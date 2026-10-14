@@ -338,7 +338,7 @@ return [
     'mac_reason_heading' => 'Ursache',
     'mac_vm_success' => 'erfolgreich',
     'mac_vm_unchanged' => 'unverändert',
-    'mac_error_bound_mac_changed' => 'MAC geändert, MECM kennt noch die alte; bitte MECM-ID zurücksetzen.',
+    'mac_error_bound_mac_changed' => 'MAC geändert, MECM kennt noch die alte. Altes Gerät in der MECM-Konsole löschen, „MECM-ID zurücksetzen“ und den Auftrag erneut ausführen.',
     'mac_action_binding' => 'VM bearbeiten',
     'mac_notice_bound_first_mac' => 'MAC erstmals übernommen; die VM ist an MECM gebunden. Wurde sie ersetzt, das Gerät in MECM löschen und die MECM-ID zurücksetzen.',
     'mac_vm_failed' => 'fehlgeschlagen',

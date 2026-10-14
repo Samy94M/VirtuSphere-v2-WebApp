@@ -157,8 +157,14 @@ verglichen. Der reguläre Worker-Abschluss konvergiert die fehlgeschlagene VM
 wie bisher nach `failed/failed`. Sie verliert damit `registered` und
 `os_installed` und mit ihnen die Umbenennungssperre; MECM-ID und gespeicherte
 MAC bleiben. Ein Abbruch folgt derselben K15-Journalregel: bestätigte Exportversuche scheitern nur ihre eigene VM, unberührte markierte VMs erhalten beide Vorzustände zurück, und erfolgreiche MAC-IDs bleiben geschützt. Der DE/EN-Hinweis erklärt, dass MECM noch die alte
-MAC kennt, und fordert zum Zurücksetzen der MECM-ID auf; mit `vms.write`
-verlinkt er den VM-Editor. Version 2 des
+MAC kennt, und nennt die Reihenfolge: altes Gerät in der MECM-Konsole löschen,
+MECM-ID zurücksetzen, Auftrag erneut ausführen; mit `vms.write` verlinkt er den
+VM-Editor. Solange die VM gebunden ist und ihre gespeicherte MAC weiter von der
+im Ergebnis gemeldeten abweicht, sperrt `bound_mac_changed` die Wiederholung als
+Identitätsbefund (K24): `deploy_retry_blockers()` fragt dasselbe Prädikat
+`virtusphere_bound_mac_conflict()` wie der Rückruf, gegen den aktuellen Zustand.
+Nach dem Zurücksetzen oder einer MAC-Korrektur fällt die Sperre von selbst weg.
+Version 2 des
 Ergebnisses speichert per-VM-WDS-Evidenz und den semantischen
 Callback-Fingerprint; V1 bleibt historisch lesbar. Ein identischer zweiter
 Callback ist nur während desselben aktiven Laufs 200 ohne Domainwrite,

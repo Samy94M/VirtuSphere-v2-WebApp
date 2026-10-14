@@ -338,7 +338,7 @@ return [
     'mac_reason_heading' => 'Reason',
     'mac_vm_success' => 'successful',
     'mac_vm_unchanged' => 'unchanged',
-    'mac_error_bound_mac_changed' => 'MAC changed, MECM still knows the old address; please reset the MECM ID.',
+    'mac_error_bound_mac_changed' => 'MAC changed, MECM still knows the old address. Delete the old device in the MECM console, reset the MECM ID and run the job again.',
     'mac_action_binding' => 'Edit VM',
     'mac_notice_bound_first_mac' => 'MAC imported for the first time; the VM is bound to MECM. If it was replaced, delete the device in MECM and reset the MECM ID.',
     'mac_vm_failed' => 'failed',

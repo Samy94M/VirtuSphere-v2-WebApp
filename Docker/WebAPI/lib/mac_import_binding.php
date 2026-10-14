@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/mac.php';
 require_once __DIR__ . '/mac_import_constants.php';
 
 // WM-E1 / K3 decision (b): how a MAC callback treats a VM with a stored MECM
 // ResourceID. Pure helpers shared by the worker marking, the plan, its V2
-// result, the import writer and the portal reader of the job-log marker.
+// result, the import writer, the retry gate and the portal reader of the
+// job-log marker.
 
 /**
  * Whether a VM row carries a stored MECM ResourceID. The one predicate for
@@ -15,6 +17,20 @@ require_once __DIR__ . '/mac_import_constants.php';
 function virtusphere_vm_is_mecm_bound(array $vm): bool
 {
     return (string) ($vm['mecm_id'] ?? '') !== '';
+}
+
+/**
+ * Whether a stored interface MAC of a bound VM contradicts the MAC a callback
+ * reports. The ONE predicate shared by the callback and the retry gate, so the
+ * gate blocks exactly when a retry would fail again. K3 decision (b): an empty
+ * stored MAC is "not known yet", never a change; the comparison is normalized,
+ * so the stored spelling does not matter.
+ */
+function virtusphere_bound_mac_conflict(array $vm, string $storedMac, string $reportedNormalizedMac): bool
+{
+    return virtusphere_vm_is_mecm_bound($vm)
+        && trim($storedMac) !== ''
+        && virtusphere_normalize_mac(trim($storedMac)) !== $reportedNormalizedMac;
 }
 
 /**

@@ -152,6 +152,38 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
     }
 
     if ($result !== null) {
+        // The current state of a bound_mac_changed result. The lookup is the
+        // callback's own rule (mac_import_build_plan()): the exact VLAN name
+        // key and one match only. A second match is an ambiguity the callback
+        // reports as its own error; a VM or interface that is gone no longer
+        // conflicts. Local on purpose: a module-level helper would widen the
+        // deploy job module surface that the facade contract pins.
+        $boundMacStillConflicts = static function (array $error) use ($db, $missionId, $lock): bool {
+            $vmId = (int) ($error['vm_id'] ?? 0);
+            $vlan = (string) ($error['vlan'] ?? '');
+            if ($vmId <= 0 || $vlan === '') {
+                return false;
+            }
+            $vm = repo_fetch_one(
+                $db,
+                'SELECT id, mecm_id FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1' . ($lock ? ' FOR UPDATE' : ''),
+                'ii',
+                [$vmId, $missionId]
+            );
+            if ($vm === null) {
+                return false;
+            }
+            $stmt = $db->prepare('SELECT id, vlan, mac FROM deploy_interfaces WHERE vm_id = ? ORDER BY id' . ($lock ? ' FOR UPDATE' : ''));
+            $stmt->bind_param('i', $vmId);
+            $stmt->execute();
+            $matches = mac_import_interfaces_by_vlan(repo_fetch_all($stmt->get_result()))[mac_import_exact_name_key($vlan)] ?? [];
+            if (count($matches) !== 1) {
+                return false;
+            }
+
+            return virtusphere_bound_mac_conflict($vm, (string) $matches[0]['mac'], (string) ($error['mac'] ?? ''));
+        };
+
         foreach ((array) $result['errors'] as $error) {
             $code = (string) ($error['code'] ?? '');
             $meta = VIRTUSPHERE_MAC_IMPORT_ERROR_META[$code] ?? null;
@@ -161,6 +193,14 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
             }
             $retryClass = (string) $meta['retry'];
             if (in_array($retryClass, ['manual', 'identity_blocked'], true)) {
+                $findings[] = deploy_retry_finding('identity', $code, true, $error);
+            }
+            // A portal_blocked class is decided by the CURRENT state, not by the
+            // historical red result. Without this check the retry is offered
+            // again and fails for the same reason while the stored MAC still
+            // differs; once MECM-ID reset or a MAC correction ends the conflict,
+            // the block lifts by itself.
+            if ($code === VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED && $boundMacStillConflicts($error)) {
                 $findings[] = deploy_retry_finding('identity', $code, true, $error);
             }
         }

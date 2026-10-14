@@ -11,6 +11,8 @@ require_once dirname(__DIR__, 2) . '/lib/deploy_log_view.php';
 require_once dirname(__DIR__, 2) . '/lib/mac_import_presenter.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vm_network.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms_mecm_reset.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/deploy_job_retry.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/status_events.php';
 
 /** K3: real worker transitions and HTTP callback, without SSH transport. */
 final class RegisteredVmExportTest extends TestCase
@@ -234,6 +236,103 @@ final class RegisteredVmExportTest extends TestCase
         self::assertSame([], deploy_log_bound_first_mac_vm_ids($this->db, repo_deploy_job($this->db, $jobId)));
     }
 
+    /** K3 retry: a changed bound MAC blocks the retry as an identity finding of that VM while the stored MAC still differs. */
+    #[DataProvider('changedCards')]
+    public function testFailedChangedMacBlocksRetryWhileTheStoredMacStillDiffers(bool $wdsChanged): void
+    {
+        [, $vm, $jobId] = $this->failedChangedMacExport($wdsChanged);
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        self::assertFalse($evaluation['allowed']);
+        $matches = array_values(array_filter(
+            $this->findingsWithCode($evaluation['blocking_findings'], VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED),
+            static fn (array $finding): bool => $finding['kind'] === 'identity' && (int) ($finding['vm_id'] ?? 0) === $vm
+        ));
+        self::assertCount(1, $matches, 'the changed bound MAC must block the retry as an identity finding of that VM');
+    }
+
+    /** K3 retry: resetting the MECM ID lifts the bound_mac_changed block by itself, with no manual clearing. */
+    #[DataProvider('changedCards')]
+    public function testResetMecmIdLiftsTheBoundMacChangedRetryBlock(bool $wdsChanged): void
+    {
+        [$mission, $vm, $jobId] = $this->failedChangedMacExport($wdsChanged);
+        // A valid rollout hostname and a stored MAC are the reset preconditions; the job is terminal, so no active job blocks it.
+        $hostname = 'K3M' . strtoupper(substr($this->prefix, -8));
+        repo_execute($this->db, 'UPDATE deploy_vms SET vm_hostname = ?, mecm_rollout_hostname = ?, mecm_rollout_revision = 1 WHERE id = ?', 'ssi', [$hostname, $hostname, $vm]);
+        self::assertSame(['done' => 1, 'skipped' => []], repo_bulk_reset_mecm_ids($this->db, $mission, [$vm]), 'the reset must take effect for this test to mean anything');
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        self::assertSame([], $this->findingsWithCode($evaluation['findings'], VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED));
+    }
+
+    /** K3 retry: storing the MAC the failed callback reported lifts the bound_mac_changed block by itself. */
+    #[DataProvider('changedCards')]
+    public function testStoredMacMatchingTheReportLiftsTheBoundMacChangedRetryBlock(bool $wdsChanged): void
+    {
+        [, $vm, $jobId, $vlan, $reported] = $this->failedChangedMacExport($wdsChanged);
+        repo_execute($this->db, 'UPDATE deploy_interfaces SET mac = ? WHERE vm_id = ? AND vlan = ?', 'sis', [$reported, $vm, $vlan]);
+        self::assertSame($reported, $this->interfaceMac($vm, $vlan), 'fixture: the stored MAC now equals the reported one');
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        self::assertSame([], $this->findingsWithCode($evaluation['findings'], VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED));
+    }
+
+    /** K3-P3-3: a VM bound between the worker marking and the callback keeps its binding and stored MACs and gets no error. */
+    public function testBinderBetweenMarkAndCallbackKeepsBindingAndStoredMac(): void
+    {
+        [$mission, $vm, $jobId, $claim] = $this->unboundFixture();
+        $before = $this->snapshot($vm);
+        $prior = deploy_worker_mark_vms_deploying($this->db, $claim, 'K3 binder start', [$vm]);
+        self::assertSame(VIRTUSPHERE_LIFECYCLE_DEPLOYING, $this->snapshot($vm)['lifecycle_state'], 'fixture: the unbound VM is marked by the worker');
+        // The binder is the MECM status report that binds the VM while the job runs (mecm_updateid.php).
+        self::assertTrue(repo_set_vm_state_forward($this->db, $vm, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'K3 binder', '4812'));
+        $this->admitExportTouch($claim, [$vm]);
+        $response = $this->sendCallback($mission, $jobId, $this->mac('old'));
+        deploy_worker_conclude_sequence($this->db, $claim, 'phpunit:k3', [$vm], $prior);
+
+        self::assertSame('succeeded', repo_deploy_job($this->db, $jobId)['status']);
+        $after = $this->snapshot($vm);
+        self::assertSame(VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, $after['lifecycle_state'], 'the binder state survives; the VM is not left in deploying');
+        self::assertSame('4812', $after['mecm_id'], 'the binder ResourceID survives conclusion');
+        self::assertSame($before['mac'], $after['mac'], 'the stored MACs are unchanged');
+        self::assertSame('success', $response['outcome']);
+        self::assertSame([], $response['errors']);
+    }
+
+    /** K3-P3-3: a sequence failure after an unchanged bound callback leaves the bound VM's whole snapshot as it was. */
+    public function testFailureAfterUnchangedCallbackKeepsBoundVmSnapshot(): void
+    {
+        [$mission, $vm, $jobId, $claim] = $this->boundFixture('os_installed', 'export', 0, null);
+        $before = $this->snapshot($vm);
+        deploy_worker_mark_vms_deploying($this->db, $claim, 'K3 failure start', [$vm]);
+        $this->admitExportTouch($claim, [$vm]);
+        $response = $this->sendCallback($mission, $jobId, $this->mac('old'));
+        self::assertSame('success', $response['outcome']);
+
+        deploy_worker_handle_failure($this->db, $claim, 'phpunit:k3', [$vm], 'K3 failure after the MAC callback');
+
+        self::assertSame('failed', repo_deploy_job($this->db, $jobId)['status']);
+        self::assertSame($before, $this->snapshot($vm), 'a successful unchanged bound VM is protected from the failure path');
+    }
+
+    /** K3-P3-3: a cancellation after an unchanged bound callback leaves the bound VM's whole snapshot as it was. */
+    public function testCancelAfterUnchangedCallbackKeepsBoundVmSnapshot(): void
+    {
+        [$mission, $vm, $jobId, $claim] = $this->boundFixture('os_installed', 'export', 0, null);
+        $before = $this->snapshot($vm);
+        deploy_worker_mark_vms_deploying($this->db, $claim, 'K3 cancel start', [$vm]);
+        $this->admitExportTouch($claim, [$vm]);
+        $response = $this->sendCallback($mission, $jobId, $this->mac('old'));
+        self::assertSame('success', $response['outcome']);
+        // An operator cancel of a running job sets `cancelling` and keeps the worker's lock (repo_cancel_deploy_job).
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, repo_cancel_deploy_job($this->db, $jobId, 42));
+
+        deploy_worker_handle_cancelled($this->db, $claim, [$vm]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, repo_deploy_job($this->db, $jobId)['status']);
+        self::assertSame($before, $this->snapshot($vm), 'a cancel after an unchanged bound callback must not touch the bound VM');
+    }
+
     private function boundFixture(string $lifecycle, string $mode, int $pickup, ?string $pending): array
     {
         $mission = $this->insertMission('bound');
@@ -245,6 +344,58 @@ final class RegisteredVmExportTest extends TestCase
         $payload = json_encode(['mode' => $mode, 'vm_ids' => [$vm]], JSON_THROW_ON_ERROR);
         repo_execute($this->db, "UPDATE deploy_jobs SET payload_json = ?, locked_by = 'phpunit:k3', lock_token = REPEAT('a',32), worker_epoch = 1, attempts = 1 WHERE id = ?", 'si', [$payload, $jobId]);
         return [$mission, $vm, $jobId, repo_deploy_job($this->db, $jobId)];
+    }
+
+    /**
+     * The unbound twin of boundFixture(): same card layout and job shape, no
+     * stored ResourceID, so the worker marks it and a callback may import it.
+     *
+     * @return array{0:int,1:int,2:int,3:array<string,mixed>}
+     */
+    private function unboundFixture(): array
+    {
+        $mission = $this->insertMission('unbound');
+        $vm = $this->insertVm($mission, 'BOUND');
+        $this->insertInterface($vm, 'WDS', virtusphere_normalize_mac($this->mac('old')));
+        $this->insertInterface($vm, 'APP', virtusphere_normalize_mac($this->mac('app')));
+        repo_execute($this->db, "UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, vm_status = ?, mecm_id = NULL, updated = 0, mecm_pending_since = '2026-01-02 03:04:05', updated_at = '2026-01-01 01:02:03' WHERE id = ?", 'sssi', [VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, VIRTUSPHERE_STATUS_DEPLOYED, $vm]);
+        $jobId = $this->insertJob($mission, [$vm]);
+        $payload = json_encode(['mode' => 'export', 'vm_ids' => [$vm]], JSON_THROW_ON_ERROR);
+        repo_execute($this->db, "UPDATE deploy_jobs SET payload_json = ?, locked_by = 'phpunit:k3', lock_token = REPEAT('a',32), worker_epoch = 1, attempts = 1 WHERE id = ?", 'si', [$payload, $jobId]);
+
+        return [$mission, $vm, $jobId, repo_deploy_job($this->db, $jobId)];
+    }
+
+    /**
+     * Runs the changed-MAC export of testChangedMacFailsBoundVmAndPreservesBindingAndMac
+     * and leaves the job failed with the bound_mac_changed result on record.
+     *
+     * @return array{0:int,1:int,2:int,3:string,4:string} mission, VM, job, changed vlan, normalized reported MAC
+     */
+    private function failedChangedMacExport(bool $wdsChanged): array
+    {
+        [$mission, $vm, $jobId, $claim] = $this->boundFixture('os_installed', 'export', 0, null);
+        deploy_worker_mark_vms_deploying($this->db, $claim, 'K3 retry start', [$vm]);
+        $this->admitExportTouch($claim, [$vm]);
+        $response = $this->sendCallback($mission, $jobId, $this->mac($wdsChanged ? 'new' : 'old'), $this->mac($wdsChanged ? 'app' : 'app-new'));
+        try {
+            deploy_worker_conclude_sequence($this->db, $claim, 'phpunit:k3', [$vm]);
+        } catch (RuntimeException $exception) {
+            deploy_worker_handle_failure($this->db, $claim, 'phpunit:k3', [$vm], $exception->getMessage());
+        }
+        self::assertSame('failed', repo_deploy_job($this->db, $jobId)['status']);
+        self::assertContains(VIRTUSPHERE_MAC_IMPORT_ERROR_BOUND_MAC_CHANGED, $response['vm_results'][0]['error_codes']);
+
+        return [$mission, $vm, $jobId, $wdsChanged ? 'WDS' : 'APP', (string) virtusphere_normalize_mac($this->mac($wdsChanged ? 'new' : 'app-new'))];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $findings
+     * @return list<array<string,mixed>>
+     */
+    private function findingsWithCode(array $findings, string $code): array
+    {
+        return array_values(array_filter($findings, static fn (array $finding): bool => ($finding['code'] ?? '') === $code));
     }
 
     private function sendCallback(int $mission, int $job, string $mac, ?string $appMac = null): array
