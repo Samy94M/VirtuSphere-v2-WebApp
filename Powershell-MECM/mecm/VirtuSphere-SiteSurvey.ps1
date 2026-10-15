@@ -248,9 +248,11 @@ function Get-VsSurveyCim {
         [Parameter(Mandatory)][hashtable]$Context,
         [Parameter(Mandatory)][string]$ClassName,
         [string]$Filter,
-        [string[]]$Property
+        [string[]]$Property,
+        [string]$Namespace
     )
-    $arguments = @{ Namespace = $Context.Namespace; ClassName = $ClassName; ErrorAction = 'Stop' }
+    if (-not $Namespace) { $Namespace = $Context.Namespace }
+    $arguments = @{ Namespace = $Namespace; ClassName = $ClassName; ErrorAction = 'Stop' }
     if ($Filter) { $arguments.Filter = $Filter }
     if ($Property) { $arguments.Property = $Property }
     if ($Context.CimComputer) { $arguments.ComputerName = $Context.CimComputer }
@@ -338,14 +340,28 @@ function Resolve-VsSurveyProvider {
 function Get-VsSurveyEnvironment {
     param([Parameter(Mandatory)][hashtable]$Context)
     $cmModule = Get-Module -ListAvailable -Name ConfigurationManager | Sort-Object Version -Descending | Select-Object -First 1
+    $site = @()
+    try {
+        $site = @(ConvertTo-VsSurveyRecords -Objects @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_Site'))
+    } catch {
+        Write-VsSurveyNote -Text ('SMS_Site: {0}' -f [string]$_.Exception.Message)
+    }
+    # SMS_ProviderLocation liegt im Namespace root\SMS, nicht im Site-Namespace
+    # (erster Standortlauf 15.10.2026: "Ungueltige Klasse").
+    $locations = @()
+    try {
+        $locations = @(ConvertTo-VsSurveyRecords -Objects @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_ProviderLocation' -Namespace 'root\SMS'))
+    } catch {
+        Write-VsSurveyNote -Text ('SMS_ProviderLocation: {0}' -f [string]$_.Exception.Message)
+    }
     return [ordered]@{
         PowerShellVersion = [string]$PSVersionTable.PSVersion
         ConfigurationManagerVersion = $(if ($cmModule) { [string]$cmModule.Version } else { '' })
         SiteCode = $Context.SiteCode
         ProviderSource = $Context.ProviderSource
         ProviderComputer = $Context.CimComputer
-        Site = @(ConvertTo-VsSurveyRecords -Objects @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_Site'))
-        ProviderLocations = @(ConvertTo-VsSurveyRecords -Objects @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_ProviderLocation'))
+        Site = $site
+        ProviderLocations = $locations
     }
 }
 
@@ -392,18 +408,23 @@ function Get-VsSurveyClassSchemas {
     return [ordered]@{ classes = $classes }
 }
 
-# Zielmenge: die Anwendungen der Client-Specs, die Altnamen aus der Policy und
-# alle Anwendungen mit dem Praefix client_ (nur Namen, ohne Lazy-Laden).
+# Zielmenge: alle Anwendungen mit dem Praefix client_, die Anwendungen der
+# Client-Specs und die Altnamen aus der Policy (nur Namen, ohne Lazy-Laden).
+# MECM vergleicht Anwendungsnamen ohne Gross-/Kleinschreibung; bei gleichem
+# Namen gewinnt die Schreibweise der Site (erster Standortlauf: client_Hostname
+# auf der Site, client_hostname in der Spec).
 function Get-VsSurveyTargetNames {
     param([Parameter(Mandatory)][object[]]$Specs, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$LegacyNames)
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $names = New-Object System.Collections.Generic.List[string]
-    foreach ($spec in $Specs) { $names.Add([string]$spec.AppName) }
-    foreach ($legacy in $LegacyNames) { $names.Add([string]$legacy) }
     foreach ($application in @(Get-CMApplication -Name 'client_*' -ShowHidden -Fast -ErrorAction Stop)) {
         $displayName = Get-VsObjectPropertyText -Object $application -Names @('LocalizedDisplayName', 'Name')
-        if ($displayName -clike 'client_*') { $names.Add($displayName) }
+        if ($displayName -like 'client_*' -and $seen.Add($displayName)) { $names.Add($displayName) }
     }
-    @($names | Where-Object { $_ } | Sort-Object -Unique)
+    foreach ($name in @(@($Specs | ForEach-Object { [string]$_.AppName }) + @($LegacyNames))) {
+        if ($name -and $seen.Add([string]$name)) { $names.Add([string]$name) }
+    }
+    @($names | Sort-Object)
 }
 
 # Eine Anwendung je Zielname mit ihren Deployment Types. SDMPackageXML ist eine
@@ -416,22 +437,27 @@ function Get-VsSurveyApplications {
     $Context.Targets = $targets
     $rows = New-Object System.Collections.Generic.List[object]
     $appObjects = New-Object System.Collections.Generic.List[object]
+    $appEntries = New-Object System.Collections.Generic.List[object]
     $typeObjects = New-Object System.Collections.Generic.List[object]
     foreach ($name in $targets) {
         $row = [ordered]@{ name = $name; applications = @(); deploymentTypes = @(); error = '' }
         $applications = @()
         try {
             $applications = @(Get-CMApplication -Name $name -ShowHidden -DisableWildcardHandling -ErrorAction Stop |
-                Where-Object { (Get-VsObjectPropertyText -Object $_ -Names @('LocalizedDisplayName', 'Name')) -ceq $name })
+                Where-Object { (Get-VsObjectPropertyText -Object $_ -Names @('LocalizedDisplayName', 'Name')) -ieq $name })
             $row.applications = @(ConvertTo-VsSurveyRecords -Objects $applications)
-            foreach ($application in $applications) { $appObjects.Add($application) }
+            foreach ($application in $applications) {
+                $appObjects.Add($application)
+                $appEntries.Add([pscustomobject]@{ Name = $name; Object = $application })
+            }
         } catch {
             $row.error = [string]$_.Exception.Message
             Write-VsSurveyNote -Text ('{0}: {1}' -f $name, $row.error)
         }
         if ($applications.Count -gt 0) {
             try {
-                $types = @(Get-CMDeploymentType -ApplicationName $name -ErrorAction Stop)
+                $siteName = Get-VsObjectPropertyText -Object $applications[0] -Names @('LocalizedDisplayName', 'Name')
+                $types = @(Get-CMDeploymentType -ApplicationName $siteName -ErrorAction Stop)
                 $row.deploymentTypes = @(ConvertTo-VsSurveyRecords -Objects $types)
                 foreach ($type in $types) { $typeObjects.Add([pscustomobject]@{ Name = $name; Object = $type }) }
             } catch {
@@ -443,6 +469,7 @@ function Get-VsSurveyApplications {
         $rows.Add($row)
     }
     $Context.ApplicationObjects = $appObjects.ToArray()
+    $Context.ApplicationEntries = $appEntries.ToArray()
     $Context.DeploymentTypeObjects = $typeObjects.ToArray()
     $Context.TargetCiIds = @($appObjects | ForEach-Object { Get-VsObjectPropertyText -Object $_ -Names @('CI_ID') } | Where-Object { $_ } | Sort-Object -Unique)
     $Context.TargetModelNames = @($appObjects | ForEach-Object { Get-VsObjectPropertyText -Object $_ -Names @('ModelName') } | Where-Object { $_ } | Sort-Object -Unique)
@@ -457,7 +484,7 @@ function Get-VsSurveyDeployments {
     $matching = @()
     if (@($Context.Targets).Count -gt 0) {
         $all = @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_ApplicationAssignment')
-        $matching = @($all | Where-Object { (Get-VsObjectPropertyText -Object $_ -Names @('ApplicationName')) -cin $Context.Targets })
+        $matching = @($all | Where-Object { (Get-VsObjectPropertyText -Object $_ -Names @('ApplicationName')) -in $Context.Targets })
     }
     $Context.DeploymentCollectionIds = @($matching | ForEach-Object { Get-VsObjectPropertyText -Object $_ -Names @('TargetCollectionID') } | Where-Object { $_ } | Sort-Object -Unique)
     return [ordered]@{ rows = @(ConvertTo-VsSurveyRecords -Objects $matching) }
@@ -495,10 +522,26 @@ function Get-VsSurveyReferences {
     }
 
     $relations = @()
+    $related = New-Object System.Collections.Generic.List[object]
     if (@($Context.TargetCiIds).Count -gt 0) {
         try {
             $all = @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_AppDependenceRelation')
-            $relations = @(ConvertTo-VsSurveyRecords -Objects @(Select-VsSurveyRowsReferencing -Rows $all -Values $Context.TargetCiIds -NamePattern '(?i)CI_?ID'))
+            $matchingRelations = @(Select-VsSurveyRowsReferencing -Rows $all -Values $Context.TargetCiIds -NamePattern '(?i)CI_?ID')
+            $relations = @(ConvertTo-VsSurveyRecords -Objects $matchingRelations)
+            # Die Gegenseite einer Relation ist oft keine Zielanwendung; ohne ihren
+            # Namen bleibt die Kette eine Liste von CI_IDs (erster Standortlauf).
+            $otherIds = @(@(foreach ($relation in $matchingRelations) {
+                foreach ($property in @($relation.PSObject.Properties)) {
+                    if ([string]$property.Name -match '(?i)ApplicationCI_?ID' -and $null -ne $property.Value) { [string]$property.Value }
+                }
+            }) | Where-Object { $_ -and $_ -notin $Context.TargetCiIds } | Sort-Object -Unique)
+            foreach ($ciId in $otherIds) {
+                if ($ciId -cnotmatch '\A[0-9]{1,10}\z') { Write-VsSurveyNote -Text ('related application {0}: unerwartete CI_ID' -f $ciId); continue }
+                foreach ($application in @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_Application' -Filter ('CI_ID = {0}' -f $ciId) `
+                    -Property @('CI_ID', 'LocalizedDisplayName', 'ModelName', 'CIVersion', 'IsLatest', 'IsExpired', 'IsDeployed', 'NumberOfDeployments'))) {
+                    $related.Add((ConvertTo-VsSurveyRecord -Object $application))
+                }
+            }
         } catch {
             Write-VsSurveyNote -Text ('SMS_AppDependenceRelation: {0}' -f [string]$_.Exception.Message)
         }
@@ -536,6 +579,7 @@ function Get-VsSurveyReferences {
     return [ordered]@{
         deploymentTypeDependencies = $dependencies.ToArray()
         appDependenceRelations = $relations
+        relatedApplications = $related.ToArray()
         supersedence = $supersedence.ToArray()
         applicationGroups = $groups
         taskSequenceReferences = $tsReferences
@@ -751,32 +795,48 @@ function Get-VsSurveySourceMapping {
     })
 
     $locations = New-Object System.Collections.Generic.List[object]
+    $covered = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $addLocations = {
+        param([string]$application, [string]$typeId, [string]$source, [string]$xml)
+        foreach ($path in @(Get-VsSurveyContentLocations -Xml $xml)) {
+            [void]$covered.Add($application)
+            $mapping = Get-VsSurveyLocalPathForUnc -Path $path -LocalShares $shares -LocalNames @($Context.ComputerNames)
+            $locations.Add([ordered]@{
+                application = $application
+                deploymentTypeId = $typeId
+                source = $source
+                location = $path
+                parsed = $mapping.Parsed
+                host = $mapping.Host
+                share = $mapping.Share
+                isLocalHost = $mapping.IsLocal
+                localShare = $mapping.ShareMatch
+                localPath = $mapping.LocalPath
+                uncReachable = $(if ($mapping.Parsed) { [bool](Test-Path -LiteralPath $path -PathType Container) } else { $false })
+                localReachable = $(if ($mapping.LocalPath) { [bool](Test-Path -LiteralPath $mapping.LocalPath -PathType Container) } else { $false })
+            })
+        }
+    }
     $fileSystemRoot = Get-VsSurveyFileSystemRoot
     Push-Location -LiteralPath $fileSystemRoot
     try {
         foreach ($entry in @($Context.DeploymentTypeObjects)) {
             $typeId = Get-VsObjectPropertyText -Object $entry.Object -Names @('CI_ID')
             try {
-                $paths = @(Get-VsSurveyContentLocations -Xml (Get-VsObjectPropertyText -Object $entry.Object -Names @('SDMPackageXML')))
+                & $addLocations $entry.Name $typeId 'deployment-type' (Get-VsObjectPropertyText -Object $entry.Object -Names @('SDMPackageXML'))
             } catch {
                 Write-VsSurveyNote -Text ('{0} DT {1}: Manifest nicht lesbar: {2}' -f $entry.Name, $typeId, [string]$_.Exception.Message)
-                continue
             }
-            foreach ($path in $paths) {
-                $mapping = Get-VsSurveyLocalPathForUnc -Path $path -LocalShares $shares -LocalNames @($Context.ComputerNames)
-                $locations.Add([ordered]@{
-                    application = $entry.Name
-                    deploymentTypeId = $typeId
-                    location = $path
-                    parsed = $mapping.Parsed
-                    host = $mapping.Host
-                    share = $mapping.Share
-                    isLocalHost = $mapping.IsLocal
-                    localShare = $mapping.ShareMatch
-                    localPath = $mapping.LocalPath
-                    uncReachable = $(if ($mapping.Parsed) { [bool](Test-Path -LiteralPath $path -PathType Container) } else { $false })
-                    localReachable = $(if ($mapping.LocalPath) { [bool](Test-Path -LiteralPath $mapping.LocalPath -PathType Container) } else { $false })
-                })
+        }
+        # Get-CMDeploymentType liefert das Manifest nicht immer mit (erster
+        # Standortlauf: zwei von vier Deployment Types ohne SDMPackageXML). Das
+        # Anwendungsmanifest enthaelt die Content-Orte aller Deployment Types.
+        foreach ($entry in @($Context.ApplicationEntries)) {
+            if ($covered.Contains([string]$entry.Name)) { continue }
+            try {
+                & $addLocations $entry.Name '' 'application' (Get-VsObjectPropertyText -Object $entry.Object -Names @('SDMPackageXML'))
+            } catch {
+                Write-VsSurveyNote -Text ('{0}: Anwendungsmanifest nicht lesbar: {1}' -f $entry.Name, [string]$_.Exception.Message)
             }
         }
     } finally {
@@ -844,6 +904,7 @@ function Get-VsSiteSurveyResult {
         TargetModelNames = @()
         TargetApplicationCount = 0
         ApplicationObjects = @()
+        ApplicationEntries = @()
         DeploymentTypeObjects = @()
         DeploymentCollectionIds = @()
         FailedSections = New-Object System.Collections.Generic.List[string]

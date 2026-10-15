@@ -1147,10 +1147,16 @@ legt kein Laufwerk an.
    Commits, der das Skript enthält, nach `C:\Temp\VirtuSphere-<commit>\`
    kopieren. Nichts installieren; ältere Offline-Bundles enthalten das Skript
    nicht.
-2. **Ausführen** in einer PowerShell als Administrator aus diesem Ordner:
-   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\survey-VirtuSphere-MecmSite.ps1 | Out-File -Encoding utf8 C:\Temp\vs-site-survey.json`.
-   Die Konsole zählt die Abschnitte von `[1/11]` bis `[11/11]` hoch und nennt je
-   Abschnitt `ok`, `partial`, `failed` oder `absent`.
+2. **Ausführen** in einer Windows PowerShell als Administrator aus diesem
+   Ordner, in derselben Sitzung:
+   `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force`, danach
+   `.\survey-VirtuSphere-MecmSite.ps1 | Out-File -Encoding utf8 C:\Temp\vs-site-survey.json`
+   und `"Exit-Code: $LASTEXITCODE"`. Die Richtlinie gilt nur für dieses Fenster.
+   Nicht über ein zweites `powershell.exe -File` starten: Ein eigener Prozess
+   schreibt Fortschritt und Warnungen ebenfalls auf seine Standardausgabe, und
+   sie landen vor und nach dem JSON in der Datei. Die Konsole zählt die
+   Abschnitte von `[1/11]` bis `[11/11]` hoch und nennt je Abschnitt `ok`,
+   `partial`, `failed` oder `absent`.
 3. **Prüfen:** Exit-Code 0 heißt, der Bericht ist vollständig geschrieben.
    Einzelne Abschnitte können trotzdem `partial` oder `failed` sein; den Grund
    nennt `error` im jeweiligen Abschnitt. Exit-Code 2 heißt, es war kein

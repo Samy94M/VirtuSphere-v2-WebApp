@@ -27,7 +27,11 @@
     Exit 1: unerwarteter Fehler ausserhalb der Abschnitte.
 
 .EXAMPLE
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\survey-VirtuSphere-MecmSite.ps1 | Out-File -Encoding utf8 C:\Temp\vs-site-survey.json
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+    .\survey-VirtuSphere-MecmSite.ps1 | Out-File -Encoding utf8 C:\Temp\vs-site-survey.json
+    In derselben Sitzung ausfuehren, nicht ueber ein zweites powershell.exe -File:
+    ein eigener Prozess schreibt Fortschritt und Warnungen auf seine
+    Standardausgabe, und sie landen vor und nach dem JSON in der Datei.
 #>
 [CmdletBinding()]
 param()

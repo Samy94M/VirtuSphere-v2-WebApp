@@ -284,6 +284,49 @@ Describe 'Site survey run' {
         { ConvertTo-Json -InputObject $report -Depth 16 | ConvertFrom-Json } | Should -Not -Throw
     }
 
+    It 'handles the shapes of the first real site run' {
+        Set-TestFreshSite
+        $script:AppXml = '<AppMgmtDigest xmlns="urn:x"><DeploymentType><Installer><Contents><Content><Location>\\SRV01\Software\core\Content_1\</Location></Content></Contents></Installer></DeploymentType></AppMgmtDigest>'
+        # Site spelling client_Hostname, spec spelling client_hostname.
+        Mock Get-CMApplication {
+            if ($Name -ceq 'client_*') { [pscustomobject]@{ LocalizedDisplayName = 'client_Hostname' } }
+            elseif ($Name -ieq 'client_Hostname') { [pscustomobject]@{ LocalizedDisplayName = 'client_Hostname'; CI_ID = 16788228; ModelName = $script:ModelA; SDMPackageXML = $script:AppXml } }
+        }
+        # The deployment type comes without its manifest, as two did on the site.
+        Mock Get-CMDeploymentType { if ($ApplicationName -ceq 'client_Hostname') { [pscustomobject]@{ LocalizedDisplayName = 'client_Hostname'; CI_ID = 16788229 } } }
+        Mock Get-CMDeploymentTypeDependencyGroup { }
+        Mock Get-CMDeploymentTypeSupersedence { }
+        Mock Get-CMApplicationGroup { }
+        Mock Get-SmbShare { [pscustomobject]@{ Name = 'Software'; Path = 'D:\Software'; Description = ''; ScopeName = '*'; Special = $false } }
+        Mock Test-Path { $true }
+        Mock Get-CimInstance {
+            switch ($ClassName) {
+                'SMS_Site' { [pscustomobject]@{ SiteCode = 'XYZ' } }
+                # Only the root namespace knows the provider locations.
+                'SMS_ProviderLocation' { if ($Namespace -ceq 'root\SMS') { [pscustomobject]@{ Machine = 'SRV01'; ProviderForLocalSite = $true } } else { throw 'Invalid class' } }
+                'SMS_ApplicationAssignment' { [pscustomobject]@{ ApplicationName = 'client_Hostname'; AssignmentID = 7; TargetCollectionID = 'XYZ00014' } }
+                'SMS_Collection' { if ($Filter -ceq "CollectionID = 'XYZ00014'") { [pscustomobject]@{ CollectionID = 'XYZ00014'; LimitToCollectionID = '' } } }
+                'SMS_AppDependenceRelation' { [pscustomobject]@{ FromApplicationCIID = 16788232; FromDeploymentTypeCIID = 16788233; ToApplicationCIID = 16788228; ToDeploymentTypeCIID = 16788229; TypeFlag = 3 } }
+                'SMS_Application' { if ($Filter -ceq 'CI_ID = 16788232') { [pscustomobject]@{ CI_ID = 16788232; LocalizedDisplayName = 'client_staticip'; IsLatest = $true } } }
+            }
+        }
+        $report = (Get-TestSiteResult).Report
+        foreach ($name in @($report.sections.Keys)) { $report.sections[$name].status | Should -Be 'ok' -Because ('{0}: {1}' -f $name, $report.sections[$name].error) }
+        @($report.sections.environment.data.ProviderLocations | ForEach-Object { $_.Machine }) | Should -Be @('SRV01')
+        $targets = @($report.sections.applications.data.targets)
+        # -ccontains: Pester's -Contain ignores case and would hide the spelling.
+        ($targets -ccontains 'client_Hostname') | Should -BeTrue
+        ($targets -ccontains 'client_hostname') | Should -BeFalse
+        $report.site.targetApplicationCount | Should -Be 1
+        Should -Invoke Get-CMDeploymentType -ParameterFilter { $ApplicationName -ceq 'client_Hostname' } -Times 1 -Exactly
+        @($report.sections.deployments.data.rows).Count | Should -Be 1
+        @($report.sections.references.data.relatedApplications | ForEach-Object { $_.LocalizedDisplayName }) | Should -Be @('client_staticip')
+        $location = @($report.sections.sourceMapping.data.contentLocations)
+        $location.Count | Should -Be 1
+        $location[0].source | Should -Be 'application'
+        $location[0].localPath | Should -Be 'D:\Software\core\Content_1'
+    }
+
     It 'stops a cyclic limiting chain' {
         Set-TestFreshSite
         Mock Get-CMApplication { if ($Name -ceq 'client_getInfos') { [pscustomobject]@{ LocalizedDisplayName = 'client_getInfos'; CI_ID = 1; ModelName = $script:ModelA } } }
