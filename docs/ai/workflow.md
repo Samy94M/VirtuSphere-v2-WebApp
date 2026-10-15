@@ -35,6 +35,8 @@ Mandatory independent reviews remain mandatory. Avoid redundant whole-repository
 
 Delegate only with authorization and a useful independent bounded task. Provide package ID, question, file ownership, necessary source versions, decisions, counterexamples and artifact paths. Workers preserve others' changes. One owner operates a shared QA stack; measurements are exclusive. No agent exists just to wait or rediscover another agent's findings.
 
+Delegate where volume is high and the answer is small: a diff review, a long log, failure or transcript analysis, a broad inventory. The delegate absorbs the reading and returns a condensed verdict, or writes the detail to an artifact and returns its path; it never pastes raw output back. Filter at the source first: a gate run whose progress is already filtered to its `[n/total]` result lines stays with the coordinator, because a delegate reloads this entry point and its contracts, spends its own tokens against the same limits, and its verdict must still be checked before commit or push. A failing gate's long log is the part worth delegating. Within the package's model assignment, give simple delegated reads the smallest adequate model. A cross-session message or monitor event starts a turn that re-sends the receiver's whole context, so batch notes and leave idle sessions quiet.
+
 Delegate output: scoped verdict, actionable findings with locations/evidence, validation and gaps, next action. Full logs stay in artifacts. Missing models or required reviews remain explicit gaps while independent work continues.
 
 ## Finish and resume
