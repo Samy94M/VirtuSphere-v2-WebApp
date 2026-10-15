@@ -391,7 +391,7 @@ function Invoke-VsPackageBundleVerifyChild {
 function Start-VsPackageReporterPipeSession {
     param(
         [Parameter(Mandatory)][object]$VerifiedBundle,
-        [Parameter(Mandatory)][ValidateRange(1, 2000)][int]$TimeoutMs
+        [Parameter(Mandatory)][ValidateRange(1, 5000)][int]$TimeoutMs
     )
 
     $pipe = $null
@@ -836,8 +836,10 @@ function Start-VsPackageReporterForRun {
         }
         $phaseClock = [Diagnostics.Stopwatch]::StartNew()
         try {
+            # The host start gets up to 5 s: a client right after OS deployment can have a saturated CPU
+            # (BK-N9, 2.5 to 2.8 s measured at full load). $remaining still caps it inside the 7500 ms budget.
             $script:VsPackageReporterSession = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle `
-                -TimeoutMs ([int][Math]::Min(2000, $remaining))
+                -TimeoutMs ([int][Math]::Min(5000, $remaining))
         } finally {
             $phaseClock.Stop()
             $script:VsPackageReporterPhaseMs.host_start += $phaseClock.ElapsedMilliseconds

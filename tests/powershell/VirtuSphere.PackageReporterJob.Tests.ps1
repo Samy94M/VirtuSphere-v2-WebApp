@@ -102,7 +102,7 @@ Describe 'T4 reporter process starts suspended inside its private kill-on-close 
                     $destination
                 }
             $bundle = [pscustomobject]@{ Root = $bundleRoot; Files = $paths }
-            $session = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle -TimeoutMs 2000
+            $session = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle -TimeoutMs 5000
             $session | Should -Not -BeNullOrEmpty
             try {
                 $session.Job.IsRunning | Should -BeTrue
