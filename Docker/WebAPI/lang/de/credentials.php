@@ -11,7 +11,7 @@ return [
     'host_identity_observed' => 'Beobachtet: :identity (:when)',
     'host_identity_confirmation' => 'Bestätigt am :when durch Benutzer #:user',
     'host_identity_manage' => 'Zugangsdaten: Host-Schlüssel prüfen',
-    'host_identity_hint' => 'Starte den Zugangstest, um den beobachteten Fingerprint und Schlüsseltyp zu sehen. Vergleiche beides direkt auf dem Ubuntu-Host mit ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 (für den angezeigten Schlüsseltyp die passende öffentliche Schlüsseldatei wählen). Trage Fingerprint und SSH-Schlüsseltyp nach dem unabhängigen Vergleich in die leeren Felder ein. Bestätige nur den unabhängig geprüften Wert. Eine Änderung ersetzt den bisherigen Pin.',
+    'host_identity_hint' => 'Starte den Zugangstest, um den beobachteten Fingerprint und Schlüsseltyp zu sehen. Vergleiche beides direkt auf dem Ubuntu-Host mit ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 (für den angezeigten Schlüsseltyp die passende öffentliche Schlüsseldatei wählen). Trage Fingerprint und SSH-Schlüsseltyp nach dem unabhängigen Vergleich in die leeren Felder ein. Als Schlüsseltyp den Namen eintragen, den diese Seite über dem Fingerprint zeigt (etwa ssh-ed25519), nicht die Kurzform ED25519 aus der Ausgabe von ssh-keygen: Ein anderer Typ sperrt die nächste Anmeldung. Bestätige nur den unabhängig geprüften Wert. Eine Änderung ersetzt den bisherigen Pin.',
     'host_identity_fingerprint' => 'SHA256-Fingerprint',
     'host_identity_type' => 'Schlüsseltyp',
     'host_identity_button' => 'Geprüften Host-Schlüssel bestätigen',

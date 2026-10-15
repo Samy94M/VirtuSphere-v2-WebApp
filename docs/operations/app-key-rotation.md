@@ -63,8 +63,8 @@ nicht.
 1. **Dienst pausieren.** Bereitstellungsdienst pausieren und warten, bis kein
    Auftrag mehr läuft. Wartende Aufträge dürfen stehen bleiben; sie starten erst
    nach Schritt 8.
-2. **Backup vorher.** `sh scripts/backup.sh` ausführen und das Tripel mit
-   `scripts/restore_test.sh` prüfen ([Backup und Restore](backup.md)). Das
+2. **Backup vorher.** `sudo sh scripts/backup.sh` ausführen und das Tripel mit
+   `sudo sh scripts/restore_test.sh` prüfen ([Backup und Restore](backup.md)). Das
    Werkzeug verlangt für `--apply`, dass die letzte Zeile der Backup-Statusdatei
    `ok` meldet und höchstens 2 Stunden alt ist; Schritt 3 bis 7 gehören deshalb in
    ein Wartungsfenster. Bei verschlüsselten Backups läuft der Drill auf dem Rechner

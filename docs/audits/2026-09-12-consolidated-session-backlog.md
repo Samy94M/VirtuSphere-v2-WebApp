@@ -1969,3 +1969,35 @@ Anlass: Der Nutzer fand die Eingabefelder nicht. Nachgelesen am Code (`lib/crede
 **Geschwister geprüft:** Kein weiteres Formular mit Eingabefeldern steckt in einer Tabellen-Aktionsspalte; die übrigen `<details>` sind Technik-Details oder Panels. Die Rollenwahl der IP-Freigaben (Auswahl plus Knopf in der Aktionsspalte) ist kompakt und hat eine Rückfrage; Grenze dort: Eine falsche Rolle sperrt den Host für fremde Endpunkte. Optionale Idee, nur nach Rückfrage: je IP die zuletzt genutzten Endpunkte als Hinweis zeigen (nicht als Ableitung der Rolle, 0063 schließt das aus).
 
 **Offene Nutzerentscheidungen:** Typ ableiten mit Auswahl nur beim Vorab-Anheften (empfohlen) oder nur die tolerante Zeilenerkennung; HK-8 Weg (a) plus (b) (empfohlen) oder zusätzlich (c) mit ADR; Priorität des Pakets gegenüber K23 und den kleinen Punkten.
+
+### Session s13 (15.10.2026): Doku-Paket Update-Runbook und Befund MECM-ID1
+
+Koordinator Claude Opus 5.5 (Sol-Ersatz), weitergeführt aus der Claude-App statt VS Code. Start geprüft: `origin/main` = `69821b0`, `refs/codex/s12-docs-wip` = `84bf518`, `refs/codex/s12-survey-wip` = `f21367b` (Elternteil `69821b0`), `refs/codex/s11-wip` und `refs/codex/s11-esxi-wip` unberührt, kein `virtusphere-qa`-Container. Keine Aktion gegen Prod, ESXi, MECM oder den Ubuntu-Host.
+
+#### Doku-Paket Update-Runbook (aus den Learnings des Prod-Upgrades)
+
+Anlass: Nutzerauftrag vom 14.10.2026, das Upgrade auf `0bf88db` auszuwerten und festzuhalten, was für Installation und Update allgemein gilt, nicht nur für den air-gapped Host. Umgesetzt in s12 (`84bf518`), in s13 gegengelesen und abgeschlossen.
+
+**Inhalt:**
+- Neues `docs/operations/update.md`: ein ausführbares Update-Runbook für Admins, die das System nicht täglich betreuen. Gilt für jeden Installationsweg (Git mit Remote, Git ohne Remote über `git bundle` und internen Git-Server, Archiv aus dem Offline-Bundle) und beide Image-Wege (laden, bauen). Jeder Block nennt die erwartete Ausgabe und wann anzuhalten ist; dazu Grundregeln (kein `sudo` im Projektordner außer den benannten Datenordnern, immer `--force-recreate`, alte Images vor dem Tausch über das Image des Containers sichern, Backup und Drill zuerst, Integrationen nach Portal und Schema), Rückweg vor und nach der Migration, einmalige Aufgaben und Hinweise für die Arbeit am Terminal (Platzhalter, eingefügte Ausgaben, escaptes `~` und `*`).
+- `go-live.md`, `offline-install.md`, `INSTALLATION-ANLEITUNG.md` und `upgrade-recovery.md` verweisen auf das Runbook statt auf drei widersprüchliche Kurzfolgen; `setup.sh` ist als reines Erstinstallations-Werkzeug gekennzeichnet (es startet die neuen Worker vor der Migration).
+- `sudo` für `backup.sh` und `restore_test.sh` in allen Betriebsdokus (`Docker/backups` gehört `root`), `vendor/` nicht über einen Git-Checkout entpacken, MECM-Installer-Sperre vor Schritt 5 und 9 von `upgrade-recovery.md`, Konto des Aufräum-Timers ist der Benutzername des Ansible-Zugangs.
+- `trust-flows.md` und Hilfetext `host_identity_hint` (DE/EN): Schlüsseltyp als OpenSSH-Name (`ssh-ed25519`, nicht `ED25519`), kopierfertiger Befehl, wo das Formular aufklappt (entschärft HK-1 nur in der Doku, der Code bleibt Paket UX-HK).
+- `mecm-integration.md` und Hilfetext `system_status_identity_4` (DE/EN): `resource_mac_conflict` hat zwei gleich aussehende Ursachen (neu erstellte VM oder abgeschaltete DHCP-Karte, siehe MECM-ID1).
+- `docs/QA.md`: drei Vorbedingungen für ein Release-Bundle (sauberer Worktree mit Ordnername `VirtuSphere-v2-WebApp`, Images `--no-cache`, `-KeepArtifacts`); `README.md` verlinkt das Runbook.
+
+**Beim Gegenlesen in s13 nachgemessen und korrigiert (`update.md`):**
+- Schritt 3.8 prüfte `http://localhost:8021`. Go-Live empfiehlt für Prod die LAN-Adresse in `APP_BIND_IP`; dann antwortet `localhost` nicht und der Prüfpunkt wäre rot bei gesundem Stack. Adresse und Port kommen jetzt aus der `.env`. Auf ubuntu-102 ging die Probe nur, weil dort nicht an eine einzelne LAN-Adresse gebunden ist.
+- Schritt 3.3 nannte den Sicherungsblock bis vor Schritt 3.7 wiederholbar, nutzte aber `docker compose ps -q`; das listet nur laufende Container, nach Schritt 3.5 fehlten Worker und Webserver. Jetzt `ps -a -q`.
+- Rückweg vor der Migration: Nach `git checkout --detach` lehnt das nächste `git pull --ff-only` ab; Hinweis auf `git checkout main` ergänzt.
+- Gegen den Code geprüft und unverändert: Meldungen von `verify.sh`, `backup.sh`, `restore_test.sh` und `migrate.php --check`, Felder von `health.php`, Bundle-Aufbau (`images/`, `deps/vendor.tar.gz`, `tools/`), `install-backup-schedule.sh --show`, Sperrzeile des MECM-Serverinstallers.
+
+**Gates:** auf `84bf518` `doc-hygiene`, `doc-semantics`, `lang-parity`, `phpunit-unit` pass (`qa-artifacts/s12-docs-package/lauf-3`, `lauf-4`); nach den s13-Korrekturen `doc-hygiene` und `doc-semantics` pass (`lauf-5/docs`, nach dem Registereintrag erneut `lauf-6/docs`, je Exit 0), `guard-harness` 116 von 117 bewiesen, `compose-hardening.green` als `infrastructure_error` (`lauf-5/guards`, 1318 s); Ursache nachgemessen: leere `.env` im Worktree, `compose config` schrieb Warnungen statt reinem JSON. `.env` aus `.env.example` erzeugt wie in CI, danach `test-guards.ps1 -Filter compose-hardening` 19 von 19 bewiesen (`lauf-5/guards-compose-hardening.log`). Die test-guards-Fixtures zu den go-live-Überschriften „## Schritt 3: Backup“ und `APP_BIND_IP` sind damit belegt. `lang-parity` und `phpunit-unit` gelten weiter, die Korrekturen ändern nur Markdown.
+
+#### Befund MECM-ID1: VM-05111 blockiert den Device-Sync (`resource_mac_conflict`)
+
+Nutzerbefund 14.10.2026, nachgelesen am Code. **Symptom:** MECM-Karte rot, Device-Sync seit 22.09.2026 nicht mehr erfolgreich. **Ursache:** DC-05111 hat zwei Netzwerkkarten, im Portal DHCP-Karte `…A3:A7` und statische Karte `…A3:B1`. Nach dem Betanken wurde die DHCP-Karte unter Windows abgeschaltet; das gebundene MECM-Gerät (ResourceID 16777824) meldet nur noch `…A3:B1`. Der Sync vergleicht für eine gebundene ResourceID nur die DHCP-MAC aus dem Portal mit den MACs des MECM-Geräts (`VirtuSphere-Common.ps1`, Zeilen 1391 bis 1395, gleich in der gesperrten neuen Version) und meldet deshalb einen Konflikt, obwohl die statische MAC im Portal zur selben VM gehört. Andere VMs laufen weiter.
+
+**Entscheidung des Nutzers:** keine Übergangslösung. **Dauerhafter Fix (Cutover-Kandidat):** Für eine gebundene ResourceID gilt jede im Portal bekannte MAC derselben VM; dazu liefert `getDeviceList` additiv alle MACs der VM, das Serverskript vergleicht gegen die Menge. Rollout erst mit dem Cutover MC-R4 (Installer-Sperre MC01). Bis dahin bleibt die MECM-Karte rot; Doku und Hilfetext nennen die zweite Ursache bereits.
+
+**Offen:** Commit und Push des Doku-Pakets nach Freigabe; Erhebungsskript (`refs/codex/s12-survey-wip`) nach `qa-artifacts/session-handoff/s12-site-survey-spec.md`; beim Nutzer M4-Lesebericht und die dritte IP der IP-Freigaben.

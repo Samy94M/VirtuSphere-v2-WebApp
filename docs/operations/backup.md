@@ -15,8 +15,10 @@ Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt
 ## Backup ausführen
 
 ```sh
-sh scripts/backup.sh
+sudo sh scripts/backup.sh
 ```
+
+Auf einem Linux-Host mit `sudo`, so wie der Zeitplan, der als `root` läuft (siehe „Zeitplan einrichten“). `Docker/backups` gehört danach `root`, und das Skript legt Dump und Konfigurationsarchiv nur für `root` lesbar ab (Modus 0600; das Manifest enthält nur Prüfsummen). Ohne `sudo` scheitert ein Lauf von Hand daran, und der Restore-Drill kann die Archive nicht lesen. Ältere Läufe aus einem früheren Stand können noch für alle lesbar sein (0644); das Verzeichnis selbst auf `chmod 700` setzen. Ein Wechsel auf das heutige Dumpformat (nur die Anwendungsdatenbank statt aller Datenbanken) macht den Dump deutlich kleiner; das ist kein Datenverlust, der Restore-Drill weist die Vollständigkeit über Tabellenzahl und Zeilenzählungen nach.
 
 Voraussetzung: der Compose-Stack läuft (`virtusphere-v2-webapp-mysql-1`; abweichender Containername via `VIRTUSPHERE_MYSQL_CONTAINER`). Das Skript validiert den Dump (Mindestgröße, gzip-Integrität), schreibt danach das Manifest und behält von jeder Artefaktart die neuesten Dateien (`KEEP=14` in `scripts/backup.sh`, die SSoT für diesen Wert). Die Retention läuft getrennt je Artefaktart; unverschlüsselte und verschlüsselte Läufe einer Art bilden dabei eine gemeinsame Reihe, sodass alte Klartext-Backups nach `KEEP` verschlüsselten Läufen verschwinden. Ein Restore braucht weiterhin das vollständige Zeitstempel-Tripel. MySQL-Binlogs sind deaktiviert: Es gibt keinen Replikations- oder Point-in-Time-Recovery-Verbraucher, und der zugesagte Wiederherstellungspunkt ist ausschließlich ein erfolgreich geprüftes Backuptripel. Vorhandene historische Binlogdateien niemals direkt im Datenverzeichnis löschen.
 
@@ -40,7 +42,7 @@ openssl req -x509 -newkey rsa:4096 -nodes -keyout virtusphere-backup-key.pem -ou
 
 **Pin des Zertifikats (optional):** Wer den Fingerabdruck des Zertifikats in der Konfiguration festschreiben will, setzt in `.env` `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` auf den SHA-256-Fingerabdruck des Zertifikats. Der Wert darf in jeder üblichen Schreibweise stehen: klein ohne Trennzeichen (wie auf der Karte im Portal), groß, mit Doppelpunkten, als Ausgabe von `openssl x509 -fingerprint -sha256` mit dem Präfix `SHA256 Fingerprint=`, in Anführungszeichen oder mit Windows-Zeilenende. Ist der Pin gesetzt, scheitert jeder Lauf, dessen Zertifikat nicht passt. Ebenso scheitert er, wenn im Portal kein Zertifikat hinterlegt ist, damit das Entfernen des Zertifikats nicht zu unverschlüsselten Backups führt, oder wenn der Wert nach dem Normalisieren keine 64 Hexzeichen ergibt. Gelesen wird nur die Datei `.env`, nie die Umgebung des Prozesses. Steht der Schlüssel mehrfach in `.env`, gilt die erste Zeile. Ohne Pin verhält sich der Lauf wie bisher. Der Restore-Drill liest den Pin nicht. Nach einem Restore auf einen neuen Host kommen `.env` mit dem Pin (aus dem Config-Archiv) und das Zertifikat (aus dem Dump) gemeinsam zurück.
 
-**Schlüsselwechsel:** neues Paar erzeugen. Dann zwei Schritte direkt hintereinander: das Zertifikat im Portal ersetzen und, falls ein Pin gesetzt ist, `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` in `.env` auf den neuen Fingerabdruck setzen. Ist ein Pin gesetzt, scheitert jeder Lauf dazwischen laut. Das gilt in jeder Reihenfolge, weil Zertifikat und Pin dann nicht übereinstimmen; es entsteht kein Backup, das niemand bestellt hat. Danach einmal `sh scripts/backup.sh` von Hand laufen lassen und die Statuszeile prüfen: `encrypted` ist `true`, `recipient_sha256` ist der neue Fingerabdruck. Ab dem nächsten Lauf gilt der neue Schlüssel; ältere Backups brauchen weiter den alten privaten Schlüssel, bis die Retention sie entfernt hat. Den alten Schlüssel erst danach vernichten. Bestehende unverschlüsselte Backups bleiben bis zum Ende der Aufbewahrung liegen; wer sie sofort loswerden will, löscht sie von Hand.
+**Schlüsselwechsel:** neues Paar erzeugen. Dann zwei Schritte direkt hintereinander: das Zertifikat im Portal ersetzen und, falls ein Pin gesetzt ist, `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` in `.env` auf den neuen Fingerabdruck setzen. Ist ein Pin gesetzt, scheitert jeder Lauf dazwischen laut. Das gilt in jeder Reihenfolge, weil Zertifikat und Pin dann nicht übereinstimmen; es entsteht kein Backup, das niemand bestellt hat. Danach einmal `sudo sh scripts/backup.sh` von Hand laufen lassen und die Statuszeile prüfen: `encrypted` ist `true`, `recipient_sha256` ist der neue Fingerabdruck. Ab dem nächsten Lauf gilt der neue Schlüssel; ältere Backups brauchen weiter den alten privaten Schlüssel, bis die Retention sie entfernt hat. Den alten Schlüssel erst danach vernichten. Bestehende unverschlüsselte Backups bleiben bis zum Ende der Aufbewahrung liegen; wer sie sofort loswerden will, löscht sie von Hand.
 
 **Entschlüsseln** auf dem Rechner mit dem privaten Schlüssel. Die Klartextdateien kommen in ein Arbeitsverzeichnis außerhalb von `Docker/backups/`, hier `RESTORE_WORK`, etwa `RESTORE_WORK=restore-work; mkdir -p "$RESTORE_WORK"` neben dem Projektordner. Klartext gehört nie nach `Docker/backups/` (Begründung unter „Echter Restore“):
 
@@ -96,8 +98,10 @@ Die Überfälligkeitsgrenze ist der *erwartete* Lauf plus `VIRTUSPHERE_BACKUP_GR
 Ein Backup ist erst dann ein Backup, wenn der Restore bewiesen ist:
 
 ```sh
-sh scripts/restore_test.sh
+sudo sh scripts/restore_test.sh
 ```
+
+Mit `sudo` aus demselben Grund wie das Backup: Dump und Konfigurationsarchiv sind nur für `root` lesbar. Vor einem Update läuft der Drill noch mit dem laufenden Stand und **vor** dem Laden oder Bauen neuer Images, weil er die Images über ihre Namen findet ([Update-Runbook](update.md), Schritt 3.2).
 
 Ohne weitere Vorgabe verwendet der Drill das Repository, zu dem dieses Skript
 gehört. Der kanonische Runner setzt `VIRTUSPHERE_CHECK_ROOT` auf seinen
@@ -180,15 +184,15 @@ Kurzfassung auch im Hilfe-Panel `stack`; hier die ausführlichen Maßnahmen.
 | Symptom im Portal | Ursache | Maßnahme |
 |---|---|---|
 | Banner/Karte `failed` | Letzter Lauf gescheitert | Cron-Log (`/var/log/virtusphere-backup.log`) und `error`-Feld der Karte lesen; Stack läuft? Platz frei? |
-| Banner/Karte `stale` | Erwarteter Lauf blieb samt Kulanzzeit aus | `sh scripts/install-backup-schedule.sh --show`, dann `sh scripts/backup.sh` manuell testen |
+| Banner/Karte `stale` | Erwarteter Lauf blieb samt Kulanzzeit aus | `sh scripts/install-backup-schedule.sh --show`, dann `sudo sh scripts/backup.sh` manuell testen |
 | Karte: Zeitplan „Nicht gemeldet" | Kein Cron-Eintrag gefunden (Backup lief von Hand) | `sudo sh scripts/install-backup-schedule.sh` ausführen; danach zeigt die Karte Zeitplan und nächsten Lauf |
 | Systemstatus/Karte „Backups unverschlüsselt“ | Kein Zertifikat hinterlegt | Schlüsselpaar offline erzeugen und das Zertifikat unter Einstellungen > System > Backup hinterlegen (Abschnitt „Verschlüsselung“) |
-| Systemstatus/Karte: letzter Lauf nicht mit dem hinterlegten Zertifikat verschlüsselt | Zertifikat erst nach dem letzten Lauf hinterlegt oder ersetzt | Nächsten Lauf abwarten oder `sh scripts/backup.sh` ausführen; danach `*.cms`-Dateien und `encrypted: true` in der Statuszeile prüfen |
+| Systemstatus/Karte: letzter Lauf nicht mit dem hinterlegten Zertifikat verschlüsselt | Zertifikat erst nach dem letzten Lauf hinterlegt oder ersetzt | Nächsten Lauf abwarten oder `sudo sh scripts/backup.sh` ausführen; danach `*.cms`-Dateien und `encrypted: true` in der Statuszeile prüfen |
 | Karte `failed`, Fehler nennt das Zertifikat oder die Verschlüsselung | Zertifikat nicht lesbar, `openssl` fehlt auf dem Host oder die Datenbankabfrage scheiterte | `openssl version` auf dem Host prüfen, Zertifikat im Portal neu hinterlegen; das Skript legt in diesem Fall bewusst nichts unverschlüsselt ab |
 | Karte `failed`, Fehler nennt `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` | Der Pin in `.env` passt nicht zum Zertifikat im Portal, fehlt dort ganz oder ist kein gültiger Fingerabdruck | Den Fingerabdruck der Karte im Portal mit dem Wert in `.env` vergleichen und beide Stellen auf denselben Schlüssel bringen (Abschnitt „Verschlüsselung“, „Schlüsselwechsel“). Nichts wurde abgelegt |
 | Lauf meldet „verwaiste Klartext-Tempdateien entfernt“ oder eine Warnung „flock fehlt“ | Ein früherer Lauf brach hart ab, bevor er aufräumte; oder der Host hat kein `flock` | Bei der Entfernung ist nichts zu tun, aber den Backup-Host prüfen: Liegt dort eine Datei `.db-*`, `.config-*` oder `.cert-*`, löschen. Bei der Warnung `flock` installieren, sonst bleiben die Reste liegen |
 | Banner/Karte `disk_low` (<10 %) | Backup-Volume voll | Ältere Läufe/`KEEP` prüfen, Volume vergrößern |
-| Karte zeigt `unknown` nach Update | Status-Mount fehlt oder Skript lief nie | `docker-compose.yml`-Mount vorhanden? Container neu erstellt? Einmal `sh scripts/backup.sh` laufen lassen |
+| Karte zeigt `unknown` nach Update | Status-Mount fehlt oder Skript lief nie | `docker-compose.yml`-Mount vorhanden? Container neu erstellt? Einmal `sudo sh scripts/backup.sh` laufen lassen |
 | Import bricht ab | Fehlende VLANs, falsche Version, kein JSON | Fehlliste in der Vorschau lesen; VLANs zuerst anlegen; Datei aus passender Version exportieren |
 | Vorschau zeigt Befunde, Bestätigen ist grau | Grau machen ausschließlich Befunde in der Datei: fehlende VLANs, global vergebene VM-Namen, VM-Namen doppelt in derselben Datei, ungültige Angaben zur Mission oder zu VMs sowie kaputte Listen oder Einträge. Ein ungültiger oder bereits vergebener **Zielname** gehört ausdrücklich nicht dazu | Befunde in der Exportdatei beheben und neu hochladen. Fehlende Pakete blockieren nicht, sie werden übersprungen |
 | Vorschau zeigt einen Namensfehler, Bestätigen bleibt aktiv | Der Zielname ist leer, enthält Leerzeichen, trägt das Vorlagenpräfix oder ist bereits vergeben | Anderen Namen ins Feld der Vorschau eintragen und erneut bestätigen; die Prüfung läuft gegen den gerade eingetippten Namen. Nach einem gescheiterten Bestätigen steht genau dieser Name wieder im Feld |

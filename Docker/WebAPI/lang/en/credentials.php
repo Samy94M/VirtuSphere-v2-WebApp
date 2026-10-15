@@ -11,7 +11,7 @@ return [
     'host_identity_observed' => 'Observed: :identity (:when)',
     'host_identity_confirmation' => 'Confirmed on :when by user #:user',
     'host_identity_manage' => 'Credentials: check host key',
-    'host_identity_hint' => 'Run the credential test to see the observed fingerprint and key type. Compare both directly on the Ubuntu host using ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 (choose the matching public key file for the displayed key type). Enter the fingerprint and SSH key type in the empty fields after the independent comparison. Confirm only the independently checked value. A change replaces the previous pin.',
+    'host_identity_hint' => 'Run the credential test to see the observed fingerprint and key type. Compare both directly on the Ubuntu host using ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 (choose the matching public key file for the displayed key type). Enter the fingerprint and SSH key type in the empty fields after the independent comparison. As key type enter the name this page shows above the fingerprint (for example ssh-ed25519), not the short form ED25519 from the ssh-keygen output: a different type blocks the next login. Confirm only the independently checked value. A change replaces the previous pin.',
     'host_identity_fingerprint' => 'SHA256 fingerprint',
     'host_identity_type' => 'Key type',
     'host_identity_button' => 'Confirm checked host key',

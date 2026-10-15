@@ -63,11 +63,9 @@ git clone <repository-url> VirtuSphere-v2-WebApp
 cd VirtuSphere-v2-WebApp
 ```
 
-Wenn der Server keinen Internetzugriff hat, kopiere den bereits vorbereiteten Projektordner und die Docker Images offline auf den Server. Danach in den Projektordner wechseln:
+Den Checkout als das Konto anlegen, das den Projektordner später betreibt, nicht mit `sudo`: Dateien, die `root` gehören, lassen spätere Updates scheitern.
 
-```bash
-cd VirtuSphere-v2-WebApp
-```
+Hat der Server keinen Internetzugriff, gilt diese Anleitung nicht. Dann kommen Code und fertige Images aus dem Offline-Bundle, siehe [Offline-Installation](operations/offline-install.md). Einen vorbereiteten Projektordner per `scp -r` oder Datei-Kopie zu übertragen ist kein sicherer Weg: Ein abgebrochener Ordner sieht vollständig aus, und es fehlen Images, die auf dem Server nicht gebaut werden können.
 
 ## Konfiguration mit `.env`
 
@@ -108,6 +106,8 @@ Das Skript führt aus:
 - optional ersten Admin seeden.
 
 Erwartung: Das Skript endet ohne Fehler. Ist ein App-Secret zu schwach, bricht EnvBoot ab; ist ein MySQL-Bootstrap-Passwort zu schwach, bricht der MySQL-Container vor dem Serverstart ab.
+
+`Docker/scripts/setup.sh` ist nur für die **Erstinstallation** gedacht. Auf einem laufenden System startet es die neuen Container vor der Migration und sichert weder Backup noch alte Images; für ein Update gilt der Abschnitt „Update“ unten.
 
 ## Manuelle Prüfungen
 
@@ -231,14 +231,21 @@ docker compose --profile tools down
 
 Das Profil `tools` gehört in beide Befehle; ohne es bleibt ein bei Bedarf gestartetes phpMyAdmin stehen.
 
+## Update
+
+Ein neueres Release kommt nach dem [Update-Runbook](operations/update.md) auf eine laufende Installation, mit oder ohne Internetzugang. Es beschreibt Bestandsaufnahme, Backup und Restore-Drill, die Sicherung der laufenden Images, das Wartungsfenster und den Rückweg. Ein `git pull` mit anschließendem Neustart reicht nicht, sobald ein Release neue Images, neue `.env`-Schlüssel oder Migrationen mitbringt.
+
 ## Backup und Restore
 
 Kanonisch sind die Skripte unter `scripts/` (die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt und brechen absichtlich mit einem Hinweis ab):
 
 ```bash
-sh scripts/backup.sh        # DB-Dump, Config-Archiv und SHA-256-Manifest nach Docker/backups/
-sh scripts/restore_test.sh  # Restore-Drill in einer Wegwerf-Umgebung (berührt den Stack nicht)
+sudo sh scripts/install-backup-schedule.sh  # täglicher Zeitplan (läuft als root)
+sudo sh scripts/backup.sh                   # DB-Dump, Config-Archiv und SHA-256-Manifest nach Docker/backups/
+sudo sh scripts/restore_test.sh             # Restore-Drill in einer Wegwerf-Umgebung (berührt den Stack nicht)
 ```
+
+Auf einem Linux-Host mit `sudo`: Der Zeitplan läuft als `root`, `Docker/backups` gehört danach `root`, und Dump und Konfigurationsarchiv sind nur für `root` lesbar.
 
 Der Drill verifiziert das Manifest, spielt den jüngsten Dump in einen Wegwerf-MySQL ein, lässt die Migrationen laufen, vergleicht das Schema gegen `struktur.sql`, prüft Invarianten und die Entschlüsselung der Zugangsdaten mit dem gesicherten `APP_KEY` und fährt einen App-Smoke (Health, Portal-Login, Machine API). Der Ernstfall-Ablauf steht in `docs/operations/backup.md` (Disaster Recovery).
 
@@ -254,7 +261,7 @@ Einmalige Host-Voraussetzungen: `WEB_HTTPS_PORT` in `.env` setzen (Vorlage `.env
 
 ## Air-Gap Hinweis
 
-Das Setup-Skript setzt voraus, dass Docker, das Compose-Plugin, die benötigten Images und die im Repository vorhandenen Vendor-Dateien bereits verfügbar sind. Es führt keine Paketinstallation aus dem Internet aus. In einer abgeschotteten Umgebung müssen Images und Quellen vorab in die Umgebung gebracht und dort validiert werden.
+Das Setup-Skript setzt voraus, dass Docker, das Compose-Plugin, die benötigten Images und die im Repository vorhandenen Vendor-Dateien bereits verfügbar sind. Es führt keine Paketinstallation aus dem Internet aus. In einer abgeschotteten Umgebung müssen Images und Quellen vorab in die Umgebung gebracht und dort validiert werden; den vollständigen Weg mit Prüfsummen beschreibt die [Offline-Installation](operations/offline-install.md).
 
 ## Frontend-Wartung
 

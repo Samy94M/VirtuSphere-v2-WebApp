@@ -59,10 +59,10 @@ Dieser Vertrauenscheck schreibt selbst keinen VM-, Auftrags- oder MECM-Zustand. 
 
 ### Betrieb
 
-In **Zugangsdaten** den Ansible-Zugang testen, Fingerprint und Typ auf dem Ubuntu-Host unabhängig vergleichen und **Geprüften Host-Schlüssel bestätigen** wählen. Beispiel für ED25519:
+In **Zugangsdaten** den Ansible-Zugang testen, Fingerprint und Typ auf dem Ubuntu-Host unabhängig vergleichen und **Geprüften Host-Schlüssel bestätigen** wählen. Der Knopf steht in der Aktionsspalte des Ansible-Zugangs und klappt dort ein eigenes kleines Formular mit den Feldern SHA256-Fingerprint und Schlüsseltyp auf; die Zeile mit Typ, Name, Host und Benutzername darunter gehört zu **Bearbeiten** und ist nicht die Bestätigung. Beispiel für ED25519, die Ausgabe ist genau der Wert für das Feld SHA256-Fingerprint:
 
 ```sh
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
+ssh-keygen -l -E sha256 -f /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f2
 ```
 
-Die zum angezeigten Schlüsseltyp passende öffentliche Host-Schlüsseldatei verwenden. SSH-Kennwörter oder private Schlüssel werden dafür nicht benötigt. Bei einem legitimen Schlüsselwechsel bleibt der Zugang bis zur ausdrücklichen Bestätigung gesperrt. Ein falscher Schlüssel während der ersten Verbindung nach dem Upgrade kann vorläufig angeheftet werden; nur der unabhängige Vergleich deckt dieses verbleibende Erstkontakt-Risiko auf. Details: [ADR-0045](../adr/ADR-0045-ansible-host-identity.md), Portalhilfe **Zugangsdaten**.
+Die zum angezeigten Schlüsseltyp passende öffentliche Host-Schlüsseldatei verwenden (`ssh_host_ecdsa_key.pub`, `ssh_host_rsa_key.pub`). Ins Feld Schlüsseltyp gehört der OpenSSH-Name, den das Portal über dem Fingerprint anzeigt, zum Beispiel `ssh-ed25519`, `ecdsa-sha2-nistp256` oder `ssh-rsa`, **nicht** die Kurzform `ED25519` aus der Klammer der `ssh-keygen`-Ausgabe. Das Portal speichert den eingetragenen Typ als Teil des Pins und vergleicht ihn bei jeder Anmeldung mit dem Host; ein anders geschriebener Typ sperrt die Anmeldung („Host-Schlüssel weicht ab“), obwohl der Fingerprint stimmt. Behoben wird das durch eine erneute Bestätigung mit dem richtigen Typ. SSH-Kennwörter oder private Schlüssel werden dafür nicht benötigt. Bei einem legitimen Schlüsselwechsel bleibt der Zugang bis zur ausdrücklichen Bestätigung gesperrt. Ein falscher Schlüssel während der ersten Verbindung nach dem Upgrade kann vorläufig angeheftet werden; nur der unabhängige Vergleich deckt dieses verbleibende Erstkontakt-Risiko auf. Details: [ADR-0045](../adr/ADR-0045-ansible-host-identity.md), Portalhilfe **Zugangsdaten**.

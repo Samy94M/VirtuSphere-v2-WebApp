@@ -75,10 +75,17 @@ mkdir -p virtusphere && tar xzf source.tar.gz -C virtusphere
 tar xzf deps/vendor.tar.gz -C virtusphere/Docker/WebAPI
 ```
 
+Beide Befehle als das Konto ausführen, das den Projektordner später betreibt,
+**nicht mit `sudo`**: Als `root` entpackte Dateien gehören `root`, und jedes
+spätere Update scheitert dann an genau diesen Ordnern.
+
 `source.tar.gz` enthält zwar das versionierte `vendor/`, aber mit den
 Entwicklungspaketen. `deps/vendor.tar.gz` ist der Produktionsstand
 (`composer install --no-dev`) und wird darüber entpackt, weil `composer install`
-hier keinen Packagist erreicht.
+hier keinen Packagist erreicht. Das gilt nur für eine Installation aus dem
+Archiv. Kommt der Code als Git-Checkout auf den Host, bringt der Checkout
+`vendor/` mit, und `deps/vendor.tar.gz` wird nicht darüber entpackt: Es würde
+versionierte Dateien verändern und das nächste `git pull` blockieren.
 
 ### Auf dem Ansible-Host
 
@@ -105,7 +112,9 @@ Danach den Aufräum-Timer einmal als root installieren. Er liegt im Bundle unter
 sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>
 ```
 
-Was der Timer tut und warum er empfohlen ist, steht in
+`<ansible-konto>` ist das Linux-Konto des Ansible-Zugangs, also der
+Benutzername, den der Ansible-Zugang im Portal unter **Zugangsdaten** trägt,
+nicht das eigene Anmeldekonto. Was der Timer tut und warum er empfohlen ist, steht in
 [Go-Live, Abschnitt Ansible-Host vorbereiten](go-live.md#ansible-host-vorbereiten-vor-schritt-4).
 
 ## Schritt 4: deaktivierten Durable Runner installieren und prüfen (Ansible-Host)
@@ -243,12 +252,15 @@ Vor jedem Update gilt zusätzlich die ausführbare Matrix und Wartungsfolge in
 [`upgrade-recovery.md`](upgrade-recovery.md). Ein verifiziertes Bundle allein
 autorisiert noch keine gemischten Portal-/Schema-/Workerstände.
 
-Ein Update ist derselbe Weg ohne die erstmalige Runner-, `.env`- und
-Hosteinrichtung aus Schritt 4 bis 6: neues Bundle prüfen, Images
-laden, Quellcode über den bestehenden Baum entpacken (die `.env` und die
-Override-Datei liegen außerhalb des Archivs und bleiben), dann
-`docker compose up -d --wait` und die Migrationen. Vorher ein Backup
-(`sh scripts/backup.sh`), denn Migrationen laufen nur vorwärts.
+Ein Update folgt dem [Update-Runbook](update.md), nicht den Schritten dieses
+Dokuments. Es unterscheidet sich an mehreren Stellen von der Erstinstallation:
+Backup und Restore-Drill kommen zuerst; die laufenden Images werden vor dem
+Laden gesichert, weil `docker load` ihre Namen auf die neuen Images umhängt;
+Worker und Webserver werden vor dem Quellwechsel gestoppt; Dateien, die das neue
+Release entfernt hat, müssen nach dem Entpacken über den alten Baum gelöscht
+werden; migriert wird vor dem Start der Worker. Ein `docker compose up -d --wait`
+vor der Migration, wie in Schritt 7 der Erstinstallation, würde die neuen Worker
+gegen das alte Schema starten.
 
 Der Runner-Installer ist bewusst kein In-place-Updater. Solange 8R-S offen ist,
 nutzt kein Produktivjob diese Installation. Ein späterer Runnerwechsel gehört

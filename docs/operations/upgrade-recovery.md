@@ -69,6 +69,10 @@ Migration 0060 ergänzt das unveränderliche Vorzustands- und Berührungsjournal
 
 ## Upgradefolge
 
+Die ausführbaren Befehle zu dieser Folge, mit den Varianten für Git und Archiv,
+Laden und Bauen der Images, stehen im [Update-Runbook](update.md). Die Liste hier
+ist der Vertrag, den dieses Runbook erfüllt.
+
 1. Zielrelease und Bundle offline verifizieren; obige Releaseidentität sichern.
 2. Aktuellen Health-/Systemstatus sowie offene, laufende, cancelling und
    `uncertain` Jobs erfassen. Neue Claims im vorhandenen Adminpfad pausieren.
@@ -77,13 +81,20 @@ Migration 0060 ergänzt das unveränderliche Vorzustands- und Berührungsjournal
    Neueinreihung „bereinigt“.
 4. `scripts/backup.sh` ausführen und genau dieses Tripel mit
    `scripts/restore_test.sh` beweisen. Ohne grünen Drill kein Schemaübergang.
-5. Worker stoppen. Erst jetzt verifizierte Quellen/Assets und erforderliche
-   Images bereitstellen. `.env`, Host-Override, Schlüssel und Laufzeitdaten
-   nicht aus einem Quellarchiv überschreiben. Wer dabei die `.env` ändert: Compose
+5. Die Images der laufenden Container unter eigenem Namen sichern, bevor neue
+   Images geladen oder gebaut werden: Beides hängt den bisherigen Namen auf das
+   neue Image um, und der Rückweg vor der Migration fände sonst nicht mehr das
+   alte. Dann Worker **und Webserver** stoppen; das Portal bleibt bis nach der
+   Migration geschlossen. Erst jetzt verifizierte Quellen/Assets und
+   erforderliche Images bereitstellen. `.env`, Host-Override, Schlüssel und
+   Laufzeitdaten nicht aus einem Quellarchiv überschreiben. Danach muss
+   `docker compose config --quiet` ohne Warnung durchlaufen; eine nicht gesetzte
+   Variable wäre sonst still leer. Wer dabei die `.env` ändert: Compose
    übernimmt sie nur beim Erzeugen eines Containers; in Schritt 7 deshalb neu
    erstellen, nicht nur neu starten.
-6. `migrate.php --check` ausführen. Bei roten Daten-Preflights abbrechen. Danach
-   Migration genau einmal starten und anschließend `pending=0` sowie
+6. Datenbank und PHP mit den neuen Images erzeugen, die übrigen Dienste noch
+   nicht. `migrate.php --check` ausführen. Bei roten Daten-Preflights abbrechen.
+   Danach Migration genau einmal starten und anschließend `pending=0` sowie
    Schemakonvergenz prüfen.
 7. PHP, beide Worker und Webserver mit der zusammengehörigen Compose-/Imageform
    neu erstellen beziehungsweise starten; Health und gespeicherten
@@ -92,12 +103,18 @@ Migration 0060 ergänzt das unveränderliche Vorzustands- und Berührungsjournal
    ungefährlichen lesenden Integrationsweg prüfen. Alte Browserseiten neu laden.
 9. PowerShell-/Runnerpaket erst nach Portal/Schema aktualisieren und seine
    eigene Version/Generation prüfen. Standortfunktionen bleiben bis zu ihren
-   Laborproben gesperrt.
+   Laborproben gesperrt. Ist der MECM-Installer eines Stands gesperrt (er bricht
+   dann vor jeder Änderung ab, siehe [MECM-Integration](mecm-integration.md)),
+   bleibt das vorhandene MECM-Paket in Betrieb; das ist die Zeile „neues Portal,
+   altes PowerShell-Paket“ der obigen Matrix. Ein Kopieren der neuen Skripte von
+   Hand umgeht diese Sperre und ist kein zulässiger Weg.
 
 ## Unterbrechung und Rückkehr
 
 - Vor der Migration kann der verifizierte alte Quell-/Imagestand wieder
-  gestartet werden, sofern kein neuer externer Vorgang begonnen hat.
+  gestartet werden, sofern kein neuer externer Vorgang begonnen hat. Die alten
+  Images kommen dabei aus der Sicherung von Schritt 5, nicht über ihren Namen,
+  denn den trägt nach dem Laden oder Bauen bereits das neue Image.
 - Bei unklar unterbrochener Migration nicht blind erneut ausführen. Den Eintrag
   in `deploy_migrations`, die konkrete Tabellenform und das Migrationsprotokoll
   prüfen. Ist atomarer Abschluss nicht belegbar, den bewiesenen Vorabstand
@@ -108,7 +125,8 @@ Migration 0060 ergänzt das unveränderliche Vorzustands- und Berührungsjournal
 - Ein Worker-/Runtimewechsel erhält Jobbesitz, Attempt, Generation und Remote-
   Handle. Erst der bestehende Recoveryvertrag darf eine Einheit freigeben.
 - Ein Restore verwendet Datenbank, `.env`, Host-Override, APP_KEY und
-  Quellrelease desselben Sicherungsstands. Anschließend AD-Konvergenz ausführen;
+  Quellrelease desselben Sicherungsstands und folgt dem Backup-Runbook dieses
+  Quellrelease, nicht dem des neueren Stands. Anschließend AD-Konvergenz ausführen;
   neuere offene Browserseiten und Callbacks müssen an ihren Revisions-/
   Generationfences scheitern.
 - Nach Restore oder Rückbau bleiben `uncertain`-Einheiten, fremde

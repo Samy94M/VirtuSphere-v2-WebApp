@@ -32,8 +32,9 @@ Schritt 0 gilt vor allen Zeilen. Die Zeilen 1 bis 2 (Docker-Host) und 3 bis 4
 (Ansible-Host) hängen nicht voneinander ab und können parallel laufen. Zeile 5
 braucht einen laufenden Stack, Zeile 6 beide Hosts. Fehlt die Ansible-Host-IP in
 der Freigabe-Liste aus Schritt 4.4 (Zugriff auf das Portal, eingehend), endet die Prüfung in Zeile 6 als Warnung mit
-genau dieser IP. Danach geht es mit MECM in Schritt 5 weiter. Updates folgen
-[Upgrade und Recovery](upgrade-recovery.md), nicht dieser Tabelle.
+genau dieser IP. Danach geht es mit MECM in Schritt 5 weiter. Ein späteres
+Update einer laufenden Installation folgt dem [Update-Runbook](update.md), nicht
+dieser Tabelle.
 
 ## Schritt 0: Kompromittiertes Alt-Credential rotieren (einmalig, vor allem anderen)
 
@@ -145,7 +146,7 @@ Netzwege gelten in beiden Fällen.
 sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>
 ```
 
-Die Installation braucht kein Netz und kein Paket und lässt sich wiederholen; ein Root-Konto lehnt sie ab. Status: `systemctl status virtusphere-secret-cleanup.timer`; Ausgaben: `journalctl -t virtusphere-secret-cleanup`. Fehlt der Timer, nennt der Zugangstest das als Hinweis. Der Befehl ist auf Ubuntu 24.04 im Labor noch nicht geprüft.
+`<ansible-konto>` ist das Linux-Konto, mit dem sich der Ansible-Zugang anmeldet: im Portal unter **Zugangsdaten** in der Zeile des Ansible-Zugangs, Spalte Benutzername. Es ist nicht das eigene Anmeldekonto am Host; ein falsches Konto installiert den Timer für Ordner, die nie entstehen. Auf einem Host mit Git-Checkout liegt das Skript unter `Ansible/host-cleanup/` im Projektordner, auf einem eigenen Ansible-Host im entpackten `source.tar.gz` des Bundles. Die Installation braucht kein Netz und kein Paket und lässt sich wiederholen, auch um das Konto zu korrigieren; ein Root-Konto lehnt sie ab. Status: `systemctl status virtusphere-secret-cleanup.timer`; Ausgaben: `journalctl -t virtusphere-secret-cleanup`. Fehlt der Timer, nennt der Zugangstest das als Hinweis. Der Befehl ist auf Ubuntu 24.04 im Labor noch nicht geprüft.
 
 „Verbindung und Umgebung prüfen" beim Ansible-Zugang prüft genau das (SSH-Login mit
 SFTP-Schreibtest, `ansible-playbook`, `python3`, `pyvmomi`, `requests`,
@@ -213,9 +214,9 @@ Namenspräfix.
 
 ## Schritt 1: Stack hochfahren
 
-1. Repo auf den Ubuntu-Host holen (Branch `main`). Der Host erreicht GitHub
-   nicht; der Code kommt per Bundle über den internen Gitea, siehe „Code auf den
-   Host bringen und Releases nachziehen" am Ende dieses Dokuments.
+1. Repo auf den Ubuntu-Host holen (Branch `main`), als Betriebskonto und ohne
+   `sudo`. Erreicht der Host das Git-Repository nicht, kommt der Code als Bundle,
+   siehe „Code auf den Host bringen“ am Ende dieses Dokuments.
 2. `.env` anlegen, und zwar als **Kopie von `.env.example`**, nicht von Hand
    getippt. Jeden Schlüssel der Vorlage stehen lassen: `docker compose` bricht
    beim Parsen ab, wenn einer fehlt, den es ohne Vorgabewert einsetzt.
@@ -329,18 +330,25 @@ Anwendungsdatenbank (`--databases`, nicht `--all-databases`); neue Tabellen sind
 damit automatisch mitgesichert.
 
 ```bash
-sh scripts/backup.sh            # Erstsicherung, Ablage/Runbook siehe docs/operations/backup.md
+sudo sh scripts/install-backup-schedule.sh     # täglicher Zeitplan, läuft als root
+sudo sh scripts/backup.sh                      # Erstsicherung, Ablage/Runbook siehe docs/operations/backup.md
+sh scripts/install-backup-schedule.sh --show   # Zeitplan steht
 ```
+
+Beide mit `sudo`: Der Zeitplan läuft als `root`, und `Docker/backups` gehört
+danach `root`; jeder spätere Lauf von Hand braucht deshalb ebenfalls `sudo`. Ohne
+Zeitplan gibt es kein automatisches Backup, auch wenn die Erstsicherung gelungen
+ist; die Backup-Karte unter Einstellungen zeigt beim Zeitplan dann „Nicht gemeldet“.
 
 Verschlüsselung: Zertifikat im Portal hinterlegen (Einstellungen > System >
 Backup) und optional seinen SHA-256-Fingerabdruck als
 `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` in `.env` festschreiben. Danach
-`sh scripts/backup.sh` von Hand laufen lassen; die Statuszeile zeigt
+`sudo sh scripts/backup.sh` von Hand laufen lassen; die Statuszeile zeigt
 `encrypted` gleich `true` und als `recipient_sha256` denselben Fingerabdruck
 (`docs/operations/backup.md`, Abschnitt „Verschlüsselung“).
 
-Restore-Probe (`scripts/restore_test.sh`) mindestens einmal ausführen, bevor
-produktive Daten entstehen.
+Restore-Probe (`sudo sh scripts/restore_test.sh`) mindestens einmal ausführen,
+bevor produktive Daten entstehen.
 
 ## Schritt 3a: DB-Anwendungskonto rotieren (bei Bedarf)
 
@@ -430,6 +438,13 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    `docs/operations/https.md`).
 
 ## Schritt 5: MECM-Server anbinden (E4, erster echter Funktionstest)
+
+Vorher prüfen, ob der MECM-Installer dieses Stands freigegeben ist:
+`grep -n "^throw " Powershell-MECM/install-VirtuSphere-MECM.ps1`. Zeigt die
+Ausgabe eine Zeile mit „gesperrt“, bricht der Installer vor jeder Änderung ab;
+dann ist dieser Schritt auf diesem Stand nicht ausführbar, und der Grund steht am
+Anfang von [MECM-Integration](mecm-integration.md). Portal und Ansible-Kette
+funktionieren ohne MECM weiter.
 
 1. **Installer auf dem MECM-Server** ausführen:
    `Powershell-MECM/install-VirtuSphere-MECM.ps1`. Er schreibt die Registry
@@ -557,59 +572,57 @@ Bei einem fehlenden Standortzugang wird dieser reale Canary nicht simuliert und
 nicht als grün eingetragen. Die lokale Revision bleibt dann vollständig
 fail-closed; Create/Full werden vor Etappe 14B nicht remote aktiviert.
 
-## Code auf den Host bringen und Releases nachziehen
+## Code auf den Host bringen
 
-Der verbindliche Kompatibilitäts-, Wartungs- und Rückkehrvertrag steht in
-[`upgrade-recovery.md`](upgrade-recovery.md). Insbesondere werden neue Quellen
-nicht bei weiter claimenden Workern entpackt und ein Schemawechsel nicht ohne
-vorher bewiesenes Backup begonnen.
+Dieser Abschnitt betrifft nur die **erste** Übertragung des Codes. Jedes spätere
+Release folgt dem [Update-Runbook](update.md): Dort stehen Reihenfolge,
+Backup, Image-Sicherung und Rückweg, die ein einfaches `git pull` mit Neustart
+nicht abdeckt. Der verbindliche Kompatibilitätsvertrag steht in
+[Upgrade und Recovery](upgrade-recovery.md).
 
-Der Produktionshost erreicht GitHub nicht (ausgehender Proxy); interne
-LAN-Adressen gehen daran vorbei. Der Code läuft deshalb über den internen Gitea
-auf demselben Host, und der Sprung von der Entwicklungsmaschine dorthin geht per
-`git bundle` auf einem USB-Stick, nie per `scp -r` des Repo-Ordners: ein
-abgebrochener Verzeichnisbaum sieht vollständig aus, und Git legt seine Packs
-read-only an, sodass ein zweiter Versuch genau an der Objektdatenbank scheitert.
+Der Projektordner gehört dem Betriebskonto. Nichts darin mit `sudo` klonen oder
+entpacken: Dateien, die `root` gehören, lassen das nächste Update scheitern.
 
-Auf der Entwicklungsmaschine bündeln. `HEAD` muss mit ins Bundle, sonst klont es
-ohne Branch und mit leerem Arbeitsbaum:
+**Host erreicht das Git-Repository:** direkt klonen.
+
+```bash
+git clone <repository-url> /opt/VirtuSphere-v2-WebApp
+```
+
+**Host erreicht das Git-Repository nicht:** Der Code kommt als `git bundle`,
+nie als per `scp -r` kopierter Repository-Ordner: Ein abgebrochener
+Verzeichnisbaum sieht vollständig aus, und Git legt seine Packs schreibgeschützt
+an, sodass ein zweiter Versuch genau an der Objektdatenbank scheitert. Auf der
+Entwicklungsmaschine bündeln; `HEAD` muss mit ins Bundle, sonst klont es ohne
+Branch und mit leerem Arbeitsbaum:
 
 ```bash
 git bundle create virtusphere-main.bundle HEAD main
 git bundle verify virtusphere-main.bundle
 ```
 
-Auf dem Host aus dem Bundle nach Gitea spiegeln. `git clone` setzt `origin` auf
-die Bundle-Datei, deshalb `set-url` statt `remote add`:
+Gibt es im Netz des Hosts einen internen Git-Server, das Bundle zuerst dorthin
+spiegeln und den Projektordner von dort klonen; spätere Releases kommen dann als
+kleines Delta-Bundle über denselben Weg ([Update-Runbook](update.md),
+Schritt 2.2). `git clone` setzt `origin` auf die Bundle-Datei, deshalb
+`set-url` statt `remote add`:
 
 ```bash
-git clone ~/virtusphere-main.bundle ~/vs-neu
-cd ~/vs-neu
-git remote set-url origin <interner-gitea>/VirtuSphere-v2-WebApp.git
+git clone /pfad/zu/virtusphere-main.bundle /home/<betriebskonto>/vs-transfer
+cd /home/<betriebskonto>/vs-transfer
+git remote set-url origin <interner-git-server>/VirtuSphere-v2-WebApp.git
 git push origin main
+git clone <interner-git-server>/VirtuSphere-v2-WebApp.git /opt/VirtuSphere-v2-WebApp
 ```
 
-Danach den scharfen Checkout nachziehen. Das ist zugleich der Weg für jedes
-weitere Release:
-
-```bash
-cd /opt/VirtuSphere-v2-WebApp
-git pull --ff-only
-docker compose exec -T php php /var/www/html/lib/migrate.php --check  # offene Migrationen?
-docker compose exec -T php php /var/www/html/lib/migrate.php          # anwenden, falls offen
-docker compose restart php deploy-worker maintenance-worker webserver   # bei geänderter .env oder docker-compose.yml stattdessen neu erzeugen (Schritt 3a)
-curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8021/portal/login.php
-```
+Ohne internen Git-Server direkt aus dem Bundle klonen und danach `origin`
+entfernen oder auf den künftigen Transportweg setzen.
 
 Der Anwendungscode liegt per Bind-Mount im Container
-(`./Docker/WebAPI:/var/www/html`) und ist nach dem Pull sofort wirksam; neue
-Images braucht es nur bei geändertem Dockerfile oder geänderter Basis-Version.
-
-Der `webserver` gehört zwingend in dieselbe Neustartzeile. Startet nur `php` neu,
-hält nginx die alte Container-Adresse fest, und das Portal antwortet trotz
-gesundem PHP-Container mit HTTP 502 (dieselbe Ursache wie in Schritt 3a). Ein 502
-unmittelbar nach einem Update heißt fast immer, dass dieser Neustart fehlt; der
-Smoke-Test oben muss 200 liefern.
+(`./Docker/WebAPI:/var/www/html`). Ein Pull ist deshalb sofort wirksam, auch bei
+laufenden Workern und ohne die Images, die ein neues Release vielleicht
+verlangt. Genau deshalb gehört jedes spätere Pull in das Wartungsfenster des
+Update-Runbooks.
 
 Ändert ein Release den Machine-API-Vertrag, gilt die Reihenfolge: erst Portal und
 Migration, dann die Skripte auf den Integrationsservern. Ein altes Portal lehnt

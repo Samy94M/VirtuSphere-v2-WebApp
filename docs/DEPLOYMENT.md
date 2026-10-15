@@ -255,7 +255,7 @@ docker exec virtusphere-v2-webapp-php-1 php-fpm -t
 
 Each run also appends a status line to `Docker/backups/status/backup-status.jsonl`. Only this `status/` subdirectory is bind-mounted read-only into the `php` service (`./Docker/backups/status:/var/backups/virtusphere-status:ro`, ADR-0021) so the portal can show a backup card and dashboard banner; the dumps and the config tar (which holds `.env`) are never mounted. After adding or changing this mount, recreate the container (`docker compose up -d php`, or `--force-recreate` if the bind was already present) or the portal keeps reporting the `unknown` state.
 
-**Rule: run `sh scripts/backup.sh` once before every migration.** Migrations have no down path, so a fresh dump is the only rollback net.
+**Rule: run `sudo sh scripts/backup.sh` once before every migration** (the schedule runs as root, so `Docker/backups` belongs to root). Migrations have no down path, so a fresh dump is the only rollback net.
 
 ## Machine API hardening notes
 
