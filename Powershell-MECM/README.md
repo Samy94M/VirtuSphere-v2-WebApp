@@ -6,7 +6,9 @@
 > Fallback mehr; bestehende Client-/MECM-Stände brauchen einen getrennten,
 > freigegebenen Cutover. Auch der Serverinstaller ist vor allen Writes
 > gesperrt: Er würde sonst Reporter/Common V2 allein in Paketvorlagen
-> veröffentlichen, während Core V1 noch auf Clients liegt.
+> veröffentlichen, während Core V1 noch auf Clients liegt. Ausnahme seit
+> 15.10.2026: `-Upgrade -ServerOnly` tauscht nur Serverskripte und Aufgaben und
+> lässt die Paketvorlage unverändert (siehe „Reines Serverupdate“).
 
 Diese Skripte verbinden den MECM-Server mit der VirtuSphere-WebApp. Sie
 laufen als geplante Aufgaben auf dem MECM-Server (`mecm/`) bzw. werden über das
@@ -115,6 +117,21 @@ den normalen Erstinstallations-/Re-Run-Aufruf mit `-WebApi` und
 Der gleiche Mutex-, Staging-, Hash-, Aufgabenstopp-, Verifikations- und
 Rollbackpfad bleibt aktiv. Ein erfolgreiches Update endet mit Exit-Code 0; die
 Tageslogs liegen unter `%ProgramFiles%\VirtuSphere\Logs`.
+
+### Reines Serverupdate
+
+Bis zum Core-/Reporter-Cutover ist nur dieser Aufruf freigegeben:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly
+```
+
+Er tauscht die Dateien aus `mecm/` und registriert die vier Aufgaben neu,
+lässt `<PackagesRoot>\Package_Vorlage` aber unverändert. Vor jedem Write prüft
+er die vorhandene Vorlage wie der Autoimporter; ohne vollständigen
+`reporting\current.json`-Satz bricht er ab, weil der neue Autoimporter sonst
+jedes Paket mit `package_template_failed` blockieren würde. Ablauf und Rückweg:
+`docs/operations/mecm-integration.md`, Abschnitt 4b.
 
 `Common`, Autoimporter und Installer tragen zusätzlich denselben
 MECM-Serververtrag. Das Upgrade vergleicht ihn im Staging und nochmals im

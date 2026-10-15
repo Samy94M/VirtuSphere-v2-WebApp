@@ -52,7 +52,7 @@ try {
 }
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
-$SCRIPT_VERSION = 'device-sync/2.0'
+$SCRIPT_VERSION = 'device-sync/2.1'
 
 $intervalSeconds = Resolve-VsInterval -Source 'device-sync' -Configured $config.DeviceSyncInterval
 $siteCode = $null
@@ -258,6 +258,11 @@ while ($true) {
                     Write-VsLog -Level WARN -Context $deviceName -Message ("Mehrere DHCP-Interfaces ({0}) - nutze die erste MAC. Falls PXE ueber eine andere NIC laeuft, Interfaces im Portal pruefen." -f $dhcpMacs.Count)
                 }
                 $deviceMac = if ($dhcpMacs.Count -gt 0) { ConvertTo-VsNormalizedMac $dhcpMacs[0] } else { $null }
+                # Alle MACs, die das Portal fuer diese VM kennt (getDeviceList
+                # liefert jedes Interface mit MAC). Sie gelten nur fuer die
+                # Pruefung einer GEBUNDENEN ResourceID (MECM-ID1); Import und
+                # Erstbindung bleiben bei der DHCP-MAC.
+                $knownMacs = @($device.interfaces | Select-Object -ExpandProperty mac -ErrorAction SilentlyContinue)
 
                 if ([string]::IsNullOrWhiteSpace($missionName)) {
                     Write-VsLog -Level WARN -Context $deviceName -Message ("Mission fehlt (Id {0}) - Device uebersprungen." -f $device.mission_id)
@@ -296,13 +301,13 @@ while ($true) {
                 # (import), oder etwas stimmt nicht und die VM bleibt in der
                 # Warteschlange (block, mit geschlossenem Code).
                 $identity = Resolve-VsDeviceIdentity -Index $mecmIndex -RolloutHostname $rolloutName -Mac $deviceMac `
-                    -BoundResourceId $boundResourceId -PreviousResourceId $previousResourceId
+                    -BoundResourceId $boundResourceId -PreviousResourceId $previousResourceId -KnownMacs $knownMacs
                 if ($identity.Action -eq 'block') {
                     # Ein Identitaetsfehler tritt VOR jeder Mitgliedschafts-
                     # mutation ein: eine Collection-Zuweisung an den falschen
                     # ResourceID-Datensatz ist nicht zurueckzunehmen, ohne dass
                     # jemand weiss, dass sie passiert ist.
-                    Write-VsLog -Level ERROR -Context $deviceName -Message ("Identitaet nicht aufloesbar ({0}): Rolloutname '{1}', MAC {2}, gebundene ResourceID '{3}', Vorgaenger '{4}' - Device bleibt in der Warteschlange." -f $identity.Cause, $rolloutName, $deviceMac, $boundResourceId, $previousResourceId)
+                    Write-VsLog -Level ERROR -Context $deviceName -Message ("Identitaet nicht aufloesbar ({0}): Rolloutname '{1}', MAC {2}, Portal-MACs '{5}', gebundene ResourceID '{3}', Vorgaenger '{4}' - Device bleibt in der Warteschlange." -f $identity.Cause, $rolloutName, $deviceMac, $boundResourceId, $previousResourceId, ($knownMacs -join ','))
                     $itemFailures++
                     Add-VsRunCause -Causes $causes -Cause $identity.Cause -Target $deviceName
                     continue

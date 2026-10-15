@@ -440,9 +440,9 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
 ## Schritt 5: MECM-Server anbinden (E4, erster echter Funktionstest)
 
 Vorher prüfen, ob der MECM-Installer dieses Stands freigegeben ist:
-`grep -n "^throw " Powershell-MECM/install-VirtuSphere-MECM.ps1`. Zeigt die
-Ausgabe eine Zeile mit „gesperrt“, bricht der Installer vor jeder Änderung ab;
-dann ist dieser Schritt auf diesem Stand nicht ausführbar, und der Grund steht am
+`grep -n "throw 'MC01" Powershell-MECM/install-VirtuSphere-MECM.ps1`. Zeigt die
+Ausgabe eine Zeile, bricht die Erstinstallation vor jeder Änderung ab; dann ist
+dieser Schritt auf diesem Stand nicht ausführbar, und der Grund steht am
 Anfang von [MECM-Integration](mecm-integration.md). Portal und Ansible-Kette
 funktionieren ohne MECM weiter.
 

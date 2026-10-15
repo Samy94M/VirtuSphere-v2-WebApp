@@ -1361,7 +1361,12 @@ function Get-VsIndexHits {
 #     Microsoft vorgesehene Weg), und VirtuSphere bewertet das nicht als Fehler,
 #     benennt nicht um und warnt nicht alle zehn Sekunden. Fehlt die ResourceID
 #     oder traegt sie eine fremde MAC, wird blockiert: ein aehnlich benannter
-#     Ersatzdatensatz wird NIE adoptiert.
+#     Ersatzdatensatz wird NIE adoptiert. Fremd heisst: keine MAC, die das
+#     Portal fuer DIESE VM kennt (-KnownMacs, alle Interfaces). Nach dem Rollout
+#     meldet Discovery die Karten, die Windows tatsaechlich nutzt; wird die
+#     PXE-/DHCP-Karte danach abgeschaltet, traegt der Datensatz nur noch die
+#     statische MAC (MECM-ID1, VM-05111). Import und Erstbindung unten bleiben
+#     bei der DHCP-MAC allein.
 #  2. Ohne Bindung blockiert ein noch vorhandenes Vorgaengergeraet (Tombstone).
 #     Ist es in MECM wirklich weg, ist der Tombstone veraltet und der Weg frei;
 #     das Portal raeumt ihn beim naechsten erfolgreichen Binden ab.
@@ -1375,7 +1380,8 @@ function Resolve-VsDeviceIdentity {
         [string]$RolloutHostname,
         [string]$Mac,
         [string]$BoundResourceId = '',
-        [string]$PreviousResourceId = ''
+        [string]$PreviousResourceId = '',
+        [string[]]$KnownMacs = @()
     )
 
     $block = { param([string]$cause) return @{ Action = 'block'; ResourceId = ''; Cause = $cause } }
@@ -1388,9 +1394,15 @@ function Resolve-VsDeviceIdentity {
         if ($hits.Count -eq 0) { return (& $block 'resource_id_missing') }
         if ($hits.Count -gt 1) { return (& $block 'device_identity_ambiguous') }
 
+        $vmMacs = @{ $Mac = $true }
+        foreach ($knownMac in @($KnownMacs)) {
+            $normalizedKnown = ConvertTo-VsNormalizedMac ([string]$knownMac)
+            if ($normalizedKnown) { $vmMacs[$normalizedKnown] = $true }
+        }
         $found = $false
         foreach ($rawMac in @($hits[0].MACAddress)) {
-            if ((ConvertTo-VsNormalizedMac ([string]$rawMac)) -eq $Mac) { $found = $true; break }
+            $normalizedRecordMac = ConvertTo-VsNormalizedMac ([string]$rawMac)
+            if ($normalizedRecordMac -and $vmMacs.ContainsKey($normalizedRecordMac)) { $found = $true; break }
         }
         if (-not $found) { return (& $block 'resource_mac_conflict') }
 

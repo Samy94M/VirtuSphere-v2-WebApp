@@ -416,16 +416,20 @@ Bindet der Webserver an eine LAN-Adresse, antwortet `localhost` nicht
 **MECM-Server.** Zuerst prüfen, ob der Installer dieses Stands freigegeben ist:
 
 ```bash
-grep -n "^throw " Powershell-MECM/install-VirtuSphere-MECM.ps1 Powershell-MECM/install-VirtuSphere-Clients.ps1
+grep -n "throw 'MC01" Powershell-MECM/install-VirtuSphere-MECM.ps1 Powershell-MECM/install-VirtuSphere-Clients.ps1
 ```
 
-Zeigt die Ausgabe eine Zeile mit „gesperrt“, bricht der Installer vor jeder
+Jede Ausgabezeile ist eine Sperre des genannten Installers: Er bricht vor jeder
 Änderung ab. Dann bleiben die vorhandenen Skripte und Aufgaben unverändert in
 Betrieb: Das neue Portal nimmt ihre Meldungen weiter an, neue MECM-Funktionen
 bleiben aus, bis ein freigegebenes Release kommt. Die Skripte **nicht** von Hand
-auf den MECM-Server kopieren; damit würde genau diese Sperre umgangen. Ist der
-Installer freigegeben, gilt [MECM-Integration](mecm-integration.md), Abschnitt
-„Admin-Runbook“, und zwar erst jetzt, nach Portal und Schema.
+auf den MECM-Server kopieren; damit würde genau diese Sperre umgangen.
+Ausnahme: Nennt die Zeile des Serverinstallers `-Upgrade -ServerOnly`, ist genau
+dieses reine Serverupdate freigegeben ([MECM-Integration](mecm-integration.md),
+Abschnitt 4b). Es tauscht Serverskripte und Aufgaben und lässt die Paketvorlage
+unverändert. Ist der Installer ganz freigegeben, gilt
+[MECM-Integration](mecm-integration.md), Abschnitt „Admin-Runbook“. In beiden
+Fällen erst jetzt, nach Portal und Schema.
 
 **phpMyAdmin** (nur wenn genutzt): aus dem entpackten Bundle
 `sh tools/install.sh /opt/VirtuSphere-v2-WebApp`. Ohne Pfadangabe sucht das

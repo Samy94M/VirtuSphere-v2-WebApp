@@ -8,6 +8,9 @@ BeforeAll {
         }
     }
     $script:ServerInstaller = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'install-VirtuSphere-MECM.ps1'
+    # Die extrahierten Bloecke lesen den Installerschalter -ServerOnly; ohne ihn
+    # laeuft der volle Vorlagenpfad. Der ServerOnly-Fall setzt ihn lokal.
+    $script:ServerOnly = $false
     $script:reporterSource = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'clients'
     $script:requiredReporterFiles = @(
         'VirtuSphere-Client-Common.ps1',
@@ -48,7 +51,9 @@ BeforeAll {
     $activationStatements = if ($activationTry) { @($activationTry.Body.Statements) } else { @() }
     $activationStart = -1
     for ($i = 0; $i -lt $activationStatements.Count; $i++) {
-        if ($activationStatements[$i].Extent.Text -match '^\s*\$templateBackup\s*=') { $activationStart = $i; break }
+        # Seit -ServerOnly steht die Aktivierung in `if (-not $ServerOnly) { ... }`;
+        # die Suche nimmt deshalb die erste Anweisung, die die Zuweisung enthaelt.
+        if ($activationStatements[$i].Extent.Text -match '(?m)^\s*\$templateBackup\s*=') { $activationStart = $i; break }
     }
     $activationSource = if ($activationStart -ge 0 -and $activationStatements.Count -gt 0) {
         ($activationStatements[$activationStart..($activationStatements.Count - 1)] | ForEach-Object { $_.Extent.Text }) -join "`n"
@@ -211,6 +216,28 @@ Describe 'Server installer Package_Vorlage transaction (U09)' {
         $templateActivationStarted | Should -BeTrue
         Test-Path -LiteralPath $templateBackup -PathType Container | Should -BeTrue
         @(Get-TemplateTreeSnapshot -Root $templateBackup).Count | Should -Be 0
+    }
+
+    It 'leaves the live template byte-identical and builds no stage under -ServerOnly' {
+        $caseRoot = Join-Path $TestDrive 'server-only'
+        $PackagesRoot = Join-Path $caseRoot 'packages'
+        $templateSource = Join-Path $caseRoot 'source'
+        $templateStage = Join-Path $PackagesRoot '.template-stage'
+        $templateDest = Join-Path $PackagesRoot 'Package_Vorlage'
+        New-TemplateTree -Root $templateSource -Label 'new'
+        New-TemplateTree -Root $templateDest -Label 'frozen'
+        $frozenTree = @(Get-TemplateTreeSnapshot -Root $templateDest)
+        $ServerOnly = [switch]$true
+        $templateActivationStarted = $false
+        $templateBackup = $null
+
+        . $script:TemplateStageBlock
+        . $script:TemplateActivationBlock
+
+        Test-Path -LiteralPath $templateStage | Should -BeFalse
+        @(Get-TemplateTreeSnapshot -Root $templateDest) | Should -Be $frozenTree
+        $templateActivationStarted | Should -BeFalse
+        $templateBackup | Should -BeNullOrEmpty
     }
 
     It 'restores the exact old tree after activation before restarting the old task' {

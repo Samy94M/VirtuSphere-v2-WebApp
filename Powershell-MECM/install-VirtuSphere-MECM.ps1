@@ -30,6 +30,14 @@
     Aktualisiert Skripte, Paketvorlage und Aufgaben mit der vollstaendigen
     vorhandenen Registry-Konfiguration. Nur fuer eine bestehende Installation.
 
+.PARAMETER ServerOnly
+    Nur zusammen mit -Upgrade: tauscht die Serverskripte und registriert die
+    vier Aufgaben neu, laesst <PackagesRoot>\Package_Vorlage aber byte-genau
+    stehen. Die vorhandene Vorlage muss einen vollstaendigen, gueltigen
+    reporting\current.json-Satz tragen, sonst bricht der Lauf vor jedem
+    Schreibzugriff ab. Die Reporter-Generation in den Paketen bleibt damit die
+    bisherige (Entscheidung MC-R4, verengt am 15.10.2026).
+
 .PARAMETER WebApi
     Adresse der VirtuSphere-WebApp, z. B. "virtusphere.lan:8021" oder "10.0.0.5:8021".
 
@@ -77,6 +85,9 @@
 .EXAMPLE
     .\install-VirtuSphere-MECM.ps1 -Upgrade
 
+.EXAMPLE
+    .\install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly
+
 .NOTES
     Die vier Intervalle behalten bei einem Re-Run ohne den jeweiligen Parameter
     ihren eingestellten Wert (wie -ProviderMachine). Ein Skript-Update setzt
@@ -85,6 +96,7 @@
 [CmdletBinding(DefaultParameterSetName = 'Install')]
 param(
     [Parameter(Mandatory, ParameterSetName = 'Upgrade')][switch]$Upgrade,
+    [Parameter(ParameterSetName = 'Upgrade')][switch]$ServerOnly,
     [Parameter(Mandatory, ParameterSetName = 'Install')][string]$WebApi,
     [Parameter(ParameterSetName = 'Install')][ValidateSet('http', 'https')][string]$Scheme = 'http',
     # SHA-1-Fingerabdruck des Portal-Zertifikats, ohne Trennzeichen (so wie
@@ -118,7 +130,12 @@ Set-StrictMode -Version 1.0
 # Server-Re-Run wuerde Reporter V2 auf Clients mit Core V1 bringen. Deshalb
 # auch hier vor Registry-, Aufgaben-, Paketvorlagen- oder MECM-Writes stoppen.
 # Die Sperre erst zusammen mit dem nachgewiesenen gemeinsamen Cutover entfernen.
-throw 'MC01: MECM-Serverinstaller ist bis zum gemeinsamen Core-/Reporter-Cutover gesperrt; keine Server-/Paketvorlagen-Aenderung ausgefuehrt.'
+# Verengt am 15.10.2026 (MC-R4): -Upgrade -ServerOnly fasst die Paketvorlage
+# nicht an und bringt deshalb keinen Reporter V2 zu den Clients. Erstinstallation
+# und volles -Upgrade bleiben gesperrt.
+if (-not $ServerOnly) {
+    throw 'MC01: MECM-Serverinstaller ist bis zum gemeinsamen Core-/Reporter-Cutover gesperrt; keine Server-/Paketvorlagen-Aenderung ausgefuehrt. Reines Serverupdate: -Upgrade -ServerOnly.'
+}
 $registryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 $installDir = Join-Path $env:ProgramFiles 'VirtuSphere\mecm'
 $logRoot = Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
@@ -648,6 +665,25 @@ $templateActivationStarted = $false
 $activatedNames = New-Object System.Collections.Generic.List[string]
 $finalExitCode = 0
 
+# -ServerOnly friert die Live-Vorlage ein. Der Autoimporter dieses Pakets
+# gleicht bei jedem Scan jedes Paket gegen sie ab und blockiert jedes Paket mit
+# package_template_failed, wenn ihr der reporting\current.json-Satz fehlt (eine
+# Vorlage aus einem Stand vor dem Reporter). Deshalb hier vor Mutex, Registry,
+# Aufgaben oder Dateien pruefen. Der Vergleich der Vorlage mit sich selbst ist
+# genau die Vorlagenpruefung des Autoimporters ohne den Paketteil.
+if ($ServerOnly) {
+    Write-Step 'Pruefe eingefrorene Paketvorlage (-ServerOnly)'
+    $frozenTemplate = Get-Item -LiteralPath $templateDest -Force -ErrorAction SilentlyContinue
+    if (-not $frozenTemplate -or -not $frozenTemplate.PSIsContainer -or
+        ($frozenTemplate.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw ("ServerOnly: Paketvorlage {0} fehlt oder ist kein echtes Verzeichnis; es wurde nichts geschrieben." -f $templateDest)
+    }
+    if (-not (Test-VsPackageTemplateSetCurrent -TemplateRoot $templateDest -PackageRoot $templateDest)) {
+        throw ("ServerOnly: Paketvorlage {0} traegt keinen vollstaendigen, gueltigen reporting\current.json-Satz. Der neue Autoimporter wuerde jedes Paket blockieren; es wurde nichts geschrieben." -f $templateDest)
+    }
+    Write-Ok ("Paketvorlage {0} ist gueltig und bleibt unveraendert" -f $templateDest)
+}
+
 try {
     $installMutex = New-Object System.Threading.Mutex($false, 'Global\VirtuSphere.MECMInstaller')
     try { $installMutexHeld = $installMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $installMutexHeld = $true }
@@ -799,23 +835,25 @@ foreach ($name in $requiredServerFiles) {
     $requiredPath = Join-Path $sourceDir $name
     if (-not (Test-Path $requiredPath)) { throw ('MECM-Serverpaket unvollstaendig: {0} fehlt.' -f $requiredPath) }
 }
-$requiredTemplateFiles = @('install.ps1', 'config.json')
-foreach ($name in $requiredTemplateFiles) {
-    $requiredPath = Join-Path $templateSource $name
-    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw ('MECM-Serverpaket unvollstaendig: Paketvorlage {0} fehlt.' -f $requiredPath) }
-}
 $requiredReporterFiles = @(
     'VirtuSphere-Client-Common.ps1',
     'VirtuSphere-Client-Logging.ps1',
     'VirtuSphere-Package-Reporter.ps1',
     'VirtuSphere-Package-ReporterHost.ps1'
 )
-foreach ($name in $requiredReporterFiles) {
-    $requiredPath = Join-Path $reporterSource $name
-    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw ('MECM-Serverpaket unvollstaendig: Reporterquelle {0} fehlt.' -f $requiredPath) }
-}
-if (Test-Path -LiteralPath (Join-Path $templateSource 'reporting')) {
-    throw 'Package_Vorlage/reporting darf keine eingecheckte Kopie enthalten; der Installer erzeugt sie aus den kanonischen Clientquellen.'
+if (-not $ServerOnly) {
+    $requiredTemplateFiles = @('install.ps1', 'config.json')
+    foreach ($name in $requiredTemplateFiles) {
+        $requiredPath = Join-Path $templateSource $name
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw ('MECM-Serverpaket unvollstaendig: Paketvorlage {0} fehlt.' -f $requiredPath) }
+    }
+    foreach ($name in $requiredReporterFiles) {
+        $requiredPath = Join-Path $reporterSource $name
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw ('MECM-Serverpaket unvollstaendig: Reporterquelle {0} fehlt.' -f $requiredPath) }
+    }
+    if (Test-Path -LiteralPath (Join-Path $templateSource 'reporting')) {
+        throw 'Package_Vorlage/reporting darf keine eingecheckte Kopie enthalten; der Installer erzeugt sie aus den kanonischen Clientquellen.'
+    }
 }
 $installStage = Join-Path $installDir ('.virtusphere-stage-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $installStage -Force -ErrorAction Stop | Out-Null
@@ -829,110 +867,114 @@ try {
             throw ('MECM-Serverpaket-Pruefsumme weicht ab: {0}' -f $source.Name)
         }
     }
-    New-Item -ItemType Directory -Path $templateStage -Force -ErrorAction Stop | Out-Null
-    $templateRoot = (Get-Item -LiteralPath $templateSource -Force -ErrorAction Stop)
-    if (-not $templateRoot.PSIsContainer -or ($templateRoot.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw ("Paketvorlagen-Quelle ist kein echtes Verzeichnis: {0}" -f $templateSource)
-    }
-    $templateSources = @(Get-ChildItem -LiteralPath $templateSource -Recurse -File -Force -ErrorAction Stop |
-        Where-Object { $_.Name -ne '.gitkeep' } | Sort-Object FullName)
-    $templateDirectories = @(Get-ChildItem -LiteralPath $templateSource -Recurse -Directory -Force -ErrorAction Stop | Sort-Object FullName)
-    $templateDirectoryManifest = New-Object System.Collections.Generic.List[string]
-    foreach ($directory in $templateDirectories) {
-        # The manifest spells relative paths with '\' (see the reporting entries
-        # below); FullName uses '/' under pwsh on Linux (Fast lane), so both
-        # sides of the directory-set check normalize to that one spelling.
-        $relative = $directory.FullName.Substring($templateRoot.FullName.TrimEnd('\', '/').Length).TrimStart('\', '/').Replace('/', '\')
-        New-Item -ItemType Directory -Path (Join-Path $templateStage $relative) -Force -ErrorAction Stop | Out-Null
-        [void]$templateDirectoryManifest.Add($relative)
-    }
-    $templateManifest = New-Object System.Collections.Generic.List[object]
-    foreach ($source in $templateSources) {
-        $relative = $source.FullName.Substring($templateRoot.FullName.TrimEnd('\').Length).TrimStart('\')
-        $staged = Join-Path $templateStage $relative
-        $stagedParent = Split-Path -Parent $staged
-        if (-not (Test-Path -LiteralPath $stagedParent)) { New-Item -ItemType Directory -Path $stagedParent -Force -ErrorAction Stop | Out-Null }
-        Copy-Item -LiteralPath $source.FullName -Destination $staged -Force -ErrorAction Stop
-        $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $source.FullName -ErrorAction Stop).Hash
-        $stagedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $staged -ErrorAction Stop).Hash
-        if ($source.Length -ne (Get-Item -LiteralPath $staged -ErrorAction Stop).Length -or $sourceHash -cne $stagedHash) {
-            throw ('Paketvorlagen-Pruefsumme weicht ab: {0}' -f $relative)
+    # -ServerOnly baut keine Vorlage und kein Reporterbuendel; die Live-Vorlage
+    # wurde vor dem Transaktionsbeginn geprueft und bleibt unveraendert.
+    if (-not $ServerOnly) {
+        New-Item -ItemType Directory -Path $templateStage -Force -ErrorAction Stop | Out-Null
+        $templateRoot = (Get-Item -LiteralPath $templateSource -Force -ErrorAction Stop)
+        if (-not $templateRoot.PSIsContainer -or ($templateRoot.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw ("Paketvorlagen-Quelle ist kein echtes Verzeichnis: {0}" -f $templateSource)
         }
-        [void]$templateManifest.Add([pscustomobject]@{ RelativePath = $relative; Length = $source.Length; Sha256 = $sourceHash })
-    }
-
-    # T3: Das Reporterbundle wird ausschliesslich aus den kanonischen
-    # Clientquellen erzeugt. bundle_id ist der SHA-256 ueber den sortierten
-    # Dateipfad-/Laengen-/Hashvertrag, also ohne Manifest-Selbsthash.
-    $reporterEntries = New-Object System.Collections.Generic.List[object]
-    foreach ($name in @($requiredReporterFiles | Sort-Object)) {
-        $source = Get-Item -LiteralPath (Join-Path $reporterSource $name) -Force -ErrorAction Stop
-        $hash = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
-        [void]$reporterEntries.Add([pscustomobject]@{ path = $name; length = [long]$source.Length; sha256 = $hash })
-    }
-    $bundleBasis = @($reporterEntries.ToArray() | ForEach-Object { '{0}|{1}|{2}' -f $_.path, $_.length, $_.sha256 }) -join "`n"
-    $bundleSha = [Security.Cryptography.SHA256]::Create()
-    try {
-        $bundleId = ([BitConverter]::ToString($bundleSha.ComputeHash([Text.Encoding]::UTF8.GetBytes($bundleBasis))).Replace('-', '')).ToLowerInvariant()
-    } finally { $bundleSha.Dispose() }
-
-    $reportingStage = Join-Path $templateStage 'reporting'
-    $bundleStage = Join-Path $reportingStage $bundleId
-    New-Item -ItemType Directory -Path $bundleStage -Force -ErrorAction Stop | Out-Null
-    [void]$templateDirectoryManifest.Add('reporting')
-    [void]$templateDirectoryManifest.Add(('reporting\{0}' -f $bundleId))
-    foreach ($entry in $reporterEntries.ToArray()) {
-        $sourcePath = Join-Path $reporterSource $entry.path
-        $stagedPath = Join-Path $bundleStage $entry.path
-        Copy-Item -LiteralPath $sourcePath -Destination $stagedPath -Force -ErrorAction Stop
-        if ((Get-Item -LiteralPath $stagedPath -Force -ErrorAction Stop).Length -ne $entry.length -or
-            (Get-FileHash -LiteralPath $stagedPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne $entry.sha256) {
-            throw ('Reporterbundle-Pruefsumme weicht ab: {0}' -f $entry.path)
+        $templateSources = @(Get-ChildItem -LiteralPath $templateSource -Recurse -File -Force -ErrorAction Stop |
+            Where-Object { $_.Name -ne '.gitkeep' } | Sort-Object FullName)
+        $templateDirectories = @(Get-ChildItem -LiteralPath $templateSource -Recurse -Directory -Force -ErrorAction Stop | Sort-Object FullName)
+        $templateDirectoryManifest = New-Object System.Collections.Generic.List[string]
+        foreach ($directory in $templateDirectories) {
+            # The manifest spells relative paths with '\' (see the reporting entries
+            # below); FullName uses '/' under pwsh on Linux (Fast lane), so both
+            # sides of the directory-set check normalize to that one spelling.
+            $relative = $directory.FullName.Substring($templateRoot.FullName.TrimEnd('\', '/').Length).TrimStart('\', '/').Replace('/', '\')
+            New-Item -ItemType Directory -Path (Join-Path $templateStage $relative) -Force -ErrorAction Stop | Out-Null
+            [void]$templateDirectoryManifest.Add($relative)
         }
-        $relative = 'reporting\{0}\{1}' -f $bundleId, $entry.path
-        [void]$templateManifest.Add([pscustomobject]@{ RelativePath = $relative; Length = $entry.length; Sha256 = $entry.sha256.ToUpperInvariant() })
-    }
+        $templateManifest = New-Object System.Collections.Generic.List[object]
+        foreach ($source in $templateSources) {
+            $relative = $source.FullName.Substring($templateRoot.FullName.TrimEnd('\').Length).TrimStart('\')
+            $staged = Join-Path $templateStage $relative
+            $stagedParent = Split-Path -Parent $staged
+            if (-not (Test-Path -LiteralPath $stagedParent)) { New-Item -ItemType Directory -Path $stagedParent -Force -ErrorAction Stop | Out-Null }
+            Copy-Item -LiteralPath $source.FullName -Destination $staged -Force -ErrorAction Stop
+            $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $source.FullName -ErrorAction Stop).Hash
+            $stagedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $staged -ErrorAction Stop).Hash
+            if ($source.Length -ne (Get-Item -LiteralPath $staged -ErrorAction Stop).Length -or $sourceHash -cne $stagedHash) {
+                throw ('Paketvorlagen-Pruefsumme weicht ab: {0}' -f $relative)
+            }
+            [void]$templateManifest.Add([pscustomobject]@{ RelativePath = $relative; Length = $source.Length; Sha256 = $sourceHash })
+        }
 
-    $commonContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Common.ps1') -VariableName 'VsClientCommonContractVersion'
-    $commonExpectedLoggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Common.ps1') -VariableName 'VsExpectedClientLoggingContractVersion'
-    $loggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Logging.ps1') -VariableName 'VsClientLoggingContractVersion'
-    $adapterContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterContractVersion'
-    $adapterSchema = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReportSchemaVersion'
-    $adapterExpectedCommonContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterExpectedCommonContractVersion'
-    $adapterExpectedLoggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterExpectedLoggingContractVersion'
-    $hostContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-ReporterHost.ps1') -VariableName 'VsPackageReporterHostContractVersion'
-    $hostExpectedAdapterContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-ReporterHost.ps1') -VariableName 'VsPackageReporterHostExpectedAdapterContractVersion'
-    if ($adapterSchema -ne 1 -or
-        $commonExpectedLoggingContract -ne $loggingContract -or
-        $adapterExpectedCommonContract -ne $commonContract -or
-        $adapterExpectedLoggingContract -ne $loggingContract -or
-        $hostExpectedAdapterContract -ne $adapterContract) {
-        throw 'Reporterbundle-Vertragsversionen sind untereinander oder mit Schema V1 nicht kompatibel.'
-    }
-    $manifestObject = [ordered]@{
-        schema_version = 1
-        bundle_id = $bundleId
-        contracts = [ordered]@{ common = $commonContract; logging = $loggingContract; adapter = $adapterContract; host = $hostContract }
-        files = @($reporterEntries.ToArray())
-    }
-    $manifestPath = Join-Path $bundleStage 'manifest.json'
-    [IO.File]::WriteAllText($manifestPath, (($manifestObject | ConvertTo-Json -Depth 5) + "`n"), (New-Object Text.UTF8Encoding($false)))
-    $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
-    $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
-    [void]$templateManifest.Add([pscustomobject]@{ RelativePath = ('reporting\{0}\manifest.json' -f $bundleId); Length = $manifestItem.Length; Sha256 = $manifestHash })
+        # T3: Das Reporterbundle wird ausschliesslich aus den kanonischen
+        # Clientquellen erzeugt. bundle_id ist der SHA-256 ueber den sortierten
+        # Dateipfad-/Laengen-/Hashvertrag, also ohne Manifest-Selbsthash.
+        $reporterEntries = New-Object System.Collections.Generic.List[object]
+        foreach ($name in @($requiredReporterFiles | Sort-Object)) {
+            $source = Get-Item -LiteralPath (Join-Path $reporterSource $name) -Force -ErrorAction Stop
+            $hash = (Get-FileHash -LiteralPath $source.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+            [void]$reporterEntries.Add([pscustomobject]@{ path = $name; length = [long]$source.Length; sha256 = $hash })
+        }
+        $bundleBasis = @($reporterEntries.ToArray() | ForEach-Object { '{0}|{1}|{2}' -f $_.path, $_.length, $_.sha256 }) -join "`n"
+        $bundleSha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $bundleId = ([BitConverter]::ToString($bundleSha.ComputeHash([Text.Encoding]::UTF8.GetBytes($bundleBasis))).Replace('-', '')).ToLowerInvariant()
+        } finally { $bundleSha.Dispose() }
 
-    $wrapperHash = (Get-FileHash -LiteralPath (Join-Path $templateStage 'install.ps1') -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
-    $descriptorObject = [ordered]@{
-        schema_version = 1
-        bundle_id = $bundleId
-        wrapper_sha256 = $wrapperHash
-        contracts = $manifestObject.contracts
+        $reportingStage = Join-Path $templateStage 'reporting'
+        $bundleStage = Join-Path $reportingStage $bundleId
+        New-Item -ItemType Directory -Path $bundleStage -Force -ErrorAction Stop | Out-Null
+        [void]$templateDirectoryManifest.Add('reporting')
+        [void]$templateDirectoryManifest.Add(('reporting\{0}' -f $bundleId))
+        foreach ($entry in $reporterEntries.ToArray()) {
+            $sourcePath = Join-Path $reporterSource $entry.path
+            $stagedPath = Join-Path $bundleStage $entry.path
+            Copy-Item -LiteralPath $sourcePath -Destination $stagedPath -Force -ErrorAction Stop
+            if ((Get-Item -LiteralPath $stagedPath -Force -ErrorAction Stop).Length -ne $entry.length -or
+                (Get-FileHash -LiteralPath $stagedPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne $entry.sha256) {
+                throw ('Reporterbundle-Pruefsumme weicht ab: {0}' -f $entry.path)
+            }
+            $relative = 'reporting\{0}\{1}' -f $bundleId, $entry.path
+            [void]$templateManifest.Add([pscustomobject]@{ RelativePath = $relative; Length = $entry.length; Sha256 = $entry.sha256.ToUpperInvariant() })
+        }
+
+        $commonContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Common.ps1') -VariableName 'VsClientCommonContractVersion'
+        $commonExpectedLoggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Common.ps1') -VariableName 'VsExpectedClientLoggingContractVersion'
+        $loggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Client-Logging.ps1') -VariableName 'VsClientLoggingContractVersion'
+        $adapterContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterContractVersion'
+        $adapterSchema = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReportSchemaVersion'
+        $adapterExpectedCommonContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterExpectedCommonContractVersion'
+        $adapterExpectedLoggingContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-Reporter.ps1') -VariableName 'VsPackageReporterExpectedLoggingContractVersion'
+        $hostContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-ReporterHost.ps1') -VariableName 'VsPackageReporterHostContractVersion'
+        $hostExpectedAdapterContract = Get-VsDeclaredScriptInteger -Path (Join-Path $reporterSource 'VirtuSphere-Package-ReporterHost.ps1') -VariableName 'VsPackageReporterHostExpectedAdapterContractVersion'
+        if ($adapterSchema -ne 1 -or
+            $commonExpectedLoggingContract -ne $loggingContract -or
+            $adapterExpectedCommonContract -ne $commonContract -or
+            $adapterExpectedLoggingContract -ne $loggingContract -or
+            $hostExpectedAdapterContract -ne $adapterContract) {
+            throw 'Reporterbundle-Vertragsversionen sind untereinander oder mit Schema V1 nicht kompatibel.'
+        }
+        $manifestObject = [ordered]@{
+            schema_version = 1
+            bundle_id = $bundleId
+            contracts = [ordered]@{ common = $commonContract; logging = $loggingContract; adapter = $adapterContract; host = $hostContract }
+            files = @($reporterEntries.ToArray())
+        }
+        $manifestPath = Join-Path $bundleStage 'manifest.json'
+        [IO.File]::WriteAllText($manifestPath, (($manifestObject | ConvertTo-Json -Depth 5) + "`n"), (New-Object Text.UTF8Encoding($false)))
+        $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
+        $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        [void]$templateManifest.Add([pscustomobject]@{ RelativePath = ('reporting\{0}\manifest.json' -f $bundleId); Length = $manifestItem.Length; Sha256 = $manifestHash })
+
+        $wrapperHash = (Get-FileHash -LiteralPath (Join-Path $templateStage 'install.ps1') -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        $descriptorObject = [ordered]@{
+            schema_version = 1
+            bundle_id = $bundleId
+            wrapper_sha256 = $wrapperHash
+            contracts = $manifestObject.contracts
+        }
+        $descriptorPath = Join-Path $reportingStage 'current.json'
+        [IO.File]::WriteAllText($descriptorPath, (($descriptorObject | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
+        $descriptorItem = Get-Item -LiteralPath $descriptorPath -Force -ErrorAction Stop
+        $descriptorHash = (Get-FileHash -LiteralPath $descriptorPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        [void]$templateManifest.Add([pscustomobject]@{ RelativePath = 'reporting\current.json'; Length = $descriptorItem.Length; Sha256 = $descriptorHash })
     }
-    $descriptorPath = Join-Path $reportingStage 'current.json'
-    [IO.File]::WriteAllText($descriptorPath, (($descriptorObject | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
-    $descriptorItem = Get-Item -LiteralPath $descriptorPath -Force -ErrorAction Stop
-    $descriptorHash = (Get-FileHash -LiteralPath $descriptorPath -Algorithm SHA256 -ErrorAction Stop).Hash
-    [void]$templateManifest.Add([pscustomobject]@{ RelativePath = 'reporting\current.json'; Length = $descriptorItem.Length; Sha256 = $descriptorHash })
     $stagedExpectedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsExpectedLoggingContractVersion'
     $stagedVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Logging.ps1') -VariableName 'VsLoggingContractVersion'
     $stagedMecmServerVersion = Get-VsDeclaredScriptInteger -Path (Join-Path $installStage 'VirtuSphere-Common.ps1') -VariableName 'VsMecmServerContractVersion'
@@ -1005,32 +1047,35 @@ try {
         Move-Item -Path (Join-Path $installStage $name) -Destination (Join-Path $installDir $name) -Force -ErrorAction Stop
         $activatedNames.Add($name)
     }
-    $templateBackup = Join-Path $PackagesRoot ('.virtusphere-template-backup-' + [guid]::NewGuid().ToString('N'))
-    $templateLive = Get-Item -LiteralPath $templateDest -Force -ErrorAction Stop
-    if (-not $templateLive.PSIsContainer -or ($templateLive.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw ("Paketvorlagen-Ziel ist kein echtes Verzeichnis: {0}" -f $templateDest)
-    }
-    Move-Item -LiteralPath $templateDest -Destination $templateBackup -ErrorAction Stop
-    $templateActivationStarted = $true
-    Move-Item -LiteralPath $templateStage -Destination $templateDest -ErrorAction Stop
-
-    $liveTemplateFiles = @(Get-ChildItem -LiteralPath $templateDest -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)
-    if ($liveTemplateFiles.Count -ne $templateManifest.Count) {
-        throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Dateisatz.'
-    }
-    foreach ($entry in $templateManifest) {
-        $livePath = Join-Path $templateDest $entry.RelativePath
-        if (-not (Test-Path -LiteralPath $livePath -PathType Leaf) -or
-            (Get-Item -LiteralPath $livePath -ErrorAction Stop).Length -ne $entry.Length -or
-            (Get-FileHash -Algorithm SHA256 -LiteralPath $livePath -ErrorAction Stop).Hash -cne $entry.Sha256) {
-            throw ('Aktivierte Paketvorlagen-Pruefsumme weicht ab: {0}' -f $entry.RelativePath)
+    # -ServerOnly: die geprueft eingefrorene Live-Vorlage bleibt stehen.
+    if (-not $ServerOnly) {
+        $templateBackup = Join-Path $PackagesRoot ('.virtusphere-template-backup-' + [guid]::NewGuid().ToString('N'))
+        $templateLive = Get-Item -LiteralPath $templateDest -Force -ErrorAction Stop
+        if (-not $templateLive.PSIsContainer -or ($templateLive.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw ("Paketvorlagen-Ziel ist kein echtes Verzeichnis: {0}" -f $templateDest)
         }
-    }
-    $liveTemplateDirectories = @(Get-ChildItem -LiteralPath $templateDest -Recurse -Directory -Force -ErrorAction Stop | ForEach-Object {
-        $_.FullName.Substring($templateDest.TrimEnd('\', '/').Length).TrimStart('\', '/').Replace('/', '\')
-    } | Sort-Object)
-    if (($liveTemplateDirectories -join "`n") -cne (@($templateDirectoryManifest | Sort-Object) -join "`n")) {
-        throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Verzeichnissatz.'
+        Move-Item -LiteralPath $templateDest -Destination $templateBackup -ErrorAction Stop
+        $templateActivationStarted = $true
+        Move-Item -LiteralPath $templateStage -Destination $templateDest -ErrorAction Stop
+
+        $liveTemplateFiles = @(Get-ChildItem -LiteralPath $templateDest -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)
+        if ($liveTemplateFiles.Count -ne $templateManifest.Count) {
+            throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Dateisatz.'
+        }
+        foreach ($entry in $templateManifest) {
+            $livePath = Join-Path $templateDest $entry.RelativePath
+            if (-not (Test-Path -LiteralPath $livePath -PathType Leaf) -or
+                (Get-Item -LiteralPath $livePath -ErrorAction Stop).Length -ne $entry.Length -or
+                (Get-FileHash -Algorithm SHA256 -LiteralPath $livePath -ErrorAction Stop).Hash -cne $entry.Sha256) {
+                throw ('Aktivierte Paketvorlagen-Pruefsumme weicht ab: {0}' -f $entry.RelativePath)
+            }
+        }
+        $liveTemplateDirectories = @(Get-ChildItem -LiteralPath $templateDest -Recurse -Directory -Force -ErrorAction Stop | ForEach-Object {
+            $_.FullName.Substring($templateDest.TrimEnd('\', '/').Length).TrimStart('\', '/').Replace('/', '\')
+        } | Sort-Object)
+        if (($liveTemplateDirectories -join "`n") -cne (@($templateDirectoryManifest | Sort-Object) -join "`n")) {
+            throw 'Aktivierte Paketvorlage enthaelt nicht den vollstaendigen geprueften Verzeichnissatz.'
+        }
     }
 } finally {
     if (Test-Path $installStage) { Remove-Item -Path $installStage -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1047,7 +1092,11 @@ if ($installedMecmServerVersion -ne $installedAutoimporterRequiredVersion) {
     throw ('Installierter MECM-Serververtrag hat Version {0}, der Autoimporter benoetigt {1}. Aufgaben bleiben deaktiviert.' -f $installedMecmServerVersion, $installedAutoimporterRequiredVersion)
 }
 Write-Ok "Skripte samt Loggingmodul nach $installDir kopiert und verifiziert"
-Write-Ok "Package-Vorlage nach $templateDest aktiviert und per SHA-256 verifiziert"
+if ($ServerOnly) {
+    Write-Ok "Package-Vorlage $templateDest unveraendert gelassen (-ServerOnly)"
+} else {
+    Write-Ok "Package-Vorlage nach $templateDest aktiviert und per SHA-256 verifiziert"
+}
 
 # --- Geplante Aufgaben ------------------------------------------------------
 $logComponents = @('device-sync', 'packages-sync', 'autoimporter', 'site-health')

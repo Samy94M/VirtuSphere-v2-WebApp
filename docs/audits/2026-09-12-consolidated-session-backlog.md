@@ -2001,3 +2001,34 @@ Nutzerbefund 14.10.2026, nachgelesen am Code. **Symptom:** MECM-Karte rot, Devic
 **Entscheidung des Nutzers:** keine Übergangslösung. **Dauerhafter Fix (Cutover-Kandidat):** Für eine gebundene ResourceID gilt jede im Portal bekannte MAC derselben VM; dazu liefert `getDeviceList` additiv alle MACs der VM, das Serverskript vergleicht gegen die Menge. Rollout erst mit dem Cutover MC-R4 (Installer-Sperre MC01). Bis dahin bleibt die MECM-Karte rot; Doku und Hilfetext nennen die zweite Ursache bereits.
 
 **Offen:** Commit und Push des Doku-Pakets nach Freigabe; Erhebungsskript (`refs/codex/s12-survey-wip`) nach `qa-artifacts/session-handoff/s12-site-survey-spec.md`; beim Nutzer M4-Lesebericht und die dritte IP der IP-Freigaben.
+
+#### Paket MECM-Serverupdate `-ServerOnly` mit MECM-ID1 (15.10.2026)
+
+Nutzerauftrag: den MECM-Server (vier Aufgaben, Serverskripte) nach dem Prod-Upgrade auf den aktuellen Stand bringen. Worktree `C:\tmp\vs-s13-mecm`, Basis `880dea7`. Keine Aktion gegen den MECM-Server; der Nutzer führt die Anleitung selbst aus.
+
+**Analyse (nur lesend, gegen Portal `0bf88db`):**
+- Die Serverskripte unter `Powershell-MECM/mecm` sind auf `69821b0` und `880dea7` byte-gleich mit `0bf88db`. Seit dem Paketreporter (`7272067b`, 22.09.2026) haben sich die vier Aufgabenskripte, Common, Logging und MembershipJournal nur an einer Stelle geändert: 7 Zeilen AV-P0 (`transfer_generation`) im Device-Sync. MC01 bis MC04, Reporter V2 und der neue Wrapper liegen in `Package_Vorlage` und `clients/`; die neuen `mecm/VirtuSphere-Client*.ps1` und `LegacyRetirement` ruft keine Aufgabe auf.
+- Common V2 erreicht Clients nur über `Package_Vorlage\reporting`. Mit eingefrorener Vorlage bleibt die Reporter-Generation in den Paketen unverändert; das Risiko aus MC-R4 (Reporter V2 auf Core V1) entsteht nicht.
+- Harte Bedingung: Der Autoimporter verlangt in der Live-Vorlage einen gültigen `reporting\current.json`-Satz, sonst blockiert er jedes Paket mit `package_template_failed`. Eine Vorlage aus einem Stand vor dem 22.09.2026 abends hat ihn nicht.
+- Vertragsversionen (Server 2, Logging 1) und Registryleser unverändert; `-Upgrade` liest alle Werte aus der Registry.
+- PS-01: `Initialize-VsCmSite` ist seit 22.07.2026 unverändert; die laufenden Aufgaben belegen das CMSite-Laufwerk als SYSTEM. Kein Blocker für ein Serverupdate; für den Clientteil bleibt die Probe vor MC07.
+- Die Stop-Gates des Clientplans betreffen Core-/Clientrollout, Collections, Deployments und Pilot; keines greift bei einem reinen Serverupdate.
+- MECM-ID1 braucht entgegen dem ersten Befund keine Portaländerung: `getDeviceList` liefert über `machine_vm_interfaces(..., true)` schon jedes Interface mit MAC.
+- Rückweg: Installertransaktion mit eigenem Rollback, zusätzlich Sicherung von Ordner `mecm` und den vier Aufgaben vor dem Lauf.
+
+**Entscheidung des Nutzers (15.10.2026, Rückfrage mit Empfehlung):** Serverupdate mit eingefrorener Paketvorlage, inklusive MECM-ID1. MC-R4 ist damit verengt (Zeile im Clientplan ergänzt). Verworfen: Sperre bis MC07 lassen (Device-Sync bliebe rot, MC07 ist derzeit nicht möglich), Serverupdate ohne MECM-ID1, Einzeldateien von Hand.
+
+**Umsetzung:**
+- `install-VirtuSphere-MECM.ps1`: Schalter `-ServerOnly`, nur im Parametersatz Upgrade. Die MC01-Sperre greift nur ohne ihn; Erstinstallation und volles `-Upgrade` bleiben gesperrt, die Sperrmeldung nennt den freigegebenen Aufruf. Vor Mutex und jedem Write prüft der Installer die Live-Vorlage mit `Test-VsPackageTemplateSetCurrent` (Vorlage gegen sich selbst, also genau die Vorlagenprüfung des Autoimporters) und bricht sonst ab. Vorlagen-Staging, Reporterbündel und Vorlagenaktivierung laufen nur ohne `-ServerOnly`.
+- `VirtuSphere-Common.ps1`: `Resolve-VsDeviceIdentity -KnownMacs`. Bei gebundener ResourceID gilt jede Portal-MAC der VM; Import und Erstbindung bleiben bei der DHCP-MAC, eine statische MAC adoptiert nie einen ungebundenen Datensatz.
+- `mecm_new-device-sync.ps1`: übergibt alle Interface-MACs nur an die Prüfung der gebundenen ResourceID, das ERROR-Log nennt sie; Kennung `device-sync/2.1`, damit der neue Stand im Portal sichtbar ist.
+- Tests: RolloutIdentity (vier MECM-ID1-Fälle, Wire-Test der drei Aufrufe), ServerTemplate (Vorlage byte-gleich, kein Stage unter `-ServerOnly`), PackageReporterDistribution (Sperre nur ohne `-ServerOnly`, Parametersatz, Vorlagenprüfung vor dem Mutex, Altvorlage und beschädigte Vorlage abgelehnt).
+- Doku: `mecm-integration.md` (Sperrhinweis, Abschnitt 4b, Fallzeile `resource_mac_conflict` mit der s12-Bedienanleitung zusammengeführt), `Powershell-MECM/README.md`, `mecm-scheduled-tasks.md` (Device-Sync-Knoten), `powershell.md` R2 und R5, ADR-0043 Amendment 1, `update.md` und `go-live.md` (Sperrprüfung jetzt `grep -n "throw 'MC01"`: das alte `"^throw "` fand die eingerückte Clientsperre schon vorher nicht und hätte die neue Serversperre übersehen), `upgrade-recovery.md` Schritt 9, Hilfe `system_status_status_package_p5` und `system_status_identity_4` (DE/EN).
+
+**Gates:** Endlauf auf `880dea7` plus Paket über `scripts/check.ps1` aus PowerShell, `qa-artifacts/s13-mecm-server-update/lauf-2`: `phpunit-unit`, `lang-parity`, `doc-hygiene`, `doc-semantics`, `powershell-syntax` (86 Dateien) und `powershell-tests` pass, Exit 0. PSScriptAnalyzer ohne Befund, Pester 962 grün, 0 rot, Coverage 81,9 % (Floor 55 %). Vorlauf `lauf-1` (Basis `69821b0`) hatte 2 rote ServerTemplate-Tests: Die extrahierten Installerblöcke lasen unter StrictMode ein nicht gesetztes `$ServerOnly`; das Test-Setup setzt jetzt den Standardwert `$false`. Nach dem Eintragen dieser Zeile `doc-hygiene` und `doc-semantics` erneut (`lauf-3`).
+
+**Anleitung für den MECM-Server:** `qa-artifacts/session-handoff/mecm-server-update-s13.md` (lokal, enthält Standortwerte): Bestand lesen mit Stopp ohne `reporting\current.json`, Sicherung, Übertragung mit SHA-256, Lauf `-Upgrade -ServerOnly`, Prüfung (Vorlage byte-gleich, Portal `device-sync/2.1`), Rückweg. Ausführung durch den Nutzer offen; das Updatepaket entsteht nach dem Commit per `git archive`.
+
+**Nicht durch dieses Paket behebbar:** MECM-Site-Status „Ausgefallen“ (meldet MECM selbst) und die 36 offenen Verteilpunkte des Autoimporters (`package_content_failed`/`package_deploy_failed`); beides ist in der MECM-Konsole zu klären (Component Status, Content Status).
+
+**Offen:** Ausführung am MECM-Server und Ergebnis ins Register (Hashliste aus Schritt 0 einem Commit zuordnen, Exit-Code, Portalzeile); Hilfeänderungen wirken erst mit dem nächsten Portalupdate auf Prod; `settings_token_p2` empfiehlt zum Setzen des Tokens noch den gesperrten Installer-Re-Run.

@@ -70,6 +70,55 @@ Describe 'T3 package reporter distribution contract' {
         $descriptorSwitch | Should -BeGreaterThan $wrapperCopy
     }
 
+    It 'keeps install and full upgrade locked and opens only -Upgrade -ServerOnly (MC-R4, 15.10.2026)' {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$tokens, [ref]$parseErrors)
+        @($parseErrors).Count | Should -Be 0
+        $lock = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.ThrowStatementAst] -and
+                $node.Extent.Text -match "MC01: MECM-Serverinstaller"
+        }, $true)
+        $lock | Should -Not -BeNullOrEmpty
+        $guard = $lock.Parent.Parent
+        $guard | Should -BeOfType ([System.Management.Automation.Language.IfStatementAst])
+        $guard.Clauses.Count | Should -Be 1
+        $guard.Clauses[0].Item1.Extent.Text | Should -BeExactly '-not $ServerOnly'
+        $guard.ElseClause | Should -BeNullOrEmpty
+
+        $serverOnly = $ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'ServerOnly' }
+        $serverOnly | Should -Not -BeNullOrEmpty
+        $sets = @($serverOnly.Attributes | Where-Object { $_.TypeName.Name -eq 'Parameter' } | ForEach-Object {
+            @($_.NamedArguments | Where-Object { $_.ArgumentName -eq 'ParameterSetName' } | ForEach-Object { $_.Argument.Value })
+        })
+        $sets | Should -Be @('Upgrade')
+
+        # The frozen template is checked before the mutex and every write.
+        $installer = Get-Content -LiteralPath $script:Installer -Raw
+        $check = $installer.IndexOf('Test-VsPackageTemplateSetCurrent -TemplateRoot $templateDest -PackageRoot $templateDest')
+        $check | Should -BeGreaterThan -1
+        $check | Should -BeLessThan $installer.IndexOf('$installMutex = New-Object System.Threading.Mutex')
+    }
+
+    It 'accepts a frozen template with a valid reporter set and rejects a pre-reporter template' {
+        $valid = Join-Path $TestDrive 'frozen-valid'
+        $legacy = Join-Path $TestDrive 'frozen-legacy'
+        $damaged = Join-Path $TestDrive 'frozen-damaged'
+        [void](New-ReporterTemplateFixture -Root $valid -Label 'frozen')
+        New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $legacy 'install.ps1') -Value 'wrapper-before-reporter' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $legacy 'config.json') -Value '{}' -Encoding UTF8
+        $damagedId = New-ReporterTemplateFixture -Root $damaged -Label 'damaged'
+        Set-Content -LiteralPath (Join-Path $damaged ('reporting\{0}\Reporter.ps1' -f $damagedId)) -Value 'changed' -Encoding UTF8
+
+        foreach ($case in @(@($valid, $true), @($legacy, $false), @($damaged, $false))) {
+            Invoke-WithMecmCommon -Arguments @($case[0]) -Body {
+                param($template) Test-VsPackageTemplateSetCurrent -TemplateRoot $template -PackageRoot $template
+            } | Should -Be $case[1]
+        }
+    }
+
     It 'publishes the complete set without changing package config or payload and retains the prior generation' {
         $templateOne = Join-Path $TestDrive 'template-one'
         $templateTwo = Join-Path $TestDrive 'template-two'

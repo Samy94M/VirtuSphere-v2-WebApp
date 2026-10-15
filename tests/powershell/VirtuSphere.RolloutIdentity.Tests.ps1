@@ -112,6 +112,18 @@ Describe 'Identitaetsentscheidung' {
         @{ why = 'gebundene ResourceID passt auf die zweite NIC desselben Datensatzes'
            given = @{ RolloutHostname = 'MULTINIC'; Mac = 'AA:BB:CC:DD:EE:06'; BoundResourceId = '16777005' }
            expect = 'use 16777005' }
+        @{ why = 'MECM-ID1: DHCP-Karte abgeschaltet, Datensatz traegt nur noch die im Portal bekannte statische MAC'
+           given = @{ RolloutHostname = 'Backup-12345'; Mac = 'AA:BB:CC:DD:EE:09'; BoundResourceId = '16777002'; KnownMacs = @('AA:BB:CC:DD:EE:09', 'aa-bb-cc-dd-ee-02') }
+           expect = 'use 16777002' }
+        @{ why = 'MECM-ID1: keine der Portal-MACs der VM passt, bleibt resource_mac_conflict'
+           given = @{ RolloutHostname = 'Backup-12345'; Mac = 'AA:BB:CC:DD:EE:09'; BoundResourceId = '16777002'; KnownMacs = @('AA:BB:CC:DD:EE:09', 'AA:BB:CC:DD:EE:0A', '', 'kaputt') }
+           expect = 'block resource_mac_conflict' }
+        @{ why = 'MECM-ID1: Portal-MACs gelten nicht fuer die Erstbindung, Name mit fremder DHCP-MAC bleibt mac_conflict'
+           given = @{ RolloutHostname = 'Backup-12345'; Mac = 'AA:BB:CC:DD:EE:02'; KnownMacs = @('AA:BB:CC:DD:EE:01') }
+           expect = 'block mac_conflict' }
+        @{ why = 'MECM-ID1: Portal-MACs fuehren ohne Bindung nicht zur Uebernahme eines fremden Datensatzes'
+           given = @{ RolloutHostname = 'FRESH-NAME'; Mac = 'AA:BB:CC:DD:EE:77'; KnownMacs = @('AA:BB:CC:DD:EE:01') }
+           expect = 'import' }
         @{ why = 'dieselbe ResourceID doppelt in MECM ist mehrdeutig, keine Auswahl'
            given = @{ RolloutHostname = 'Backup-12345'; Mac = 'AA:BB:CC:DD:EE:01'; BoundResourceId = '16777001' }
            expect = 'block device_identity_ambiguous' }
@@ -254,6 +266,18 @@ Describe 'Wire-Vertrag des Device-Sync' {
         $script:SyncCode | Should -Not -Match '-MergeIfExist'
         # Kein name-keyed Cache mehr; der Index ist die einzige Quelle.
         $script:SyncCode | Should -Not -Match '\$mecmDevices\['
+    }
+
+    It 'gibt die Portal-MACs nur der Pruefung der gebundenen ResourceID mit (MECM-ID1)' {
+        $script:SyncCode | Should -Match '\$knownMacs\s*=\s*@\(\$device\.interfaces \| Select-Object -ExpandProperty mac'
+        $joined = $script:SyncCode -replace '`\r?\n\s*', ' '
+        $calls = @([regex]::Matches($joined, 'Resolve-VsDeviceIdentity [^\r\n]*'))
+        $calls.Count | Should -Be 3
+        @($calls | Where-Object { $_.Value -match '-KnownMacs \$knownMacs' }).Count | Should -Be 1
+        $calls[0].Value | Should -Match '-BoundResourceId \$boundResourceId'
+        $calls[0].Value | Should -Match '-KnownMacs \$knownMacs'
+        # Import und Nachlesen bleiben bei der DHCP-MAC allein.
+        $script:SyncCode | Should -Match 'Import-CMComputerInformation -ComputerName \$rolloutName -MacAddress \$deviceMac'
     }
 
     It 'sendet die Rolloutrevision in beiden mutierenden Rueckmeldungen' {

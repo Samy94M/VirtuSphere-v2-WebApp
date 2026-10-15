@@ -4,6 +4,21 @@ Date: 2026-09-03
 Status: Accepted; implemented, release blocked until the MECM lab proof and the
 coordinated script/client cutover
 
+## Amendment 1 (15.10.2026): a bound ResourceID matches any portal MAC of the VM
+
+Finding MECM-ID1: VM-05111 blocked the device sync from 22.09.2026 with
+`resource_mac_conflict`. The sync compared only the DHCP MAC with the bound
+record. After the PXE/DHCP NIC was disabled, Discovery left only the static NIC
+on the record, and that MAC is known to the portal for the same VM.
+
+At a bound ResourceID the record is now accepted when it carries any MAC the
+portal holds for this VM (`getDeviceList` already returns every interface with a
+MAC; no wire change). A record carrying none of them still blocks. Import and the
+first binding without a ResourceID stay on the DHCP MAC alone, so a static MAC
+never adopts an unbound record. The fix ships with the server-only update
+(`install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly`), not with the client
+cutover.
+
 ## Context
 
 MECM imported `vm_name`. That is the ESXi/portal VM name, typically something

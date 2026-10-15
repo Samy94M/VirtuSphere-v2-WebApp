@@ -9,7 +9,9 @@
 > Auch `install-VirtuSphere-MECM.ps1` ist vor allen Writes gesperrt, weil sein
 > Reporter-Bundle sonst Common V2 ohne den passenden Core veröffentlichen würde.
 > Die Server-Installationsbefehle weiter unten sind bis zur gemeinsamen
-> Freigabe ebenfalls historisch und nicht ausführbar.
+> Freigabe ebenfalls historisch und nicht ausführbar. Einzige Ausnahme seit
+> 15.10.2026 ist das reine Serverupdate `-Upgrade -ServerOnly` (Abschnitt 4b):
+> Es tauscht Serverskripte und Aufgaben und lässt die Paketvorlage unverändert.
 
 Dieses Dokument beschreibt die Integration zwischen der VirtuSphere-WebApp, dem
 MECM-Server und den per PXE ausgerollten Windows-Clients. Zielgruppe sind
@@ -239,6 +241,37 @@ der Portalstatus stattdessen eine unbekannte Funktion wie
 Autoimporter aktiv. Das ist kein Verteilungsfehler. Keine Einzeldatei ersetzen,
 sondern den vollständigen neuen Baum erneut mit `-Upgrade` installieren; ein
 inkompatibler Satz bricht danach schon beim Prozessstart eindeutig ab.
+
+### 4b. Reines Serverupdate mit eingefrorener Paketvorlage
+
+Bis zum gemeinsamen Core- und Reporter-Cutover (MC-R4, verengt am 15.10.2026)
+ist das der einzige freigegebene Installeraufruf:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly
+```
+
+`-ServerOnly` gibt es nur zusammen mit `-Upgrade` und übernimmt dessen
+Registryregel. Es tauscht den vollständigen Serverdateisatz unter
+`%ProgramFiles%\VirtuSphere\mecm` und registriert die vier Aufgaben neu.
+`<PackagesRoot>\Package_Vorlage` bleibt byte-genau stehen, damit die
+Reporter-Generation in den Paketen die bisherige bleibt und kein Common V2 ohne
+passenden Core zu den Clients kommt. Die Client-Anwendungen in MECM berührt der
+Aufruf nicht.
+
+Vor Mutex, Registry, Aufgaben oder Dateien prüft der Installer die vorhandene
+Vorlage mit derselben Prüfung, die der Autoimporter bei jedem Scan anwendet. Fehlt
+ihr ein vollständiger `reporting\current.json`-Satz, etwa weil die Vorlage aus
+einem Stand vor dem Paketreporter (22.09.2026) stammt, bricht der Lauf ohne
+Änderung ab. Der neue Autoimporter würde sonst jedes Paket mit
+`package_template_failed` blockieren. Erstinstallation und volles `-Upgrade`
+bleiben gesperrt.
+
+Transaktion, Hashprüfung, Aufgabenstopp und Rollback sind dieselben wie in 4a.
+Vor dem Lauf den alten Ordner `mecm` und die vier Aufgaben zusätzlich sichern;
+damit ist ein Rückweg auch nach einem erfolgreichen Lauf möglich (Aufgaben
+deaktivieren, Ordner zurückkopieren, Aufgaben aktivieren). Die Paketvorlage
+braucht keinen Rückweg, weil sie unverändert bleibt.
 
 Anschließend prüfen:
 
@@ -1055,7 +1088,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Rolloutname ungültig (`device_name_invalid`) | kein Import; im VM-Editor korrigieren | ERROR |
 | Name mit fremder MAC oder MAC mit fremdem Namen (`mac_conflict`) | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „Identitaet nicht aufloesbar" |
 | Gebundene ResourceID fehlt in MECM (`resource_id_missing`) | blockiert; kein Ersatzdatensatz wird adoptiert. „MECM-ID zurücksetzen" | ERROR |
-| Gebundene ResourceID mit fremder MAC (`resource_mac_conflict`) | blockiert; Handentscheidung. Der Abgleich vergleicht nur die MAC der DHCP-Karte aus dem Portal mit den MACs, die MECM für das gebundene Gerät kennt. Zwei Ursachen sehen gleich aus: Die VM wurde neu erstellt (das MECM-Gerät ist die alte Maschine: altes Gerät in MECM löschen, dann im Portal „MECM-ID zurücksetzen“), **oder** dieselbe VM meldet in MECM nur noch eine andere Karte, etwa weil die DHCP-Karte nach dem Betanken abgeschaltet wurde (das Gerät ist die lebende Maschine: nicht löschen, nicht zurücksetzen). Unterscheiden: in der MECM-Konsole die MAC des Geräts mit allen Karten der VM im Portal vergleichen. Im zweiten Fall bleibt die VM in der Warteschlange, die übrigen VMs laufen weiter | ERROR |
+| Gebundene ResourceID mit fremder MAC (`resource_mac_conflict`) | blockiert; Handentscheidung. Fremd heißt ab `device-sync/2.1` (MECM-ID1, 15.10.2026): keine der MACs, die das Portal für diese VM kennt; vorher zählte nur die DHCP-Karte. Meldet dieselbe VM in MECM nur noch ihre statische Karte, weil die DHCP-Karte nach dem Betanken abgeschaltet wurde, läuft sie damit durch. Bleibt der Konflikt, ist das MECM-Gerät meist die alte Maschine einer neu erstellten VM: altes Gerät in MECM löschen, dann im Portal „MECM-ID zurücksetzen“. Vorher in der MECM-Konsole die MAC des Geräts mit allen Karten der VM im Portal vergleichen; das Log nennt die Portal-MACs. Die VM bleibt in der Warteschlange, die übrigen VMs laufen weiter | ERROR |
 | Mehrere Treffer nach Name, MAC oder ResourceID (`device_identity_ambiguous`) | blockiert; das Skript wählt bewusst keinen aus | ERROR |
 | Vorgängergerät noch vorhanden (`previous_resource_present`) | blockiert bis zum Löschen in der MECM-Konsole | ERROR |
 | Abweichender **Anzeigename** bei gültiger ResourceID und MAC | **kein Befund**: Windows/Discovery darf umbenennen; kein Reimport, kein Rename, keine Warnung | DEBUG |

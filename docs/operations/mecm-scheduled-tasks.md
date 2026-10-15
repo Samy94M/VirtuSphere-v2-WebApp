@@ -52,7 +52,7 @@ flowchart TD
     V{"Mission und DHCP-MAC vorhanden?"}
     V -->|nein| V1["VM übersprungen, bleibt in der Warteschlange"]
     V -->|ja| MC["Mission-Collection anlegen, falls sie fehlt"]
-    MC --> ID{"Identität eindeutig? (Rolloutname, MAC, ResourceID)"}
+    MC --> ID{"Identität eindeutig? (Rolloutname, DHCP-MAC, ResourceID; eine gebundene ResourceID passt auf jede Portal-MAC der VM)"}
     ID -->|nein| ID1["Keine Änderung, VM bleibt mit Ursache in der Warteschlange"]
     ID -->|ja| G{"Gerät schon in MECM?"}
     G -->|nein| IMP["Rolloutname und MAC importieren und nachlesen; nicht sichtbar oder Fehler: VM wartet auf den nächsten Lauf"]

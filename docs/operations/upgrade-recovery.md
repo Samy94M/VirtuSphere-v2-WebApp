@@ -107,7 +107,9 @@ ist der Vertrag, den dieses Runbook erfüllt.
    dann vor jeder Änderung ab, siehe [MECM-Integration](mecm-integration.md)),
    bleibt das vorhandene MECM-Paket in Betrieb; das ist die Zeile „neues Portal,
    altes PowerShell-Paket“ der obigen Matrix. Ein Kopieren der neuen Skripte von
-   Hand umgeht diese Sperre und ist kein zulässiger Weg.
+   Hand umgeht diese Sperre und ist kein zulässiger Weg. Bietet die Sperre das
+   reine Serverupdate `-Upgrade -ServerOnly` an, ist es der zulässige Weg für
+   Serverskripte und Aufgaben; die Paketvorlage bleibt dabei unverändert.
 
 ## Unterbrechung und Rückkehr
 
