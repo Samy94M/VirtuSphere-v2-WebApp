@@ -70,6 +70,12 @@ $intervalSeconds = Resolve-VsInterval -Source 'autoimporter' -Configured $config
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'autoimporter/2.2'
+# Build und Dateisatz aus manifest.json des Installers an die Kennung haengen
+# ("+<Commit>", "-abw" bei abweichender Datei); schreibt eine Logzeile.
+$SCRIPT_VERSION = Resolve-VsReportedScriptVersion -BaseVersion $SCRIPT_VERSION -InstallDir $PSScriptRoot
+if (Test-VsLegacyPackageTemplate -TemplateRoot $templatePath) {
+    Write-VsLog -Message ("Paketvorlage {0} ohne Reporter-Satz: Uebergangsmodus bis zum Cutover, nur install.ps1 wird in die Pakete abgeglichen." -f $templatePath)
+}
 
 $siteCode = $null
 $providerMachine = $null
@@ -204,7 +210,8 @@ while ($true) {
                     try {
                         Sync-VsPackageTemplateSet -TemplateRoot $templatePath -PackageRoot $pkgFolder
                         $templateCurrent = $true
-                        Write-VsLog -Context $fullName -Message 'Vorlagensatz samt Reporter-Generation uebernommen und per SHA-256 bestaetigt.'
+                        $templateKind = if (Test-VsLegacyPackageTemplate -TemplateRoot $templatePath) { 'Altvorlage (nur install.ps1)' } else { 'Vorlagensatz samt Reporter-Generation' }
+                        Write-VsLog -Context $fullName -Message ("{0} uebernommen und per SHA-256 bestaetigt." -f $templateKind)
                     } catch {
                         Write-VsLog -Level WARN -Context $fullName -Message ("Vorlagensatz nicht vollstaendig publiziert - Wiederholung im naechsten Durchlauf: {0}" -f $_.Exception.Message)
                         $scanWarnings++

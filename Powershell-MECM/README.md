@@ -128,10 +128,18 @@ Bis zum Core-/Reporter-Cutover ist nur dieser Aufruf freigegeben:
 
 Er tauscht die Dateien aus `mecm/` und registriert die vier Aufgaben neu,
 lässt `<PackagesRoot>\Package_Vorlage` aber unverändert. Vor jedem Write prüft
-er die vorhandene Vorlage wie der Autoimporter; ohne vollständigen
-`reporting\current.json`-Satz bricht er ab, weil der neue Autoimporter sonst
-jedes Paket mit `package_template_failed` blockieren würde. Ablauf und Rückweg:
+er die vorhandene Vorlage wie der Autoimporter. Zulässig sind ein vollständiger
+`reporting\current.json`-Satz oder eine Altvorlage ganz ohne `reporting`; für
+die Altvorlage gleicht der Autoimporter bis zum Cutover nur `install.ps1` ab.
+Ein unvollständiger Satz bricht ab. Ablauf und Rückweg:
 `docs/operations/mecm-integration.md`, Abschnitt 4b.
+
+Jedes Paket aus `git archive` trägt Commit und Datum in `BUILD.json`. Der
+Installer schreibt daraus `manifest.json` (SHA-256 jeder Serverdatei) ins
+Installationsverzeichnis, den Build in die Registry und in die
+Aufgabenbeschreibung. Die Aufgaben melden ihn mit ihrer Kennung, etwa
+`device-sync/2.1+53ba24a`; `-abw` heißt, eine Datei weicht vom Manifest ab
+(Abschnitt 4c).
 
 `Common`, Autoimporter und Installer tragen zusätzlich denselben
 MECM-Serververtrag. Das Upgrade vergleicht ihn im Staging und nochmals im

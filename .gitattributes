@@ -6,3 +6,6 @@
 *.sh text eol=lf
 Ansible/runner/* text eol=lf
 Ansible/host-cleanup/* text eol=lf
+# git archive (Updatepaket, Offline-Bundle) schreibt Commit und Commitdatum in
+# die Build-Kennung des MECM-Serverpakets; ein Checkout behaelt die Platzhalter.
+Powershell-MECM/BUILD.json export-subst

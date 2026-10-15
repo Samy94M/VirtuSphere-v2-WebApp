@@ -1376,6 +1376,8 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
             'LogRoot'              = 'aus PackagesRoot abgeleitet, kein eigener Parameter'
             'MECM_SiteCode'        = 'wird erkannt, nicht eingestellt'
             'MECM_ProviderMachine' = 'hat seine eigene Erhaltung vor der Tabelle'
+            'InstalledBuild'       = 'Build des gerade installierten Pakets, gehoert zu jedem Lauf neu'
+            'InstalledBuildDate'   = 'Commitdatum des gerade installierten Pakets, gehoert zu jedem Lauf neu'
         }
     }
 

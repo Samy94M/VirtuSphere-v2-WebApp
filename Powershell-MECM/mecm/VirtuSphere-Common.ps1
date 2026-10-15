@@ -403,6 +403,135 @@ $script:VsRunScriptVersionMaxChars = 32   # VIRTUSPHERE_RUN_SCRIPT_VERSION_MAX_C
 # Server kappt zusaetzlich bei 1024 Zeichen.
 $script:VsReportDetailMaxBytes = 2048
 
+# ---------------------------------------------------------------------------
+# Build-Kennung und Installationsmanifest
+# ---------------------------------------------------------------------------
+# `git archive` ersetzt die Platzhalter in Powershell-MECM/BUILD.json
+# (.gitattributes: export-subst) durch Commit und Commitdatum. Ein Git-Checkout
+# behaelt die Platzhalter; der Build heisst dann "unbekannt" und wird nie
+# geraten. Der Installer schreibt beim Aktivieren manifest.json in das
+# Installationsverzeichnis: Build, Modus und SHA-256 jeder Serverdatei. Jede
+# Aufgabe vergleicht beim Start ihre Dateien damit und haengt den Build an ihre
+# Kennung im Laufbericht. So zeigt die Systemstatusseite, welcher Stand
+# wirklich laeuft, und eine von Hand kopierte oder umkodierte Datei faellt auf
+# (Anlass 15.10.2026: der Stand auf dem MECM-Server liess sich keinem Commit
+# zuordnen).
+$script:VsServerManifestName = 'manifest.json'
+$script:VsServerBuildFileName = 'BUILD.json'
+
+function Get-VsServerBuildInfo {
+    param([Parameter(Mandatory)][string]$PackageRoot)
+    $result = [pscustomobject]@{ Commit = ''; Date = '' }
+    $path = Join-Path $PackageRoot $script:VsServerBuildFileName
+    try {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $result }
+        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$raw.commit -cmatch '^[0-9a-f]{40}$') {
+            $result.Commit = [string]$raw.commit
+            if ([string]$raw.date -match '^\d{4}-\d{2}-\d{2}$') { $result.Date = [string]$raw.date }
+        }
+    } catch {
+        Write-Debug $_
+    }
+    return $result
+}
+
+function New-VsServerManifest {
+    param(
+        [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string[]]$FileNames,
+        [Parameter(Mandatory)]$Build,
+        [Parameter(Mandatory)][string]$Mode
+    )
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($name in @($FileNames | Sort-Object)) {
+        $path = Join-Path $Directory $name
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        [void]$entries.Add([ordered]@{ path = $name; length = [long]$item.Length; sha256 = $hash })
+    }
+    $manifest = [ordered]@{
+        schema_version = 1
+        commit = [string]$Build.Commit
+        commit_date = [string]$Build.Date
+        installed_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        mode = $Mode
+        files = $entries.ToArray()
+    }
+    $target = Join-Path $Directory $script:VsServerManifestName
+    [IO.File]::WriteAllText($target, (($manifest | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
+    return $target
+}
+
+# Liest das Manifest und prueft jede eingetragene Datei. Zusaetzliche Dateien im
+# Verzeichnis (Journal, Altdateien) sind kein Befund; sie werden nicht geladen.
+function Get-VsServerFileSetState {
+    param([Parameter(Mandatory)][string]$InstallDir)
+    $state = [pscustomobject]@{ ManifestPresent = $false; Commit = ''; Date = ''; Checked = 0; Deviations = @() }
+    $path = Join-Path $InstallDir $script:VsServerManifestName
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $state }
+    $state.ManifestPresent = $true
+    $deviations = New-Object System.Collections.Generic.List[string]
+    try {
+        $manifest = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$manifest.commit -cmatch '^[0-9a-f]{40}$') {
+            $state.Commit = [string]$manifest.commit
+            $state.Date = [string]$manifest.commit_date
+        }
+        $entries = @($manifest.files)
+        if ([int]$manifest.schema_version -ne 1 -or $entries.Count -eq 0) { [void]$deviations.Add($script:VsServerManifestName) }
+        foreach ($entry in $entries) {
+            $name = [string]$entry.path
+            if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.ps1$') { [void]$deviations.Add($script:VsServerManifestName); continue }
+            $file = Join-Path $InstallDir $name
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { [void]$deviations.Add($name); continue }
+            $state.Checked++
+            $item = Get-Item -LiteralPath $file -Force -ErrorAction Stop
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+            if ($item.Length -ne [long]$entry.length -or $hash -cne [string]$entry.sha256) { [void]$deviations.Add($name) }
+        }
+    } catch {
+        Write-Debug $_
+        [void]$deviations.Add($script:VsServerManifestName)
+    }
+    $state.Deviations = $deviations.ToArray()
+    return $state
+}
+
+# Rein: Grundkennung plus Build. "+1234567" = Commit, "+unbekannt" = installiert
+# aus einem Git-Checkout, "+ohne-manifest" = nicht ueber den Installer
+# installiert, Nachsatz "-abw" = mindestens eine Datei weicht vom Manifest ab.
+function Format-VsReportedScriptVersion {
+    param([Parameter(Mandatory)][string]$BaseVersion, [Parameter(Mandatory)]$State)
+    $suffix = 'unbekannt'
+    if (-not $State.ManifestPresent) {
+        $suffix = 'ohne-manifest'
+    } elseif ([string]$State.Commit -cmatch '^[0-9a-f]{40}$') {
+        $suffix = ([string]$State.Commit).Substring(0, 7)
+    }
+    $value = '{0}+{1}' -f $BaseVersion, $suffix
+    if (@($State.Deviations).Count -gt 0) { $value += '-abw' }
+    if ($value.Length -gt $script:VsRunScriptVersionMaxChars) { $value = $value.Substring(0, $script:VsRunScriptVersionMaxChars) }
+    return $value
+}
+
+# Einmal je Aufgabenstart nach Initialize-VsLog: prueft den Dateisatz, schreibt
+# genau eine Zeile ins Tageslog und liefert die Kennung fuer jeden Laufbericht.
+function Resolve-VsReportedScriptVersion {
+    param([Parameter(Mandatory)][string]$BaseVersion, [Parameter(Mandatory)][string]$InstallDir)
+    $state = Get-VsServerFileSetState -InstallDir $InstallDir
+    $reported = Format-VsReportedScriptVersion -BaseVersion $BaseVersion -State $state
+    if (-not $state.ManifestPresent) {
+        Write-VsLog -Level WARN -Message ("Kein Installationsmanifest in {0}: Build unbekannt. Serverpaket mit install-VirtuSphere-MECM.ps1 installieren, nicht von Hand kopieren. Kennung {1}." -f $InstallDir, $reported)
+    } elseif (@($state.Deviations).Count -gt 0) {
+        Write-VsLog -Level WARN -Message ("Dateien weichen vom Installationsmanifest ab: {0}. Serverpaket vollstaendig mit dem Installer neu installieren. Kennung {1}." -f (@($state.Deviations) -join ', '), $reported)
+    } else {
+        $build = if ($state.Commit) { '{0} vom {1}' -f $state.Commit, $state.Date } else { 'unbekannt (aus einem Git-Checkout installiert)' }
+        Write-VsLog -Message ("Build {0}; {1} Datei(en) wie installiert. Kennung {2}." -f $build, $state.Checked, $reported)
+    }
+    return $reported
+}
+
 # Untergrenze je Aufgabe: darunter kostet ein Lauf mehr als er einbringt (der
 # Device-Sync fragt eine Liste ab, der Autoimporter kopiert Dateien und legt
 # Applications an). Die Obergrenze ist fuer alle die des Wire-Contracts, denn
@@ -909,6 +1038,20 @@ function Test-VsTemplateScriptCurrent {
     return ($template -eq $package)
 }
 
+# Uebergangsmodus Altvorlage (MC-R4, verengt am 15.10.2026). Eine Vorlage ganz
+# ohne reporting-Eintrag stammt aus einem Stand vor dem Paketreporter
+# (22.09.2026) und bleibt unter -ServerOnly eingefroren. Fuer sie gilt bis zum
+# Cutover der damalige Vertrag: nur install.ps1 wird in die Pakete abgeglichen,
+# kein Reporter erreicht Pakete oder Clients. Ein vorhandener, aber
+# unvollstaendiger oder beschaedigter reporting-Satz ist KEIN Altbestand und
+# bleibt package_template_failed. Der volle Installer legt reporting immer an,
+# damit endet der Modus mit dem Cutover von selbst.
+function Test-VsLegacyPackageTemplate {
+    param([Parameter(Mandatory)][string]$TemplateRoot)
+    return ((Test-Path -LiteralPath (Join-Path $TemplateRoot 'install.ps1') -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $TemplateRoot 'reporting')))
+}
+
 function Get-VsFilesManifestStamp {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -983,6 +1126,9 @@ function Test-VsPackageTemplateSetCurrent {
         [Parameter(Mandatory)][string]$PackageRoot
     )
     try {
+        if (Test-VsLegacyPackageTemplate -TemplateRoot $TemplateRoot) {
+            return (Test-VsTemplateScriptCurrent -TemplateFile (Join-Path $TemplateRoot 'install.ps1') -PackageFile (Join-Path $PackageRoot 'install.ps1'))
+        }
         $descriptorPath = Join-Path (Join-Path $TemplateRoot 'reporting') 'current.json'
         $wrapperPath = Join-Path $TemplateRoot 'install.ps1'
         if (-not (Test-Path -LiteralPath $wrapperPath -PathType Leaf) -or
@@ -1060,6 +1206,16 @@ function Sync-VsPackageTemplateSet {
     )
     if (-not (Test-Path -LiteralPath $PackageRoot -PathType Container)) {
         throw ("Paketordner fehlt: {0}" -f $PackageRoot)
+    }
+    if (Test-VsLegacyPackageTemplate -TemplateRoot $TemplateRoot) {
+        # Altvorlage: genau das Verhalten vor dem Paketreporter.
+        $legacyTemplate = Join-Path $TemplateRoot 'install.ps1'
+        $legacyTarget = Join-Path $PackageRoot 'install.ps1'
+        Copy-Item -LiteralPath $legacyTemplate -Destination $legacyTarget -Force -ErrorAction Stop
+        if (-not (Test-VsTemplateScriptCurrent -TemplateFile $legacyTemplate -PackageFile $legacyTarget)) {
+            throw 'Kopie stimmt nach dem Schreiben nicht mit der Vorlage ueberein.'
+        }
+        return
     }
     $descriptorSource = Join-Path (Join-Path $TemplateRoot 'reporting') 'current.json'
     $descriptor = Get-Content -LiteralPath $descriptorSource -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop

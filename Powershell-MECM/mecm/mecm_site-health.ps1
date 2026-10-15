@@ -44,6 +44,9 @@ Write-VsLog -Message '=== Site-Health gestartet ==='
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'site-health/1.0'
+# Build und Dateisatz aus manifest.json des Installers an die Kennung haengen
+# ("+<Commit>", "-abw" bei abweichender Datei); schreibt eine Logzeile.
+$SCRIPT_VERSION = Resolve-VsReportedScriptVersion -BaseVersion $SCRIPT_VERSION -InstallDir $PSScriptRoot
 
 # Intervall aus der Registry (SiteHealthIntervalSeconds), Default 300s; die
 # Spanne und das Protokollieren einer Korrektur liegen in Resolve-VsInterval.

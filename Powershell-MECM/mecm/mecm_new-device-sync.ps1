@@ -53,6 +53,9 @@ try {
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'device-sync/2.1'
+# Build und Dateisatz aus manifest.json des Installers an die Kennung haengen
+# ("+<Commit>", "-abw" bei abweichender Datei); schreibt eine Logzeile.
+$SCRIPT_VERSION = Resolve-VsReportedScriptVersion -BaseVersion $SCRIPT_VERSION -InstallDir $PSScriptRoot
 
 $intervalSeconds = Resolve-VsInterval -Source 'device-sync' -Configured $config.DeviceSyncInterval
 $siteCode = $null

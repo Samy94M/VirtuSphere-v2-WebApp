@@ -101,22 +101,51 @@ Describe 'T3 package reporter distribution contract' {
         $check | Should -BeLessThan $installer.IndexOf('$installMutex = New-Object System.Threading.Mutex')
     }
 
-    It 'accepts a frozen template with a valid reporter set and rejects a pre-reporter template' {
+    It 'accepts a valid reporter set and a legacy template, rejects partial and damaged sets' {
         $valid = Join-Path $TestDrive 'frozen-valid'
         $legacy = Join-Path $TestDrive 'frozen-legacy'
+        $partial = Join-Path $TestDrive 'frozen-partial'
         $damaged = Join-Path $TestDrive 'frozen-damaged'
+        $empty = Join-Path $TestDrive 'frozen-empty'
         [void](New-ReporterTemplateFixture -Root $valid -Label 'frozen')
-        New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+        New-Item -ItemType Directory -Path $legacy, $empty -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $legacy 'install.ps1') -Value 'wrapper-before-reporter' -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $legacy 'config.json') -Value '{}' -Encoding UTF8
+        Copy-Item -LiteralPath $legacy -Destination $partial -Recurse
+        New-Item -ItemType Directory -Path (Join-Path $partial 'reporting') -Force | Out-Null
         $damagedId = New-ReporterTemplateFixture -Root $damaged -Label 'damaged'
         Set-Content -LiteralPath (Join-Path $damaged ('reporting\{0}\Reporter.ps1' -f $damagedId)) -Value 'changed' -Encoding UTF8
 
-        foreach ($case in @(@($valid, $true), @($legacy, $false), @($damaged, $false))) {
+        foreach ($case in @(@($valid, $true), @($legacy, $true), @($partial, $false), @($damaged, $false), @($empty, $false))) {
             Invoke-WithMecmCommon -Arguments @($case[0]) -Body {
                 param($template) Test-VsPackageTemplateSetCurrent -TemplateRoot $template -PackageRoot $template
             } | Should -Be $case[1]
         }
+    }
+
+    It 'keeps the pre-reporter contract for a legacy template: only install.ps1, no reporting in the package' {
+        $template = Join-Path $TestDrive 'legacy-template'
+        $package = Join-Path $TestDrive 'legacy-package'
+        New-Item -ItemType Directory -Path $template, (Join-Path $package 'powershell') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $template 'install.ps1') -Value 'wrapper-legacy' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $template 'config.json') -Value '{"ProjectName":"Vorlage"}' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $package 'install.ps1') -Value 'wrapper-drifted' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $package 'config.json') -Value '{"ProjectName":"Keep"}' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $package 'powershell\01.keep.ps1') -Value 'keep-payload' -Encoding UTF8
+
+        Invoke-WithMecmCommon -Arguments @($template, $package) -Body {
+            param($t, $p) Test-VsPackageTemplateSetCurrent -TemplateRoot $t -PackageRoot $p
+        } | Should -BeFalse
+        Invoke-WithMecmCommon -Arguments @($template, $package) -Body {
+            param($t, $p) Sync-VsPackageTemplateSet -TemplateRoot $t -PackageRoot $p
+        }
+        Invoke-WithMecmCommon -Arguments @($template, $package) -Body {
+            param($t, $p) Test-VsPackageTemplateSetCurrent -TemplateRoot $t -PackageRoot $p
+        } | Should -BeTrue
+        (Get-Content -LiteralPath (Join-Path $package 'install.ps1') -Raw).Trim() | Should -Be 'wrapper-legacy'
+        (Get-Content -LiteralPath (Join-Path $package 'config.json') -Raw) | Should -Match 'Keep'
+        (Get-Content -LiteralPath (Join-Path $package 'powershell\01.keep.ps1') -Raw).Trim() | Should -Be 'keep-payload'
+        Test-Path -LiteralPath (Join-Path $package 'reporting') | Should -BeFalse
     }
 
     It 'publishes the complete set without changing package config or payload and retains the prior generation' {

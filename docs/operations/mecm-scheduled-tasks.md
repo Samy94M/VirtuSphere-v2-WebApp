@@ -24,7 +24,8 @@ flowchart TD
   T --> C{"Registry-Konfiguration vorhanden?"}
   C -->|nein| CW["Fehler ins Log, Registry jede Minute neu lesen"] --> C
   C -->|ja| I["Tageslog öffnen, TLS 1.2 und Zertifikats-Pin setzen, Intervall aus der Registry lesen und auf die erlaubte Spanne begrenzen"]
-  I --> S["Neuer Lauf: Lauf-ID, „started“ melden (Site Health meldet nur „completed“)"]
+  I --> B["Einmal beim Start: eigene Dateien mit manifest.json des Installers vergleichen, eine Logzeile schreiben und Build an die Kennung hängen (+Commit, -abw bei Abweichung, +ohne-manifest ohne Installer)"]
+  B --> S["Neuer Lauf: Lauf-ID, „started“ melden (Site Health meldet nur „completed“)"]
   S --> A["Eigentliche Arbeit (Abschnitte unten)"]
   A --> F{"Fehler im Lauf?"}
   F -->|ja| E["Ergebnis „fail“; Devices und Packages Sync pausieren 30 s, ab dem dritten Fehler in Folge 60 s und bauen die MECM-Verbindung neu auf; der Autoimporter pausiert immer 60 s, baut neu auf und scannt beim nächsten Lauf voll; Site Health pausiert immer sein Intervall"]
@@ -121,7 +122,7 @@ flowchart TD
   B -->|ja| RC["Alle config.json lesen (ungültige sind offene Punkte), je Produkt die höchste Version bestimmen"]
   RC --> T
   subgraph JP["Je Paketordner"]
-    T["Vorlage (install.ps1, Reporter) ins Paket kopieren, wenn sie abweicht"]
+    T["Vorlage (install.ps1, Reporter) ins Paket kopieren, wenn sie abweicht; eine Altvorlage ohne reporting-Ordner gleicht bis zum Cutover nur install.ps1 ab"]
     T -.->|nicht kopierbar| T1["Paket übersprungen, offener Punkt package_template_failed"]
     T --> AM{"Applicationname eindeutig?"}
     AM -->|nein, mehrere| AM1["Paket übersprungen, keine Definition und kein Content verändert, offener Punkt package_definition_drift"]

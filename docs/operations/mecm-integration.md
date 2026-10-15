@@ -260,12 +260,55 @@ passenden Core zu den Clients kommt. Die Client-Anwendungen in MECM berührt der
 Aufruf nicht.
 
 Vor Mutex, Registry, Aufgaben oder Dateien prüft der Installer die vorhandene
-Vorlage mit derselben Prüfung, die der Autoimporter bei jedem Scan anwendet. Fehlt
-ihr ein vollständiger `reporting\current.json`-Satz, etwa weil die Vorlage aus
-einem Stand vor dem Paketreporter (22.09.2026) stammt, bricht der Lauf ohne
-Änderung ab. Der neue Autoimporter würde sonst jedes Paket mit
-`package_template_failed` blockieren. Erstinstallation und volles `-Upgrade`
-bleiben gesperrt.
+Vorlage mit derselben Prüfung, die der Autoimporter bei jedem Scan anwendet.
+Zulässig sind zwei Formen:
+
+- ein vollständiger, gültiger `reporting\current.json`-Satz: der Autoimporter
+  gleicht Wrapper und Reporter-Generation wie gewohnt ab;
+- eine **Altvorlage** ganz ohne `reporting`-Ordner, also eine Vorlage aus einem
+  Stand vor dem Paketreporter (22.09.2026): Bis zum Cutover gleicht der
+  Autoimporter wie damals nur `install.ps1` ab (Übergangsmodus). Pakete,
+  Wrapper und Clients bleiben unverändert, es gibt keine Neuverteilung. Das
+  Tageslog des Autoimporters nennt den Modus beim Start.
+
+Ein vorhandener, aber unvollständiger oder beschädigter `reporting`-Satz ist
+keine Altvorlage. Dann bricht der Lauf ohne Änderung ab, weil der Autoimporter
+jedes Paket mit `package_template_failed` blockieren würde. Erstinstallation und
+volles `-Upgrade` bleiben gesperrt. Der volle Installer legt `reporting` immer
+an; der Übergangsmodus endet also mit dem Cutover von selbst.
+
+### 4c. Build-Kennung und Installationsmanifest
+
+Jedes per `git archive` gebaute Paket (Updatepaket, Offline-Bundle) trägt in
+`Powershell-MECM\BUILD.json` Commit und Commitdatum; Git setzt sie beim Packen
+ein (`.gitattributes`, `export-subst`). Ein Git-Checkout behält die Platzhalter,
+der Build heißt dann „unbekannt“.
+
+Der Installer schreibt beim Aktivieren
+`%ProgramFiles%\VirtuSphere\mecm\manifest.json` mit Commit, Commitdatum,
+Installationszeit, Modus (`install`, `upgrade`, `server-only`) und SHA-256
+jeder Serverdatei. Das Manifest wird als letzte Datei aktiviert und beim
+Rollback mit zurückgenommen. Denselben Build schreibt er nach
+`HKLM:\SOFTWARE\VirtuSphere\MECM` (`InstalledBuild`, `InstalledBuildDate`) und
+in die Beschreibung der vier Aufgaben.
+
+Jede Aufgabe vergleicht beim Start ihre Dateien mit dem Manifest, schreibt eine
+Zeile ins Tageslog und hängt das Ergebnis an ihre Kennung im Laufbericht. Die
+Systemstatusseite zeigt sie unter „Skript“:
+
+| Kennung | Bedeutung |
+|---|---|
+| `device-sync/2.1+53ba24a` | installiert aus Commit `53ba24a`, alle Dateien wie installiert |
+| `…+53ba24a-abw` | mindestens eine Datei weicht vom Manifest ab, etwa nach einer Handkopie; das Tageslog nennt sie. Den vollständigen Satz mit dem Installer neu installieren |
+| `…+unbekannt` | mit dem Installer installiert, aber aus einem Git-Checkout statt aus einem Paket |
+| `…+ohne-manifest` | nicht über diesen Installer installiert (Altstand oder Handkopie) |
+
+Den installierten Stand direkt auf dem MECM-Server lesen:
+
+```powershell
+Get-Content -LiteralPath 'C:\Program Files\VirtuSphere\mecm\manifest.json'
+Get-ScheduledTask -TaskPath '\' | Where-Object TaskName -Match 'VirtuSphere MECM' | Format-Table TaskName, Description
+```
 
 Transaktion, Hashprüfung, Aufgabenstopp und Rollback sind dieselben wie in 4a.
 Vor dem Lauf den alten Ordner `mecm` und die vier Aufgaben zusätzlich sichern;

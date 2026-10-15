@@ -33,10 +33,11 @@
 .PARAMETER ServerOnly
     Nur zusammen mit -Upgrade: tauscht die Serverskripte und registriert die
     vier Aufgaben neu, laesst <PackagesRoot>\Package_Vorlage aber byte-genau
-    stehen. Die vorhandene Vorlage muss einen vollstaendigen, gueltigen
-    reporting\current.json-Satz tragen, sonst bricht der Lauf vor jedem
-    Schreibzugriff ab. Die Reporter-Generation in den Paketen bleibt damit die
-    bisherige (Entscheidung MC-R4, verengt am 15.10.2026).
+    stehen. Die vorhandene Vorlage muss entweder ein vollstaendiger, gueltiger
+    reporting\current.json-Satz oder eine Altvorlage ganz ohne reporting sein
+    (dann gleicht der Autoimporter bis zum Cutover nur install.ps1 ab); sonst
+    bricht der Lauf vor jedem Schreibzugriff ab. Die Pakete behalten damit ihren
+    bisherigen Stand (Entscheidung MC-R4, verengt am 15.10.2026).
 
 .PARAMETER WebApi
     Adresse der VirtuSphere-WebApp, z. B. "virtusphere.lan:8021" oder "10.0.0.5:8021".
@@ -665,12 +666,25 @@ $templateActivationStarted = $false
 $activatedNames = New-Object System.Collections.Generic.List[string]
 $finalExitCode = 0
 
+# Build-Kennung dieses Pakets: `git archive` hat Commit und Datum in BUILD.json
+# eingesetzt. Fehlt sie (Git-Checkout statt Paket), installiert der Lauf trotzdem,
+# meldet den Build aber ehrlich als unbekannt statt einen zu raten.
+$buildInfo = Get-VsServerBuildInfo -PackageRoot $PSScriptRoot
+$buildLabel = if ($buildInfo.Commit) { [string]$buildInfo.Commit } else { 'unbekannt' }
+$installMode = if ($ServerOnly) { 'server-only' } elseif ($Upgrade) { 'upgrade' } else { 'install' }
+if ($buildInfo.Commit) {
+    Write-Ok ("Build {0} vom {1}" -f $buildInfo.Commit, $buildInfo.Date)
+} else {
+    Write-Hint 'Build unbekannt: BUILD.json traegt keinen Commit (Quelle ist kein git-archive-Paket). Manifest und Aufgaben nennen den Build als "unbekannt".'
+}
+
 # -ServerOnly friert die Live-Vorlage ein. Der Autoimporter dieses Pakets
-# gleicht bei jedem Scan jedes Paket gegen sie ab und blockiert jedes Paket mit
-# package_template_failed, wenn ihr der reporting\current.json-Satz fehlt (eine
-# Vorlage aus einem Stand vor dem Reporter). Deshalb hier vor Mutex, Registry,
-# Aufgaben oder Dateien pruefen. Der Vergleich der Vorlage mit sich selbst ist
-# genau die Vorlagenpruefung des Autoimporters ohne den Paketteil.
+# gleicht bei jedem Scan jedes Paket gegen sie ab: einen vollstaendigen
+# reporting-Satz wie gewohnt, eine Altvorlage ohne reporting im Uebergangsmodus
+# nur ueber install.ps1. Einen unvollstaendigen oder beschaedigten Satz meldet
+# er bei jedem Paket als package_template_failed. Deshalb hier vor Mutex,
+# Registry, Aufgaben oder Dateien pruefen. Der Vergleich der Vorlage mit sich
+# selbst ist genau die Vorlagenpruefung des Autoimporters ohne den Paketteil.
 if ($ServerOnly) {
     Write-Step 'Pruefe eingefrorene Paketvorlage (-ServerOnly)'
     $frozenTemplate = Get-Item -LiteralPath $templateDest -Force -ErrorAction SilentlyContinue
@@ -679,9 +693,13 @@ if ($ServerOnly) {
         throw ("ServerOnly: Paketvorlage {0} fehlt oder ist kein echtes Verzeichnis; es wurde nichts geschrieben." -f $templateDest)
     }
     if (-not (Test-VsPackageTemplateSetCurrent -TemplateRoot $templateDest -PackageRoot $templateDest)) {
-        throw ("ServerOnly: Paketvorlage {0} traegt keinen vollstaendigen, gueltigen reporting\current.json-Satz. Der neue Autoimporter wuerde jedes Paket blockieren; es wurde nichts geschrieben." -f $templateDest)
+        throw ("ServerOnly: Paketvorlage {0} ist weder eine Altvorlage (install.ps1 ohne reporting) noch ein vollstaendiger, gueltiger reporting\current.json-Satz. Der neue Autoimporter wuerde jedes Paket blockieren; es wurde nichts geschrieben." -f $templateDest)
     }
-    Write-Ok ("Paketvorlage {0} ist gueltig und bleibt unveraendert" -f $templateDest)
+    if (Test-VsLegacyPackageTemplate -TemplateRoot $templateDest) {
+        Write-Ok ("Paketvorlage {0} ist eine Altvorlage ohne Reporter-Satz und bleibt unveraendert (Uebergangsmodus: nur install.ps1 wird abgeglichen)" -f $templateDest)
+    } else {
+        Write-Ok ("Paketvorlage {0} ist gueltig und bleibt unveraendert" -f $templateDest)
+    }
 }
 
 try {
@@ -752,6 +770,10 @@ $settings = @{
     PackagesSyncIntervalSeconds = $PackagesSyncIntervalSeconds
     ImporterIntervalSeconds     = $ImporterIntervalSeconds
     SiteHealthIntervalSeconds   = $SiteHealthIntervalSeconds
+    # Build dieses Pakets (BUILD.json, leer bei einem Git-Checkout): derselbe
+    # Wert steht im Manifest und in der Beschreibung der vier Aufgaben.
+    InstalledBuild              = $buildLabel
+    InstalledBuildDate          = [string]$buildInfo.Date
 }
 if ($siteCode) { $settings['MECM_SiteCode'] = $siteCode }
 # Nur schreiben, wenn ein Provider vorliegt: ein leerer Wert wuerde die lokale
@@ -867,6 +889,9 @@ try {
             throw ('MECM-Serverpaket-Pruefsumme weicht ab: {0}' -f $source.Name)
         }
     }
+    # Manifest aus den gestagten, schon geprueften Dateien. Es wird als letzte
+    # Datei aktiviert und beim Rollback wie jede andere zurueckgenommen.
+    [void](New-VsServerManifest -Directory $installStage -FileNames @($serverSources.Name) -Build $buildInfo -Mode $installMode)
     # -ServerOnly baut keine Vorlage und kein Reporterbuendel; die Live-Vorlage
     # wurde vor dem Transaktionsbeginn geprueft und bleibt unveraendert.
     if (-not $ServerOnly) {
@@ -1032,9 +1057,10 @@ foreach ($task in $tasks) {
 $installBackup = Join-Path $installDir ('.virtusphere-backup-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $installBackup -Force -ErrorAction Stop | Out-Null
 try {
-    $orderedNames = @($serverSources.Name | Sort-Object @{ Expression = {
+    $orderedNames = @(@($serverSources.Name) + $script:VsServerManifestName | Sort-Object @{ Expression = {
         if ($_ -eq 'VirtuSphere-Logging.ps1') { 0 }
         elseif ($_ -eq 'VirtuSphere-Common.ps1') { 2 }
+        elseif ($_ -eq $script:VsServerManifestName) { 3 }
         else { 1 }
     } }, @{ Expression = { $_ } })
     foreach ($name in $orderedNames) {
@@ -1091,7 +1117,13 @@ if ($installedVersion -ne $installedExpectedVersion -or $installedVersion -ne $i
 if ($installedMecmServerVersion -ne $installedAutoimporterRequiredVersion) {
     throw ('Installierter MECM-Serververtrag hat Version {0}, der Autoimporter benoetigt {1}. Aufgaben bleiben deaktiviert.' -f $installedMecmServerVersion, $installedAutoimporterRequiredVersion)
 }
+$installedFileSet = Get-VsServerFileSetState -InstallDir $installDir
+if (-not $installedFileSet.ManifestPresent -or @($installedFileSet.Deviations).Count -gt 0 -or
+    $installedFileSet.Checked -ne @($serverSources).Count) {
+    throw ('Installationsmanifest passt nicht zum aktivierten Dateisatz ({0}). Aufgaben bleiben deaktiviert.' -f (@($installedFileSet.Deviations) -join ', '))
+}
 Write-Ok "Skripte samt Loggingmodul nach $installDir kopiert und verifiziert"
+Write-Ok ("Installationsmanifest geschrieben: Build {0}, {1} Dateien" -f $buildLabel, $installedFileSet.Checked)
 if ($ServerOnly) {
     Write-Ok "Package-Vorlage $templateDest unveraendert gelassen (-ServerOnly)"
 } else {
@@ -1138,7 +1170,7 @@ foreach ($task in $tasks) {
     $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
     # Endlosschleifen: kein Laufzeitlimit (Standard 72h wuerde sie killen).
     $set.ExecutionTimeLimit = 'PT0S'
-    $definition = New-ScheduledTask -Action $action -Trigger $triggers -Principal $principal -Settings $set -Description 'VirtuSphere MECM Integration'
+    $definition = New-ScheduledTask -Action $action -Trigger $triggers -Principal $principal -Settings $set -Description ('VirtuSphere MECM Integration, Build {0} {1}, installiert {2} ({3})' -f $buildLabel, [string]$buildInfo.Date, (Get-Date -Format 'yyyy-MM-dd HH:mm'), $installMode)
     Register-ScheduledTask -TaskName $task.Name -InputObject $definition -Force | Out-Null
     Start-ScheduledTask -TaskName $task.Name
     Write-Ok ("Aufgabe registriert und gestartet: {0}" -f $task.Name)

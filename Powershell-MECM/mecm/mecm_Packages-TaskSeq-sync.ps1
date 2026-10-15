@@ -41,6 +41,9 @@ Write-VsLog -Message '=== Packages-Sync gestartet ==='
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
 $SCRIPT_VERSION = 'packages-sync/2.0'
+# Build und Dateisatz aus manifest.json des Installers an die Kennung haengen
+# ("+<Commit>", "-abw" bei abweichender Datei); schreibt eine Logzeile.
+$SCRIPT_VERSION = Resolve-VsReportedScriptVersion -BaseVersion $SCRIPT_VERSION -InstallDir $PSScriptRoot
 
 $folderName = $script:VsApplicationsFolderName   # SSoT in VirtuSphere-Common.ps1
 $intervalSeconds = Resolve-VsInterval -Source 'packages-sync' -Configured $config.PackagesSyncInterval
