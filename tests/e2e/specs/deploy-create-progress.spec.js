@@ -217,10 +217,15 @@ test('stored create outcomes and their failure classes stay distinguishable whil
 
   const findings = card.locator('[data-create-finding-list] li');
   await expect(findings).toHaveCount(2);
-  await expect(findings.nth(0).locator('code')).toHaveText('module_failed');
-  await expect(findings.nth(1).locator('code')).toHaveText('async_state_missing');
-  expect(await findings.nth(0).locator('span').textContent()).not.toBe(
-    await findings.nth(1).locator('span').textContent()
+  // The error code is the plain <code>; a module failure additionally quotes
+  // the host's own message as <code class="log-line">, every other class has
+  // none (deploy_create_progress_host_detail()).
+  await expect(findings.nth(0).locator('code:not(.log-line)')).toHaveText('module_failed');
+  await expect(findings.nth(1).locator('code:not(.log-line)')).toHaveText('async_state_missing');
+  await expect(findings.nth(0).locator('code.log-line')).toHaveText('The create module reported a failure.');
+  await expect(findings.nth(1).locator('code.log-line')).toHaveCount(0);
+  expect(await findings.nth(0).locator('span:not(.muted)').textContent()).not.toBe(
+    await findings.nth(1).locator('span:not(.muted)').textContent()
   );
   await expect(page.locator('[data-deploy-retry-blocked]')).toBeVisible();
 });
