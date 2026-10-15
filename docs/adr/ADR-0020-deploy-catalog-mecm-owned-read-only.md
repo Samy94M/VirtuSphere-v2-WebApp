@@ -87,3 +87,38 @@ Decided:
   `deploy_vms`, no `mecm_sync_state`, no `updated`. That was true by accident and
   is pinned by `PackageSyncScopeContractTest` now, because it is the guarantee an
   operator relies on when a catalog sync runs every minute.
+
+## Amendment 2026-10-15: the sync never relinks a real VM (AV-R08)
+
+The bounded relink still decided for the operator. When the autoimporter
+created version 1.1 and removed 1.0 (`removeOldVersion`) before the next
+package sync, both changes fell into one payload and every VM holding 1.0 was
+moved to 1.1; when they fell into two payloads, nothing moved. A moved
+assignment takes effect on the next MECM transfer of that VM, often much later
+and for an unrelated reason, and 1.1 then runs its `install.ps1` again on an
+installed system and overwrites what the administrator configured after 1.0.
+The VM editor already showed 1.1 as if somebody had chosen it.
+
+Decided by the user on 28.09.2026 (AV-R08) and implemented on 15.10.2026:
+
+- **The package sync never changes a real VM's assignment.** A retired row
+  stays assigned and selectable; the VM editor warns that a transfer with a
+  retired version stays in the queue with `collection_missing`.
+- **The update hint covers every strictly higher active version** (AV-R09), not
+  only retired links, and stays silent when the VM already holds that version
+  or a higher one. Successor choice remains `catalog_pick_highest_version`.
+- **Template VMs follow a higher version exactly once**, when that version
+  appears in the catalog for the first time (a row this payload inserted).
+  Only lower versions move; a template set back by hand afterwards stays where
+  it was put. Templates are never transferred to MECM, so this cannot reinstall
+  anything, and new missions cloned from a template start on the current
+  version. The entry is `mecm.packages_relinked` with "Vorlagen-VM(s)" items.
+- **A retirement with remaining assignments is logged once**
+  (`mecm.package_retired_assigned`, warning) with the number of real and
+  template VMs and the higher active version. `mecm.packages_relink_skipped`
+  is historical: readable, never written again.
+- `assignments_relinked_at` and the purge rule are unchanged; rows relinked
+  before this amendment keep their protection.
+
+Until the portal carrying this amendment runs in production, `removeOldVersion`
+is not set in package `config.json` files.

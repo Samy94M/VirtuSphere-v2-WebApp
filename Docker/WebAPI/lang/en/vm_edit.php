@@ -46,6 +46,7 @@ return [
     'hostname_legacy_warning' => 'Warning: this hostname violates the Windows rules (max. 15 characters, no dots). The client would change it to ":preview" during deploy. Please correct it with your next save.',
     'package_retired_suffix' => '(retired)',
     'package_update_available' => 'Update available: this VM is linked to ":old" while ":new" is active in the catalog.',
+    'package_retired_selected' => '":name" is retired and no longer exists in MECM. If the VM is transferred to MECM with this box ticked, it stays in the queue with collection_missing. Untick it or replace it with the current version.',
     'client_events_summary' => 'Show recent client events',
     'client_events_empty' => 'No client reports for this VM yet.',
     'th_time' => 'Time',

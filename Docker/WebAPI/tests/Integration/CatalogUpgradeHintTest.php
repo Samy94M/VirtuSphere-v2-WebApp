@@ -8,7 +8,7 @@ require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/catalog.php';
 
 /**
- * B12: the update-available hint and the real version relink used to answer
+ * B12: the update-available hint and the version relink used to answer
  * "which successor" with two different rules. mecm_packages.php picks by
  * version_compare(); the hint picked by `ORDER BY new.id DESC` and first-wins,
  * i.e. by INSERT ORDER. A re-imported older build (higher row id, lower
@@ -68,8 +68,45 @@ final class CatalogUpgradeHintTest extends TestCase
         self::assertSame(
             self::PREFIX . 'pkg-1.10.0',
             $hints[self::PREFIX . 'pkg-1.2.0'] ?? null,
-            'the hint must follow version_compare, exactly like the relink in mecm_packages.php'
+            'the hint must follow version_compare, exactly like the template rule in mecm_packages.php'
         );
+    }
+
+    /**
+     * AV-R09: the sync no longer moves a real VM (AV-R08), so the hint is the
+     * only way an administrator learns about 1.1 while 1.0 is still active,
+     * which is the normal case without removeOldVersion.
+     */
+    public function testTheHintAppearsWhileTheLinkedVersionIsStillActive(): void
+    {
+        $activeOld = $this->insertPackage('1.0', VIRTUSPHERE_CATALOG_STATUS_DEFAULT);
+        $this->linkPackage($activeOld);
+        $this->insertPackage('1.1', VIRTUSPHERE_CATALOG_STATUS_DEFAULT);
+
+        $hints = repo_vm_package_upgrade_hints($this->db, $this->vmId);
+
+        self::assertSame(self::PREFIX . 'pkg-1.1', $hints[self::PREFIX . 'pkg-1.0'] ?? null);
+    }
+
+    /** E2: a lower active version is never recommended, even for a retired link. */
+    public function testTheHintNeverRecommendsALowerVersion(): void
+    {
+        $retiredHigh = $this->insertPackage('2.0', VIRTUSPHERE_CATALOG_STATUS_RETIRED);
+        $this->linkPackage($retiredHigh);
+        $this->insertPackage('1.5', VIRTUSPHERE_CATALOG_STATUS_DEFAULT);
+
+        self::assertSame([], repo_vm_package_upgrade_hints($this->db, $this->vmId));
+    }
+
+    /** No hint when the VM already holds the recommended version or a higher one. */
+    public function testTheHintIsSilentWhenTheVmAlreadyHoldsTheHigherVersion(): void
+    {
+        $old = $this->insertPackage('1.0', VIRTUSPHERE_CATALOG_STATUS_RETIRED);
+        $new = $this->insertPackage('1.1', VIRTUSPHERE_CATALOG_STATUS_DEFAULT);
+        $this->linkPackage($old);
+        $this->linkPackage($new);
+
+        self::assertSame([], repo_vm_package_upgrade_hints($this->db, $this->vmId));
     }
 
     public function testThePurePickPrefersVersionOverInsertOrder(): void

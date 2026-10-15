@@ -358,6 +358,15 @@ declare(strict_types=1);
             <?php foreach ($packageUpgradeHints as $oldName => $newName) { ?>
                 <p class="muted"><?php echo h(__t('vm_edit.package_update_available', ['old' => (string) $oldName, 'new' => (string) $newName])); ?></p>
             <?php } ?>
+            <?php
+            // AV-R08: a ticked version that left MECM is no longer moved for the
+            // administrator. Say what a transfer with it does before it happens.
+            foreach ($packages as $package) {
+                if ((string) ($package['package_status'] ?? '') === VIRTUSPHERE_CATALOG_STATUS_RETIRED
+                    && in_array((int) $package['id'], $selectedPackages, true)) { ?>
+                <p class="alert alert-warning"><?php echo h(__t('vm_edit.package_retired_selected', ['name' => (string) ($package['package_name'] ?? '')])); ?></p>
+            <?php }
+            } ?>
             <div class="checkbox-grid">
                 <?php foreach ($packages as $package) {
                     $packageId = (int) $package['id'];

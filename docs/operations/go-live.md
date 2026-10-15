@@ -502,7 +502,9 @@ funktionieren ohne MECM weiter.
 2. **Schutzschwelle** gegen die reale Kataloggröße prüfen (Default 30 %, Portal →
    Einstellungen → Paket-Sync-Schutzschwelle) und bei Bedarf anpassen.
 3. **Retire statt Löschen** einmal bewusst provozieren (Versionswechsel) und
-   prüfen, dass VM-Zuweisungen umgehängt statt vernichtet werden.
+   prüfen, dass VM-Zuweisungen erhalten bleiben und nicht umgehängt werden, der
+   VM-Editor „Update verfügbar“ zeigt, Vorlagen-VMs der neuen Version gefolgt
+   sind und das Log „Zurückgezogene Paketversion weiter zugewiesen“ enthält.
 4. **ACL der Content-Ordner prüfen (Abnahmepunkt, nicht nur Warnung).** Sowohl die
    paketeigene `install.ps1` (Paket-Pipeline) als auch die vier Client-Skripte
    laufen als SYSTEM mit `-ExecutionPolicy Bypass` aus ihrer ContentLocation. Ist

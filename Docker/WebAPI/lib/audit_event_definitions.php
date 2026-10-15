@@ -106,6 +106,8 @@ const VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED = 'mecm.rollout_revi
 const VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED = 'mecm.catalog_sync_rejected';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED = 'mecm.packages_relinked';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED = 'mecm.packages_relink_skipped';
+// AV-R08 (15.10.2026): a version left the catalog while VMs still hold it.
+const VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED = 'mecm.package_retired_assigned';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_REPORT_TOKEN_REJECTED = 'mecm.report_token_rejected';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_CLIENT_CAP = 'mecm.client_event_cap_reached';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED = 'mecm.reporter_upgraded';
@@ -119,9 +121,13 @@ const VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED = 'mecm.reporter_upgraded';
  * exempts them from `unused-event` and reports `historical-produced` when a
  * producer writes one.
  * `vm.identity_adopted`: "adopt identity" was removed (WM-E2a).
+ * `mecm.packages_relink_skipped`: the package sync no longer relinks real VMs
+ * at all (AV-R08), so "skipped" stopped meaning anything; a retirement with
+ * remaining assignments is `mecm.package_retired_assigned`.
  */
 const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [
     VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED,
+    VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED,
 ];
 
 /**
@@ -234,6 +240,7 @@ function audit_event_registry(): array
         VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], ['retire_count', 'active_count', 'threshold_percent'], $throttle, 'required', [], [], [], $catalogs),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], $success, ['items', 'item_count'], [], 'required', [], [], [], $catalogs),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['items', 'item_count'], [], 'required', [], [], [], $catalogs),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['items', 'item_count'], [], 'required', [], [], [], $catalogs),
         VIRTUSPHERE_AUDIT_EVENT_MECM_REPORT_TOKEN_REJECTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['machine_endpoint'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], ['action'], $throttle, 'required', [], [], [], $endpoints),
         VIRTUSPHERE_AUDIT_EVENT_MECM_CLIENT_CAP => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['vm'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], [], $throttle),
         VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['integration_source'], [VIRTUSPHERE_AUDIT_RESULT_RECOVERED], ['report_version'], $throttle, 'required', [], [], [], VIRTUSPHERE_INTEGRATION_RUN_SOURCES),

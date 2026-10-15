@@ -199,7 +199,8 @@ sogar „bestehende Mitgliedschaften werden nie entfernt".
   Verteilwahrheit (`package_content_in_progress`, `package_content_unknown`).
 - B11-Rest und B12 sind Teil der Etappe: der Statusverlauf hat Leser und
   Retention (Migration 0032), Update-Hinweis und Relink teilen die
-  Versionswahl (`catalog_pick_highest_version`).
+  Versionswahl (`catalog_pick_highest_version`). Seit AV-R08 (ADR-0020,
+  Nachtrag 2026-10-15) gilt der Relink nur noch für Vorlagen-VMs.
 - Das MECM-Hardware-Gate bleibt ausdrücklich offen: OS-Wechsel A→B mit
   überlebender Hand-Regel, wiederholter Device-Sync idempotent, Verteilung
   erfolgreich/in Arbeit/fehlgeschlagen korrekt gemeldet (Air-Gap-Checkliste).

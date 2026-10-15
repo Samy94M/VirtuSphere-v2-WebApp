@@ -744,16 +744,38 @@ Lebenszyklus eines Katalogeintrags:
    gespeichert und im Portal angezeigt.
 2. **Zurückgezogen (Retired)**: fehlt ein Eintrag im Sync-Payload (z. B.
    Versionswechsel mit `removeOldVersion`), wird er markiert statt gelöscht.
-   VM-Zuweisungen bleiben erhalten; existiert eine aktive Nachfolge-Version
-   (gleicher Namensstamm), die im selben Sync neu angelegt wurde und eine
-   höhere Version hat, werden die Zuweisungen **automatisch umgehängt**
-   (protokolliert im Log, Kategorie „MECM-Integration"). Sonst bleibt die
-   Zuweisung bestehen und der VM-Editor zeigt „Update verfügbar". Taucht der Name
-   wieder auf, wird er automatisch reaktiviert.
+   VM-Zuweisungen bleiben erhalten. **VirtuSphere hängt eine VM nie selbst auf
+   eine neue Version um** (AV-R08, seit 15.10.2026): Die neue Version würde ihr
+   `install.ps1` auf einem eingerichteten System erneut ausführen und
+   überschreiben, was danach von Hand eingestellt wurde. Der Rückzug einer
+   Version, die noch VMs zugewiesen ist, steht im Log (Kategorie
+   „MECM-Integration“, „Zurückgezogene Paketversion weiter zugewiesen“) mit der
+   Anzahl der VMs und Vorlagen-VMs und der höheren aktiven Version. Taucht der
+   Name wieder auf, wird er automatisch reaktiviert.
 3. **Endgültig gelöscht**: erst nach 30 Tagen im Zustand „Zurückgezogen"
    **und** ohne verbleibende VM-Verknüpfung (Wartungsdienst). Verknüpfte
-   zurückgezogene Pakete bleiben dauerhaft erhalten, ebenso einmal umgehängte
-   Pakete.
+   zurückgezogene Pakete bleiben dauerhaft erhalten, ebenso Pakete, deren
+   Zuweisungen einmal automatisch umgehängt wurden (heute nur bei Vorlagen,
+   früher auch bei VMs).
+
+**Neue Version für eine VM:** Der VM-Editor zeigt „Update verfügbar“, sobald
+eine echt höhere Version desselben Pakets aktiv ist, auch solange die alte noch
+aktiv ist. Der Admin setzt den Haken auf die neue Version, entfernt den alten
+und überträgt eine bereits registrierte VM mit „Zuweisungen an MECM
+übertragen“. Ein Haken auf einer zurückgezogenen Version zeigt eine Warnung:
+Eine Übertragung damit bleibt mit `collection_missing` in der Warteschlange.
+
+**Vorlagen-VMs** (Missionen mit Vorlagen-Präfix, nie an MECM übertragen) folgen
+einer höheren Version genau einmal, wenn sie zum ersten Mal im Katalog
+erscheint. Nur niedrigere Versionen rücken nach; der Eintrag „Pakete neu
+verknüpft“ nennt sie. Wird eine Vorlage danach von Hand auf eine ältere Version
+gesetzt, bleibt sie dort. Neue Missionen aus einer Vorlage übernehmen deren
+Paketauswahl beim Klonen.
+
+**Bis das Portal mit AV-R08 auf Prod läuft:** In `config.json` kein
+`removeOldVersion` setzen. Ältere Portalstände hängen VMs sonst um, wenn das
+Löschen der alten und das Erscheinen der neuen Version in denselben Paket-Sync
+fallen.
 
 **Schutzschwelle:** Würde ein einzelner Sync mehr als X % (Standard 30 %,
 Portal → Einstellungen → Tab „Kataloge und Inventar") der aktiven Pakete zurückziehen (typisch bei

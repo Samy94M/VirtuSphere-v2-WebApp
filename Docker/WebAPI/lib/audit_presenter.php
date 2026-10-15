@@ -125,6 +125,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => 'Catalog sync rejected for ' . $id . ': payload would retire ' . ($context['retire_count'] ?? 0) . ' of ' . ($context['active_count'] ?? 0) . ' active entries (threshold ' . ($context['threshold_percent'] ?? 0) . '%).',
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => '[mecm_packages] package relink: ' . audit_description_items($context),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => '[mecm_packages] retired without relink (no newer version in this payload): ' . audit_description_items($context),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED => '[mecm_packages] retired version still assigned, nothing moved: ' . audit_description_items($context),
         VIRTUSPHERE_AUDIT_EVENT_MECM_REPORT_TOKEN_REJECTED => 'Rejected ' . ($context['action'] ?? 'report') . ' with invalid token',
         VIRTUSPHERE_AUDIT_EVENT_MECM_CLIENT_CAP => 'Daily client event cap reached for vm ' . $id,
         VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED => 'reporter ' . $id . ' switched from legacy heartbeats to V' . ($context['report_version'] ?? VIRTUSPHERE_REPORT_CHANNEL_VERSION) . ' result reports',

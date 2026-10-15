@@ -141,6 +141,7 @@ return [
     'eventcode_machine_api_internal_failure' => 'Machine API failure',
     'eventcode_mecm_catalog_sync_rejected' => 'Catalog sync rejected',
     'eventcode_mecm_client_event_cap_reached' => 'Client event cap reached',
+    'eventcode_mecm_package_retired_assigned' => 'Retired package version still assigned',
     'eventcode_mecm_packages_relink_skipped' => 'Package relink skipped',
     'eventcode_mecm_packages_relinked' => 'Packages relinked',
     'eventcode_mecm_report_token_rejected' => 'Report token rejected',

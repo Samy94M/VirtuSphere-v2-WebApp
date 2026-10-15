@@ -142,6 +142,7 @@ return [
     'eventcode_machine_api_internal_failure' => 'Maschinen-API-Fehler',
     'eventcode_mecm_catalog_sync_rejected' => 'Katalogabgleich abgewiesen',
     'eventcode_mecm_client_event_cap_reached' => 'Client-Ereignisgrenze erreicht',
+    'eventcode_mecm_package_retired_assigned' => 'Zurückgezogene Paketversion weiter zugewiesen',
     'eventcode_mecm_packages_relink_skipped' => 'Paketverknüpfung übersprungen',
     'eventcode_mecm_packages_relinked' => 'Pakete neu verknüpft',
     'eventcode_mecm_report_token_rejected' => 'Report-Token abgewiesen',

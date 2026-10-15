@@ -140,13 +140,15 @@ final class PhaseCContractTest extends TestCase
     public function testPackageSyncRetiresInsteadOfDeleting(): void
     {
         // E3: the destructive DELETE (which cascaded into deploy_vm_packages)
-        // must never come back; retire + guard + relink replace it.
+        // must never come back; retire + guard replace it. Since AV-R08 only
+        // template VMs follow a new version; real VMs are never relinked.
         $packages = $this->source('mecm_packages.php');
         self::assertStringNotContainsString('DELETE FROM deploy_packages', $packages);
         self::assertStringNotContainsString('DELETE FROM deploy_os', $packages);
         self::assertStringContainsString('function catalog_retire_missing', $packages);
         self::assertStringContainsString('function packages_retire_guard', $packages);
-        self::assertStringContainsString('function packages_relink_upgrades', $packages);
+        self::assertStringContainsString('function packages_follow_first_versions_in_templates', $packages);
+        self::assertStringNotContainsString('function packages_relink_upgrades', $packages);
         self::assertStringContainsString('retired_at = NULL', $packages);
 
         $catalog = $this->source('lib/repo/catalog.php');

@@ -80,7 +80,7 @@ flowchart TD
 
 ## Packages Sync
 
-Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach `VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` Tagen und nur, wenn keine VM sie mehr nutzt und ihre Zuweisungen nie umgehängt wurden; ein Paket, dessen Zuweisungen einmal auf eine höhere Version umgehängt wurden, bleibt dauerhaft stehen.
+Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach `VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` Tagen und nur, wenn keine VM sie mehr nutzt und ihre Zuweisungen nie umgehängt wurden; ein Paket, dessen Zuweisungen einmal automatisch auf eine höhere Version umgehängt wurden (heute nur bei Vorlagen-VMs, früher auch bei VMs), bleibt dauerhaft stehen. Echte VMs hängt das Portal seit AV-R08 nie selbst um.
 
 ```mermaid
 flowchart TD
@@ -96,7 +96,7 @@ flowchart TD
   P --> T{"Portal: mindestens VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE aktive Einträge, und fehlen mehr als die eingestellte Schwelle (5 bis 90 %, Standard 30 %)?"}
   T -->|ja| T1["Portal lehnt ab (409), Warnung catalog_conflict; der nächste Lauf sendet erneut"] --> R
   T -->|nein| RT["Portal: fehlende Einträge „zurückgezogen“, neue und wieder aufgetauchte aktiv"]
-  RT --> RL["Portal: VM-Zuweisungen auf eine höhere Version umhängen, wenn diese in diesem Katalog neu ist; sonst „Update verfügbar“ im VM-Editor"]
+  RT --> RL["Portal: echte VMs nie umhängen; Vorlagen-VMs folgen einer höheren Version einmal, wenn sie in diesem Katalog zum ersten Mal erscheint; Rückzug einer noch zugewiesenen Version protokollieren; der VM-Editor zeigt „Update verfügbar“"]
   RL --> H["Gesendeten Katalogstand für den nächsten Vergleich merken"]
   H --> R["„completed“ melden (Pakete, Task Sequences, gesendet); Pause 60 s"]
   R -.->|nächster Lauf| S

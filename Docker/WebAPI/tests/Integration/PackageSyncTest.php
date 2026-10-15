@@ -5,17 +5,23 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/db.php';
-// The purge is part of the contract here: it and the relink compose into the one
+// The purge is part of the contract here: it and a relink compose into the one
 // path that could lose an assignment for good.
 require_once dirname(__DIR__, 2) . '/lib/repo/catalog.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/package_sync.php';
+require_once dirname(__DIR__, 2) . '/lib/audit_event_definitions.php';
 
-// E3 hardening contract: retire instead of delete, assignment relink on
-// version bumps, threshold brake. Runs in-stack (db() + HTTP against
+// E3 hardening contract: retire instead of delete, threshold brake, and since
+// AV-R08 (15.10.2026) never a relink of a real VM: only template VMs follow a
+// version that appears for the first time. Runs in-stack (db() + HTTP against
 // webserver) and allowlists its own container IP for the duration.
 final class PackageSyncTest extends TestCase
 {
     private const PREFIX = 'PhpunitE3App';
+
+    private const REAL_MISSION = 'phpunit_e3_mission';
+
+    private int $vmSeq = 0;
 
     private ?mysqli $db = null;
 
@@ -77,10 +83,13 @@ final class PackageSyncTest extends TestCase
             $stmt->execute();
         }
     }
-
-    public function testMissingPackageIsRetiredNotDeletedAndAssignmentsRelink(): void
+    /**
+     * AV-R08: a real version bump retires the old row but never moves a real
+     * VM. The next MECM transfer would otherwise run the new install.ps1 on an
+     * installed system and overwrite what the administrator configured.
+     */
+    public function testARealVersionBumpRetiresTheOldRowButNeverMovesARealVm(): void
     {
-        // Seed catalog with two versions' history: first sync brings v1.
         [$status, $body] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . 'Other-2.0']));
         self::assertSame(200, $status, $body);
         $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
@@ -90,101 +99,133 @@ final class PackageSyncTest extends TestCase
         self::assertNotNull($v1);
         self::assertSame(self::PREFIX, $v1['package_basename']);
         self::assertSame('1.0', $v1['package_version']);
-
-        // Link a test VM to v1.
-        $this->db->query("INSERT INTO deploy_missions (mission_name, mission_status) VALUES ('phpunit_e3_mission', 'active')");
-        $missionId = $this->db->insert_id;
-        $this->db->query("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES ({$missionId}, 'PHPUNIT-E3', 'PHPUNIT-E3')");
-        $vmId = $this->db->insert_id;
-        $this->db->query('INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (' . $vmId . ', ' . (int) $v1['id'] . ')');
-
-        // Second sync: v1 gone, v2 present -> retire + relink.
+        $vmId = $this->seedVmWithPackages([(int) $v1['id']]);
         $editVersion = (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
+
+        // v1 gone and v2 new in the same payload: the case that used to relink.
         [$status, $body] = $this->post($this->payload([self::PREFIX . '-2.0', self::PREFIX . 'Other-2.0']));
         self::assertSame(200, $status, $body);
-        self::assertGreaterThan($editVersion, (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmId]));
 
         $v1After = $this->packageRow(self::PREFIX . '-1.0');
         self::assertNotNull($v1After, 'retired row must still exist');
         self::assertSame('Retired', $v1After['package_status']);
         self::assertNotNull($v1After['retired_at']);
+        self::assertNull($v1After['assignments_relinked_at'], 'nothing was moved, so nothing is marked');
+        self::assertSame([(int) $v1['id']], $this->linkedPackageIds($vmId), 'a real VM keeps the version the administrator chose');
+        self::assertSame($editVersion, (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$vmId]), 'the VM editor state was not touched');
 
-        $v2 = $this->packageRow(self::PREFIX . '-2.0');
-        self::assertNotNull($v2);
-        $link = $this->db->query('SELECT package_id FROM deploy_vm_packages WHERE vm_id = ' . $vmId)->fetch_all(MYSQLI_ASSOC);
-        self::assertSame([(int) $v2['id']], array_map(static fn (array $r): int => (int) $r['package_id'], $link), 'assignment must move to the successor');
+        $entry = $this->auditContext(VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED, self::PREFIX . '-1.0');
+        self::assertNotNull($entry, 'the retirement of a version VMs still hold is logged once');
+        self::assertStringContainsString(self::PREFIX . '-1.0: 1 VM(s), 0 Vorlagen-VM(s), hoehere Version ' . self::PREFIX . '-2.0', $entry);
+        self::assertNull($this->auditContext(VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED, self::PREFIX . '-1.0'), 'no relink entry for a real VM');
 
-        // Third sync: v1 re-appears -> un-retire.
+        // v1 re-appears -> un-retire, still nothing moved.
         [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0', self::PREFIX . 'Other-2.0']));
         self::assertSame(200, $status);
         $v1Again = $this->packageRow(self::PREFIX . '-1.0');
         self::assertSame('Aktiv', $v1Again['package_status']);
         self::assertNull($v1Again['retired_at']);
+        self::assertSame([(int) $v1['id']], $this->linkedPackageIds($vmId));
     }
 
-    public function testRelinkScopeLocksVmBeforePackageAndLeavesALateAssignmentOutsideTheSnapshot(): void
+    /**
+     * A template VM is never installed, so it follows a higher version once,
+     * when that version appears for the first time, even while the old one is
+     * still active. A real VM holding the same version stays where it is.
+     */
+    public function testATemplateFollowsAFirstAppearanceWhileARealVmStays(): void
     {
         [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
         self::assertSame(200, $status);
         $v1 = $this->packageRow(self::PREFIX . '-1.0');
-        self::assertNotNull($v1);
-        $packageId = (int) $v1['id'];
-        $firstVmId = $this->seedVmWithPackages([$packageId]);
-        $missionId = (int) repo_scalar($this->db, 'SELECT mission_id FROM deploy_vms WHERE id = ?', 'i', [$firstVmId]);
-        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)', 'iss', [$missionId, 'PHPUNIT-E3-LATE', 'PHPUNIT-E3-LATE']);
-        $lateVmId = (int) $this->db->insert_id;
+        $realVm = $this->seedVmWithPackages([(int) $v1['id']]);
+        $templateVm = $this->seedVmWithPackages([(int) $v1['id']], true);
+        $templateEdit = (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$templateVm]);
 
-        $late = new mysqli(
-            envboot_required('DB_HOST'),
-            envboot_required('DB_USER'),
-            envboot_required('DB_PASS'),
-            envboot_required('DB_NAME'),
-            (int) envboot_optional('DB_PORT', '3306')
-        );
-        $late->set_charset('utf8mb4');
-        $late->query("SET time_zone = '+00:00'");
-        $late->query('SET SESSION innodb_lock_wait_timeout = 2');
+        // 2.0 appears for the first time; 1.0 stays active (no removeOldVersion).
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0']));
+        self::assertSame(200, $status);
+        $v2 = $this->packageRow(self::PREFIX . '-2.0');
+
+        self::assertSame([(int) $v2['id']], $this->linkedPackageIds($templateVm), 'the template follows the first appearance');
+        self::assertGreaterThan($templateEdit, (int) repo_scalar($this->db, 'SELECT edit_version FROM deploy_vms WHERE id = ?', 'i', [$templateVm]));
+        self::assertSame([(int) $v1['id']], $this->linkedPackageIds($realVm), 'the real VM is never moved');
+        $entry = $this->auditContext(VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED, self::PREFIX . '-1.0 -> ' . self::PREFIX . '-2.0');
+        self::assertNotNull($entry);
+        self::assertStringContainsString('(1 Vorlagen-VM(s))', $entry);
+        self::assertNull($this->auditContext(VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED, self::PREFIX . '-1.0'), 'nothing was retired');
+    }
+
+    /**
+     * Once is once: a template set back by hand stays there on every later
+     * sync, because 2.0 is no longer a first appearance.
+     */
+    public function testATemplatePinnedBackByHandIsNotMovedAgain(): void
+    {
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
+        self::assertSame(200, $status);
+        $v1 = $this->packageRow(self::PREFIX . '-1.0');
+        $templateVm = $this->seedVmWithPackages([(int) $v1['id']], true);
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0']));
+        self::assertSame(200, $status);
+        $v2 = $this->packageRow(self::PREFIX . '-2.0');
+        self::assertSame([(int) $v2['id']], $this->linkedPackageIds($templateVm));
+
+        repo_execute($this->db, 'UPDATE deploy_vm_packages SET package_id = ? WHERE vm_id = ? AND package_id = ?', 'iii', [(int) $v1['id'], $templateVm, (int) $v2['id']]);
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0']));
+        self::assertSame(200, $status);
+
+        self::assertSame([(int) $v1['id']], $this->linkedPackageIds($templateVm), 'a deliberately pinned template keeps its version');
+    }
+
+    public function testTheTemplateScopeHoldsOnlyTemplatesBelowAFirstAppearanceAndLocksThem(): void
+    {
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-3.0']));
+        self::assertSame(200, $status);
+        $v1 = $this->packageRow(self::PREFIX . '-1.0');
+        $v3 = $this->packageRow(self::PREFIX . '-3.0');
+        $realVm = $this->seedVmWithPackages([(int) $v1['id']]);
+        $lowTemplate = $this->seedVmWithPackages([(int) $v1['id']], true);
+        $highTemplate = $this->seedVmWithPackages([(int) $v3['id']], true);
 
         $this->db->begin_transaction();
         try {
-            $scope = packages_lock_relink_vm_scope($this->db, [['id' => $packageId]]);
-            repo_execute($late, 'INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (?, ?)', 'ii', [$lateVmId, $packageId]);
-
-            self::assertSame([$firstVmId], $scope[$packageId] ?? []);
+            $scope = packages_lock_template_follow_scope($this->db, [self::PREFIX . '-1.0', self::PREFIX . '-2.0', self::PREFIX . '-3.0']);
+            $known = packages_lock_template_follow_scope($this->db, [self::PREFIX . '-1.0', self::PREFIX . '-3.0']);
         } finally {
             $this->db->rollback();
-            $late->close();
         }
 
-        self::assertSame([$packageId], $this->linkedPackageIds($lateVmId), 'a concurrent assignment outside the snapshot remains on the selectable retired row as that writer chose');
+        $vmIds = array_map(static fn (array $entry): int => $entry['vm_id'], $scope);
+        self::assertSame([$lowTemplate], $vmIds, 'only templates below the first-time 2.0; not the real VM, not the template on 3.0');
+        self::assertNotContains($realVm, $vmIds);
+        self::assertNotContains($highTemplate, $vmIds);
+        self::assertSame([], $known, 'names already in the catalog are no first appearance');
     }
 
     /**
      * A package that merely vanished from one payload is a GAP, not an upgrade,
      * so the assignment stays where the operator put it.
-     *
-     * This is the decision that replaced the old behaviour, and it is the reason
-     * the relink is bounded to "the successor is new in this payload". Before, a
-     * transient MECM outage (a hiccup, an admin mid-edit) rewrote assignments to
-     * whatever else shared the basename, and the row it moved them off then lost
-     * its purge protection. Both versions already existing is exactly the case
-     * that used to look like an upgrade and is not one.
      */
     public function testATransientDisappearanceLeavesTheAssignmentAlone(): void
     {
         [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0']));
         self::assertSame(200, $status);
         $v1 = $this->packageRow(self::PREFIX . '-1.0');
-        $v2 = $this->packageRow(self::PREFIX . '-2.0');
         $vmId = $this->seedVmWithPackages([(int) $v1['id']]);
+        $templateVm = $this->seedVmWithPackages([(int) $v1['id']], true);
 
         // v1 drops out of the payload while v2 is nothing new.
         [$status] = $this->post($this->payload([self::PREFIX . '-2.0']));
         self::assertSame(200, $status);
 
         self::assertSame([(int) $v1['id']], $this->linkedPackageIds($vmId), 'no newer row appeared, so nothing was an upgrade to follow');
+        self::assertSame([(int) $v1['id']], $this->linkedPackageIds($templateVm), 'not even a template follows a version that is not new');
         self::assertSame('Retired', $this->packageRow(self::PREFIX . '-1.0')['package_status'], 'the row is still retired; only the assignment is untouched');
         self::assertNull($this->packageRow(self::PREFIX . '-1.0')['assignments_relinked_at'], 'nothing was relinked, so nothing is marked');
+        $entry = $this->auditContext(VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED, self::PREFIX . '-1.0');
+        self::assertNotNull($entry);
+        self::assertStringContainsString('1 VM(s), 1 Vorlagen-VM(s), hoehere Version ' . self::PREFIX . '-2.0', $entry);
     }
 
     /**
@@ -192,76 +233,65 @@ final class PackageSyncTest extends TestCase
      * versions were imported out of order (a re-created package, a backported
      * fix) moved the assignment to the wrong, possibly older package.
      */
-    public function testTheSuccessorIsChosenByVersionAndNotByRowId(): void
+    public function testATemplateFollowsTheHighestNewVersionAndNotTheRowId(): void
     {
-        // Insert 3.0 FIRST so the newest row id carries the LOWER version.
         [$status] = $this->post($this->payload([self::PREFIX . '-2.0', self::PREFIX . '-3.0']));
         self::assertSame(200, $status);
         $v2 = $this->packageRow(self::PREFIX . '-2.0');
         $v3 = $this->packageRow(self::PREFIX . '-3.0');
         // Force the id order to disagree with the version order.
-        $this->db->query('UPDATE deploy_packages SET id = id + 1000 WHERE id = ' . (int) $v2['id']);
+        repo_execute($this->db, 'UPDATE deploy_packages SET id = id + 1000 WHERE id = ?', 'i', [(int) $v2['id']]);
         $v2 = $this->packageRow(self::PREFIX . '-2.0');
         self::assertGreaterThan((int) $v3['id'], (int) $v2['id'], 'the fixture needs the lower version on the higher id');
 
-        $vmId = $this->seedVmWithPackages([(int) $v2['id']]);
+        $templateVm = $this->seedVmWithPackages([(int) $v2['id']], true);
 
-        // v2 disappears, and 4.0 arrives as the genuinely new row.
-        [$status] = $this->post($this->payload([self::PREFIX . '-3.0', self::PREFIX . '-4.0']));
+        // 4.0 and 3.5 arrive as genuinely new rows; 3.0 is not new.
+        [$status] = $this->post($this->payload([self::PREFIX . '-3.0', self::PREFIX . '-3.5', self::PREFIX . '-4.0']));
         self::assertSame(200, $status);
         $v4 = $this->packageRow(self::PREFIX . '-4.0');
 
-        self::assertSame([(int) $v4['id']], $this->linkedPackageIds($vmId), 'the assignment must follow the highest version created by this payload');
+        self::assertSame([(int) $v4['id']], $this->linkedPackageIds($templateVm), 'the template must follow the highest version created by this payload');
     }
 
-    /** A VM holding both versions ends up with one link, not a duplicate. */
-    public function testAVmHoldingBothVersionsKeepsExactlyTheSuccessorLink(): void
+    /** A template holding two lower versions ends up with one link, not a duplicate. */
+    public function testATemplateHoldingTwoLowerVersionsKeepsExactlyOneLink(): void
     {
-        [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
-        self::assertSame(200, $status);
-        $v1 = $this->packageRow(self::PREFIX . '-1.0');
-
-        // Second payload creates 2.0 (new) and drops 1.0: a real version bump.
-        // The VM is linked to both beforehand, which is the PK collision case.
-        $vmId = $this->seedVmWithPackages([(int) $v1['id']]);
         [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0']));
         self::assertSame(200, $status);
+        $v1 = $this->packageRow(self::PREFIX . '-1.0');
         $v2 = $this->packageRow(self::PREFIX . '-2.0');
-        $this->db->query('INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (' . $vmId . ', ' . (int) $v2['id'] . ')');
+        $templateVm = $this->seedVmWithPackages([(int) $v1['id'], (int) $v2['id']], true);
 
-        // Now 1.0 goes away together with a newly created 3.0.
-        [$status] = $this->post($this->payload([self::PREFIX . '-2.0', self::PREFIX . '-3.0']));
+        [$status] = $this->post($this->payload([self::PREFIX . '-1.0', self::PREFIX . '-2.0', self::PREFIX . '-3.0']));
         self::assertSame(200, $status);
         $v3 = $this->packageRow(self::PREFIX . '-3.0');
 
-        $links = $this->linkedPackageIds($vmId);
-        self::assertNotContains((int) $v1['id'], $links, 'the relinked row must not keep a second link for the same package');
-        self::assertContains((int) $v3['id'], $links);
+        self::assertSame([(int) $v3['id']], $this->linkedPackageIds($templateVm), 'both lower links collapse into the one new version');
     }
 
     /**
-     * The composition that could lose a package for good: the relink removes the
+     * The composition that could lose a package for good: a relink removes the
      * reference, and the purge protected the row only while that reference
-     * existed. ADR-0020 calls the deletion safe BECAUSE linked rows are kept, and
-     * that held for every row except the ones that had assignments.
+     * existed. Still true for templates.
      */
-    public function testThePurgeKeepsARowWhoseAssignmentsTheRelinkMovedAway(): void
+    public function testThePurgeKeepsARowWhoseTemplateAssignmentsMovedAway(): void
     {
         [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
         self::assertSame(200, $status);
         $v1 = $this->packageRow(self::PREFIX . '-1.0');
-        $vmId = $this->seedVmWithPackages([(int) $v1['id']]);
+        $templateVm = $this->seedVmWithPackages([(int) $v1['id']], true);
 
         [$status] = $this->post($this->payload([self::PREFIX . '-2.0']));
         self::assertSame(200, $status);
         $v2 = $this->packageRow(self::PREFIX . '-2.0');
-        self::assertSame([(int) $v2['id']], $this->linkedPackageIds($vmId), 'a real version bump still relinks');
+        self::assertSame([(int) $v2['id']], $this->linkedPackageIds($templateVm));
 
         $v1After = $this->packageRow(self::PREFIX . '-1.0');
-        self::assertNotNull($v1After['assignments_relinked_at'], 'the relink has to record that it removed the reference');
+        self::assertNotNull($v1After['assignments_relinked_at'], 'the template relink has to record that it removed the reference');
+        self::assertNull($this->auditContext(VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED, self::PREFIX . '-1.0'), 'the template moved first, so nobody holds the retired row');
 
-        // Age it well past the purge window and run the real purge.
-        $this->db->query('UPDATE deploy_packages SET retired_at = DATE_SUB(NOW(), INTERVAL ' . (VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS + 10) . ' DAY) WHERE id = ' . (int) $v1['id']);
+        repo_execute($this->db, 'UPDATE deploy_packages SET retired_at = DATE_SUB(NOW(), INTERVAL ? DAY) WHERE id = ?', 'ii', [VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS + 10, (int) $v1['id']]);
         repo_purge_retired_packages($this->db);
 
         self::assertNotNull($this->packageRow(self::PREFIX . '-1.0'), 'a row that carried assignments must survive the purge');
@@ -278,32 +308,58 @@ final class PackageSyncTest extends TestCase
         [$status] = $this->post($this->payload([self::PREFIX . '-1.0']));
         self::assertSame(200, $status);
 
-        $this->db->query('UPDATE deploy_packages SET retired_at = DATE_SUB(NOW(), INTERVAL ' . (VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS + 10) . ' DAY) WHERE id = ' . (int) $lonely['id']);
+        repo_execute($this->db, 'UPDATE deploy_packages SET retired_at = DATE_SUB(NOW(), INTERVAL ? DAY) WHERE id = ?', 'ii', [VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS + 10, (int) $lonely['id']]);
         repo_purge_retired_packages($this->db);
 
         self::assertNull($this->packageRow(self::PREFIX . 'Lonely-1.0'), 'the purge must still do its job for an unassigned row');
     }
 
     /** @param list<int> $packageIds */
-    private function seedVmWithPackages(array $packageIds): int
+    private function seedVmWithPackages(array $packageIds, bool $template = false): int
     {
-        $this->db->query("INSERT INTO deploy_missions (mission_name, mission_status) VALUES ('phpunit_e3_mission', 'active')");
-        $missionId = $this->db->insert_id;
-        $this->db->query("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES ({$missionId}, 'PHPUNIT-E3', 'PHPUNIT-E3')");
+        // Mission names are unique: several VMs of one kind share one mission.
+        $missionName = $template ? self::templateMission() : self::REAL_MISSION;
+        $missionId = (int) repo_scalar($this->db, 'SELECT id FROM deploy_missions WHERE mission_name = ?', 's', [$missionName]);
+        if ($missionId === 0) {
+            repo_execute($this->db, 'INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, ?)', 'ss', [$missionName, 'active']);
+            $missionId = (int) $this->db->insert_id;
+        }
+        $this->vmSeq++;
+        $vmName = 'PHPUNIT-E3-' . $this->vmSeq;
+        repo_execute($this->db, 'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)', 'iss', [$missionId, $vmName, $vmName]);
         $vmId = (int) $this->db->insert_id;
         foreach ($packageIds as $packageId) {
-            $this->db->query('INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (' . $vmId . ', ' . $packageId . ')');
+            repo_execute($this->db, 'INSERT INTO deploy_vm_packages (vm_id, package_id) VALUES (?, ?)', 'ii', [$vmId, $packageId]);
         }
 
         return $vmId;
     }
 
+    private static function templateMission(): string
+    {
+        return VIRTUSPHERE_TEMPLATE_PREFIX . 'phpunit_e3_template';
+    }
+
     /** @return list<int> */
     private function linkedPackageIds(int $vmId): array
     {
-        $rows = $this->db->query('SELECT package_id FROM deploy_vm_packages WHERE vm_id = ' . $vmId . ' ORDER BY package_id')->fetch_all(MYSQLI_ASSOC);
+        $stmt = $this->db->prepare('SELECT package_id FROM deploy_vm_packages WHERE vm_id = ? ORDER BY package_id');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
 
-        return array_map(static fn (array $row): int => (int) $row['package_id'], $rows);
+        return array_map(static fn (array $row): int => (int) $row['package_id'], $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
+    }
+
+    /** The newest audit context of $event that mentions $needle, or null. */
+    private function auditContext(string $event, string $needle): ?string
+    {
+        $like = '%' . $needle . '%';
+        $stmt = $this->db->prepare('SELECT context_json FROM deploy_logs WHERE event_code = ? AND context_json LIKE ? ORDER BY id DESC LIMIT 1');
+        $stmt->bind_param('ss', $event, $like);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_row();
+
+        return $row === null ? null : (string) $row[0];
     }
 
     public function testMassRetireIsRejectedWith409(): void
@@ -355,7 +411,13 @@ final class PackageSyncTest extends TestCase
     private function cleanupTestRows(): void
     {
         $this->db->query("DELETE FROM deploy_packages WHERE package_name LIKE '" . self::PREFIX . "%'");
-        $this->db->query("DELETE FROM deploy_missions WHERE mission_name = 'phpunit_e3_mission'");
+        repo_execute($this->db, 'DELETE FROM deploy_missions WHERE mission_name IN (?, ?)', 'ss', [self::REAL_MISSION, self::templateMission()]);
+        repo_execute(
+            $this->db,
+            'DELETE FROM deploy_logs WHERE event_code IN (?, ?) AND context_json LIKE ?',
+            'sss',
+            [VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED, VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED, '%' . self::PREFIX . '%']
+        );
     }
 
     /**

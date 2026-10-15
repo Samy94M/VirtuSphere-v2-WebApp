@@ -10,8 +10,8 @@ use PHPUnit\Framework\TestCase;
  *
  * The question this answers is "can a package re-import re-queue a VM for MECM,
  * or move it back in its lifecycle". The answer today is no, and the reason is
- * that mecm_packages.php changes only package assignments and the owning VM's
- * configuration version. It never changes rollout or lifecycle state. That is a
+ * that mecm_packages.php changes only template VM package assignments (AV-R08)
+ * and the owning VM's configuration version. It never changes rollout or lifecycle state. That is a
  * real guarantee an operator relies on: a catalog sync runs every minute, and a
  * VM that starts installing again because a package name changed would be a
  * production incident.
@@ -65,12 +65,13 @@ final class PackageSyncScopeContractTest extends TestCase
         $code = (string) preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', $source);
         $scopeHelper = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/repo/package_sync.php');
 
-        self::assertSame(1, substr_count($scopeHelper, 'deploy_vms'));
-        self::assertStringContainsString(
-            "SELECT id FROM deploy_vms WHERE id IN (' . \$placeholders . ') ORDER BY id FOR UPDATE",
+        self::assertSame(1, substr_count($scopeHelper, 'FOR UPDATE'));
+        self::assertMatchesRegularExpression(
+            "/FROM deploy_vms v INNER JOIN deploy_missions m ON m\\.id = v\\.mission_id\\s+WHERE v\\.id IN \\(' \\. \\\$placeholders \\. '\\) ORDER BY v\\.id FOR UPDATE/",
             $scopeHelper,
             'the exact affected parents must be locked deterministically before assignment writes'
         );
+        self::assertStringNotContainsString('UPDATE deploy_vms', $scopeHelper);
         self::assertSame(1, substr_count($code, 'repo_advance_vm_edit_version('));
         self::assertStringNotContainsString('UPDATE deploy_vms', $code, 'the endpoint may not add another VM mutation');
 
@@ -89,17 +90,14 @@ final class PackageSyncScopeContractTest extends TestCase
     public function testVmParentsAreLockedBeforeAnyPackageCatalogWrite(): void
     {
         $source = $this->source();
-        $scopeLock = strpos($source, '$relinkVmScope = packages_lock_relink_vm_scope(');
+        $scopeLock = strpos($source, '$templateFollowScope = packages_lock_template_follow_scope(');
         $catalogWrite = strpos($source, "catalog_retire_missing(\$connection, 'deploy_packages'");
         self::assertIsInt($scopeLock);
         self::assertIsInt($catalogWrite);
         self::assertLessThan($catalogWrite, $scopeLock, 'VM -> package order must match the editor and avoid a deadlock cycle');
 
-        $relinkStart = strpos($source, 'function packages_relink_upgrades');
-        $relinkEnd = strpos($source, 'function packages_pick_successor', $relinkStart);
-        self::assertIsInt($relinkStart);
-        self::assertIsInt($relinkEnd);
-        self::assertStringNotContainsString('FOR UPDATE', substr($source, $relinkStart, $relinkEnd - $relinkStart), 'relink must use only the prelocked parent scope');
+        [$followStart, $followEnd] = $this->followFunctionBounds($source);
+        self::assertStringNotContainsString('FOR UPDATE', substr($source, $followStart, $followEnd - $followStart), 'the template rule must use only the prelocked parent scope');
     }
 
     /** Zero-match guard: the file must still be the sync we think it is. */
@@ -109,15 +107,52 @@ final class PackageSyncScopeContractTest extends TestCase
 
         self::assertStringContainsString('deploy_packages', $source);
         self::assertStringContainsString('deploy_vm_packages', $source, 'the sync does own the assignment table');
-        self::assertStringContainsString('function packages_relink_upgrades', $source);
+        self::assertStringContainsString('function packages_follow_first_versions_in_templates', $source);
     }
 
     /**
-     * The relink's two conditions, pinned at the source. Both are load-bearing
-     * and neither is visible from the outside on a payload that happens not to
-     * hit them.
+     * AV-R08 (15.10.2026): the sync never moves a real VM. Every write into the
+     * assignment table is derived from the source and must sit inside the
+     * template rule, and the scope that feeds it filters through the one
+     * template SSoT, before and after the lock.
      */
-    public function testTheRelinkKeepsItsTwoConditions(): void
+    public function testEveryAssignmentWriteIsTheTemplateRule(): void
+    {
+        $source = $this->source();
+        $code = (string) preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], '', $source);
+        [$followStart, $followEnd] = $this->followFunctionBounds($code);
+
+        preg_match_all('/(UPDATE(?:\s+IGNORE)?\s+deploy_vm_packages|DELETE\s+FROM\s+deploy_vm_packages|INSERT\s+INTO\s+deploy_vm_packages)/', $code, $matches, PREG_OFFSET_CAPTURE);
+        self::assertNotSame([], $matches[0], 'zero match: the template rule writes assignments');
+        foreach ($matches[0] as [$statement, $offset]) {
+            self::assertTrue(
+                $offset > $followStart && $offset < $followEnd,
+                sprintf('"%s" outside packages_follow_first_versions_in_templates would move a real VM', $statement)
+            );
+        }
+        self::assertStringNotContainsString('packages_relink_upgrades', $code, 'the real-VM relink is gone (AV-R08)');
+
+        $scopeHelper = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/repo/package_sync.php');
+        self::assertSame(2, substr_count($scopeHelper, 'mission_name_is_template('), 'template check before and after the lock');
+    }
+
+    /** @return array{0:int,1:int} */
+    private function followFunctionBounds(string $source): array
+    {
+        $start = strpos($source, 'function packages_follow_first_versions_in_templates');
+        $end = strpos($source, 'function packages_audit_retired_assignments', (int) $start);
+        self::assertIsInt($start);
+        self::assertIsInt($end);
+
+        return [$start, $end];
+    }
+
+    /**
+     * The template rule's conditions, pinned at the source. Each is load-bearing
+     * and none is visible from the outside on a payload that happens not to hit
+     * it.
+     */
+    public function testTheTemplateRuleKeepsItsConditions(): void
     {
         $source = $this->source();
 
@@ -134,12 +169,12 @@ final class PackageSyncScopeContractTest extends TestCase
         self::assertStringContainsString(
             '$newPackageIds',
             $source,
-            'the relink must be bounded to successors this payload created, or a transient gap rewrites assignments'
+            'the template rule must be bounded to versions this payload created, or a transient gap rewrites assignments'
         );
         self::assertStringContainsString(
             'assignments_relinked_at',
             $source,
-            'a relink has to record that it removed the reference the purge protection reads'
+            'a template relink has to record that it removed the reference the purge protection reads'
         );
     }
 }
