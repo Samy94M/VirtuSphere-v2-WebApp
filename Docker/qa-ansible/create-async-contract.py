@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import base64
+import functools
+import importlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 
 
 MARKER = "::virtusphere-create::"
@@ -32,6 +35,33 @@ def decode_marker(line: str) -> dict[str, object]:
 DEFAULT_INVENTORY = [{"guest_name": "fixture-vm", "moid": "vm-42", "instance_uuid": "fixture-uuid"}]
 
 
+@functools.lru_cache(maxsize=None)
+def vm_info_detail_switches() -> tuple[tuple[str, bool], ...]:
+    """The show_* switches of the PINNED vmware_vm_info, with their defaults.
+
+    Derived from the installed module rather than listed here: a later
+    collection that adds a switch which defaults to on would pass a written
+    list while the identity read quietly grew slow again. ansible-doc runs
+    without the stub on the collection path, so it answers for the real module.
+    """
+    completed = subprocess.run(
+        ["ansible-doc", "--json", "community.vmware.vmware_vm_info"],
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(f"ansible-doc cannot read the pinned vmware_vm_info\n{completed.stdout}\n{completed.stderr}")
+    options = json.loads(completed.stdout)["community.vmware.vmware_vm_info"]["doc"]["options"]
+    switches = tuple(sorted(
+        (name, bool(spec.get("default", False)))
+        for name, spec in options.items()
+        if name.startswith("show_") and spec.get("type") == "bool"
+    ))
+    if not switches:
+        raise AssertionError("the pinned vmware_vm_info documents no show_* switch; there is nothing to derive")
+    return switches
+
+
 def write_stub_collection(root: Path, inventory: list[dict[str, str]] | None = None, read_failure: str | None = None) -> Path:
     modules = root / "ansible_collections" / "community" / "vmware" / "plugins" / "modules"
     modules.mkdir(parents=True)
@@ -42,9 +72,20 @@ def module(extra=None):
     return AnsibleModule(argument_spec=spec)
 """
     listing = json.dumps(DEFAULT_INVENTORY if inventory is None else inventory)
+    # The stub takes exactly the pinned module's switches with their REAL
+    # defaults: a switch the task leaves out is recorded as the module would
+    # apply it, and a name the module does not know fails as unsupported.
+    vm_info_spec: dict[str, dict[str, object]] = {
+        name: {"type": "bool", "default": default} for name, default in vm_info_detail_switches()
+    }
+    vm_info_spec.update(vm_name={"type": "str"}, folder={"type": "str"}, vm_type={"type": "str", "default": "all"})
+    recorded = [name for name, _ in vm_info_detail_switches()] + ["vm_name", "folder"]
     (modules / "vmware_vm_info.py").write_text(
         common
-        + "import json\nm=module()\n"
+        + "import json\nimport os\nm=module(" + repr(vm_info_spec) + ")\n"
+        + "if os.environ.get('VS_VM_INFO_CALLS'):\n"
+        + "    with open(os.environ['VS_VM_INFO_CALLS'], 'a', encoding='utf-8') as calls:\n"
+        + "        calls.write(json.dumps({key: m.params[key] for key in " + repr(recorded) + "}) + '\\n')\n"
         + ("m.fail_json(msg='synthetic identity read failure')\n" if read_failure == "identity" else "")
         + "m.exit_json(changed=False, virtual_machines=json.loads(" + repr(listing) + "))\n",
         encoding="utf-8",
@@ -265,6 +306,116 @@ def run_prepare_case(repo: Path, label: str, stored_uuid: str, inventory: list[d
                 raise AssertionError(f"{label}: expected {key}={value!r}, got {payload!r}")
 
 
+def run_identity_read_case(repo: Path, label: str) -> None:
+    """The shared identity read lists every VM of the host and nothing more.
+
+    Every detail switch of the pinned module must arrive switched off; each
+    one costs extra ESXi requests per VM, three times per create unit. No name
+    or folder filter either: IDR-P02 looks the stored UUID up among all VMs of
+    the host, and a renamed bound VM is outside a name filter by definition.
+    """
+    with tempfile.TemporaryDirectory(prefix="vs-create-identity-read-") as raw:
+        work = Path(raw)
+        for name in ("createVMPrepare-ESXi_playbook.yml", "create_identity_check_tasks.yml", "emit_create_result.py"):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work)
+        collection_root = write_stub_collection(work / "collections")
+        calls_file = work / "vm-info-calls.jsonl"
+        env = os.environ.copy()
+        installed = env.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections")
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
+        env["VS_VM_INFO_CALLS"] = str(calls_file)
+        extra = {"vs_portal_vm_id": 1, "vs_result_file": str(work / "prepare.json")}
+        completed = run(["ansible-playbook", "createVMPrepare-ESXi_playbook.yml", "-e", json.dumps(extra)], cwd=work, env=env)
+        if completed.returncode != 0:
+            raise AssertionError(f"{label}: production playbook failed\n{completed.stdout}\n{completed.stderr}")
+        calls = [json.loads(line) for line in calls_file.read_text(encoding="utf-8").splitlines()] if calls_file.exists() else []
+        if len(calls) != 1:
+            raise AssertionError(f"{label}: expected exactly one inventory read, got {calls!r}")
+        switched_on = [name for name, _ in vm_info_detail_switches() if calls[0][name] is not False]
+        if switched_on:
+            raise AssertionError(f"{label}: detail switches of the pinned vmware_vm_info left on: {switched_on}")
+        filters = {key: calls[0][key] for key in ("vm_name", "folder") if calls[0][key] is not None}
+        if filters:
+            raise AssertionError(f"{label}: the identity read must see every VM of the host, got a filter {filters!r}")
+
+
+def run_vm_info_fields_case(label: str) -> None:
+    """The pinned vmware_vm_info answers the identity read from the list alone.
+
+    With every detail switch off, the real module must return name, MOID,
+    instance UUID and power state of each VM without touching anything else
+    of the VM object. It runs against stand-in objects that raise on every
+    attribute they were not given, so a lookup a switch would add fails here
+    instead of costing ESXi requests. Run B, with the real defaults, has to
+    hit such a lookup; otherwise the stand-ins prove nothing.
+    """
+    collections_root = os.environ.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections").split(os.pathsep)[0]
+    if collections_root not in sys.path:
+        sys.path.insert(0, collections_root)
+    module = importlib.import_module("ansible_collections.community.vmware.plugins.modules.vmware_vm_info")
+    switches = vm_info_detail_switches()
+    accessed: list[tuple[str, str]] = []
+
+    class Strict:
+        def __init__(self, owner: str, **attributes: object) -> None:
+            object.__setattr__(self, "_label", owner)
+            object.__setattr__(self, "_attributes", attributes)
+
+        def __getattr__(self, attribute: str) -> object:
+            accessed.append((self._label, attribute))
+            if attribute in self._attributes:
+                return self._attributes[attribute]
+            raise AssertionError(f"detail lookup {self._label}.{attribute}")
+
+    def stand_in_vm() -> object:
+        summary = Strict(
+            "summary",
+            guest=None,
+            config=Strict("summary.config", name="vm-a", guestFullName="fixture guest", uuid="fixture-bios-uuid", instanceUuid="iu-a"),
+            runtime=Strict("summary.runtime", powerState="poweredOff"),
+        )
+        return Strict("vm", summary=summary, config=Strict("vm.config", template=False), _moId="vm-1")
+
+    def read_inventory(switch_values: dict[str, object]) -> list[dict[str, object]]:
+        vm_object = stand_in_vm()
+
+        def fail_json(**kwargs: object) -> None:
+            raise AssertionError(f"module failed: {kwargs}")
+
+        params: dict[str, object] = dict(switch_values, vm_type="all", folder=None, vm_name=None)
+        instance = module.VmwareVmInfo.__new__(module.VmwareVmInfo)
+        instance.module = types.SimpleNamespace(params=params, fail_json=fail_json)
+        instance.params = params
+        instance.content = object()
+        module.get_all_objs = lambda content, vimtype, folder=None: {vm_object: "vm-a"}
+        accessed.clear()
+        return instance.get_virtual_machines()
+
+    original_get_all_objs = module.get_all_objs
+    try:
+        found = read_inventory({name: False for name, _ in switches})
+        if len(found) != 1:
+            raise AssertionError(f"{label}: expected exactly one VM, got {found!r}")
+        expected = {"guest_name": "vm-a", "moid": "vm-1", "instance_uuid": "iu-a", "power_state": "poweredOff"}
+        actual = {key: found[0].get(key) for key in expected}
+        if actual != expected:
+            raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
+        vm_attributes = {attribute for owner, attribute in accessed if owner == "vm"}
+        if not vm_attributes <= {"summary", "config", "_moId"}:
+            raise AssertionError(f"{label}: the identity read touched further VM attributes {sorted(vm_attributes)}")
+
+        try:
+            read_inventory({name: default for name, default in switches})
+        except Exception as exc:
+            if not (isinstance(exc, AssertionError) and str(exc).startswith("detail lookup")):
+                raise AssertionError(f"{label}: control run with the real defaults failed for another reason: {exc!r}") from exc
+        else:
+            raise AssertionError(f"{label}: control run with the real defaults made no detail lookup, the stand-in objects prove nothing")
+    finally:
+        module.get_all_objs = original_get_all_objs
+
+
 def vm(name: str, moid: str, uuid: str) -> dict[str, str]:
     return {"guest_name": name, "moid": moid, "instance_uuid": uuid}
 
@@ -311,6 +462,7 @@ def main(argv: list[str]) -> int:
         ("removed-during-query", ('{"failed":false,"changed":true}', {"event": "rejected", "error_code": "async_state_missing"}, True)),
     ]
     cases += [(label, ("prepare", stored, inventory, expected)) for label, stored, inventory, expected in PREPARE_CASES]
+    cases += [("identity-read-narrow", ("identity-read",)), ("identity-fields-without-details", ("vm-info-fields",))]
     cases += [("launch-powered-on", ("launch", "poweredOn")),
               ("launch-power-unknown", ("launch", None)),
               ("launch-suspended", ("launch", "suspended")),
@@ -326,6 +478,10 @@ def main(argv: list[str]) -> int:
                 run_prepare_case(repo, label, stored, inventory, expected)
             elif case is not None and case[0] == "launch":
                 run_launch_case(repo, label, case[1])
+            elif case is not None and case[0] == "identity-read":
+                run_identity_read_case(repo, label)
+            elif case is not None and case[0] == "vm-info-fields":
+                run_vm_info_fields_case(label)
             elif case is not None and case[0] == "read-failure":
                 run_status_case(repo, label, '{"failed":false,"changed":true}',
                                 {"event": "succeeded", "changed": True, "power_state": "unknown"}, read_failure=case[1])

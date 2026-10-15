@@ -169,6 +169,52 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         self::assertMatchesRegularExpression("/^\s*'vms':\s*\{/m", $source);
     }
 
+    /**
+     * Every read of a host's VM list asks for every VM and only for the fields
+     * the readers keep: name, MOID, instance UUID and power state, which
+     * vmware_vm_info always reports. Each of its show_* switches costs extra
+     * ESXi requests per VM, and eight are on by default; with them the create
+     * identity read took about 20 seconds on Prod (15.10.2026), three times per
+     * VM. The gate ansible-create-async derives the switches from the pinned
+     * module for the identity read; this test holds every other call site to
+     * the same switches, so the derivation covers them as well.
+     *
+     * A name or folder filter is refused: IDR-P02 finds a renamed bound VM by
+     * looking its stored UUID up among ALL VMs of the host.
+     */
+    public function testEveryVmListReadSkipsTheDetailLookupsAndFiltersNothing(): void
+    {
+        $switchSets = [];
+        foreach ($this->playbooks() as $name => $source) {
+            foreach ($this->moduleArguments($source, 'community.vmware.vmware_vm_info') as $arguments) {
+                foreach (['vm_name', 'folder'] as $filter) {
+                    self::assertArrayNotHasKey($filter, $arguments, sprintf('%s narrows the VM list by %s; a renamed bound VM would be invisible.', $name, $filter));
+                }
+                $switches = [];
+                foreach ($arguments as $key => $value) {
+                    if (str_starts_with($key, 'show_')) {
+                        self::assertSame('false', $value, sprintf('%s: %s must be false.', $name, $key));
+                        $switches[] = $key;
+                    }
+                }
+                sort($switches);
+                $switchSets[] = [$name, $switches];
+            }
+        }
+
+        self::assertGreaterThanOrEqual(2, count($switchSets), 'VM list scan found fewer reads than the repo contains (zero-match must not pass).');
+        $reference = [];
+        foreach ($switchSets as [$name, $switches]) {
+            if ($name === 'create_identity_check_tasks.yml') {
+                $reference = $switches;
+            }
+        }
+        self::assertNotEmpty($reference, 'The create identity read must switch the detail lookups off.');
+        foreach ($switchSets as [$name, $switches]) {
+            self::assertSame($reference, $switches, sprintf('%s reads the VM list with other switches than the create identity check.', $name));
+        }
+    }
+
     public function testEveryCommandTaskIsClassified(): void
     {
         $commandTasks = 0;
@@ -292,5 +338,35 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         self::assertIsArray($parts);
 
         return array_slice($parts, 1);
+    }
+
+    /**
+     * The arguments of each call of one module: the lines indented below its
+     * key, as key => raw scalar. Read from the module key rather than from
+     * tasks(), which splits at blank lines and would hand a task directly under
+     * a comment block to the part it drops.
+     *
+     * @return list<array<string, string>>
+     */
+    private function moduleArguments(string $source, string $module): array
+    {
+        $lines = preg_split('/\R/', $source) ?: [];
+        $calls = [];
+        foreach ($lines as $index => $line) {
+            if (preg_match('/^(\s*)' . preg_quote($module, '/') . ':\s*$/', $line, $key) !== 1) {
+                continue;
+            }
+            $arguments = [];
+            for ($next = $index + 1; $next < count($lines); $next++) {
+                preg_match('/^(\s*)(\w+):\s*(.*)$/', $lines[$next], $argument);
+                if ($argument === [] || strlen($argument[1]) <= strlen($key[1])) {
+                    break;
+                }
+                $arguments[$argument[2]] = trim($argument[3]);
+            }
+            $calls[] = $arguments;
+        }
+
+        return $calls;
     }
 }

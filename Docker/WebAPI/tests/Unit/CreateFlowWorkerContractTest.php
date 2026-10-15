@@ -96,6 +96,10 @@ final class CreateFlowWorkerContractTest extends TestCase
         self::assertStringNotContainsString('trap ', $command);
         self::assertStringNotContainsString('rm -rf', $command);
         self::assertStringContainsString('export PYTHONUNBUFFERED=1', $command);
+        self::assertStringContainsString('export ANSIBLE_LOCALHOST_WARNING=False', $command);
+        self::assertStringContainsString('export ANSIBLE_INVENTORY_UNPARSED_WARNING=False', $command);
+        // Only these two warnings are silenced; every other warning stays on.
+        self::assertSame(2, substr_count($command, '_WARNING=False'));
         self::assertStringContainsString("mkdir -p -m 0700 '/tmp/vs-job-1/create.vm.2/async'", $command);
         self::assertStringContainsString("test ! -L '/tmp/vs-job-1/create.vm.2/async'", $command);
         // A stale document from the previous call must never be read as this

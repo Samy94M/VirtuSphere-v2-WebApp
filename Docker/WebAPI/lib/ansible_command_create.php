@@ -124,6 +124,13 @@ function ansible_create_control_command(
         // terminal, and the worker reads through an SSH pipe. Without this the
         // marker line of a short control call can sit in the buffer.
         'export PYTHONUNBUFFERED=1',
+        // Control calls run against the implicit localhost without an
+        // inventory, so ansible-core prints "No inventory was parsed" and
+        // "provided hosts list is empty" on every call; the status poll repeats
+        // both every cycle. Neither says anything about the run, so only these
+        // two warnings are switched off.
+        'export ANSIBLE_LOCALHOST_WARNING=False',
+        'export ANSIBLE_INVENTORY_UNPARSED_WARNING=False',
         'test ! -L ' . ansible_sh_quote($unitDir),
         'mkdir -p -m 0700 ' . ansible_sh_quote($unitDir),
         'test ! -L ' . ansible_sh_quote($asyncDir),

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/deploy_constants.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_job_output.php';
 
 /**
  * The guards the create SSoT cannot express as a type (Etappe 14B, plan 6.3).
@@ -68,6 +69,33 @@ final class DeployCreateConstantsContractTest extends TestCase
         self::assertLessThanOrEqual(
             VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MAX_SECONDS,
             VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MIN_SECONDS
+        );
+    }
+
+    /**
+     * Every log line of a job, the SYSTEM lines included, passes one output
+     * gate with one byte budget, and a spent budget drops everything after it
+     * silently: the DONE, FAIL and HOLD lines of the last VMs and the create
+     * summary would be gone. A shorter poll interval writes the same running
+     * poll more often, so the interval has a floor, and this is it: polling for
+     * the whole create budget may use at most half of the job's output budget.
+     *
+     * The per-poll size is a deliberate upper estimate. A running poll of
+     * createVMStatus without -vvv wrote 2,251 bytes in 59 lines, measured on
+     * 15.10.2026 in the pinned qa-ansible image. With -vvv it was about 20 KB,
+     * which this bound does not cover: a verbose job that polls for most of its
+     * budget can reach the output limit, and only its log is cut, never its
+     * stored per-VM results. Shortening the poll output itself is FC2-04.
+     */
+    public function testPollingForTheWholeBudgetCannotExhaustTheJobLog(): void
+    {
+        $runningPollBytes = 4096;
+        $worstCasePolls = intdiv(deploy_create_total_budget_seconds(), VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS);
+
+        self::assertLessThanOrEqual(
+            intdiv(VIRTUSPHERE_DEPLOY_OUTPUT_JOB_MAX_BYTES, 2),
+            $worstCasePolls * $runningPollBytes,
+            'polling at this interval for the whole create budget could fill the job log'
         );
     }
 

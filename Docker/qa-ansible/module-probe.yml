@@ -89,9 +89,23 @@
         name: virtusphere-probe-vm
       ignore_errors: true
 
+    # Dieselben Schalter wie die Identitaetspruefung und der Inventarabruf: so
+    # prueft die echte argument_spec ihre Namen, nicht nur die Dokumentation,
+    # aus der das Gate ansible-create-async sie ableitet.
     - name: vmware_vm_info
       community.vmware.vmware_vm_info:
         <<: *probe
+        show_allocated: false
+        show_attribute: false
+        show_cluster: false
+        show_datacenter: false
+        show_datastore: false
+        show_esxi_hostname: false
+        show_folder: false
+        show_mac_address: false
+        show_net: false
+        show_resource_pool: false
+        show_tag: false
       ignore_errors: true
 
     - name: vmware_guest_powerstate

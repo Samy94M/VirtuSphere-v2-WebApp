@@ -106,8 +106,15 @@ The worker then drives each row itself through four control playbooks
 the shared `create_identity_check_tasks.yml`, `emit_create_result.py` and
 `inspect_create_async_state.py`; all seven are listed in `VIRTUSPHERE_CREATE_ARTIFACTS` because the SFTP upload has to carry
 them). `createVMLaunch` starts exactly one `vmware_guest` call with `async` and
-`poll: 0`; the worker polls its job id every
-`VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS`. Operational consequences:
+`poll: 0`; the worker polls its job id and pauses
+`VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS` (10 s) after every `running` answer.
+A poll is itself an `ansible-playbook` run of a few seconds that does not reach
+ESXi, so one cycle is about 15 s. The shared identity check reads the host's VM
+list three times per VM with every `show_*` detail switch of `vmware_vm_info`
+off; it needs name, MOID, instance UUID and power state of every VM and nothing
+else. Control calls switch off exactly two ansible-core warnings
+(`ANSIBLE_LOCALHOST_WARNING`, `ANSIBLE_INVENTORY_UNPARSED_WARNING`) that every
+localhost run without an inventory prints. Operational consequences:
 
 - **Runtime versions are checked, not assumed.** The preflight compares every
   installed collection against the complete lock in `Ansible/requirements.yml`

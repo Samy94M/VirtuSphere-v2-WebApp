@@ -148,7 +148,16 @@ const VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES = [
 // DeployCreateConstantsContractTest rather than by comment: a poll interval
 // above the stale limit would let the job look abandoned between two healthy
 // polls, and a discovery interval above its own timeout would never poll.
-const VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS = 30;
+//
+// The poll interval is the pause AFTER a `running` answer, not the period: each
+// poll is a full ansible-playbook run over SSH of about 5 seconds, so 10 makes
+// one cycle about 15 seconds. A VM that finishes waits half a cycle on average
+// before anyone notices, 7.5 seconds instead of 17.5 at 30. Below 10 the poll's
+// own cost dominates the cycle: 5 would save another 2.5 seconds per VM for half
+// again as many SSH sessions and log lines. A running poll never reaches ESXi;
+// what it costs is the Ansible host and the job log, which the contract test
+// bounds against the job's output budget.
+const VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS = 10;
 const VIRTUSPHERE_CREATE_CONTROL_IDLE_TIMEOUT_SECONDS = 120;
 const VIRTUSPHERE_CREATE_CONTROL_TOTAL_TIMEOUT_SECONDS = 300;
 const VIRTUSPHERE_CREATE_JID_DISCOVERY_INTERVAL_SECONDS = 5;

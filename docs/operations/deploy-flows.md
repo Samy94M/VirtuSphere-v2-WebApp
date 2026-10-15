@@ -143,7 +143,7 @@ flowchart TD
 
 ## Create je VM
 
-`create` und `full` legen VMs einzeln an: je VM ein Prepare, ein Launch als Async-Job und eine Statusabfrage alle `VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS` Sekunden. Jede Einheit hat ein dauerhaftes Ergebnis, bevor die nächste beginnt.
+`create` und `full` legen VMs einzeln an: je VM ein Prepare, ein Launch als Async-Job und Statusabfragen, bis der Job endet. Nach jeder Antwort `running` wartet der Worker `VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS` Sekunden; jede Abfrage ist selbst ein `ansible-playbook`-Lauf von einigen Sekunden, ohne Zugriff auf ESXi. Jede Einheit hat ein dauerhaftes Ergebnis, bevor die nächste beginnt.
 
 ```mermaid
 flowchart TD
@@ -182,7 +182,7 @@ flowchart TD
   JD -->|keine bis zur Frist| LU["uncertain (launch_unconfirmed)"]
   JD -->|Hostidentität der Suchverbindung abgelehnt| HU["uncertain (host_identity_rejected), Ausgang bleibt unbekannt"]
   JD -->|ja| PO
-  LA -->|launched| PO["createVMStatus im Takt VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS"]
+  LA -->|launched| PO["createVMStatus; nach running VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS Pause"]
   PO -->|running| PO
   PO -->|Transport abgerissen| PO
   PO -->|Hostidentität vor Anmeldung abgelehnt| HU
@@ -249,7 +249,7 @@ Die eine Identitätsmatrix für Prepare, Launch und Status. Ein Befund bricht ni
 
 ```mermaid
 flowchart TD
-  A["Live-Inventar lesen (vmware_vm_info)"] --> B["Namensgleiche VMs und VMs mit der gespeicherten Instance-UUID sammeln"]
+  A["Live-Inventar lesen (vmware_vm_info): alle VMs des Hosts, nur Name, MOID, Instance-UUID und Energiezustand"] --> B["Namensgleiche VMs und VMs mit der gespeicherten Instance-UUID sammeln"]
   B --> C{"Mehr als eine namensgleiche VM?"}
   C -->|ja| C1["identity_conflict"]
   C -->|nein| D{"Eine namensgleiche VM ohne MOID oder UUID?"}
@@ -264,6 +264,8 @@ flowchart TD
 ```
 
 Nach einem erfolgreichen Async-Job ruft das Status-Playbook die Matrix ohne Abgleich gegen die gespeicherte UUID auf (`vs_identity_require_stored_match` aus), weil die VM gerade erst entstanden ist. Dann entfallen die Fragen E und F.
+
+Das Live-Inventar wird je VM dreimal gelesen (Prepare, Launch, nach dem Erfolg); der Aufruf schaltet deshalb alle `show_*`-Zusatzangaben des Moduls aus: Jede kostet je VM des Hosts eigene Abfragen an ESXi, acht sind standardmäßig an. Nach Namen oder Ordner gefiltert wird bewusst nicht, weil Frage E die gespeicherte UUID unter allen VMs des Hosts sucht.
 
 ### createVMLaunch
 
@@ -409,7 +411,7 @@ Liest nur und läuft ohne Mission als Systemauftrag je ESXi-Zugang.
 ```mermaid
 flowchart TD
   A["Datacenter lesen (Verbindungstest, ohne Fehlertoleranz)"] -->|Fehler| AX["Abruf failed; der Worker ordnet die Ursache ein"]
-  A --> B["Datastores, Standard-Portgruppen, verteilte Portgruppen des ersten Datacenters, Hostdaten, VMs, Produkt und Lizenz, Wartungsmodus und HA-Zustand lesen; jede Abfrage darf einzeln scheitern"]
+  A --> B["Datastores, Standard-Portgruppen, verteilte Portgruppen des ersten Datacenters, Hostdaten, VMs (nur Name, MOID, Instance-UUID, Energiezustand), Produkt und Lizenz, Wartungsmodus und HA-Zustand lesen; jede Abfrage darf einzeln scheitern"]
   B --> C["Ergebnis und Zustand jeder Einzelabfrage als eine Base64-Markerzeile ausgeben"]
 ```
 
