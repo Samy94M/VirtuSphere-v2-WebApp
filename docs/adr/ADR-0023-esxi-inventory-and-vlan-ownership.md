@@ -295,3 +295,15 @@ After any worker-owned terminal outcome of create/full, a stored Create
 Failure, cancellation and uncertainty can all leave changes on ESXi. Publication
 and VM convergence retain their existing transactions and ownership fences;
 scheduling occurs afterwards, fail-soft and through the deduplicating writer.
+
+## Amendment 7 (2026-10-15): the reported release decides the hardware version of a new VM
+
+On 15.10.2026 job 1180 created nothing on a standalone ESXi 7.0.3 host: both create units ended `module_failed` with "The operation is not supported on the object". The create playbook had hardwired `version: 21` since 06.07.2026, and Broadcom KB 312100 documents vmx-21 as creatable only from ESXi 8.0 Update 2. The portal had the host release in its capability facts the whole time (`ESXi capabilities: product=VMware ESXi 7.0.3 ...` was the line before the failure). Before July the playbook set no version and ESXi chose, which is why "it worked before". The support matrix compensated with a create floor of 8.0 Update 2 and justified it with a desktop client that, as it turns out, never set a version either.
+
+Decided:
+
+- **The capability fact is the source of the hardware version.** `lib/esxi_create_compatibility.php` holds the one table (first release that can create each version: 7.0 → 17, 7.0 Update 1 → 18, 7.0 Update 2 → 19, 8.0 → 20, 8.0 Update 2 → 21) and the one verdict, `esxi_create_compatibility()`. Only a standalone host (`api_type = HostAgent`) with a fresh, parsed release pins a version; the worker writes it as `create_hardware_version` into `serverlist.yml`, and `createVMLaunch` passes it only for a VM that did not exist before. A release newer than the table keeps its last row: raising the version is its own decision with its own evidence.
+- **Unknown stays unknown, as in Amendment 4.** A stale or absent fact pins nothing and refuses nothing: the playbook then passes no version and ESXi uses its default, which is the pre-July behaviour and the one that cannot be wrong for this host.
+- **Two new refusals, both on a fresh fact only.** A release below the table cannot create any VM, and a VM whose guest identifier that release does not know (Windows Server 2022 from 7.0 Update 1, Windows 11 and Server 2025 from 8.0, per the vSphere API "Since") would fail the same way. Deploy page, single enqueue, stagger, retry and worker ask the same owner (`deploy_esxi_create_compatibility()`); the worker refusal is `configuration_blocked` before any upload. The guest floors live next to the options in `VIRTUSPHERE_GUEST_OS_OPTIONS`.
+- **An existing VM never gets a version.** `vmware_guest` upgrades a lower version with `UpgradeVM_Task`, which cannot be undone, and refuses a higher one as a downgrade. The hardwired 21 did the first to every powered-off VM it converged on an 8.0 Update 2 host. Converging now leaves the virtual hardware alone; upgrading it stays an operator action on the host.
+- **The guard derives from the table.** `check-doc-semantics.sh` rule 15 reads the table's pairs and requires each in the support matrix row about creating, and fails on any literal version in the playbook.

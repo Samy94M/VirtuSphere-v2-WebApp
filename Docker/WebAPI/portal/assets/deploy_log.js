@@ -99,6 +99,22 @@
         followToggle.checked = followEnabled;
     }
 
+    // The one-shot flash after queueing or retrying says "queued, not yet
+    // confirmed as run" and links to this very log. That stays true until the
+    // job ends; above a finished job it contradicts the status beside it. Its
+    // own link pointing at this page is what identifies it, so no other flash
+    // is touched and the server-side wording stays the reviewed contract.
+    function retireQueuedFlash() {
+        var here = window.location.pathname + window.location.search;
+        document.querySelectorAll('[data-flash] .alert-actions a[href]').forEach(function (link) {
+            var target = new URL(link.getAttribute('href'), window.location.href);
+            var flash = link.closest('[data-flash]');
+            if (flash && target.pathname + target.search === here) {
+                flash.hidden = true;
+            }
+        });
+    }
+
     function setFeedback(text) {
         if (feedback) { feedback.textContent = text || ''; }
     }
@@ -244,6 +260,21 @@
                     var code = document.createElement('code');
                     code.textContent = finding.error_code;
                     item.appendChild(code);
+                }
+                // The host's own message (module failures only); its label
+                // arrives translated with the payload, never built here.
+                if (typeof finding.host_detail === 'string' && finding.host_detail !== ''
+                    && typeof finding.host_detail_label === 'string') {
+                    item.appendChild(document.createElement('br'));
+                    var detailLabel = document.createElement('span');
+                    detailLabel.className = 'muted';
+                    detailLabel.textContent = finding.host_detail_label;
+                    item.appendChild(detailLabel);
+                    item.appendChild(document.createTextNode(' '));
+                    var detail = document.createElement('code');
+                    detail.className = 'log-line';
+                    detail.textContent = finding.host_detail;
+                    item.appendChild(detail);
                 }
                 findingsList.appendChild(item);
             });
@@ -481,6 +512,7 @@
             root.setAttribute('data-caught-up', payload.caught_up ? '1' : '0');
             if (payload.job && payload.job.terminal) {
                 root.setAttribute('data-terminal', '1');
+                retireQueuedFlash();
             }
             renderConnection();
             if (payload.job && payload.job.terminal && payload.caught_up) {
@@ -621,6 +653,9 @@
     // the top, because then the start of the window is where they asked to be.
     if (followEnabled) {
         scrollToEnd();
+    }
+    if (root.getAttribute('data-terminal') === '1') {
+        retireQueuedFlash();
     }
     if (!(root.getAttribute('data-terminal') === '1' && root.getAttribute('data-caught-up') === '1')) {
         schedule(2000);

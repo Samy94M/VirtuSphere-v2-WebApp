@@ -9,6 +9,7 @@ require_once __DIR__ . '/deploy_network_blockers.php';
 require_once __DIR__ . '/deploy_queue_blocker_view.php';
 require_once __DIR__ . '/deploy_preflight_bounds.php';
 require_once __DIR__ . '/esxi_write_capability.php';
+require_once __DIR__ . '/deploy_capability_blockers.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/layout_response.php';
 require_once __DIR__ . '/deploy_mode_labels.php';
@@ -314,17 +315,15 @@ function deploy_queue_blockers(mysqli $db, array $input, ?array &$presentation =
         }
     }
 
-    // DF-E2: the same verdict the repository enqueue and the worker apply.
-    $esxiWrite = $selectedEsxiValid
-        ? esxi_write_preflight(repo_esxi_inventory_state($db, $state['credential_esxi_id']), esxi_inventory_interval_hours($db), $state['mode'])
-        : null;
-    if ($esxiWrite !== null && $esxiWrite['verdict'] === 'block') {
-        $blockers[] = deploy_action_blocker(
-            'esxi_write_license',
-            __t('layout.err_esxi_write_license'),
-            system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI),
-            __t('deploy.identity_refresh_link')
-        );
+    // DF-E2 and ADR-0023 amendment 7: the verdicts the enqueue and the worker apply.
+    if ($selectedEsxiValid) {
+        array_push($blockers, ...deploy_esxi_capability_blockers(
+            $db,
+            $state['credential_esxi_id'],
+            $state['mode'],
+            $selectedMission !== null ? $missionId : 0,
+            $eligibleVmIds
+        ));
     }
 
     foreach ($blockers as $index => &$blocker) {

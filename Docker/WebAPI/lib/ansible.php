@@ -28,7 +28,8 @@ function ansible_prepare_job_artifacts(
     array $esxiCredential,
     string $esxiSecret,
     array $ansibleCredential,
-    string $apiBaseUrl
+    string $apiBaseUrl,
+    ?int $createHardwareVersion = null
 ): array {
     $jobId = (int) ($job['id'] ?? 0);
     $missionId = (int) ($job['mission_id'] ?? 0);
@@ -88,7 +89,8 @@ function ansible_prepare_job_artifacts(
     $trustFile = ansible_write_esxi_trust_artifact($workDir, $esxiCredential);
     ansible_write_file(
         $workDir . DIRECTORY_SEPARATOR . 'serverlist.yml',
-        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait']) . ansible_job_execution_yml($job)
+        ansible_serverlist_yml($mission, $vms, $payload['powercycle_wait'], $hostDatacenter, $esxiHostName, $payload['start_wait'])
+            . ansible_create_hardware_yml($createHardwareVersion) . ansible_job_execution_yml($job)
     );
     ansible_patch_upload_script($workDir . DIRECTORY_SEPARATOR . VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT, $apiBaseUrl, $missionId, $jobId);
 
@@ -112,6 +114,9 @@ function ansible_prepare_job_artifacts(
             'host_datacenter' => $hostDatacenter,
             'esxi_host_name' => $esxiHostName,
             'vm_ids' => array_values(array_map(static fn (array $vm): int => (int) ($vm['id'] ?? 0), $vms)),
+            // The worker's create verdict, not a second derivation: the
+            // rewrite must not pick another version than the create section used.
+            'create_hardware_version' => $createHardwareVersion,
         ],
     ];
 }
@@ -162,8 +167,23 @@ function ansible_refresh_serverlist_after_create(mysqli $db, array $job, array $
             (string) ($context['host_datacenter'] ?? ''),
             (string) ($context['esxi_host_name'] ?? ''),
             $payload['start_wait']
-        ) . ansible_job_execution_yml($job)
+        ) . ansible_create_hardware_yml(isset($context['create_hardware_version']) ? (int) $context['create_hardware_version'] : null)
+        . ansible_job_execution_yml($job)
     );
+}
+
+/**
+ * The hardware version a NEW VM is created with, derived by the worker from
+ * the host's current release (esxi_create_compatibility(), ADR-0023 amendment
+ * 5). Empty when that release is not currently known: createVMLaunch then
+ * passes no version and ESXi picks its own default, which is what the playbook
+ * did before July 2026. Only createVMLaunch reads it, and only for a VM that
+ * did not exist before.
+ */
+function ansible_create_hardware_yml(?int $createHardwareVersion): string
+{
+    return 'create_hardware_version: '
+        . ($createHardwareVersion !== null && $createHardwareVersion > 0 ? (string) $createHardwareVersion : "''") . "\n";
 }
 
 /** Per-claim fences; neither is a secret or an authentication token. */

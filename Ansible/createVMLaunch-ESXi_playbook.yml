@@ -145,6 +145,13 @@
     # ausschließlich die bereits gebundene Instance-UUID, weil Ansible eine UUID
     # bei einer Neuanlage ignoriert: eine nach der Prüfung verschwundene eigene
     # VM würde sonst unter ihrem Namen neu entstehen.
+    #
+    # Die Hardware-Version gilt nur für eine NEUE VM und kommt aus serverlist.yml
+    # (`create_hardware_version`, abgeleitet aus der gemeldeten ESXi-Version,
+    # lib/esxi_create_compatibility.php). Leer heißt: Version nicht aktuell
+    # bekannt, ESXi wählt seinen Standard. Eine vorhandene VM bekommt nie eine
+    # Version: das Modul würde sie sonst per UpgradeVM_Task unwiderruflich
+    # anheben oder bei einer niedrigeren Zahl hart ablehnen.
     - name: Genau eine VM erstellen oder konvergieren
       community.vmware.vmware_guest:
         hostname: "{{ esxi_hostname }}"
@@ -166,7 +173,13 @@
           num_cpus: "{{ vs_target.vcpus }}"
           hotadd_cpu: "{{ vs_target.hotadd_cpu | default(true) }}"
           hotadd_memory: "{{ vs_target.hotadd_memory | default(true) }}"
-          version: 21
+          version: >-
+            {{
+              (create_hardware_version | string)
+              if (not (vs_existed_before | bool)
+                  and (create_hardware_version | default('') | string | length) > 0)
+              else omit
+            }}
           scsi: lsilogicsas
           secure_boot: true
           boot_firmware: "efi"

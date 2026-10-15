@@ -172,7 +172,10 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
             'interfaces' => [],
             'packages' => [],
         ];
-        $yaml = ansible_serverlist_yml($mission, [$vm], 5, 'DC1', 'esxi01');
+        // The artifact the worker writes is the builder plus the appended
+        // top-level keys (ansible_prepare_job_artifacts()); the hardware version
+        // is one of them since ADR-0023 amendment 7.
+        $yaml = ansible_serverlist_yml($mission, [$vm], 5, 'DC1', 'esxi01') . ansible_create_hardware_yml(19);
 
         $topKeys = [];
         $vmKeys = [];

@@ -142,6 +142,8 @@ require_once __DIR__ . '/../deploy_late_start.php';
             <p><?php echo h(__t('help_deploy.create_progress_p3')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p4')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p5')); ?></p>
+            <p><?php echo h(__t('help_deploy.create_progress_p6')); ?></p>
+            <p><?php echo h(__t('help_deploy.create_progress_p7')); ?></p>
         </section>
 
         <section class="panel" id="help-action-outcomes">

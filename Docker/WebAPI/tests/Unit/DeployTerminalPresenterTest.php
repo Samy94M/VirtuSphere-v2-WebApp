@@ -147,6 +147,42 @@ final class DeployTerminalPresenterTest extends TestCase
         self::assertSame($mac, deploy_job_terminal_result_json($mac, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED));
     }
 
+    /**
+     * 15.10.2026: a create job failed on the host, and its result block said
+     * "the current portal network configuration is now unambiguous". That
+     * sentence answers a network failure; under any other one it reads like a
+     * cause that was fixed. It appears only when the job's own result is about
+     * the network.
+     */
+    public function testTheNetworkReadySentenceAppearsOnlyAboveANetworkResult(): void
+    {
+        Lang::load('en');
+        $ready = ['network_ready' => true, 'findings' => []];
+        $sentence = __t('deploy.retry_network_ready_now');
+
+        $createFailure = deploy_terminal_blocks_html([
+            'id' => 1180,
+            'mission_id' => 5,
+            'status' => VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+            'terminal_reason_code' => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
+        ], $ready);
+        self::assertStringNotContainsString($sentence, $createFailure);
+
+        $network = vm_network_preflight_result_contract(
+            VIRTUSPHERE_DEPLOY_MODE_FULL,
+            [['id' => 17, 'vm_name' => 'APP-17']],
+            [['code' => VIRTUSPHERE_VM_NETWORK_AMBIGUOUS, 'vm_id' => 17, 'vlan' => 'WDS', 'interface_ids' => [41, 42]]]
+        );
+        $networkFailure = deploy_terminal_blocks_html([
+            'id' => 99,
+            'mission_id' => 5,
+            'status' => VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+            'result_json' => json_encode($network, JSON_THROW_ON_ERROR),
+            'terminal_reason_code' => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CONFIGURATION_BLOCKED,
+        ], $ready, []);
+        self::assertStringContainsString(htmlspecialchars($sentence, ENT_QUOTES), $networkFailure);
+    }
+
     public function testNetworkPreflightResultIsExhaustivelyDecodedAndPresented(): void
     {
         Lang::load('en');

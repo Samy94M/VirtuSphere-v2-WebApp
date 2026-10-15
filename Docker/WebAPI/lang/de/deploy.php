@@ -392,6 +392,7 @@ return [
     'create_progress_findings_heading' => 'Gespeicherte Ursachen',
     'create_progress_finding' => ':name (Position :position): :reason',
     'create_progress_reason_module_failed' => 'Das entfernte VM-Modul meldete einen Fehler.',
+    'create_progress_host_detail' => 'Meldung des Hosts:',
     'create_progress_reason_host_identity' => 'Die Steuerverbindung wurde wegen der SSH-Hostidentität vor der Anmeldung gesperrt.',
     'create_progress_reason_unresolved_observation' => 'Der Ausgang des entfernten Anlegevorgangs konnte nicht sicher beobachtet werden.',
     'create_progress_reason_identity_conflict' => 'Die live gelesene VM-Identität widerspricht der erwarteten Identität.',

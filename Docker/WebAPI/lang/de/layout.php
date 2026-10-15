@@ -59,6 +59,9 @@ return [
     // Auftrags), damit niemandes laufender Deploy nebenbei beendet wird.
     'err_mission_active_job' => 'Für diese Mission läuft oder wartet ein Bereitstellungsauftrag. Den Auftrag zuerst abwarten oder abbrechen.',
     'err_esxi_write_license' => 'Der gewählte ESXi-Host meldet eine freie Lizenz: Seine API ist nur lesend, deshalb lässt sich dieser Modus nicht ausführen. Nur der MAC-Export und der Inventarabruf sind möglich. Nach einem Lizenzwechsel das ESXi-Inventar aktualisieren.',
+    // Create-Urteil aus der gemeldeten ESXi-Version (ADR-0023 Nachtrag 7).
+    'err_esxi_create_host' => 'Auf dem gewählten ESXi-Host lassen sich keine VMs erstellen: Er meldet ESXi :release, VirtuSphere erstellt VMs ab ESXi :floor. Nach einem Host-Update das ESXi-Inventar aktualisieren.',
+    'err_esxi_create_guest' => 'VM :name: Das Guest OS :os braucht mindestens ESXi :floor, der gewählte Host meldet ESXi :release. In der VM ein anderes Guest OS wählen oder einen neueren Host verwenden.',
     // Der Wiederholen-Knopf der Auftragsliste faehrt dasselbe Einreih-Gatter noch
     // einmal, hat aber kein Formular und damit keine Feldmeldung. Ohne diesen
     // Eintrag rendert das Portal an dieser Stelle die rohe englische

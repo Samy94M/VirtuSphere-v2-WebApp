@@ -59,6 +59,9 @@ return [
     // ended as a side effect.
     'err_mission_active_job' => 'A deploy job for this mission is queued or running. Wait for it to finish or cancel it first.',
     'err_esxi_write_license' => 'The selected ESXi host reports a free licence: its API is read-only, so this mode cannot run. Only the MAC export and the inventory pull are possible. After a licence change, refresh the ESXi inventory.',
+    // Create verdict from the reported ESXi release (ADR-0023 amendment 7).
+    'err_esxi_create_host' => 'VMs cannot be created on the selected ESXi host: it reports ESXi :release, and VirtuSphere creates VMs from ESXi :floor. After a host update, refresh the ESXi inventory.',
+    'err_esxi_create_guest' => 'VM :name: the guest OS :os needs at least ESXi :floor, but the selected host reports ESXi :release. Choose another guest OS in the VM or use a newer host.',
     // The retry button in the job list re-runs the same enqueue gate, but it has
     // no form and therefore no field message. Without this entry the portal
     // renders the raw English exception there. The sentence names both causes,

@@ -257,7 +257,10 @@ $docSemFixtureFiles = @(
     # die Pruefung mitgezogen, diese Fixture aber nicht: sechzehn
     # doc-semantics-Waechter liefen danach als infra und bewiesen nichts
     # mehr, ohne dass irgendetwas rot wurde.
-    'Ansible/createVMLaunch-ESXi_playbook.yml'
+    'Ansible/createVMLaunch-ESXi_playbook.yml',
+    # Seit ADR-0023 Nachtrag 7 die eigentliche SSoT der Regel 15: die Tabelle
+    # der vmx-Versionen je ESXi-Version. Ohne sie meldet Regel 15 no-ssot.
+    'Docker/WebAPI/lib/esxi_create_compatibility.php'
 )
 # struktur.sql gehoert seit Etappe 10C dazu: bounds-sync prueft dort den
 # gespiegelten Audit-Kontext-Bytewert gegen die PHP-Konstante und bricht ohne
@@ -453,20 +456,27 @@ $cases = @(
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(0)
     } }
     @{ Name = 'doc-semantics.hw-version-matrix'; Body = {
-        # Das Paar, nicht die Zahl: eine Hardware-Version, deren ESXi-Untergrenze
-        # die Support-Matrix nicht nennt, verspricht Hosts, auf denen die
-        # VM-Erstellung hart fehlschlaegt.
+        # Das Paar, nicht die Zahl: die Tabelle in lib/esxi_create_compatibility.php
+        # ist die SSoT, und jedes ihrer Paare muss in den Matrixzeilen zur
+        # Erstellung stehen. Eine geaenderte vmx-Zuordnung ohne Doku verspricht
+        # etwas anderes, als der Worker tut.
         $fx = New-Fixture $docSemFixtureFiles
-        Edit-Fixture $fx 'Ansible/createVMLaunch-ESXi_playbook.yml' 'version: 21' 'version: 19'
+        Edit-Fixture $fx 'Docker/WebAPI/lib/esxi_create_compatibility.php' "['esxi' => '7.0.2', 'vmx' => 19]" "['esxi' => '7.0.2', 'vmx' => 18]"
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-matrix\]'
     } }
-    @{ Name = 'doc-semantics.hw-version-unknown'; Body = {
-        # Eine Version, fuer die niemand eine Untergrenze belegt hat, ist kein
-        # gruener Lauf: sonst haette ein kuenftiges vmx-22 die Regel still
-        # stillgelegt.
+    @{ Name = 'doc-semantics.hw-version-hardwired'; Body = {
+        # Der Vorfall vom 15.10.2026: eine verdrahtete Zahl im Playbook ignoriert
+        # die gemeldete Hostversion. Sie darf nicht zurueckkommen.
         $fx = New-Fixture $docSemFixtureFiles
-        Edit-Fixture $fx 'Ansible/createVMLaunch-ESXi_playbook.yml' 'version: 21' 'version: 22'
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-unknown\]'
+        Edit-Fixture $fx 'Ansible/createVMLaunch-ESXi_playbook.yml' 'version: >-' 'version: 21'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-hardwired\]'
+    } }
+    @{ Name = 'doc-semantics.hw-version-ssot-unreadable'; Body = {
+        # Eine Tabelle, aus der die Regel nichts liest, ist kein gruener Lauf:
+        # sonst haette ein Umbau der Zeilenform die Regel still stillgelegt.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/esxi_create_compatibility.php' "['esxi' => " "['release' => "
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.no-ssot\]'
     } }
     @{ Name = 'doc-semantics.vcenter-deploy-boundary'; Body = {
         $fx = New-Fixture $docSemFixtureFiles

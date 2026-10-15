@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ansible_command_create.php';
 require_once __DIR__ . '/ansible_create_protocol.php';
+require_once __DIR__ . '/ansible_command_modes.php';
+require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
@@ -64,6 +66,12 @@ function deploy_worker_run_create_section(
     // has been running since its first VM.
     repo_deploy_create_mark_started($db, $jobId);
     $context['create_started_at'] = deploy_worker_create_started_at($db, $jobId);
+    // The create section is a step of the job like any playbook, but it runs
+    // outside ansible_remote_steps(), so no remote echo marks it. Without these
+    // two lines the job log's "Ablauf" claimed no step ran while two VMs were
+    // being created. The end marker is written only when every unit succeeded:
+    // a missing end is the timeline's word for "did not finish".
+    $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, ansible_step_marker_line(VIRTUSPHERE_ANSIBLE_STEP_BEGIN, VIRTUSPHERE_PLAYBOOKS['create']));
 
     $stopReason = null;
     // A bounded outer loop rather than `while (true)`: every pass either moves
@@ -97,9 +105,13 @@ function deploy_worker_run_create_section(
 
     $summary = repo_deploy_create_summary($channel->connection(), $jobId);
     $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, deploy_worker_create_summary_line($summary));
+    $allSuccessful = deploy_create_all_successful(repo_deploy_create_results($channel->connection(), $jobId));
+    if ($allSuccessful) {
+        $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, ansible_step_marker_line(VIRTUSPHERE_ANSIBLE_STEP_END, VIRTUSPHERE_PLAYBOOKS['create']));
+    }
 
     return [
-        'all_successful' => deploy_create_all_successful(repo_deploy_create_results($channel->connection(), $jobId)),
+        'all_successful' => $allSuccessful,
         'summary' => $summary,
         'stop_reason' => $stopReason,
     ];

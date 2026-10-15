@@ -58,6 +58,12 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
             // decision, so the table has to say that it is not all of it;
             // otherwise "3 of 40 blocked" reads as a table with 3 missing rows.
             'network_omitted' => (int) ($network['vm_results_omitted_count'] ?? 0),
+            // Whether this job's own result is about the network at all: a
+            // network preflight block, or a MAC import with failed VMs. Only
+            // then does "the network configuration is unambiguous NOW" answer
+            // a question; under a host or create failure it reads like a cause.
+            'network_history' => $network !== null
+                || ($mac !== null && (int) ($counts['failed_vms'] ?? 0) > 0),
             // K16 is a queue-scope diagnostic beside the existing result
             // protocol. It does not alter or impersonate the MAC outcome.
             'skipped_count' => $skippedCount,
@@ -156,7 +162,7 @@ function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null,
                 ) . '</p>';
             }
         }
-        if ($name === 'result' && is_array($retryEvaluation) && !empty($retryEvaluation['network_ready'])) {
+        if ($name === 'result' && is_array($retryEvaluation) && !empty($retryEvaluation['network_ready']) && !empty($block['network_history'])) {
             $html .= '<p>' . deploy_terminal_h(__t('deploy.retry_network_ready_now')) . '</p>';
         } elseif ($name === 'result' && is_array($retryEvaluation) && deploy_terminal_retry_has_network_blocker((array) ($retryEvaluation['findings'] ?? []))) {
             $html .= '<p>' . deploy_terminal_h(__t('deploy.retry_network_still_blocked')) . '</p>';

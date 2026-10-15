@@ -209,6 +209,40 @@ final class DeployCreateProgressTest extends TestCase
     }
 
     /**
+     * 15.10.2026: two units failed with module_failed, and the card said only
+     * "the remote VM module reported a failure" while ESXi had said exactly
+     * what was wrong. A module failure shows the host's stored words next to
+     * the label; every other class keeps its closed sentence alone.
+     */
+    public function testAModuleFailureShowsTheHostMessageAndNoOtherClassDoes(): void
+    {
+        $rows = $this->rows([
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, ''],
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN, ''],
+        ]);
+        $rows[0]['error_code'] = VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED;
+        $rows[0]['error_detail'] = 'Failed to create a virtual machine : The operation is not supported on the object.';
+        $rows[1]['error_code'] = VIRTUSPHERE_CREATE_ERROR_ASYNC_STATE_MISSING;
+        $rows[1]['error_detail'] = 'status file vanished';
+
+        $view = deploy_create_progress_from_rows($rows);
+        self::assertNotNull($view);
+        self::assertSame(
+            ['Failed to create a virtual machine : The operation is not supported on the object.', null],
+            array_column($view['findings'], 'host_detail')
+        );
+
+        $payload = deploy_create_progress_payload_from_view($view);
+        self::assertNotNull($payload);
+        self::assertSame($view['findings'][0]['host_detail'], $payload['findings'][0]['host_detail']);
+        self::assertNull($payload['findings'][1]['host_detail']);
+        self::assertNotSame('deploy.create_progress_host_detail', $payload['findings'][0]['host_detail_label']);
+
+        self::assertNull(deploy_create_progress_host_detail(VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED, '   '));
+        self::assertSame(512, strlen((string) deploy_create_progress_host_detail(VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED, str_repeat('x', 2000))));
+    }
+
+    /**
      * IDR-P02: a unit that replaced an externally deleted VM succeeded. It is a
      * note about the follow-up MECM step, never a stored failure cause, and the
      * sentence names the VM without exposing a raw UUID.

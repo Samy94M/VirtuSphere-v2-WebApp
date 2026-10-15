@@ -392,6 +392,7 @@ return [
     'create_progress_findings_heading' => 'Stored causes',
     'create_progress_finding' => ':name (position :position): :reason',
     'create_progress_reason_module_failed' => 'The remote VM module reported a failure.',
+    'create_progress_host_detail' => 'Host message:',
     'create_progress_reason_host_identity' => 'The control connection was blocked before authentication because of the SSH host identity.',
     'create_progress_reason_unresolved_observation' => 'The outcome of the remote create operation could not be observed safely.',
     'create_progress_reason_identity_conflict' => 'The live VM identity contradicts the expected identity.',

@@ -276,49 +276,50 @@ for f in $active_docs; do
   fi
 done
 
-# --- 15. Hardware-Version des createVMs-Playbooks vs. Support-Matrix ------------
+# --- 15. Hardware-Version der VM-Erstellung vs. Support-Matrix ------------------
 #
-# Das Playbook verdrahtet `version: 21`. vmx-21 ist laut Broadcom "not compatible
-# with versions of ESXi prior to 8.0 Update 2", die Support-Matrix in
-# docs/DEPLOYMENT.md verspricht aber ESXi 7.0 und 8.0. Dass der Altclient dieselbe
-# 21 ausliefert und im Feld funktioniert, beweist nur, dass die Hosts im Feld schon
-# 8.0 U2 oder neuer sind: ein erster Kunde auf 7.0 laeuft in einen harten
-# Fehlschlag bei der VM-Erstellung, und unsere eigene Zusage ist die Ursache.
+# Bis 15.10.2026 verdrahtete das Create-Playbook `version: 21`. vmx-21 laesst sich
+# erst ab ESXi 8.0 Update 2 erstellen; auf einem 7.0.3-Host schlug deshalb jede
+# Erstellung mit "The operation is not supported on the object" fehl, obwohl das
+# Portal die Hostversion kannte. Vor Juli 2026 setzte das Playbook gar keine
+# Version, und ESXi waehlte selbst.
 #
-# Geprueft wird deshalb das Paar, nicht die Zahl: das Playbook ist die SSoT, und die
-# Matrix muss die Untergrenze nennen, die diese Zahl verlangt.
-# Seit Etappe 14B-E mutiert nicht mehr das Schleifen-Playbook, sondern der
-# Launch-Aufruf, der genau eine VM erstellt. Die SSoT der Hardware-Version ist
-# damit diese Datei; der alte Pfad existiert nicht mehr.
+# Seit ADR-0023 Nachtrag 7 ist die SSoT die Tabelle
+# VIRTUSPHERE_ESXI_CREATE_HARDWARE_VERSIONS in lib/esxi_create_compatibility.php:
+# je vmx-Version die erste ESXi-Version, die sie erstellen kann. Die Regel leitet
+# daraus ab, statt Zahlen zu listen:
+#   - das Playbook darf keine Hardware-Version mehr verdrahten (hw-version-hardwired);
+#   - jedes Tabellenpaar muss in den Matrixzeilen zur Erstellung als
+#     "<Version>: vmx-<N>" stehen (hw-version-matrix), sonst verspricht die Doku
+#     etwas anderes als der Worker tut;
+#   - eine leere oder unlesbare Tabelle ist kein gruener Lauf (no-ssot).
 create_playbook='Ansible/createVMLaunch-ESXi_playbook.yml'
+hw_ssot='Docker/WebAPI/lib/esxi_create_compatibility.php'
 matrix_doc='docs/DEPLOYMENT.md'
-if [ -f "$create_playbook" ] && [ -f "$matrix_doc" ]; then
-  hw_version=$(sed -n 's/^[[:space:]]*version:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$create_playbook" | head -n 1)
-  if [ -z "$hw_version" ]; then
-    fail no-ssot "$create_playbook nennt keine hardware version mehr; Regel 15 kann die Support-Matrix nicht mehr dagegen halten."
+if [ -f "$create_playbook" ] && [ -f "$hw_ssot" ] && [ -f "$matrix_doc" ]; then
+  if grep -nE '^[[:space:]]*version:[[:space:]]*[0-9]+[[:space:]]*$' "$create_playbook" >&2; then
+    fail hw-version-hardwired "$create_playbook verdrahtet wieder eine hardware version (Zeile oben); sie kommt aus serverlist.yml (create_hardware_version), abgeleitet aus der gemeldeten ESXi-Version."
+  fi
+  hw_pairs=$(tr -d '\r' < "$hw_ssot" \
+    | sed -n "s/^[[:space:]]*\['esxi' => '\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\)', 'vmx' => \([0-9][0-9]*\)\],.*/\1.\2 \3 \4/p")
+  if [ -z "$hw_pairs" ]; then
+    fail no-ssot "$hw_ssot enthaelt keine lesbare VIRTUSPHERE_ESXI_CREATE_HARDWARE_VERSIONS-Zeile; Regel 15 kann die Support-Matrix nicht dagegen halten."
   else
-    # Die Untergrenze je vmx-Version. Waechst die Liste, waechst die Doku mit.
-    case "$hw_version" in
-      21) esxi_floor='8.0 Update 2' ;;
-      20) esxi_floor='8.0' ;;
-      19) esxi_floor='7.0 Update 2' ;;
-      *)  esxi_floor='' ;;
-    esac
-    if [ -z "$esxi_floor" ]; then
-      fail hw-version-unknown "$create_playbook setzt hardware version $hw_version, fuer die Regel 15 keine ESXi-Untergrenze kennt; Untergrenze belegen und hier eintragen."
-    else
-      # Nur die Zeilen, die von der Erstellung reden. Ein "8.0" irgendwo in der
-      # Matrix ist kein Beleg: die Zeile ueber der Erstellungsgrenze nennt die
-      # allgemein unterstuetzten Versionen, und die ist genau die Aussage, die zu
-      # weit ist.
-      create_rows=$(grep -iE 'creating|hardware version' "$matrix_doc" || true)
-      if ! printf '%s\n' "$create_rows" | grep -qF "$esxi_floor"; then
-        fail hw-version-matrix "$create_playbook erzeugt VMs mit hardware version $hw_version (verlangt ESXi $esxi_floor), aber $matrix_doc nennt diese Untergrenze nicht dort, wo es um die Erstellung geht; die Support-Matrix verspricht damit Hosts, auf denen die VM-Erstellung hart fehlschlaegt."
+    # Nur die Zeilen, die von der Erstellung reden: die allgemeine Zeile ueber
+    # der Erstellung ist kein Beleg fuer eine Erstellungszusage.
+    create_rows=$(grep -iE 'creating|hardware version' "$matrix_doc" || true)
+    while read -r base update vmx; do
+      [ -z "$base" ] && continue
+      if [ "$update" -gt 0 ]; then label="$base Update $update"; else label="$base"; fi
+      if ! printf '%s\n' "$create_rows" | grep -qF "$label: vmx-$vmx"; then
+        fail hw-version-matrix "$hw_ssot erstellt ab ESXi $label mit vmx-$vmx, aber $matrix_doc nennt das Paar \"$label: vmx-$vmx\" nicht dort, wo es um die Erstellung geht."
       fi
-    fi
+    done <<HW_PAIRS
+$hw_pairs
+HW_PAIRS
   fi
 else
-  fail no-ssot "$create_playbook oder $matrix_doc fehlt; die Hardware-Version ist nicht gegen die Support-Matrix pruefbar."
+  fail no-ssot "$create_playbook, $hw_ssot oder $matrix_doc fehlt; die Hardware-Version ist nicht gegen die Support-Matrix pruefbar."
 fi
 
 # --- 16. vCenter bleibt Inventarquelle, nie Deploy-Ziel ------------------------

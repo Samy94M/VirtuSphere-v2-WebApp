@@ -16,6 +16,7 @@ require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_network_preflight.php';
 require_once __DIR__ . '/deploy_worker_host_preflight.php';
+require_once __DIR__ . '/deploy_worker_esxi_preflight.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
 require_once __DIR__ . '/deploy_worker_step_failure.php';
 require_once __DIR__ . '/deploy_worker_inventory.php';
@@ -93,7 +94,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         }
 
         $esxiCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_esxi_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ESXI);
-        deploy_worker_esxi_write_preflight($channel->connection(), $jobId, (int) $esxiCredential['id'], (string) deploy_worker_payload($job)['mode']);
+        $createHardwareVersion = deploy_worker_esxi_write_preflight($channel->connection(), $jobId, (int) $esxiCredential['id'], (string) deploy_worker_payload($job)['mode'], (int) $job['mission_id'], $materializedVmIds);
         $ansibleCredential = deploy_worker_credential($channel->connection(), (int) $job['credential_ansible_id'], VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE);
         $esxiSecret = repo_credential_secret($channel->connection(), (int) $esxiCredential['id']);
         $ansibleSecret = repo_credential_secret($channel->connection(), (int) $ansibleCredential['id']);
@@ -116,7 +117,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         $vmsMarked = true;
         deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
 
-        $artifacts = ansible_prepare_job_artifacts($channel->connection(), $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl);
+        $artifacts = ansible_prepare_job_artifacts($channel->connection(), $job, $esxiCredential, $esxiSecret, $ansibleCredential, $apiBaseUrl, $createHardwareVersion);
         $localDir = (string) $artifacts['local_dir'];
         // Known from here on, so a failed upload is cleaned up too: whatever
         // reached the host at that point includes accounts.yml.
@@ -322,72 +323,4 @@ function deploy_worker_transport_failure_with_step(RuntimeException $exception, 
     }
 
     return new RuntimeException($message, 0, $exception);
-}
-
-/**
- * Decides whether this job may write the ESXi autostart policy, from the cached
- * capability facts of the target credential (ADR-0025).
- *
- * The facts always land in the job log first, fresh or not, so the run is
- * explainable afterwards even when the verdict was "go ahead".
- *
- * Refusals need a FRESH fact, never a stale or absent one: the cache is a mirror
- * and must not block on an assumption (ADR-0023). Consequences differ by mode,
- * because the operator asked for different things:
- *  - `autostart` is a request to write the policy. If it provably cannot work,
- *    fail loudly rather than report a success that changed nothing.
- *  - `full` is a request to deploy. A host that ignores autostart should not cost
- *    the operator the VMs, so the step is dropped and the pipeline continues.
- *
- * @return bool whether the autostart playbook stays in the sequence
- */
-function deploy_worker_autostart_preflight(mysqli $db, int $jobId, int $credentialId, string $mode, bool $autostartEnabled): bool
-{
-    $state = repo_esxi_inventory_state($db, $credentialId);
-    $intervalHours = esxi_inventory_interval_hours($db);
-    $preflight = esxi_autostart_preflight($state, $intervalHours);
-    $fresh = esxi_capabilities_fresh($state, $intervalHours);
-    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line($preflight['facts'], $fresh));
-
-    if ($preflight['verdict'] === 'block') {
-        throw new RuntimeException('Autostart cannot be written: this ESXi host reports a free licence, whose API is read-only. Assign a licensed edition or turn the mission autostart off.');
-    }
-
-    if ($preflight['verdict'] === 'skip') {
-        if ($mode === VIRTUSPHERE_DEPLOY_MODE_AUTOSTART) {
-            throw new RuntimeException('Autostart cannot be written: this ESXi host is part of a vSphere HA cluster, where ESXi disables autostart. Use the HA restart priority instead.');
-        }
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Skipping the autostart step: the target host is in a vSphere HA cluster, where autostart has no effect. The rest of the pipeline runs unchanged.');
-
-        return false;
-    }
-
-    if (!$fresh) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'Autostart preflight ran on stale or missing capability facts. Proceeding: ESXi remains the authority and will reject the write if it cannot perform it.');
-    }
-
-    return $autostartEnabled || $mode === VIRTUSPHERE_DEPLOY_MODE_AUTOSTART;
-}
-
-/**
- * DF-E2 in the worker: logs the evidence, then refuses a writing mode on a
- * proven read-only host before any VM is marked or file uploaded. The refusal
- * is configuration_blocked, never execution_failed: no playbook ran.
- */
-function deploy_worker_esxi_write_preflight(mysqli $db, int $jobId, int $credentialId, string $mode): void
-{
-    if (!ansible_mode_writes_esxi($mode)) {
-        return;
-    }
-    $state = repo_esxi_inventory_state($db, $credentialId);
-    $fresh = esxi_capabilities_fresh($state, esxi_inventory_interval_hours($db));
-    repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, esxi_capabilities_log_line(esxi_capabilities($state), $fresh));
-    try {
-        deploy_assert_esxi_write_capability($db, $credentialId, $mode);
-    } catch (ValidationException $blocked) {
-        throw new DeployWorkerConfigurationBlocked($blocked->getMessage(), null, $blocked);
-    }
-    if (!$fresh) {
-        repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'ESXi write preflight used stale or missing capability facts. Proceeding: ESXi remains the authority and may reject the write.');
-    }
 }

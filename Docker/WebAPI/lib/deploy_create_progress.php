@@ -7,6 +7,7 @@ require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/deploy_create_progress_actions.php';
 require_once __DIR__ . '/help_page.php';
+require_once __DIR__ . '/deploy_create_progress_findings.php';
 require_once __DIR__ . '/portal_time.php';
 require_once __DIR__ . '/layout_response.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
@@ -142,42 +143,6 @@ function deploy_create_progress_replacement_text(array $replacement): string
 }
 
 /**
- * A stored failure class presented without parsing prose or exposing it as the
- * visible explanation. The technical error code remains alongside the label so
- * operations can still correlate it with a runbook or support case.
- *
- * @param array<string,mixed> $row
- * @return array<string,mixed>
- */
-function deploy_create_progress_finding(array $row): array
-{
-    $errorCode = (string) ($row['error_code'] ?? '');
-    $reasonKey = match ($errorCode) {
-        VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED => 'deploy.create_progress_reason_host_identity',
-        VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED => 'deploy.create_progress_reason_module_failed',
-        VIRTUSPHERE_CREATE_ERROR_IDENTITY_CONFLICT => 'deploy.create_progress_reason_identity_conflict',
-        VIRTUSPHERE_CREATE_ERROR_IDENTITY_BOUND_VM_RENAMED => 'deploy.create_progress_reason_renamed',
-        VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR,
-        VIRTUSPHERE_CREATE_ERROR_IDENTITY_RESULT_INVALID => 'deploy.create_progress_reason_invalid_evidence',
-        VIRTUSPHERE_CREATE_ERROR_OPERATOR_RELEASED => 'deploy.create_progress_reason_operator_released',
-        VIRTUSPHERE_CREATE_ERROR_LAUNCH_UNCONFIRMED,
-        VIRTUSPHERE_CREATE_ERROR_ASYNC_STATE_MISSING,
-        VIRTUSPHERE_CREATE_ERROR_TRANSPORT_LOST,
-        VIRTUSPHERE_CREATE_ERROR_JOB_TIMEOUT,
-        VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST => 'deploy.create_progress_reason_unresolved_observation',
-        default => 'deploy.create_progress_reason_unknown',
-    };
-
-    return [
-        'position' => (int) $row['position'],
-        'vm_name' => (string) $row['vm_name'],
-        'error_code' => $errorCode,
-        'reason_key' => $reasonKey,
-        'reason_label' => __t($reasonKey),
-    ];
-}
-
-/**
  * The same view model for the polling JSON.
  *
  * It is the SAME function underneath, so the card the browser updates and the
@@ -228,6 +193,8 @@ function deploy_create_progress_payload_from_view(?array $view, int $missionId =
         'findings' => array_map(
             static fn(array $finding): array => [
                 'error_code' => (string) $finding['error_code'],
+                'host_detail' => $finding['host_detail'] ?? null,
+                'host_detail_label' => __t('deploy.create_progress_host_detail'),
                 'text' => __t('deploy.create_progress_finding', [
                     'name' => (string) $finding['vm_name'],
                     'position' => (string) (int) $finding['position'],
@@ -351,6 +318,9 @@ function deploy_log_render_create_progress(mysqli $db, array $job, array $user):
                         ])); ?></span>
                         <?php if ((string) $finding['error_code'] !== '') { ?>
                             <code><?php echo h((string) $finding['error_code']); ?></code>
+                        <?php } ?>
+                        <?php if (($finding['host_detail'] ?? null) !== null) { ?>
+                            <br><span class="muted"><?php echo h(__t('deploy.create_progress_host_detail')); ?></span> <code class="log-line"><?php echo h((string) $finding['host_detail']); ?></code>
                         <?php } ?>
                     </li>
                 <?php } ?>

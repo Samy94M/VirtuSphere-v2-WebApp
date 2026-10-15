@@ -30,22 +30,30 @@ const VIRTUSPHERE_VM_DEFAULTS = [
     'ram_hotplug' => true,
 ];
 
+// `min_esxi` is the first ESXi release whose API knows the identifier (vSphere
+// Web Services API, GuestOsIdentifier "Since"): Server 2022 came with 7.0 U1,
+// Windows 11 and Server 2025 with 8.0. The create preflight refuses a VM whose
+// guest OS the target host reports it cannot know (lib/esxi_create_compatibility.php).
 const VIRTUSPHERE_GUEST_OS_OPTIONS = [
     [
         'guest_id' => 'windows2019srv_64Guest',
         'label_key' => 'portal.vm_guest_os_windows_server_2019',
+        'min_esxi' => '7.0.0',
     ],
     [
         'guest_id' => 'windows11_64Guest',
         'label_key' => 'portal.vm_guest_os_windows_11',
+        'min_esxi' => '8.0.0',
     ],
     [
         'guest_id' => 'windows2019srvNext_64Guest',
         'label_key' => 'portal.vm_guest_os_windows_server_2022',
+        'min_esxi' => '7.0.1',
     ],
     [
         'guest_id' => 'windows2022srvNext_64Guest',
         'label_key' => 'portal.vm_guest_os_windows_server_2025',
+        'min_esxi' => '8.0.0',
     ],
 ];
 

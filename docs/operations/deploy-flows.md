@@ -59,6 +59,7 @@ Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
 - Netz: allgemeine Zuordnung und PXE-Karte laut Netzvertrag; welche Modi sperren und welche nur warnen, steht in [DEPLOYMENT.md](../DEPLOYMENT.md#deploy-modes-and-the-mac-generation-power-cycle).
 - Create-Historie: Eine frühere Create-Einheit derselben VM ist noch ungeklärt (`uncertain`).
 - Host-Fähigkeit: Ein aktueller Befund „freie Lizenz“ des gewählten Hosts sperrt jeden schreibenden Modus (`create`, `full`, `powercycle`, `start`, `autostart`); `export` bleibt erlaubt. Ein veralteter oder fehlender Befund warnt nur. Dieselbe Prüfung läuft für Einzelauftrag, Staffelung und Wiederholung und im Worker erneut.
+- Host-Version (`create`, `full`): Eine aktuell gemeldete ESXi-Version unter 7.0 sperrt. Ebenso eine VM, deren Guest OS diese Version noch nicht kennt (Windows Server 2022 ab 7.0 Update 1, Windows 11 und Windows Server 2025 ab 8.0); jede solche VM erscheint als eigene Sperre mit Link in ihren Editor. Aus derselben Version leitet der Worker die Hardwareversion neuer VMs ab. Ein veralteter oder fehlender Befund sperrt nicht; dann wählt ESXi die Version. Einzelauftrag, Staffelung, Wiederholung und Worker fragen denselben Owner (`deploy_esxi_create_compatibility()`, ADR-0023 Nachtrag 7).
 
 Keine Sperre, aber eine Bestätigung vor dem Einreihen: Würde `create` oder `full` gebundene VMs anlegen, deren Bindung über ein anderes Zugangsziel nachgewiesen wurde (`vm_bound_esxi_host`, Vergleich ohne Groß-/Kleinschreibung und abschließenden Punkt), zeigt die Seite die Warnung mit dem bisherigen Host live an, und das Absenden führt zuerst auf eine Bestätigungsseite, auch ohne JavaScript. Create fände dort weder UUID noch Namen und legte die VMs neu an; die alten VMs und ihre MECM-Geräte laufen weiter. Eine Wiederholung nennt dieselbe Warnung im Bestätigungsdialog und neben „Erneut ausführen“ im Auftragsprotokoll; die Jobliste verlinkt in diesem Fall dorthin. Eine Bindung ohne bekannten Host warnt nicht.
 
@@ -79,14 +80,20 @@ flowchart TD
   P -->|nein| PX["Auftrag failed (configuration_blocked); nichts hochgeladen, nichts auf ESXi geändert"]
   P -->|ja| W{"Schreibender Modus und aktueller Befund „freie Lizenz“?"}
   W -->|ja| WX["Auftrag failed (configuration_blocked); nichts hochgeladen, VM-Zustände unverändert"]
-  W -->|nein, veraltet oder unbekannt: Hinweis im Protokoll| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
+  W -->|nein, veraltet oder unbekannt: Hinweis im Protokoll| CV{"Modus legt VMs an? Dann Create-Urteil aus der gemeldeten ESXi-Version"}
+  CV -->|aktuell bekannt, unter 7.0 oder Guest OS einer VM jünger als der Host| CVX["Auftrag failed (configuration_blocked) mit Version und betroffenen VMs; nichts hochgeladen, VM-Zustände unverändert"]
+  CV -->|aktuell bekannt| CVH["Hardwareversion für neue VMs aus der Tabelle: 7.0: 17, 7.0 U1: 18, 7.0 U2: 19, 8.0: 20, 8.0 U2: 21"]
+  CV -->|veraltet oder unbekannt: Hinweis im Protokoll| CVU["Keine Version: ESXi wählt seinen Standard"]
+  CV -->|kein Create-Modus| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
+  CVH --> D
+  CVU --> D
   D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit und IP-Freigabe des Hosts"]
   H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente (terminal_reason timeout bei überschrittenem Transportbudget); VM-Zustände unverändert"]
   H -->|MAC-Modus, IP nicht oder nicht als Ansible-Host freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
   H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
   H --> SW["Liegengebliebene accounts.yml früherer Aufträge desselben Zugangs auf diesem Ziel entfernen (nächster Kontakt, bricht den Auftrag nicht ab)"]
   SW --> M["Nach dem Preflight markieren zustandsändernde Modi ihre VMs; start/autostart schreiben nie Lifecycle oder MECM"]
-  M --> A["Artefakte bauen: accounts.yml, serverlist.yml, Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
+  M --> A["Artefakte bauen: accounts.yml, serverlist.yml (mit create_hardware_version, leer wenn unbekannt), Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
   A --> AS{"Schreibt der Auftrag Autostart?"}
   AS -->|ja| AP{"Aktueller Befund des Hosts?"}
   AP -->|freie Lizenz (nur theoretisch: W hat schon gesperrt)| APX["Auftrag failed, noch vor dem Upload; unberührte VM-Zustände bleiben erhalten"]
@@ -270,9 +277,9 @@ flowchart TD
   D -->|ja| W{"VM existierte vorher und ist nicht ausgeschaltet (auch unbekannt)?"}
   W -->|ja| WX["rejected: vm_not_powered_off, keine Änderung; der Worker meldet die Einheit unverändert"]
   W -->|nein| E{"VM existierte vorher?"}
-  E -->|nein| E1["vmware_guest per Name: neue VM anlegen"]
-  E -->|ja, ausgeschaltet| E2["vmware_guest per gebundener Instance-UUID: Hardware angleichen"]
-  E1 --> F["Async-Job mit poll 0 starten: Hardwareversion 21, EFI, Secure Boot, CPU, RAM, Disks, Netze"]
+  E -->|nein| E1["vmware_guest per Name: neue VM anlegen, Hardwareversion aus create_hardware_version (leer: ESXi wählt)"]
+  E -->|ja, ausgeschaltet| E2["vmware_guest per gebundener Instance-UUID: Hardware angleichen, ohne Hardwareversion (nie anheben)"]
+  E1 --> F["Async-Job mit poll 0 starten: EFI, Secure Boot, CPU, RAM, Disks, Netze"]
   E2 --> F
   F --> G["Ergebnis launched mit Job-ID und Async-Verzeichnis"]
 ```

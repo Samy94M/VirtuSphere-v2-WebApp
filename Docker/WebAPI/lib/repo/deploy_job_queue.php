@@ -102,6 +102,11 @@ function repo_create_deploy_job(mysqli $db, int $missionId, int $userId, int $es
             repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $payload['vm_ids']);
         }
         if ($payload['vm_ids'] !== []) {
+            // The host version and the guest OS of exactly the frozen scope:
+            // a retry passes through here too, with its own selection.
+            deploy_assert_esxi_create_compatibility($db, $esxiCredentialId, (string) $payload['mode'], $missionId, $payload['vm_ids']);
+        }
+        if ($payload['vm_ids'] !== []) {
             repo_vm_network_assert_deploy_ready($db, $missionId, $payload['vm_ids'], (string) ($mission['wds_vlan'] ?? ''), (string) $payload['mode']);
         }
 
@@ -266,6 +271,9 @@ function repo_enqueue_deploy_group(mysqli $db, int $missionId, int $userId, int 
         }
         if ($scopeIds !== []) {
             repo_deploy_assert_create_history_resolved($db, $missionId, $esxiCredentialId, $scopeIds);
+        }
+        if ($scopeIds !== []) {
+            deploy_assert_esxi_create_compatibility($db, $esxiCredentialId, (string) $basePayload['mode'], $missionId, $scopeIds);
         }
         // Union pre-check for the whole group: it fans out into one job per VM
         // below, so the per-job scope cap is deliberately not applied here.
