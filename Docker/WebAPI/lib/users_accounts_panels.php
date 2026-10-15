@@ -71,6 +71,16 @@ function users_render_accounts(array $rows, array $actor, int $passwordMinLength
                             <button class="button button-secondary" type="submit"><?php echo h(__t('directory.sync_user')); ?></button>
                         </form>
                         <?php } else { ?>
+                        <?php // Local accounts only: a directory account's address is the
+                              // directory's `mail`, rewritten by every sync. ?>
+                        <form class="inline-form" method="post" action="<?php echo h($actionUrl); ?>">
+                            <?php echo csrf_field(); ?><input type="hidden" name="action" value="set_email"><input type="hidden" name="user_id" value="<?php echo h((string) $row['id']); ?>">
+                            <?php $emailForm = 'row-' . (int) $row['id']; $emailInputId = form_element_id($emailForm, 'email'); ?>
+                            <label class="sr-only" for="<?php echo h($emailInputId); ?>"><?php echo h(__t('users.email_label', ['name' => $rowName])); ?></label>
+                            <input name="email" type="email" value="<?php echo h(form_old($emailForm, 'email', (string) $row['email'])); ?>"<?php echo form_control_attrs($emailForm, 'email'); ?> autocomplete="off">
+                            <button class="button button-secondary" type="submit"><?php echo h(__t('users.btn_email')); ?></button>
+                            <?php echo form_error_html($emailForm, 'email'); ?>
+                        </form>
                         <form class="inline-form" method="post" action="<?php echo h($actionUrl); ?>">
                             <?php echo csrf_field(); ?><input type="hidden" name="action" value="reset_password"><input type="hidden" name="user_id" value="<?php echo h((string) $row['id']); ?>">
                             <?php $passwordForm = 'row-' . (int) $row['id']; $passwordInputId = form_element_id($passwordForm, 'password'); ?>

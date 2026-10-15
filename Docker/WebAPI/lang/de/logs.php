@@ -161,6 +161,7 @@ return [
     'eventcode_user_created' => 'Benutzer angelegt',
     'eventcode_user_directory_imported' => 'AD-Benutzer importiert',
     'eventcode_user_directory_synchronized' => 'AD-Benutzer synchronisiert',
+    'eventcode_user_email_changed' => 'E-Mail-Adresse geändert',
     'eventcode_user_role_changed' => 'Rolle geändert',
     'eventcode_user_security_state_changed' => 'Kontosicherheit geändert',
     'eventcode_vm_bulk_changed' => 'VMs gesammelt geändert',

@@ -13,6 +13,8 @@ const VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED = 'auth.session_ended';
 const VIRTUSPHERE_AUDIT_EVENT_USER_CREATED = 'user.created';
 const VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED = 'user.active_state_changed';
 const VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED = 'user.role_changed';
+// The action says changed or cleared; the address itself never enters the trail.
+const VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED = 'user.email_changed';
 const VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED = 'user.security_state_changed';
 const VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED = 'user.directory_imported';
 const VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED = 'user.directory_synchronized';
@@ -164,6 +166,7 @@ function audit_event_registry(): array
         VIRTUSPHERE_AUDIT_EVENT_USER_CREATED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_USERS, ['user'], $success, ['source'], ['name']),
         VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_USERS, ['user'], $success, ['enabled']),
         VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_USERS, ['user'], $success, ['role']),
+        VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_USERS, ['user'], $success, ['action']),
         VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_USERS, ['user'], $success, ['action']),
         VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_USERS, ['user'], $success),
         VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_USERS, ['user'], $success),

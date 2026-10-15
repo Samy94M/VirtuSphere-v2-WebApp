@@ -160,6 +160,7 @@ return [
     'eventcode_user_created' => 'User created',
     'eventcode_user_directory_imported' => 'AD user imported',
     'eventcode_user_directory_synchronized' => 'AD user synchronized',
+    'eventcode_user_email_changed' => 'Email address changed',
     'eventcode_user_role_changed' => 'Role changed',
     'eventcode_user_security_state_changed' => 'Account security changed',
     'eventcode_vm_bulk_changed' => 'VMs changed in bulk',

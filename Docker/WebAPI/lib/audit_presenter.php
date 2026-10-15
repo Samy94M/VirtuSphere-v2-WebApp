@@ -27,6 +27,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_USER_CREATED => 'created ' . ($context['source'] ?? 'local') . ' user id ' . $id . audit_description_named($context),
         VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED => 'changed active state for user id ' . $id . ' to ' . audit_bool_word((bool) ($context['enabled'] ?? false)),
         VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED => 'changed role for user id ' . $id . ' to ' . ($context['role'] ?? 'unknown'),
+        VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED => $action . ' email address for local user id ' . $id,
         VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED => $action . ' for local user id ' . $id,
         VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED => 'imported Active Directory user id ' . $id,
         VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED => 'synchronized Active Directory user id ' . $id,

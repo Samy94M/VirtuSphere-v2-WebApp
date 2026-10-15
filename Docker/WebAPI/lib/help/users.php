@@ -55,6 +55,7 @@ $passwordMinLength = password_policy_min_length(db());
             <h2><?php echo h(__t('help_users.usersmgmt_actions_heading')); ?></h2>
             <ul>
                 <li><?php echo h(__t('help_users.usersmgmt_action_role')); ?></li>
+                <li><?php echo h(__t('help_users.usersmgmt_action_email')); ?></li>
                 <li><?php echo h(__t('help_users.usersmgmt_action_active')); ?></li>
                 <li><?php echo h(__t('help_users.usersmgmt_action_reset', ['min' => $passwordMinLength])); ?></li>
             </ul>

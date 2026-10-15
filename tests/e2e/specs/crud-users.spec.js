@@ -32,7 +32,7 @@ echo 'JSON' . json_encode(['id' => $id]) . 'JSON';
 function userRow(id) {
   return phpJson(`
 $db = db();
-$stmt = $db->prepare('SELECT name, password, role, is_active, must_change_password, locked_until FROM deploy_users WHERE id = ? LIMIT 1');
+$stmt = $db->prepare('SELECT name, password, email, role, is_active, must_change_password, locked_until FROM deploy_users WHERE id = ? LIMIT 1');
 $id = ${Number(id)};
 $stmt->bind_param('i', $id);
 $stmt->execute();
@@ -137,6 +137,35 @@ test('set_role: Cancel keeps the role, Confirm changes it', async ({ page }) => 
   await expect(dialog).toBeVisible();
   await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'users.php');
   expect(userRow(id).role, 'Confirm changed the role').toBe('admin');
+});
+
+// e2e-covers: users.php:set_email
+test('set_email: an invalid address is refused, a valid one is stored, an empty one clears it', async ({ page }) => {
+  const name = PREFIX + 'mail-1';
+  const id = seedUser(name);
+  const form = () => targetRow(page, name).locator('form:has(input[name="action"][value="set_email"])');
+
+  await page.goto('users.php');
+  const submit = form().locator('button[type="submit"]');
+  await expect(submit, 'overwriting a visible note needs no prompt').not.toHaveAttribute('data-confirm', /./);
+
+  // The browser's own type=email check would stop the POST before the server
+  // sees it; the server rule is what this test pins, so skip the client one.
+  await form().locator('input[name="email"]').fill('not-an-address');
+  await form().evaluate((element) => { element.noValidate = true; });
+  await submitAndWaitForNavigation(page, submit, 'users.php');
+  expect(userRow(id).email, 'an invalid address is not stored').toBe('');
+  await expect(form().locator('input[name="email"]'), 'the refused value is shown again').toHaveValue('not-an-address');
+  await expect(form().locator('input[name="email"]')).toHaveAttribute('aria-invalid', 'true');
+
+  await form().locator('input[name="email"]').fill('ops@example.test');
+  await submitAndWaitForNavigation(page, form().locator('button[type="submit"]'), 'users.php');
+  expect(userRow(id).email, 'the new address is stored').toBe('ops@example.test');
+  await expect(form().locator('input[name="email"]'), 'the row shows the stored address').toHaveValue('ops@example.test');
+
+  await form().locator('input[name="email"]').fill('');
+  await submitAndWaitForNavigation(page, form().locator('button[type="submit"]'), 'users.php');
+  expect(userRow(id).email, 'an empty field clears the address').toBe('');
 });
 
 // e2e-covers: users.php:reset_password

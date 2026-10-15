@@ -46,7 +46,63 @@ function users_admin_target(mysqli $db, int $targetId): ?array
 {
     $source = auth_user_source_schema_available($db) ? 'auth_source' : "'local' AS auth_source";
     // csp-allow: interpolated-sql
-    return repo_fetch_one($db, 'SELECT id, name, ' . $source . ', role, is_active FROM deploy_users WHERE id = ? LIMIT 1', 'i', [$targetId]);
+    return repo_fetch_one($db, 'SELECT id, name, ' . $source . ', email, role, is_active FROM deploy_users WHERE id = ? LIMIT 1', 'i', [$targetId]);
+}
+
+/**
+ * The one email rule for both writers (create and set_email): optional, at
+ * most the column width, and a valid address when given. An empty value
+ * clears the note; the address gates nothing in the portal.
+ */
+function users_email_from_post(Validator $validator): string
+{
+    $email = $validator->optionalString('email', $_POST['email'] ?? '', __t('users.field_email'), 191);
+    if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+        $validator->add('email', __t('users.err_email_invalid'));
+    }
+
+    return $email;
+}
+
+/**
+ * Local accounts only: a directory account's address is the `mail` attribute
+ * the directory sync writes back (repo_directory_update_user_cache()), so a
+ * portal edit there would silently drift and be overwritten.
+ *
+ * @param array<string,mixed> $target users_require_local_target() row
+ */
+function users_set_email(mysqli $db, array $actor, array $target): void
+{
+    $validator = new Validator();
+    $email = users_email_from_post($validator);
+    $validator->throwIfInvalid();
+    $targetId = (int) $target['id'];
+    if ($email === (string) ($target['email'] ?? '')) {
+        flash_set('info', __t('users.flash_email_unchanged'));
+
+        return;
+    }
+    if (auth_user_source_schema_available($db)) {
+        $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+        $stmt = $db->prepare('UPDATE deploy_users SET email = ?, updated_at = NOW() WHERE id = ? AND auth_source = ?');
+        $stmt->bind_param('sis', $email, $targetId, $source);
+    } else {
+        $stmt = $db->prepare('UPDATE deploy_users SET email = ?, updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('si', $email, $targetId);
+    }
+    $stmt->execute();
+    // updated_at = NOW() makes every matched row count, so zero means the
+    // account vanished or stopped being local since the check above.
+    if ($stmt->affected_rows < 1) {
+        throw new ValidationException(['user_id' => __t('users.err_local_action_only')]);
+    }
+    // The trail records that and how the note changed, never the address
+    // itself: the audit log outlives the account row and is readable by
+    // every admin.
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+        'action' => $email === '' ? 'cleared' : 'changed',
+    ], (int) $actor['id']);
+    flash_set('success', __t($email === '' ? 'users.flash_email_cleared' : 'users.flash_email'));
 }
 
 function users_require_local_target(mysqli $db, int $targetId): array
@@ -64,10 +120,7 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
     if ($action === 'create') {
         $validator = new Validator();
         $name = $validator->requireString('name', $_POST['name'] ?? '', __t('common.name'), 191);
-        $email = $validator->optionalString('email', $_POST['email'] ?? '', __t('users.field_email'), 191);
-        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            $validator->add('email', __t('users.err_email_invalid'));
-        }
+        $email = users_email_from_post($validator);
         $password = request_string($_POST, 'password');
         $policyError = password_policy_error($password, password_policy_min_length($db), 'users.err_password_min');
         if ($policyError !== null) {
@@ -96,7 +149,7 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
 
         return true;
     }
-    if (!in_array($action, ['set_active', 'set_role', 'reset_password', 'clear_lock'], true)) {
+    if (!in_array($action, ['set_active', 'set_role', 'set_email', 'reset_password', 'clear_lock'], true)) {
         return false;
     }
 
@@ -174,7 +227,12 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
 
         return true;
     }
-    users_require_local_target($db, $targetId);
+    $localTarget = users_require_local_target($db, $targetId);
+    if ($action === 'set_email') {
+        users_set_email($db, $actor, $localTarget);
+
+        return true;
+    }
     if ($action === 'reset_password') {
         $password = request_string($_POST, 'password');
         $policyError = password_policy_error($password, password_policy_min_length($db), 'users.err_password_min');

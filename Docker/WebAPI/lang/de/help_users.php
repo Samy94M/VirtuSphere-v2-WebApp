@@ -21,6 +21,7 @@ return [
     'usersmgmt_create_p2' => 'Neue Konten starten immer mit Passwort-Änderungspflicht: Bei der ersten Anmeldung muss die Person das Startpasswort durch ein eigenes ersetzen. So kennt nach der Übergabe niemand außer ihr selbst das gültige Passwort.',
     'usersmgmt_actions_heading' => 'Bestehende Konten verwalten',
     'usersmgmt_action_role' => 'Rolle ändern: In der Zeile des Kontos die neue Rolle wählen und speichern. Die Änderung wirkt ab der nächsten Seitenaktion der Person, eine Neuanmeldung ist nicht nötig.',
+    'usersmgmt_action_email' => 'E-Mail-Adresse ändern: Bei einem lokalen Konto die neue Adresse in das Feld der Zeile eintragen und speichern; ein leeres Feld entfernt sie. Bei einem Active-Directory-Konto kommt die Adresse aus dem Verzeichnis und wird bei jeder Synchronisierung übernommen, deshalb lässt sie sich hier nicht ändern.',
     'usersmgmt_action_active' => 'Deaktivieren statt löschen: Ein deaktiviertes Konto kann sich nicht mehr anmelden, bleibt aber samt Historie erhalten und lässt sich jederzeit wieder aktivieren. Konten werden bewusst nicht gelöscht, damit Protokolleinträge zuordenbar bleiben.',
     'usersmgmt_action_reset' => 'Passwort zurücksetzen: Neues Passwort (mindestens :min Zeichen) in das Feld der Zeile eintragen und zurücksetzen. Auch hier gilt danach die Änderungspflicht bei der nächsten Anmeldung.',
     'usersmgmt_safety_heading' => 'Eingebaute Schutzmechanismen',

@@ -94,6 +94,7 @@ final class PortalConfirmContractTest extends TestCase
         'settings.php:save_retire_threshold' => 'overwrites a value shown in the same input',
         'settings.php:save_timezone' => 'overwrites a value shown in the same select',
         'users.php:directory_save_config' => 'replaces the configuration shown in the same form after validating its revision',
+        'users.php:set_email' => 'overwrites the address shown in the same input; it is a note that gates no login, role or deploy',
         'users.php:directory_move_controller' => 'changes a visible, reversible priority ordering',
 
         // Deliberate, documented exceptions.

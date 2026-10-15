@@ -21,6 +21,7 @@ return [
     'usersmgmt_create_p2' => 'New accounts always start with a mandatory password change: on first sign-in the person must replace the initial password with their own. After the handover, nobody but the account holder knows the valid password.',
     'usersmgmt_actions_heading' => 'Managing existing accounts',
     'usersmgmt_action_role' => 'Change role: pick the new role in the account row and save. The change takes effect with the person\'s next page action; no re-login is required.',
+    'usersmgmt_action_email' => 'Change email address: for a local account, enter the new address in the row field and save; an empty field removes it. For an Active Directory account the address comes from the directory and is taken over on every sync, so it cannot be changed here.',
     'usersmgmt_action_active' => 'Deactivate instead of delete: a deactivated account can no longer sign in but is kept with its history and can be reactivated at any time. Accounts are deliberately never deleted so audit entries stay attributable.',
     'usersmgmt_action_reset' => 'Reset password: enter a new password (at least :min characters) in the row field and reset. The mandatory change on next sign-in applies here as well.',
     'usersmgmt_safety_heading' => 'Built-in safeguards',
