@@ -4,8 +4,10 @@
 > historischen Schritte zum Anlegen/Aktualisieren der vier Client-Anwendungen
 > dürfen nicht ausgeführt werden: Der Clientinstaller blockiert vor jedem
 > Content-/MECM-Write und akzeptiert keine `-WebApi`-/`-ContentShare`-Overrides
-> mehr. Common verwendet keinen DNS-/IP-Fallback. Erst MC02/MC03 liefern
-> Preflight und geordneten Cutover; bestehende MECM-Objekte bleiben unberührt.
+> mehr. Common verwendet keinen DNS-/IP-Fallback. Der lesende MC02-Preflight
+> prüft seit 15.10.2026 auch RBAC-Sicht, Quellzuordnung, Rückwärtsreferenzen
+> und Deployment-Policy (am Standort noch nicht gelaufen); erst MC03 liefert den
+> geordneten Cutover. Bestehende MECM-Objekte bleiben unberührt.
 > Auch `install-VirtuSphere-MECM.ps1` ist vor allen Writes gesperrt, weil sein
 > Reporter-Bundle sonst Common V2 ohne den passenden Core veröffentlichen würde.
 > Die Server-Installationsbefehle weiter unten sind bis zur gemeinsamen
@@ -358,15 +360,16 @@ derselben Sperre sitzt.
 
 ### 5. Vier Client-Anwendungen erstellen
 
-Dieser historische Schritt ist bis MC02/MC03 ausgesetzt. Der Clientinstaller
-nimmt keine Einzelparameter mehr an und beendet den Lauf vor Content-/MECM-
-Writes. Keine vier Applications oder Dependencies manuell aus dem Zielgraphen
-anlegen; zuerst den read-only Preflight und den geordneten Cutover abwarten.
+Dieser historische Schritt ist bis zum geordneten Cutover (MC03) ausgesetzt.
+Der Clientinstaller nimmt keine Einzelparameter mehr an und beendet den Lauf vor
+Content-/MECM-Writes. Keine vier Applications oder Dependencies manuell aus dem
+Zielgraphen anlegen; den Cutover abwarten.
 
 Die früheren V22/V23-Re-Run- und Legacy-Übernahmeschritte sind keine Anleitung
-für den neuen Graphen. Der ausstehende Preflight muss bestehende Applications,
-Deployment Types, Dependencies, Content und aktive Policies read-only
-inventarisieren. Erst ein freigegebener Cutover darf die vier Ziel-Applications
+für den neuen Graphen. Der Preflight (MC02, Abschnitt „Client-Preflight“ unter
+„Client-Anwendungen“) inventarisiert bestehende Applications, Deployment Types,
+Dependencies, Rückwärtsreferenzen, RBAC-Sicht, Content und Deployment-Policy
+read-only. Erst ein freigegebener Cutover darf die vier Ziel-Applications
 `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`
 gemeinsam mit dem dazu passenden Reporter verteilen. Der bisherige Installer
 prüft diese Reihenfolge noch nicht und führt deshalb keine Content-/MECM-Writes
@@ -379,9 +382,9 @@ Dieser Ablauf ist für den MC01-Zwischenstand gesperrt. Die neue Clientkonfigura
 wird als geprüfter, unveränderlicher Satz veröffentlicht; ein einzelner
 Registry-Override oder ein Re-Run mit `-WebApi` ist kein zulässiger Wechsel.
 Zuerst DNS-Auflösung aus MECM- und Deploy-VLAN prüfen. Danach den neuen
-Standortwert in der geschützten Packaging-Konfiguration vorbereiten und den
-noch ausstehenden MC02-/MC03-Preflight samt geordnetem Core-/Reporter-Cutover
-durchführen. Bereits veröffentlichte Clients brauchen einen ausdrücklich
+Standortwert in der geschützten Packaging-Konfiguration vorbereiten, den
+MC02-Preflight lesen und den noch ausstehenden geordneten Core-/Reporter-Cutover
+(MC03) durchführen. Bereits veröffentlichte Clients brauchen einen ausdrücklich
 geplanten Migrations-/Repairpfad; sie übernehmen den neuen Wert nicht
 automatisch aus aktualisiertem Content.
 
@@ -1002,7 +1005,8 @@ als Diagnoseheader mitgesendet; sie ist kein Authentisierungsmerkmal.
 > `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`
 > als Vertrag definiert; die Einstiegsskripte wurden entsprechend umbenannt.
 > Der mutierende Clientinstaller stoppt vor Content- und MECM-Änderungen, bis
-> Read-only-Preflight und geordneter Cutover umgesetzt sind. Die nachfolgende
+> der geordnete Cutover (MC03) umgesetzt ist; der Read-only-Preflight (MC02)
+> liefert seit 15.10.2026 für alle vier Prüfungen echte Befunde. Die nachfolgende
 > Beschreibung dokumentiert den bisherigen Betrieb, nicht eine Freigabe zur
 > Anwendung des neuen Graphen. `client_getinfo`/`client_getinfo_2.1` werden
 > niemals stillschweigend übernommen.
@@ -1167,6 +1171,59 @@ legt kein Laufwerk an.
    Name `password`, `secret` oder `credential` enthält, stehen als `[redacted]`
    im Bericht. Vor der Weitergabe ansehen und wie eine interne Konfiguration
    behandeln.
+
+### Client-Preflight (MC02, nur lesend)
+
+`install-VirtuSphere-Clients.ps1` beginnt jeden Lauf mit dem Preflight aus
+`mecm\VirtuSphere-ClientPreflight.ps1`; mit `-ValidateOnly` endet er danach.
+Der Bericht erscheint als JSON auf der Konsole (Schemaversion 2). Seit dem
+15.10.2026 beantwortet er vier Fragen mit Standortdaten statt mit pauschalen
+Sperren. Grundlage sind die Feldformen, die zwei Läufe der Standort-Erhebung auf
+dem echten SMS-Provider geliefert haben.
+
+Jede Antwort steht als Zeile in `Checks` mit `Check`, `Target`, `Status`
+(`pass`, `fail`, `warn` oder `unknown`), `Code`, `Reason` und `Blocking`. Jede
+Zeile, die nicht `pass` ist, steht mit demselben Code und Grund zusätzlich in
+`Findings`. `fail` und `unknown` blockieren, `warn` nicht. Nur zwei Punkte sind
+`unknown`, ohne zu blockieren: Für sie hat der Provider kein Feld (siehe
+Deployment-Policy).
+
+| Prüfung | Was sie liest | Bewertung |
+|---|---|---|
+| `source_mapping` | `ContentShare` muss diesen Rechner nennen (NetBIOS- oder FQDN-Name, Groß-/Kleinschreibung egal). Die Freigabe aus `Get-SmbShare` ergibt mit dem Restpfad den lokalen Pfad, der genau `PackagesBase` sein muss. Dazu der Quellmarker, auf beiden Wegen gleich zurückgelesen. | `pass` nur mit allen drei Belegen. Freigabe fehlt oder führt woandershin: `fail`. Fremder Host, nicht lesbare Freigaben oder unbestätigter Marker: `unknown`. |
+| `rbac_scope` | Die `SMS_Admin`-Zeilen des Aufrufers über die eigene SID und alle Gruppen-SIDs. `Categories` und `Permissions` sind Lazy-Felder und werden je Zeile nachgeladen. Bereiche der Zielanwendungen aus `SMS_SecuredCategoryMembership`, die Limiting-Kette jeder Zielsammlung aus `SMS_Collection`. | Eine Anwendung ist abgedeckt, wenn der Aufrufer den Bereich `All` oder einen ihrer Bereiche hält. Eine Sammlung ist abgedeckt, wenn er sie oder eine Sammlung ihrer Limiting-Kette hält. Bereiche der Site außerhalb seiner Sicht: `warn`. Nur wenn er jeden Bereich sieht, belegt eine nicht sichtbare verwaltete Anwendung ihr Fehlen (`application_absent`); sonst bleibt es `application_absence_unverified`. |
+| `references` | Siteweit `SMS_AppDependenceRelation` über alle Revisionen der Zielanwendungen, auch abgelaufene, dazu `SMS_TaskSequenceAppReferencesInfo`, die Definitionen aller Application Groups und `SMS_CIRelation` auf Anwendungen und Deployment Types der Zielanwendungen (nach Schlüssel abgefragt, nicht die ganze Klasse). Die Gegenseite löst `SMS_Application`, `SMS_DeploymentType` oder `SMS_ApplicationGroup` per CI_ID auf. | Kante innerhalb der Clientkette: `pass`. Abgelaufene Revision, die noch verweist: `warn`. Aktuelle fremde Anwendung, Tasksequenz oder Application Group: `fail`. Nicht auflösbares CI: `unknown`. Der Relationstyp aus `SMS_CIRelation` steht als Zahl im Grund und wird nicht gedeutet. |
+| `deployment_policy` | `SMS_ApplicationAssignment` der Phasen, auch versionierter Kopien einer Phase auf denselben Sammlungen, die Wartungsfenster aus `SMS_CollectionSettings.ServiceWindows` (Lazy-Feld) und die Maximum Runtime aus dem Deployment-Type-Manifest. | Siehe nächster Absatz. |
+
+**Deployment-Policy nach Q1, Variante A (Entscheidung vom 15.10.2026).** Das vom
+Installer verwaltete Core-Deployment ist ein Deployment der Einstiegsanwendung
+`client_staticip`, wenn diese den Projektmarker trägt. Es muss eine aktivierte
+Required-Installation mit Stichtag sein, ohne Soft Deadline und ohne
+Genehmigung, und Installation sowie Neustart außerhalb von Wartungsfenstern
+erlauben (`OverrideServiceWindows`, `RebootOutsideOfServiceWindows`); sonst
+`fail`. Ein bestehendes manuelles Deployment einer Phase meldet dieselben zwei
+Flags nur als `warn`. Ist die Einstiegsanwendung nicht sichtbar, bleibt offen,
+welche Regel gilt (`unknown`). Zwei verschiedene Anwendungen derselben Phase, die
+gleichzeitig Required auf derselben Sammlung liegen, etwa eine alte und eine
+versionierte getInfos, sind `fail` (`parallel_required_deployment`). Als Phase
+zählen der Spec-Name, bei der ersten Phase auch die Altnamen, jeweils allein
+oder mit einem Suffix nach `_`, `-`, `.` oder Leerzeichen.
+
+Wartungsfenster: keine auf der Sammlung ergibt `pass`. Gibt es welche und darf
+dort ein Deployment nicht außerhalb installieren, ist das `warn`; der Grund nennt
+das längste Fenster und ob es die Maximum Runtime fasst. Die Maximum Runtime
+kommt nur aus der Installationsaktion des Manifests; die Reparaturaktion trägt
+einen eigenen Wert (auf der erhobenen Site beide 120 Minuten). Weicht sie vom
+Vertrag (15 Minuten) ab, ist das `fail`. Implizite Deinstallation und Simulation
+haben in `SMS_ApplicationAssignment` kein eigenes Feld. Sie bleiben deshalb
+`unknown`, ohne zu blockieren, und der Grund nennt die Rohwerte `OfferFlags` und
+`DesiredConfigType` des verwalteten Core-Deployments. Beides vor dem Cutover in
+der Konsole am Deployment prüfen.
+
+`CanApply` bleibt `false`: MC02 liest nur. Wann ein sauberer Bericht Apply
+freigeben darf, entscheidet der geordnete Cutover (MC03). Die übrigen Befunde
+des Berichts (Ownership, Deployment-Type-Vertrag, Content-Manifest,
+Altanwendungen, DP-Gruppe) bleiben unverändert eigene Findings.
 
 ## Edge Cases der Server-Skripte (Referenz)
 

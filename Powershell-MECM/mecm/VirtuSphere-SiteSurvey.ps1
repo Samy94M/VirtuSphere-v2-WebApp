@@ -13,8 +13,9 @@
 #
 # Braucht VirtuSphere-Common.ps1 (Initialize-VsCmSite), VirtuSphere-ClientPackaging.ps1
 # (Spec, Policy, Get-VsObjectPropertyText), VirtuSphere-ClientPreflight.ps1
-# (Get-VsClientSupersedenceRows) und VirtuSphere-LegacyRetirement.ps1
-# (Read-VsApplicationGroupMembership, Read-VsLegacySimilarNames, Get-VsLegacyLogicalName).
+# (Get-VsClientSupersedenceRows und die gemeinsamen Lesehelfer: WQL-Quoting,
+# UNC-Zuordnung, eigene SIDs und Rechnernamen, Application Groups) und
+# VirtuSphere-LegacyRetirement.ps1 (Read-VsLegacySimilarNames).
 Set-StrictMode -Version 1.0
 
 $script:VsSurveySchema = 'virtusphere.mecm-site-survey/1'
@@ -129,47 +130,6 @@ function ConvertTo-VsSurveyRecords {
     }
 }
 
-# Liest eine UNC-Angabe wie \\SERVER\share\a\b in Host, Freigabe und Restpfad.
-# Ein abschliessender Backslash (so stehen Content-Pfade im SDMPackageXML) wird
-# entfernt. Liefert $null bei jeder Fehlform (kein UNC, fehlende Freigabe).
-function ConvertFrom-VsSurveyUncPath {
-    param([AllowNull()][string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
-    $text = $Path.Trim()
-    if ($text.Length -gt 2) { $text = $text.TrimEnd('\') }
-    if ($text -cnotmatch '\A\\\\(?<host>[A-Za-z0-9][A-Za-z0-9.\-]*)\\(?<share>[^\\/:*?"<>|\x00-\x1F]+)(?<rest>(\\[^\\/:*?"<>|\x00-\x1F]+)*)\z') { return $null }
-    # Relativsegmente fuehren aus der Freigabe heraus; solche Angaben ordnet die
-    # Erhebung keinem lokalen Pfad zu.
-    foreach ($segment in @(([string]$Matches['share'] + [string]$Matches['rest']) -split '\\')) {
-        if ($segment -ceq '.' -or $segment -ceq '..') { return $null }
-    }
-    return [pscustomobject]@{
-        Host = [string]$Matches['host']
-        Share = [string]$Matches['share']
-        Rest = [string]$Matches['rest']
-    }
-}
-
-# Ordnet eine UNC-Angabe nur dann einem lokalen Freigabepfad zu, wenn der Host
-# dieser Rechner ist (NetBIOS- oder FQDN-Name, Gross-/Kleinschreibung egal).
-function Get-VsSurveyLocalPathForUnc {
-    param(
-        [AllowNull()][string]$Path,
-        [AllowEmptyCollection()][object[]]$LocalShares,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$LocalNames
-    )
-    $parsed = ConvertFrom-VsSurveyUncPath -Path $Path
-    if ($null -eq $parsed) { return [pscustomobject]@{ Parsed = $false; Host = ''; Share = ''; IsLocal = $false; ShareMatch = ''; LocalPath = '' } }
-    $isLocal = @($LocalNames | Where-Object { $_ -and [string]$_ -ieq $parsed.Host }).Count -gt 0
-    $result = [pscustomobject]@{ Parsed = $true; Host = $parsed.Host; Share = $parsed.Share; IsLocal = $isLocal; ShareMatch = ''; LocalPath = '' }
-    if (-not $isLocal) { return $result }
-    $share = @($LocalShares | Where-Object { $_ -and [string]$_.Name -ieq $parsed.Share } | Select-Object -First 1)
-    if ($share.Count -eq 0 -or -not $share[0].Path) { return $result }
-    $result.ShareMatch = [string]$share[0].Name
-    $result.LocalPath = ([string]$share[0].Path).TrimEnd('\') + $parsed.Rest
-    return $result
-}
-
 # Alle Content-Orte eines Deployment-Type-Manifests (AppMgmtDigest), ohne
 # Namespace-Annahme ueber local-name().
 function Get-VsSurveyContentLocations {
@@ -265,11 +225,6 @@ function Get-VsSurveyCimFull {
     Get-CimInstance -InputObject $InputObject -ErrorAction Stop
 }
 
-function ConvertTo-VsSurveyWqlString {
-    param([AllowNull()][string]$Value)
-    return ("'{0}'" -f ([string]$Value).Replace('\', '\\').Replace("'", "\'"))
-}
-
 # Zeilen, bei denen eine Eigenschaft, deren Name auf $NamePattern passt, einen
 # der gesuchten Werte traegt. Die Feldnamen der Provider-Klassen sind genau das,
 # was die Erhebung erst feststellt; deshalb kein fester Feldname.
@@ -288,32 +243,6 @@ function Select-VsSurveyRowsReferencing {
             if ([string]$property.Name -notmatch $NamePattern -or $null -eq $property.Value) { continue }
             if ($wanted.Contains([string]$property.Value)) { $row; break }
         }
-    }
-}
-
-function Get-VsSurveyComputerNames {
-    $names = New-Object System.Collections.Generic.List[string]
-    $names.Add([string]$env:COMPUTERNAME)
-    try {
-        $fqdn = [string]([Net.Dns]::GetHostEntry([string]$env:COMPUTERNAME).HostName)
-        if ($fqdn) { $names.Add($fqdn) }
-    } catch {
-        Write-Verbose ([string]$_)
-    }
-    if ($env:USERDNSDOMAIN -and $env:COMPUTERNAME) { $names.Add(('{0}.{1}' -f $env:COMPUTERNAME, $env:USERDNSDOMAIN)) }
-    @($names | Where-Object { $_ } | Sort-Object -Unique)
-}
-
-# SID des Aufrufers und seiner Gruppen, fuer die eigene Zeile in SMS_Admin.
-function Get-VsSurveyCurrentSids {
-    try {
-        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $sids = New-Object System.Collections.Generic.List[string]
-        $sids.Add([string]$identity.User.Value)
-        foreach ($group in @($identity.Groups)) { $sids.Add([string]$group.Value) }
-        @($sids | Where-Object { $_ } | Sort-Object -Unique)
-    } catch {
-        Write-Verbose ([string]$_)
     }
 }
 
@@ -548,7 +477,7 @@ function Get-VsSurveyReferences {
     }
 
     $groups = [ordered]@{ state = 'not-needed'; groupCount = 0; members = [ordered]@{}; detail = 'keine Zielanwendung vorhanden' }
-    $logicalNames = @($Context.TargetModelNames | ForEach-Object { Get-VsLegacyLogicalName -ModelName $_ } | Where-Object { $_ })
+    $logicalNames = @($Context.TargetModelNames | ForEach-Object { Get-VsApplicationLogicalName -ModelName $_ } | Where-Object { $_ })
     if ($logicalNames.Count -gt 0) {
         $membership = Read-VsApplicationGroupMembership -LogicalNames $logicalNames
         $members = [ordered]@{}
@@ -569,7 +498,7 @@ function Get-VsSurveyReferences {
             $taskSequences = @(foreach ($packageId in $packageIds) {
                 if ($packageId -cnotmatch $script:VsSurveyIdPattern) { Write-VsSurveyNote -Text ('task sequence {0}: unerwartete PackageID' -f $packageId); continue }
                 ConvertTo-VsSurveyRecords -Objects @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_TaskSequencePackage' `
-                    -Filter ('PackageID = {0}' -f (ConvertTo-VsSurveyWqlString -Value $packageId)) -Property @('PackageID', 'Name'))
+                    -Filter ('PackageID = {0}' -f (ConvertTo-VsWqlString -Value $packageId)) -Property @('PackageID', 'Name'))
             })
         } catch {
             Write-VsSurveyNote -Text ('task sequence references: {0}' -f [string]$_.Exception.Message)
@@ -599,7 +528,7 @@ function Get-VsSurveySecurityScopes {
         if ($key -cnotmatch $script:VsSurveyKeyPattern) { Write-VsSurveyNote -Text ('scope membership {0}: unerwarteter Schluessel' -f $key); continue }
         try {
             # ObjectKey ist der dokumentierte Schluessel; das Klassenschema im Bericht belegt ihn.
-            foreach ($row in @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_SecuredCategoryMembership' -Filter ('ObjectKey = {0}' -f (ConvertTo-VsSurveyWqlString -Value $key)))) {
+            foreach ($row in @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_SecuredCategoryMembership' -Filter ('ObjectKey = {0}' -f (ConvertTo-VsWqlString -Value $key)))) {
                 $memberships.Add((ConvertTo-VsSurveyRecord -Object $row))
             }
         } catch {
@@ -643,7 +572,7 @@ function Get-VsSurveyCollections {
         param([string]$id, [string]$reason)
         if ($found.Contains($id)) { & $addCollection $found[$id] $reason; return }
         if ($id -cnotmatch $script:VsSurveyIdPattern) { Write-VsSurveyNote -Text ('collection {0}: unerwartete ID' -f $id); return }
-        $rows = @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_Collection' -Filter ('CollectionID = {0}' -f (ConvertTo-VsSurveyWqlString -Value $id)))
+        $rows = @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_Collection' -Filter ('CollectionID = {0}' -f (ConvertTo-VsWqlString -Value $id)))
         if ($rows.Count -eq 0) { Write-VsSurveyNote -Text ('collection {0}: nicht sichtbar' -f $id); return }
         & $addCollection $rows[0] $reason
     }
@@ -668,7 +597,7 @@ function Get-VsSurveyCollections {
     $rows = @(foreach ($id in @($found.Keys)) {
         $settings = @()
         try {
-            $settings = @(foreach ($setting in @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_CollectionSettings' -Filter ('CollectionID = {0}' -f (ConvertTo-VsSurveyWqlString -Value $id)))) {
+            $settings = @(foreach ($setting in @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_CollectionSettings' -Filter ('CollectionID = {0}' -f (ConvertTo-VsWqlString -Value $id)))) {
                 ConvertTo-VsSurveyRecord -Object (Get-VsSurveyCimFull -InputObject $setting)
             })
         } catch {
@@ -722,7 +651,7 @@ function Get-VsSurveyContent {
             [ordered]@{
                 packageId = $packageId
                 distributionPoints = @(ConvertTo-VsSurveyRecords -Objects @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_PackageStatusDistPointsSummarizer' `
-                    -Filter ('PackageID = {0}' -f (ConvertTo-VsSurveyWqlString -Value $packageId))))
+                    -Filter ('PackageID = {0}' -f (ConvertTo-VsWqlString -Value $packageId))))
             }
         } catch {
             Write-VsSurveyNote -Text ('content {0}: {1}' -f $packageId, [string]$_.Exception.Message)
@@ -745,7 +674,7 @@ function Get-VsSurveyFolders {
     foreach ($modelName in @($Context.TargetModelNames)) {
         if ($modelName -cnotmatch $script:VsSurveyKeyPattern) { Write-VsSurveyNote -Text ('folder item {0}: unerwarteter Schluessel' -f $modelName); continue }
         try {
-            foreach ($item in @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_ObjectContainerItem' -Filter ('InstanceKey = {0}' -f (ConvertTo-VsSurveyWqlString -Value $modelName)))) {
+            foreach ($item in @(Get-VsSurveyCim -Context $Context -ClassName 'SMS_ObjectContainerItem' -Filter ('InstanceKey = {0}' -f (ConvertTo-VsWqlString -Value $modelName)))) {
                 $items.Add($item)
             }
         } catch {
@@ -800,7 +729,7 @@ function Get-VsSurveySourceMapping {
         param([string]$application, [string]$typeId, [string]$source, [string]$xml)
         foreach ($path in @(Get-VsSurveyContentLocations -Xml $xml)) {
             [void]$covered.Add($application)
-            $mapping = Get-VsSurveyLocalPathForUnc -Path $path -LocalShares $shares -LocalNames @($Context.ComputerNames)
+            $mapping = Get-VsLocalPathForUnc -Path $path -LocalShares $shares -LocalNames @($Context.ComputerNames)
             $locations.Add([ordered]@{
                 application = $application
                 deploymentTypeId = $typeId
@@ -817,7 +746,7 @@ function Get-VsSurveySourceMapping {
             })
         }
     }
-    $fileSystemRoot = Get-VsSurveyFileSystemRoot
+    $fileSystemRoot = Get-VsFileSystemRoot
     Push-Location -LiteralPath $fileSystemRoot
     try {
         foreach ($entry in @($Context.DeploymentTypeObjects)) {
@@ -843,16 +772,6 @@ function Get-VsSurveySourceMapping {
         Pop-Location
     }
     return [ordered]@{ registry = $registry; shares = $shareRecords; contentLocations = $locations.ToArray() }
-}
-
-# Systemlaufwerk unter Windows; pwsh unter Linux hat kein Systemverzeichnis, dort
-# nennt der Rueckfall den FileSystem-Provider ausdruecklich (wie ClientPreflight).
-function Get-VsSurveyFileSystemRoot {
-    $root = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)
-    if ([string]::IsNullOrEmpty($root)) {
-        $root = 'Microsoft.PowerShell.Core\FileSystem::' + [IO.Path]::GetPathRoot([IO.Path]::GetTempPath())
-    }
-    return $root
 }
 
 # Altanwendungen: Namen, die wie die getinfo-Altnamen beginnen, ohne diese und

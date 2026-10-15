@@ -375,6 +375,20 @@ function Get-VsObjectPropertyText {
     return ''
 }
 
+# Die MaxExecuteTime-Werte der Installationsaktion, getrimmt. Ein echtes
+# Manifest traegt den Wert je Aktion: InstallAction und RepairAction
+# (Standorterhebung 15.10.2026), und das Manifest eines Deployment Types ist
+# das der ganzen Anwendung. Ueber die Laufzeit entscheidet nur die
+# Installationsaktion; ein Manifest ohne InstallAction wird als Ganzes gelesen.
+function Get-VsDeploymentTypeMaximumRuntimeArgs {
+    param([Parameter(Mandatory)][xml]$Xml)
+    $path = "//*[local-name()='Arg'][@Name='MaxExecuteTime']"
+    if (@($Xml.SelectNodes("//*[local-name()='InstallAction']")).Count -gt 0) {
+        $path = "//*[local-name()='InstallAction']//*[local-name()='Arg'][@Name='MaxExecuteTime']"
+    }
+    @($Xml.SelectNodes($path) | ForEach-Object { ([string]$_.InnerText).Trim() })
+}
+
 function Get-VsClientDeploymentTypeContractIssues {
     param(
         [Parameter(Mandatory)]$DeploymentType,
@@ -408,8 +422,8 @@ function Get-VsClientDeploymentTypeContractIssues {
     # (MaxExecuteTime, RunAs32Bit). Fehlt die Laufzeit oder ist sie mehrdeutig,
     # ist sie unbekannt und blockiert; eine fehlende 32-Bit-Angabe ist der
     # native Standard, jeder andere Wert als "false" blockiert.
-    $runtimeArgs = @($xml.SelectNodes("//*[local-name()='Arg'][@Name='MaxExecuteTime']"))
-    if ($runtimeArgs.Count -ne 1 -or ([string]$runtimeArgs[0].InnerText).Trim() -cne [string]$Spec.MaximumRuntimeMins) { $issues += 'maximum-runtime' }
+    $runtimeArgs = @(Get-VsDeploymentTypeMaximumRuntimeArgs -Xml $xml)
+    if ($runtimeArgs.Count -ne 1 -or $runtimeArgs[0] -cne [string]$Spec.MaximumRuntimeMins) { $issues += 'maximum-runtime' }
     foreach ($bitnessArg in @($xml.SelectNodes("//*[local-name()='Arg'][@Name='RunAs32Bit']"))) {
         if (([string]$bitnessArg.InnerText).Trim() -ne 'false') { $issues += 'run-as-32bit'; break }
     }

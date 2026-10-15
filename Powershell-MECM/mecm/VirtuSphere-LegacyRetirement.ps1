@@ -6,8 +6,8 @@
 # Invoke-VsLegacyRetirementStage executes one stage of an already previewed plan
 # through injected handlers. retire-VirtuSphere-LegacyGetInfo.ps1 wires the CM
 # calls. Requires VirtuSphere-ClientPackaging.ps1 (spec, policy, property
-# helpers) and VirtuSphere-ClientPreflight.ps1 (plan hash). No import-time side
-# effects.
+# helpers) and VirtuSphere-ClientPreflight.ps1 (plan hash, logical name,
+# application-group membership). No import-time side effects.
 Set-StrictMode -Version 1.0
 
 $script:VsLegacyRetirementSchema = 1
@@ -33,15 +33,6 @@ function ConvertTo-VsLegacyCounters {
         else { return $null }
     }
     return [pscustomobject]$result
-}
-
-# ModelName is ScopeId_<guid>/Application_<guid>. Only the second part is
-# revision independent and appears in application-group definitions.
-function Get-VsLegacyLogicalName {
-    param([string]$ModelName)
-    $parts = @(([string]$ModelName) -split '/')
-    if ($parts.Count -ne 2 -or $parts[1] -cnotmatch '\AApplication_[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\z') { return '' }
-    return $parts[1]
 }
 
 function Read-VsApplicationDeploymentRows {
@@ -135,7 +126,7 @@ function Read-VsLegacyApplicationEvidence {
         $evidence.CiId = Get-VsObjectPropertyText -Object $application -Names @('CI_ID')
         $evidence.ModelName = Get-VsObjectPropertyText -Object $application -Names @('ModelName')
         if (-not $evidence.CiId -or -not $evidence.ModelName) { throw 'CI_ID or ModelName missing' }
-        $evidence.LogicalName = Get-VsLegacyLogicalName -ModelName $evidence.ModelName
+        $evidence.LogicalName = Get-VsApplicationLogicalName -ModelName $evidence.ModelName
         if ($application.PSObject.Properties['SecuredScopeNames']) { $evidence.SecurityScopes = @($application.SecuredScopeNames | ForEach-Object { [string]$_ }) }
         $evidence.DevicesWithApp = Get-VsObjectPropertyText -Object $application -Names @('NumberOfDevicesWithApp')
         $counters = [ordered]@{}
@@ -174,33 +165,6 @@ function Read-VsLegacySimilarNames {
         return [pscustomobject]@{ State = 'complete'; Names = @($names); Detail = '' }
     } catch {
         return [pscustomobject]@{ State = 'unknown'; Names = @(); Detail = [string]$_.Exception.Message }
-    }
-}
-
-function Read-VsApplicationGroupMembership {
-    param([AllowEmptyCollection()][string[]]$LogicalNames)
-    $members = @{}
-    foreach ($logicalName in @($LogicalNames | Where-Object { $_ })) { $members[$logicalName] = @() }
-    try {
-        $groups = @(Get-CMApplicationGroup -ShowHidden -ErrorAction Stop)
-        foreach ($group in $groups) {
-            $groupName = Get-VsObjectPropertyText -Object $group -Names @('LocalizedDisplayName', 'Name')
-            $raw = Get-VsObjectPropertyText -Object $group -Names @('SDMPackageXML')
-            if (-not $raw -and $group.PSObject.Methods['Get']) {
-                # Lazy property of the provider object; load it once explicitly.
-                $group.Get()
-                $raw = Get-VsObjectPropertyText -Object $group -Names @('SDMPackageXML')
-            }
-            if (-not $raw) {
-                return [pscustomobject]@{ State = 'unknown'; GroupCount = $groups.Count; Members = @{}; Detail = ("definition of application group '{0}' unreadable" -f $groupName) }
-            }
-            foreach ($logicalName in @($members.Keys)) {
-                if ($raw.IndexOf($logicalName, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $members[$logicalName] += $groupName }
-            }
-        }
-        return [pscustomobject]@{ State = 'complete'; GroupCount = $groups.Count; Members = $members; Detail = '' }
-    } catch {
-        return [pscustomobject]@{ State = 'unknown'; GroupCount = 0; Members = @{}; Detail = [string]$_.Exception.Message }
     }
 }
 

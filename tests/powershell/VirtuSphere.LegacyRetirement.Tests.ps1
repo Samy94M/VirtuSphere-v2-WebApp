@@ -31,7 +31,7 @@ BeforeAll {
         foreach ($key in $Counters.Keys) { $values[$key] = $Counters[$key] }
         return [pscustomobject]@{
             Name = $Name; State = 'visible'; Detail = ''
-            CiId = $CiId; ModelName = $ModelName; LogicalName = (Get-VsLegacyLogicalName -ModelName $ModelName); SecurityScopes = @('Default')
+            CiId = $CiId; ModelName = $ModelName; LogicalName = (Get-VsApplicationLogicalName -ModelName $ModelName); SecurityScopes = @('Default')
             Counters = [pscustomobject]$values; DevicesWithApp = '57'
             Deployments = @($Deployments); DeploymentTypeIds = @('9' + $CiId)
             ContentReadable = $true; ContentFiles = @('client_getinfo.ps1'); ContentLocations = @('\\mecm\src\client_getinfo'); DetectsSetupState = $true; ScriptVersion = 'V22'
@@ -88,7 +88,7 @@ Describe 'MC04 legacy getinfo retirement plan' {
     }
 
     It 'blocks Retire for application-group membership, an unreadable group scan and an unparsed identity' {
-        $logicalName = Get-VsLegacyLogicalName -ModelName $script:ModelA
+        $logicalName = Get-VsApplicationLogicalName -ModelName $script:ModelA
         $member = New-TestPlan -Applications @(New-TestEvidence) -Groups (New-TestGroups -Members @{ $logicalName = @('Server-Basis') })
         (Get-TestItem -Plan $member -Stage 'Retire' -Name 'client_getinfo')[0].Blockers | Should -Be @('legacy_application_group_member')
         $unknown = New-TestPlan -Applications @(New-TestEvidence) -Groups (New-TestGroups -State 'unknown')
@@ -341,7 +341,7 @@ Describe 'MC04 retirement evidence readers' {
     }
 
     It 'finds a group member by the revision-independent logical name and fails closed on an unreadable group' {
-        $logicalName = Get-VsLegacyLogicalName -ModelName $script:ModelA
+        $logicalName = Get-VsApplicationLogicalName -ModelName $script:ModelA
         Mock Get-CMApplicationGroup { [pscustomobject]@{ LocalizedDisplayName = 'Server-Basis'; SDMPackageXML = "<AppGroup><Ref LogicalName=`"$logicalName`" /></AppGroup>" } }
         $scan = Read-VsApplicationGroupMembership -LogicalNames @($logicalName)
         $scan.State | Should -Be 'complete'

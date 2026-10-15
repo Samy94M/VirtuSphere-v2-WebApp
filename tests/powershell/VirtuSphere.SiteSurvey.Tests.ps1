@@ -110,7 +110,7 @@ Describe 'Site survey value conversion' {
 
 Describe 'Site survey UNC parsing and local mapping' {
     It 'parses host, share and rest and ignores a trailing backslash' {
-        $parsed = ConvertFrom-VsSurveyUncPath -Path '\\MECM01\VirtuSphere$\files\client_getInfos\'
+        $parsed = ConvertFrom-VsUncPath -Path '\\MECM01\VirtuSphere$\files\client_getInfos\'
         $parsed.Host | Should -Be 'MECM01'
         $parsed.Share | Should -Be 'VirtuSphere$'
         $parsed.Rest | Should -Be '\files\client_getInfos'
@@ -118,25 +118,25 @@ Describe 'Site survey UNC parsing and local mapping' {
 
     It 'rejects malformed paths and relative segments' {
         foreach ($path in @('', 'D:\files', '\\host', '\\host\', 'host\share', '//host/share', '\\host\share\..\other', '\\host\.\x', '\\-bad\share')) {
-            ConvertFrom-VsSurveyUncPath -Path $path | Should -BeNullOrEmpty -Because $path
+            ConvertFrom-VsUncPath -Path $path | Should -BeNullOrEmpty -Because $path
         }
     }
 
     It 'maps the local host by NetBIOS or FQDN name, case-insensitive, and nothing else' {
         $shares = @([pscustomobject]@{ Name = 'VirtuSphere'; Path = 'D:\VirtuSphere\Packages\' })
         $names = @('SRV01', 'srv01.corp.example')
-        $netbios = Get-VsSurveyLocalPathForUnc -Path '\\srv01\virtusphere\files\a' -LocalShares $shares -LocalNames $names
+        $netbios = Get-VsLocalPathForUnc -Path '\\srv01\virtusphere\files\a' -LocalShares $shares -LocalNames $names
         $netbios.IsLocal | Should -BeTrue
         $netbios.LocalPath | Should -Be 'D:\VirtuSphere\Packages\files\a'
-        (Get-VsSurveyLocalPathForUnc -Path '\\SRV01.CORP.EXAMPLE\VirtuSphere\x' -LocalShares $shares -LocalNames $names).LocalPath | Should -Be 'D:\VirtuSphere\Packages\x'
-        $foreign = Get-VsSurveyLocalPathForUnc -Path '\\other\VirtuSphere\x' -LocalShares $shares -LocalNames $names
+        (Get-VsLocalPathForUnc -Path '\\SRV01.CORP.EXAMPLE\VirtuSphere\x' -LocalShares $shares -LocalNames $names).LocalPath | Should -Be 'D:\VirtuSphere\Packages\x'
+        $foreign = Get-VsLocalPathForUnc -Path '\\other\VirtuSphere\x' -LocalShares $shares -LocalNames $names
         $foreign.Parsed | Should -BeTrue
         $foreign.IsLocal | Should -BeFalse
         $foreign.LocalPath | Should -Be ''
-        $unknownShare = Get-VsSurveyLocalPathForUnc -Path '\\SRV01\missing\x' -LocalShares $shares -LocalNames $names
+        $unknownShare = Get-VsLocalPathForUnc -Path '\\SRV01\missing\x' -LocalShares $shares -LocalNames $names
         $unknownShare.IsLocal | Should -BeTrue
         $unknownShare.LocalPath | Should -Be ''
-        (Get-VsSurveyLocalPathForUnc -Path 'not-unc' -LocalShares $shares -LocalNames $names).Parsed | Should -BeFalse
+        (Get-VsLocalPathForUnc -Path 'not-unc' -LocalShares $shares -LocalNames $names).Parsed | Should -BeFalse
     }
 
     It 'reads every content location from a namespaced manifest' {

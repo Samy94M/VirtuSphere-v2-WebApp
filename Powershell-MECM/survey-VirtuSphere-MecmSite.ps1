@@ -55,7 +55,7 @@ try {
 
     $result = Get-VsSiteSurveyResult -Config $config -Specs @(Get-VsClientAppSpecs) `
         -LegacyNames @((Get-VsClientPackagingPolicy).LegacyApplicationNames) `
-        -CurrentSids @(Get-VsSurveyCurrentSids) -ComputerNames @(Get-VsSurveyComputerNames)
+        -CurrentSids @(Get-VsCurrentSids) -ComputerNames @(Get-VsLocalComputerNames)
     if ($null -ne $result.Report) {
         ConvertTo-Json -InputObject $result.Report -Depth 16 | Write-Output
         $states = @(foreach ($name in @($result.Report.sections.Keys)) { '{0}={1}' -f $name, $result.Report.sections[$name].status })

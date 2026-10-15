@@ -43,6 +43,22 @@ Server-Installer kopiert das Modul nur wie alle Dateien unter `mecm\` mit.
 Aufruf und Auswertung stehen in `docs/operations/mecm-integration.md` im
 Abschnitt „Standort-Erhebung“.
 
+`install-VirtuSphere-Clients.ps1` liest vor jedem anderen Schritt den
+MC02-Preflight (`mecm\VirtuSphere-ClientPreflight.ps1`, `-ValidateOnly` endet
+dort). Er prüft vier Punkte mit Standortdaten: deckt die RBAC-Sicht des
+Aufrufers (eigene SID und Gruppen) die Bereiche der Zielanwendungen und die
+Zielsammlungen ab (`rbac_scope`), zeigen `PackagesBase` und `ContentShare` über
+die Freigabe dieses Rechners auf dasselbe Verzeichnis (`source_mapping`), was
+verweist siteweit von außerhalb der Clientkette auf die Zielanwendungen
+(`references`), und folgen die Deployments der Core-Regel Q1 (`deployment_policy`:
+verwaltetes Core-Deployment blockierend, manuelle Deployments nur Warnung,
+dazu parallele Versionen einer Phase, Wartungsfenster und Maximum Runtime).
+Jede Prüfung liefert Zeilen mit `pass`, `fail`, `warn` oder `unknown` und Grund;
+`CanApply` bleibt bis zum Cutover (MC03) `false`. Dasselbe Modul hält die
+Lesehelfer, die Erhebung und Altanwendungs-Rückbau mitbenutzen (WQL-Quoting,
+UNC-Zuordnung, eigene SIDs, Application Groups). Details in
+`docs/operations/mecm-integration.md`, Abschnitt „Client-Preflight“.
+
 JSON wird explizit als UTF-8-`byte[]` gesendet. Die beiden ausgelieferten
 Server-/Client-Helper geben das Array als ein einziges Funktionsobjekt zurück,
 damit PowerShell es nicht zu `object[]` entpackt und die HTTP-Bindung den

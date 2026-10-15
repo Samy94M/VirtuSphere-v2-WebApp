@@ -35,17 +35,20 @@ BeforeAll {
 Describe 'Visible progress reporting contract' {
     It 'reports each client preflight phase and each content manifest read' {
         $script:ClientPreflight | Should -Match '\[0/\$total\] RUN client-preflight'
-        foreach ($index in 1..6) {
+        $script:ClientPreflight | Should -Match '\$total = 8\b'
+        foreach ($index in 1..8) {
             $script:ClientPreflight | Should -Match ("\[$index/\`$total\] RUN ")
             $script:ClientPreflight | Should -Match ("\[$index/\`$total\] DONE ")
         }
         $script:ClientPreflight | Should -Match '\[\$specIndex/\$specCount\] RUN content-manifest'
         $script:ClientPreflight | Should -Match '\[\$specIndex/\$specCount\] DONE content-manifest'
-        $script:ClientPreflight | Should -Match '\[0/2\] RUN shared-references'
-        $script:ClientPreflight | Should -Match '\[1/2\] RUN application-groups'
-        $script:ClientPreflight | Should -Match '\[1/2\] DONE application-groups'
-        $script:ClientPreflight | Should -Match '\[2/2\] RUN task-sequence-references'
-        $script:ClientPreflight | Should -Match '\[2/2\] DONE task-sequence-references'
+        $script:ClientPreflight | Should -Match '\[0/4\] RUN shared-references'
+        foreach ($unit in @('1/4\] (RUN|DONE) application-groups', '2/4\] (RUN|DONE) task-sequence-references', '3/4\] (RUN|DONE) dependence-relations', '4/4\] (RUN|DONE) ci-relations')) {
+            ([regex]::Matches($script:ClientPreflight, ('\[' + $unit))).Count | Should -Be 2 -Because $unit
+        }
+        $script:ClientPreflight | Should -Match '\[0/\$\(\$policyCollections.Count\)\] RUN deployment-collections'
+        $script:ClientPreflight | Should -Match '\[\$collectionIndex/\$\(\$policyCollections.Count\)\] RUN deployment-collection \$id'
+        $script:ClientPreflight | Should -Match '\[\$collectionIndex/\$\(\$policyCollections.Count\)\] DONE deployment-collection \$id'
         $script:ClientPreflight | Should -Match '\[0/\$\(\$points.Count\)\] RUN distribution-points'
         $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] RUN distribution-point'
         $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] DONE distribution-point'

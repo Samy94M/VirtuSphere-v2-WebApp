@@ -88,8 +88,10 @@ $specs = Get-VsClientAppSpecs
 Assert-VsClientAppSpecGraph -Specs $specs
 
 # MC02 begins with a read-only inventory on every invocation. A blocked or
-# incomplete report exits before Copy-VsClientContent or any CM write. Keep the
-# old apply guard below until the remaining reference and site checks are built.
+# incomplete report exits before Copy-VsClientContent or any CM write. The
+# report answers RBAC view, source mapping, references and deployment policy;
+# CanApply stays false until the ordered cutover (MC03) exists, so the old
+# apply guard below remains in place.
 $siteCode = Initialize-VsCmSite -Config $config
 if (-not $siteCode) { throw 'MECM-Site nicht initialisierbar (MECM-Konsole/Site-Drive pruefen).' }
 $preflight = Get-VsClientPreflightReport -Config $site -Specs $specs -ClientSourceDir $SourceDir -SiteCode $siteCode
