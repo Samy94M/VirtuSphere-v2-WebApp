@@ -82,26 +82,35 @@ function users_set_email(mysqli $db, array $actor, array $target): void
 
         return;
     }
-    if (auth_user_source_schema_available($db)) {
-        $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
-        $stmt = $db->prepare('UPDATE deploy_users SET email = ?, updated_at = NOW() WHERE id = ? AND auth_source = ?');
-        $stmt->bind_param('sis', $email, $targetId, $source);
-    } else {
-        $stmt = $db->prepare('UPDATE deploy_users SET email = ?, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('si', $email, $targetId);
-    }
-    $stmt->execute();
-    // updated_at = NOW() makes every matched row count, so zero means the
-    // account vanished or stopped being local since the check above.
-    if ($stmt->affected_rows < 1) {
+    // No network I/O here, so the write and its audit row commit or roll back
+    // together (webapi R19), unlike the user actions that still predate it.
+    $written = repo_transaction($db, function () use ($db, $actor, $targetId, $email): bool {
+        if (auth_user_source_schema_available($db)) {
+            $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+            $stmt = $db->prepare('UPDATE deploy_users SET email = ?, updated_at = NOW() WHERE id = ? AND auth_source = ?');
+            $stmt->bind_param('sis', $email, $targetId, $source);
+        } else {
+            $stmt = $db->prepare('UPDATE deploy_users SET email = ?, updated_at = NOW() WHERE id = ?');
+            $stmt->bind_param('si', $email, $targetId);
+        }
+        $stmt->execute();
+        // updated_at = NOW() makes every matched row count, so zero means the
+        // account vanished or stopped being local since the check above.
+        if ($stmt->affected_rows < 1) {
+            return false;
+        }
+        // The trail records that and how the note changed, never the address
+        // itself: the audit log outlives the account row and is readable by
+        // every admin.
+        audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'action' => $email === '' ? 'cleared' : 'changed',
+        ], (int) $actor['id']);
+
+        return true;
+    });
+    if (!$written) {
         throw new ValidationException(['user_id' => __t('users.err_local_action_only')]);
     }
-    // The trail records that and how the note changed, never the address
-    // itself: the audit log outlives the account row and is readable by
-    // every admin.
-    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-        'action' => $email === '' ? 'cleared' : 'changed',
-    ], (int) $actor['id']);
     flash_set('success', __t($email === '' ? 'users.flash_email_cleared' : 'users.flash_email'));
 }
 
