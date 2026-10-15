@@ -115,6 +115,51 @@ final class DeployCreateRunningVmTest extends TestCase
         self::assertSame(VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED, (string) repo_deploy_create_results($this->db, $jobId)[0]['status']);
     }
 
+    /** The locked row decides the launch-less edge, not the caller's arguments. */
+    public function testAPreparedNewVmCannotBeConcludedUnchangedFromTheArgumentsAlone(): void
+    {
+        [$jobId, $fence] = $this->createJob();
+        self::assertTrue(repo_deploy_create_transition($this->db, $jobId, 1, VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING, VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED, [
+            'existed_before' => 0,
+        ], $fence));
+
+        $commit = repo_deploy_create_commit_success($this->db, $jobId, 1, true, false, 'vm-moved', '5001-own', $fence, VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED);
+
+        self::assertSame(
+            ['committed' => false, 'replayed' => false, 'outcome' => null, 'error_code' => VIRTUSPHERE_CREATE_ERROR_IDENTITY_RESULT_INVALID],
+            $commit
+        );
+        $row = repo_deploy_create_results($this->db, $jobId)[0];
+        self::assertSame(VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED, (string) $row['status']);
+        self::assertNull($row['outcome']);
+        self::assertSame(0, (int) $row['existed_before']);
+        self::assertSame('vm-own', (string) repo_scalar($this->db, 'SELECT vm_moid FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]), 'the binding is not refreshed');
+        self::assertSame('5001-own', (string) repo_scalar($this->db, 'SELECT vm_instance_uuid FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]));
+    }
+
+    /**
+     * The instance the preparation proved must be the live one. Here the VM was
+     * bound to the live instance after the preparation, so a binding check alone
+     * would accept it; only the stored precheck UUID refuses it.
+     */
+    public function testAPreparedVmWhosePreparedInstanceDiffersFromTheLiveOneIsRefused(): void
+    {
+        [$jobId, $fence] = $this->createJob();
+        $this->prepare($jobId, $fence, 'vm-own', '5001-own');
+        repo_execute($this->db, 'UPDATE deploy_vms SET vm_moid = ?, vm_instance_uuid = ? WHERE id = ?', 'ssi', ['vm-rebound', '5002-live', $this->vmId]);
+
+        $commit = repo_deploy_create_commit_success($this->db, $jobId, 1, true, false, 'vm-live', '5002-live', $fence, VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED);
+
+        self::assertFalse($commit['committed']);
+        self::assertFalse($commit['replayed']);
+        self::assertSame(VIRTUSPHERE_CREATE_ERROR_IDENTITY_RESULT_INVALID, $commit['error_code']);
+        $row = repo_deploy_create_results($this->db, $jobId)[0];
+        self::assertSame(VIRTUSPHERE_CREATE_RESULT_STATUS_PREPARED, (string) $row['status']);
+        self::assertSame('5001-own', (string) $row['precheck_instance_uuid']);
+        self::assertSame('vm-rebound', (string) repo_scalar($this->db, 'SELECT vm_moid FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]));
+        self::assertSame('5002-live', (string) repo_scalar($this->db, 'SELECT vm_instance_uuid FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]));
+    }
+
     /** FC2-02: a refused success commit keeps the live identity findable. */
     public function testARefusedSuccessCommitKeepsTheLiveIdentity(): void
     {

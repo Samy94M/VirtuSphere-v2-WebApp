@@ -118,8 +118,12 @@ der `.env` ändert, schreibt mit dem alten Container-Stand weiter die alte Adres
 in die Auftragsdateien, und der MAC-Rückruf geht dorthin. Deshalb nach jeder
 `.env`-Änderung wie in Schritt 3a neu erzeugen und den Webserver neu starten
 (`docker compose up -d --force-recreate --no-deps php deploy-worker maintenance-worker`,
-danach `docker compose restart webserver`; bei der Supervisor-Form zusätzlich mit
-`-f docker-compose.supervisor.yml`). Einfacher ist, die API-Basis-URL nur im
+danach `docker compose restart webserver`). Bei der Supervisor-Form stehen alle
+Compose-Dateien ausgeschrieben im Befehl, weil Compose mit einem `-f` die
+`docker-compose.override.yml` nicht mehr von selbst lädt (ohne Override-Datei
+entfällt das mittlere `-f`):
+`docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.supervisor.yml up -d --force-recreate --no-deps php deploy-worker maintenance-worker`.
+Einfacher ist, die API-Basis-URL nur im
 Portal zu pflegen: Der Portalwert gilt ohne Neustart für alle Prozesse.
 
 Auf dem Host installieren und bereitstellen. Die `pip`- und

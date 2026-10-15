@@ -6,7 +6,12 @@
 #
 #   docker compose exec php php /var/www/html/lib/deploy_supervisor_switch.php --check
 #   docker compose exec php php /var/www/html/lib/deploy_supervisor_switch.php --to=supervisor_v1 --actor=<user id>
-#   docker compose -f docker-compose.yml -f docker-compose.supervisor.yml up -d deploy-worker
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.supervisor.yml up -d deploy-worker
+#
+# Name every file: with an explicit -f, Compose no longer loads
+# docker-compose.override.yml by itself, and on a host that keeps its network
+# or proxy settings there, the container would come up without them. Drop the
+# middle -f only where no override file exists.
 #
 # The order matters in both directions. The service snapshot fails closed when
 # the observed process shape does not match the stored contract, so starting

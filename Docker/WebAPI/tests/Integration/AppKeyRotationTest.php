@@ -301,6 +301,56 @@ final class AppKeyRotationTest extends TestCase
         self::assertSame([], $this->rotationAuditRows());
     }
 
+    /** An actor names the audit row: the one apply writes exactly one row, and that row carries the user id. */
+    public function testAnApplyWithAnActorWritesTheAuditRowForThatUser(): void
+    {
+        self::requireFunction('app_key_rotate');
+        $this->seedFixture($this->oldKey);
+        $actor = $this->existingUserId();
+
+        app_key_rotate($this->db, $this->oldKey, $this->newKey, true, null, $actor);
+
+        $audit = $this->rotationAuditRows();
+        self::assertCount(1, $audit, 'exactly one audit row for one apply');
+        self::assertSame($actor, (int) $audit[0]['user_id']);
+    }
+
+    /** Without an actor the audit row names no user, as it did before the option existed. */
+    public function testAnApplyWithoutAnActorWritesTheAuditRowWithoutAUser(): void
+    {
+        self::requireFunction('app_key_rotate');
+        $this->seedFixture($this->oldKey);
+
+        app_key_rotate($this->db, $this->oldKey, $this->newKey, true);
+
+        $audit = $this->rotationAuditRows();
+        self::assertCount(1, $audit, 'exactly one audit row for one apply');
+        self::assertNull($audit[0]['user_id']);
+    }
+
+    /**
+     * Why the CLI refuses an unknown actor before any work: deploy_logs.user_id is a foreign key, so the audit row of
+     * an id no user has fails at the very end of the run, and the whole rotation rolls back with it.
+     */
+    public function testAnUnknownActorRollsTheWholeRotationBackAtItsAuditRow(): void
+    {
+        self::requireFunction('app_key_rotate');
+        $this->seedFixture($this->oldKey);
+        $before = $this->fixtureSnapshot();
+
+        $exception = null;
+        try {
+            app_key_rotate($this->db, $this->oldKey, $this->newKey, true, null, $this->unknownUserId());
+        } catch (Throwable $caught) {
+            $exception = $caught;
+        }
+
+        self::assertNotNull($exception, 'an audit row that names no existing user must not commit');
+        self::assertStringContainsStringIgnoringCase('foreign key', $exception->getMessage());
+        self::assertSame($before, $this->fixtureSnapshot(), 'the rotation is rolled back in full');
+        self::assertSame([], $this->rotationAuditRows());
+    }
+
     /** CLI: empty STDIN is a usage error and exits 2. */
     public function testCliWithEmptyStdinIsAUsageErrorWithExitCode2(): void
     {
@@ -315,6 +365,63 @@ final class AppKeyRotationTest extends TestCase
         $result = $this->runCli(['--bogus'], $this->oldKeyLine());
 
         self::assertSame(2, $result['exit'], $result['output']);
+    }
+
+    /** CLI: a malformed --actor is refused with exit 2 before the old key is read, and changes no row and writes no audit row. */
+    #[DataProvider('malformedActorArguments')]
+    public function testCliRefusesAMalformedActorWithExitCode2AndChangesNothing(array $arguments): void
+    {
+        self::requireFunction('crypto_encrypt_secret_with_key');
+        $this->seedFixture($this->oldKey);
+        $before = $this->fixtureSnapshot();
+
+        $result = $this->runCli($arguments, $this->oldKeyLine());
+
+        self::assertSame(2, $result['exit'], $result['output']);
+        self::assertStringContainsString('--actor', $result['output']);
+        self::assertSame($before, $this->fixtureSnapshot(), 'a refused actor changes no row');
+        self::assertSame([], $this->rotationAuditRows(), 'a refused actor writes no audit row');
+    }
+
+    /** @return iterable<string, array{list<string>}> */
+    public static function malformedActorArguments(): iterable
+    {
+        yield 'a word' => [['--actor=abc']];
+        yield 'zero' => [['--actor=0']];
+        yield 'a negative id' => [['--actor=-1']];
+        yield 'an empty value' => [['--actor=']];
+        yield 'a fraction, with --apply' => [['--apply', '--actor=1.5']];
+        yield 'a repeated --actor' => [['--actor=1', '--actor=1']];
+    }
+
+    /** CLI: an id no user has is refused with exit 2 and changes no row, so the rotation never starts. */
+    public function testCliRefusesAnUnknownActorWithExitCode2AndChangesNothing(): void
+    {
+        self::requireFunction('crypto_encrypt_secret_with_key');
+        $this->seedFixture($this->oldKey);
+        $before = $this->fixtureSnapshot();
+
+        $result = $this->runCli(['--actor=' . $this->unknownUserId()], $this->oldKeyLine());
+
+        self::assertSame(2, $result['exit'], $result['output']);
+        self::assertStringContainsString('no deploy user', $result['output']);
+        self::assertSame($before, $this->fixtureSnapshot(), 'a refused actor changes no row');
+        self::assertSame([], $this->rotationAuditRows(), 'a refused actor writes no audit row');
+    }
+
+    /** CLI: a dry run with an existing --actor exits 0 and writes no audit row, because only an apply writes one. */
+    public function testCliDryRunWithAnExistingActorExitsZeroAndWritesNoAuditRow(): void
+    {
+        self::requireFunction('crypto_encrypt_secret_with_key');
+        self::requireFunction('app_key_rotate');
+        $this->seedFixture($this->oldKey);
+        $before = $this->fixtureSnapshot();
+
+        $result = $this->runCli(['--actor=' . $this->existingUserId()], $this->oldKeyLine());
+
+        self::assertSame(0, $result['exit'], $result['output']);
+        self::assertSame($before, $this->fixtureSnapshot(), 'a CLI dry run changes no row');
+        self::assertSame([], $this->rotationAuditRows(), 'a CLI dry run writes no audit row');
     }
 
     /** CLI: a dry run with the old key exits 0, prints the four progress lines in order, changes no row and prints neither a plaintext secret nor a v1: ciphertext. */
@@ -547,7 +654,7 @@ final class AppKeyRotationTest extends TestCase
     /** @return list<array<string, mixed>> the rotation audit rows written after setUp */
     private function rotationAuditRows(): array
     {
-        $stmt = $this->db->prepare('SELECT id, object_type, object_id, result, context_json FROM deploy_logs WHERE event_code = ? AND id > ? ORDER BY id');
+        $stmt = $this->db->prepare('SELECT id, user_id, object_type, object_id, result, context_json FROM deploy_logs WHERE event_code = ? AND id > ? ORDER BY id');
         $code = self::EVENT;
         $watermark = $this->auditWatermark;
         $stmt->bind_param('si', $code, $watermark);
@@ -559,6 +666,21 @@ final class AppKeyRotationTest extends TestCase
     private function oldKeyLine(): string
     {
         return 'base64:' . base64_encode($this->oldKey) . "\n";
+    }
+
+    /** The id of a deploy user the fixture can name as actor. The database seeds one. */
+    private function existingUserId(): int
+    {
+        $id = (int) repo_scalar($this->db, 'SELECT id FROM deploy_users ORDER BY id LIMIT 1');
+        self::assertGreaterThan(0, $id, 'the integration fixture needs the seeded user');
+
+        return $id;
+    }
+
+    /** An id just above the largest existing one, so no user has it. */
+    private function unknownUserId(): int
+    {
+        return (int) repo_scalar($this->db, 'SELECT COALESCE(MAX(id), 0) + 1 FROM deploy_users');
     }
 
     /**

@@ -417,8 +417,6 @@ test('retry: Cancel creates nothing, Confirm queues a new job for the failed one
   await expect(outcome.locator('.alert-actions a')).toHaveAttribute('href', `deploy_log.php?id=${newId}`);
 });
 
-// e2e-covers: deploy_log.php:retry
-// e2e-covers-cancel: deploy_log.php:retry
 test('deploy_log retry: Cancel keeps the failed job alone, Confirm queues its current scope', async ({ page }) => {
   const seed = seedBase();
   const failedId = seedFailedJob(seed);
@@ -448,8 +446,6 @@ test('deploy_log retry: Cancel keeps the failed job alone, Confirm queues its cu
     .toBe(Number(jobs[1].id));
 });
 
-// e2e-covers: deploy_log.php:cancel
-// e2e-covers-cancel: deploy_log.php:cancel
 test('deploy_log cancel: Cancel keeps the job, Confirm cancels it and stays on the log page', async ({ page }) => {
   const seed = seedBase();
   const jobId = seedScheduledJob(seed);

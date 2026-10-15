@@ -33,8 +33,6 @@ test.afterAll(() => cleanup());
 
 // e2e-covers: deploy.php:remote_cleanup_retry
 // e2e-covers: deploy.php:remote_review_document
-// e2e-covers: deploy_log.php:remote_cleanup_retry
-// e2e-covers: deploy_log.php:remote_review_document
 test('recovery block: a failed cleanup can be requeued, a moved evidence hash is refused, a check is appended', async ({ page }) => {
   const seed = phpJson(`
 $db = db();

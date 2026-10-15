@@ -16,6 +16,7 @@ require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/audit_event_definitions.php';
 require_once __DIR__ . '/repo/helpers.php';
 require_once __DIR__ . '/repo/log.php';
+require_once __DIR__ . '/app_key_rotate_cli.php';
 
 // The rotation needs a backup taken just before the key change: if the change goes wrong, the
 // previous key and that backup are the way back. Two hours is one maintenance window.
@@ -74,14 +75,16 @@ function app_key_rotate_backup_blocker(array $status, int $now): ?string
  * A dry run ($apply false) performs the same work and rolls it back, so its counts are exactly what
  * an apply would do. A refusal throws AppKeyRotationRefused with reason 'same_key', 'active_jobs' or
  * 'unreadable', and changes nothing. $afterRow runs after each rewritten row, inside the transaction;
- * the rollback test uses it to fail mid-run.
+ * the rollback test uses it to fail mid-run. $actorId, when given, is the deploy user the audit row names; it must be
+ * an existing user, because deploy_logs.user_id is a foreign key and an unknown id would roll the whole run back at
+ * its audit row. The CLI checks it before any work.
  *
  * @param (callable(string, int): void)|null $afterRow
  * @return array{applied:bool,credentials:int,directory:int,already:int}
  * @throws AppKeyRotationRefused
  * @throws LogicException when called inside a transaction
  */
-function app_key_rotate(mysqli $db, string $oldKey, string $newKey, bool $apply, ?callable $afterRow = null): array
+function app_key_rotate(mysqli $db, string $oldKey, string $newKey, bool $apply, ?callable $afterRow = null, ?int $actorId = null): array
 {
     // A nested run would not commit by itself: the outer transaction decides, and it may roll back.
     if (repo_transaction_depth($db) > 0) {
@@ -93,8 +96,8 @@ function app_key_rotate(mysqli $db, string $oldKey, string $newKey, bool $apply,
 
     $counts = ['credentials' => 0, 'directory' => 0, 'already' => 0];
     try {
-        repo_transaction($db, function () use ($db, $oldKey, $newKey, $apply, $afterRow, &$counts): void {
-            $counts = app_key_rotate_in_transaction($db, $oldKey, $newKey, $apply, $afterRow);
+        repo_transaction($db, function () use ($db, $oldKey, $newKey, $apply, $afterRow, $actorId, &$counts): void {
+            $counts = app_key_rotate_in_transaction($db, $oldKey, $newKey, $apply, $afterRow, $actorId);
             if (!$apply) {
                 // Every write and check of the dry run has happened; this rolls them all back.
                 throw new AppKeyRotationDryRunRollback();
@@ -119,7 +122,7 @@ function app_key_rotate(mysqli $db, string $oldKey, string $newKey, bool $apply,
  * @return array{credentials:int,directory:int,already:int}
  * @throws AppKeyRotationRefused
  */
-function app_key_rotate_in_transaction(mysqli $db, string $oldKey, string $newKey, bool $apply, ?callable $afterRow): array
+function app_key_rotate_in_transaction(mysqli $db, string $oldKey, string $newKey, bool $apply, ?callable $afterRow, ?int $actorId = null): array
 {
     // A running or cancelling job may hold secrets it decrypted with the old key and may read the credential
     // again, so a rewrite under it would fail that read. A queued job holds no decrypted secret and reads the
@@ -216,7 +219,7 @@ function app_key_rotate_in_transaction(mysqli $db, string $oldKey, string $newKe
                 'credential_count' => $counts['credentials'],
                 'directory_count' => $counts['directory'],
                 'already_count' => $counts['already'],
-            ]);
+            ], $actorId);
         }
 
         return $counts;
@@ -260,93 +263,6 @@ function app_key_rotate_wipe(?string &$secret): void
     if ($secret !== null && function_exists('sodium_memzero')) {
         sodium_memzero($secret);
     }
-}
-
-/**
- * Command line entry. The old APP_KEY arrives on STDIN; `--apply` commits, and no argument is a dry run.
- *
- * @param list<string> $arguments the arguments after the script name
- */
-function app_key_rotate_cli(array $arguments): int
-{
-    $usage = 'usage: php lib/app_key_rotate.php [--apply] < file-with-the-old-APP_KEY' . PHP_EOL;
-    if ($arguments !== [] && $arguments !== ['--apply']) {
-        fwrite(STDERR, $usage);
-
-        return 2;
-    }
-    $apply = $arguments === ['--apply'];
-
-    // The old key comes on STDIN, never as an argument: arguments show up in the process list and the shell history.
-    $line = fgets(STDIN);
-    if ($line === false || trim($line) === '') {
-        fwrite(STDERR, $usage);
-
-        return 2;
-    }
-    try {
-        $oldKey = envboot_parse_app_key($line);
-    } catch (RuntimeException) {
-        fwrite(STDERR, 'the old key on STDIN is not a valid APP_KEY' . PHP_EOL);
-
-        return 2;
-    }
-    app_key_rotate_wipe($line);
-
-    try {
-        $newKey = envboot_app_key_bytes();
-    } catch (RuntimeException $exception) {
-        app_key_rotate_wipe($oldKey);
-        fwrite(STDERR, virtusphere_redact_log_text($exception->getMessage()) . PHP_EOL);
-
-        return 1;
-    }
-
-    try {
-        return app_key_rotate_run($oldKey, $newKey, $apply);
-    } finally {
-        app_key_rotate_wipe($oldKey);
-        app_key_rotate_wipe($newKey);
-    }
-}
-
-/**
- * The two progress units of a run: the backup gate, then the re-encryption. The gate applies only to
- * an apply, because a dry run changes nothing. A refusal ends the run with a FAIL line and exit 1.
- */
-function app_key_rotate_run(string $oldKey, string $newKey, bool $apply): int
-{
-    fwrite(STDOUT, '[1/2] RUN backup check' . PHP_EOL);
-    if ($apply) {
-        $blocker = app_key_rotate_backup_blocker(backup_status_read(), time());
-        if ($blocker !== null) {
-            fwrite(STDERR, '[1/2] FAIL backup check: refused ' . $blocker . ' (take a backup with scripts/backup.sh first; the newest backup status must be ok and at most '
-                . intdiv(VIRTUSPHERE_APP_KEY_ROTATE_BACKUP_MAX_AGE_SECONDS, 3600) . ' h old)' . PHP_EOL);
-
-            return 1;
-        }
-        fwrite(STDOUT, '[1/2] PASS backup check' . PHP_EOL);
-    } else {
-        fwrite(STDOUT, '[1/2] SKIP backup check (dry run)' . PHP_EOL);
-    }
-
-    fwrite(STDOUT, '[2/2] RUN re-encrypt' . PHP_EOL);
-    try {
-        $result = app_key_rotate(db(), $oldKey, $newKey, $apply);
-    } catch (AppKeyRotationRefused $exception) {
-        fwrite(STDERR, '[2/2] FAIL re-encrypt: refused ' . $exception->reason . ': ' . virtusphere_redact_log_text($exception->getMessage()) . PHP_EOL);
-
-        return 1;
-    } catch (Throwable $exception) {
-        fwrite(STDERR, '[2/2] FAIL re-encrypt: ' . virtusphere_redact_log_text($exception->getMessage()) . PHP_EOL);
-
-        return 1;
-    }
-
-    fwrite(STDOUT, '[2/2] PASS re-encrypt (' . ($apply ? 'applied' : 'dry run') . '): credentials=' . $result['credentials']
-        . ' directory=' . $result['directory'] . ' already=' . $result['already'] . PHP_EOL);
-
-    return 0;
 }
 
 if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {

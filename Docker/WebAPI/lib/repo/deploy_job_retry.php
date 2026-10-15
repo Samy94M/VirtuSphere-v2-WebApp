@@ -37,7 +37,9 @@ function repo_deploy_retry_job(mysqli $db, int $jobId, bool $lock = false): ?arr
 
 /**
  * The sole retry decision. Findings are emitted in invariant order: remote,
- * identity, current portal network, then confirmable external history.
+ * create (the per-VM create units of the source job), identity, current portal
+ * network, then confirmable external history. A result that cannot be read at
+ * all is reported as an identity finding ahead of the create units.
  *
  * @return array{retryable:bool,allowed:bool,effective_mode:string,scope_vm_ids:list<int>,findings:list<array<string,mixed>>,blocking_findings:list<array<string,mixed>>,external_confirmation:bool,network_ready:bool,repair_vm_id:?int,plan:?array,source_create_rows:list<array<string,mixed>>,host_moves:list<array<string,mixed>>}
  */

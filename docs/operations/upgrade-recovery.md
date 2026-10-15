@@ -52,9 +52,9 @@ bewiesene konsistente Restorestand verwendet.
 
 | Klasse | Migrationen | Rückkehrvertrag |
 |---|---|---|
-| A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052, 0054, 0055 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
+| A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052, 0054, 0055, 0061, 0062 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
 | N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
-| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
+| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060, 0063, 0064 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
 
 Migration 0034 entfernt das Legacy-Tokenschema ausdrücklich. Die Migrationen
 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049 und 0050 führen
@@ -66,6 +66,12 @@ gelöscht noch durch Defaultwerte simuliert werden.
 Migration 0059 führt die Prüfung der SSH-Hostidentität vor jeder Anmeldung ein. Alter Code würde ohne Host-Schlüsselprüfung anmelden; ein gemischter Betrieb ist unsicher. Rückkehr ist nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore zulässig.
 
 Migration 0060 ergänzt das unveränderliche Vorzustands- und Berührungsjournal je Auftrag und VM, ohne historische Zeilen anzulegen. Die Worker-Konvergenz nach 0060 liest dieses Journal und die aktuelle Ausführungsgeneration; alter Worker-Code ignoriert diesen Beweis und darf nicht mit neuem Schema gemischt laufen. Rückkehr auf alten Code erfolgt nur mit dem dazugehörigen konsistenten Schema- und Konfigurationsrestore.
+
+Migration 0061 ergänzt an der VM-Bindung den ESXi-Zugang und dessen Host zum Bindungszeitpunkt; 0062 den Startzeitpunkt eines Auftrags. Beide Spalten sind nullbar, alter Code liest und schreibt sie nicht. Bindet alter Code eine VM, bleibt der Host-Schnappschuss der vorherigen Bindung stehen, bis der nächste erfolgreiche Create ihn neu schreibt; bis dahin kann die Warnung bei Create auf anderem Host fehlen oder einen alten Host nennen. Sie sperrt nichts. Aufträge, die alter Code startet, zeigen keinen Startzeitpunkt, wie historische Aufträge.
+
+Migration 0063 gibt jedem Eintrag der Machine-API-Freigabeliste eine optionale Rolle, die die erreichbaren Endpunkte begrenzt. Alter Code kennt die Rolle nicht und öffnet jedem freigegebenen Eintrag wieder jeden Endpunkt; eine Rückkehr hebt also die vom Administrator gesetzten Grenzen still auf.
+
+Migration 0064 führt den dauerhaften Merker für ESXi-Zugangsdateien auf dem Ansible-Host ein (`deploy_remote_secret_files`) und die Sperre, das Ziel eines Ansible-Zugangs bei offenem Merker zu ändern. Alter Code lädt die Datei ohne Merker hoch und kennt die Sperre nicht: Eine in seiner Laufzeit liegengebliebene Datei sieht weder der Systemstatus noch das Aufräumen beim nächsten Kontakt. Für 0063 und 0064 gilt deshalb dieselbe Grenze wie für 0059: kein gemischter Betrieb, Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore.
 
 ## Upgradefolge
 

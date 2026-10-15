@@ -34,7 +34,6 @@ echo 'CLEANED';
 test.beforeEach(() => cleanup());
 test.afterEach(() => cleanup());
 
-// e2e-covers: system_status.php:test
 test('Ansible card separates an outdated full test from mission evidence and can retest in place', async ({ page }) => {
   const seed = phpJson(`
 $db = db();
@@ -405,8 +404,8 @@ echo 'CLEANED';
 // status page and the line on the credentials page carry the same form. Cancel changes nothing, a
 // reason below the minimum is refused by the server, and a confirmation with a reason closes every
 // open file of the target and writes one audit row.
-// e2e-covers: system_status.php:remote_secret_acknowledge
-// e2e-covers-cancel: system_status.php:remote_secret_acknowledge
+// e2e-covers: credentials.php:remote_secret_acknowledge
+// e2e-covers-cancel: credentials.php:remote_secret_acknowledge
 test('remote_secret_acknowledge: Cancel changes nothing, a short reason is refused, Confirm closes the open files and audits them', async ({ page }) => {
   const seed = phpJson(`
 $db = db();

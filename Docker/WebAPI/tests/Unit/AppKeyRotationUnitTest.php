@@ -129,4 +129,54 @@ final class AppKeyRotationUnitTest extends TestCase
         // constant() throws an Error naming the constant while the module is missing.
         self::assertSame(7200, constant('VIRTUSPHERE_APP_KEY_ROTATE_BACKUP_MAX_AGE_SECONDS'));
     }
+
+    /** @return iterable<string, array{list<string>, array{apply:bool,actor:?string}|null}> */
+    public static function argumentShapes(): iterable
+    {
+        yield 'no argument is a dry run' => [[], ['apply' => false, 'actor' => null]];
+        yield '--apply' => [['--apply'], ['apply' => true, 'actor' => null]];
+        yield '--actor alone' => [['--actor=7'], ['apply' => false, 'actor' => '7']];
+        yield '--apply before --actor' => [['--apply', '--actor=7'], ['apply' => true, 'actor' => '7']];
+        yield '--actor before --apply' => [['--actor=7', '--apply'], ['apply' => true, 'actor' => '7']];
+        yield 'an empty actor reaches the id check' => [['--actor='], ['apply' => false, 'actor' => '']];
+        yield 'an unknown switch' => [['--bogus'], null];
+        yield 'a repeated --apply' => [['--apply', '--apply'], null];
+        yield 'a repeated --actor' => [['--actor=1', '--actor=2'], null];
+        yield '--actor without its equals sign' => [['--actor'], null];
+        yield 'a positional argument' => [['7'], null];
+    }
+
+    /** app_key_rotate_parse_arguments() returns the apply switch and the raw actor value, in any order, and null for anything else. */
+    #[DataProvider('argumentShapes')]
+    public function testArgumentsSplitIntoTheApplySwitchAndTheRawActorOrAreRefused(array $arguments, ?array $expected): void
+    {
+        self::assertTrue(function_exists('app_key_rotate_parse_arguments'), 'app_key_rotate_parse_arguments is missing (K22)');
+
+        self::assertSame($expected, app_key_rotate_parse_arguments($arguments));
+    }
+
+    /** @return iterable<string, array{string, int|null}> */
+    public static function actorValues(): iterable
+    {
+        yield 'one' => ['1', 1];
+        yield 'the largest INT id' => ['2147483647', 2147483647];
+        yield 'one above the INT range' => ['2147483648', null];
+        yield 'eleven digits' => ['40000000001', null];
+        yield 'zero' => ['0', null];
+        yield 'a leading zero' => ['07', null];
+        yield 'a negative id' => ['-3', null];
+        yield 'a fraction' => ['1.5', null];
+        yield 'a word' => ['abc', null];
+        yield 'surrounding whitespace' => [' 7', null];
+        yield 'empty' => ['', null];
+    }
+
+    /** app_key_rotate_actor_id() accepts only a positive id that fits the 32-bit column the audit row binds. */
+    #[DataProvider('actorValues')]
+    public function testActorIdAcceptsOnlyAPositiveIntegerThatFitsTheColumn(string $raw, ?int $expected): void
+    {
+        self::assertTrue(function_exists('app_key_rotate_actor_id'), 'app_key_rotate_actor_id is missing (K22)');
+
+        self::assertSame($expected, app_key_rotate_actor_id($raw));
+    }
 }

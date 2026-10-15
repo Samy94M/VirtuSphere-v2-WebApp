@@ -54,7 +54,6 @@ final class PortalConfirmContractTest extends TestCase
 
         // Read-only or idempotent refreshes.
         'credentials.php:test' => 'runs a diagnostic or queues a read-only inventory pull; no managed object is deleted',
-        'system_status.php:test' => 'delegates to the same non-destructive Ansible diagnostic from its status card',
         'mission_details.php:export' => 'downloads JSON, writes nothing',
         'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
         'system_status.php:preview_vlan_reassign' => 'renders the exact write scope and writes nothing',
@@ -67,14 +66,10 @@ final class PortalConfirmContractTest extends TestCase
         // retry re-enters a queue the worker drains and refuses outright if the
         // evidence moved, and the documentation form only ever adds a row to an
         // append-only evidence table.
-        // Both keys: lib/deploy_log_recovery_panel.php matches the owner glob
-        // of deploy.php AND of deploy_log.php, so the shared scan attributes
-        // its forms to both pages. Listing one would leave the other
-        // unclassified and the build red.
+        // The forms of lib/deploy_log_recovery_panel.php post to deploy.php,
+        // so the inventory files them under deploy.php wherever they render.
         'deploy.php:remote_cleanup_retry' => 'puts a failed cleanup back in the worker queue; it deletes nothing and is refused outright when the evidence changed',
         'deploy.php:remote_review_document' => 'appends one evidence row; no earlier entry is replaced or removed',
-        'deploy_log.php:remote_cleanup_retry' => 'puts a failed cleanup back in the worker queue; it deletes nothing and is refused outright when the evidence changed',
-        'deploy_log.php:remote_review_document' => 'appends one evidence row; no earlier entry is replaced or removed',
         'system_status.php:deploy_recovery_review' => 're-runs the recovery policy and sets the flag the worker reads; it performs no recovery and destroys nothing',
         'users.php:directory_search' => 'performs a read-only directory search',
         'users.php:directory_test_controller' => 'runs a read-only controller diagnostic',

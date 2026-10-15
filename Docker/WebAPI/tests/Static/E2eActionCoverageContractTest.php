@@ -47,7 +47,6 @@ final class E2eActionCoverageContractTest extends TestCase
         // action itself, its permissions and its refusals are proved in
         // DeployCreateReleaseTest against a real database.
         'deploy.php:create_unit_release' => '14B-G',
-        'deploy_log.php:create_unit_release' => '14B-G',
     ];
 
     /**

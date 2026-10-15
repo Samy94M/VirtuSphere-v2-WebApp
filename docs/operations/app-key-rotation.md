@@ -82,9 +82,21 @@ nicht.
    ```sh
    sed -i "s#^APP_KEY=.*#APP_KEY=base64:$(openssl rand -base64 32)#" .env
    ```
-5. **Alle Prozesse neu erzeugen:** `docker compose up -d --force-recreate --no-deps php deploy-worker maintenance-worker`,
-   danach `docker compose restart webserver` (bei der Supervisor-Form zusätzlich mit
-   `-f docker-compose.supervisor.yml`). Compose übernimmt die `.env` nur beim
+5. **Alle Prozesse neu erzeugen:**
+   ```sh
+   docker compose up -d --force-recreate --no-deps php deploy-worker maintenance-worker
+   docker compose restart webserver
+   ```
+   Bei der Supervisor-Form lautet die erste Zeile mit allen Compose-Dateien
+   ausgeschrieben, denn sobald ein `-f` dasteht, lädt Compose die
+   `docker-compose.override.yml` nicht mehr von selbst (auf Prod trägt sie das
+   Subnetz):
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.supervisor.yml \
+     up -d --force-recreate --no-deps php deploy-worker maintenance-worker
+   ```
+   Ohne `docker-compose.override.yml` auf dem Host entfällt das mittlere `-f`.
+   Compose übernimmt die `.env` nur beim
    Erzeugen eines Containers; ein `restart` behält den alten Schlüssel. Ab hier
    bis zum Ende von Schritt 7 gilt das Wartungsfenster:
    - Aufträge, Inventarabrufe, Zugangstests und Anmeldungen über AD scheitern an
@@ -112,6 +124,10 @@ nicht.
    ```
    Erwartet ist `[2/2] PASS re-encrypt (applied): …` mit denselben Anzahlen wie
    im Trockenlauf.
+   Mit `--actor=<Benutzer-ID>` (etwa `--apply --actor=3`) nennt die Zeile
+   `credential.app_key_rotated` unter **Logs** den Benutzer, der den Wechsel
+   ausgeführt hat; ohne die Angabe steht dort kein Benutzer. Eine ID, zu der es
+   keinen Portalbenutzer gibt, lehnt das Werkzeug vor jedem Schritt ab (Exit 2).
 8. **Prüfen und fortsetzen.** Das AD-Suchkonto unter **Benutzer > Active
    Directory** testen und jeden Ansible-Zugang unter **Zugangsdaten** **Testen**.
    Dann den Bereitstellungsdienst fortsetzen; erst danach laufen der ESXi-Test je

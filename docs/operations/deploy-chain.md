@@ -174,7 +174,9 @@ abweichende oder terminale Wiederholungen sind 409. Der Fingerprint enthält die
 erwarteten VM-IDs und die normalisierten semantischen Zeilen mit Multiplizität;
 reine Reihenfolge und diagnostischer Freitext sind bedeutungslos. Der Retry
 zeigt sämtliche gleichzeitig bestehenden Befunde in der Reihenfolge
-Remoteevidenz, Identität, Netzwerk, externe Voraussetzung und wiederholt ein
+Remoteevidenz, Create-Einheiten des Quellauftrags, Identität, Netzwerk, externe
+Voraussetzung (ein gar nicht lesbares Ergebnis meldet sich als Identitätsbefund
+schon vor den Create-Einheiten) und wiederholt ein
 Teilergebnis nur im aktuellen fehlgeschlagenen Export-Scope.
 
 Eine Änderung der Missions-WDS-Portgruppe passt keine VM-Karte automatisch an.
