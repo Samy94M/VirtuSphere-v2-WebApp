@@ -71,7 +71,12 @@ final class DeployFlowsDocContractTest extends TestCase
         self::assertStringContainsString('MAC-Erwartung und Create-Zeilen werden aus den Playbooks abgeleitet', $doc);
         self::assertStringContainsString('VIRTUSPHERE_DEPLOY_STAGGER_MODES', $doc);
         self::assertStringContainsString('VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES', $doc);
-        self::assertStringContainsString('Modusliteral `create`', $doc);
+        // The worker finds the create unit through the playbooks too; the doc
+        // used to name a mode literal the worker no longer compares.
+        $worker = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_worker_mission.php');
+        self::assertStringContainsString('ansible_mode_creates_vms(', $worker);
+        self::assertStringContainsString('`ansible_mode_creates_vms()`', $doc);
+        self::assertStringNotContainsString('Modusliteral `create`', $doc);
         self::assertStringNotContainsString('Staffelung, Wartezeitsperren im Formular, MAC-Erwartung und Create-Zeilen werden daraus abgeleitet', $doc);
     }
 

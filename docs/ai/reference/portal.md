@@ -55,9 +55,9 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 - A visible disk provisioning type goes through `disk_type_label()` (`lib/defaults.php`), never the stored token: `thin`, `thick` and `eagerzeroedthick` are the wire values `vmware_guest` expects, and two of them read the same to anyone without VMware background. The help's storage-demand paragraph interpolated the constant directly and printed `eagerzeroedthick` in a sentence while every other place said "Eager Zeroed Thick"; `DiskTypeLabelTest` now walks the `__t()` calls of every help, form and portal renderer for that. The text says when the work happens (on demand, at first write, up front), never a fixed speed ranking, and never that the array realized what was requested: nothing reads that back.
 
-## R14 Render status/label badges with portal_badge($variant, $label) (lib/layout.php); it escapes bot
+## R14 Render status/label badges with portal_badge($variant, $label) (lib/layout_presenters.php); it
 
-- Render status/label badges with `portal_badge($variant, $label)` (`lib/layout.php`); it escapes both. Do not hand-write `<span class="badge badge-*">`. A badge needing an extra attribute (`title`, live `data-deploy-status`) stays literal.
+- Render status/label badges with `portal_badge($variant, $label)` (`lib/layout_presenters.php`); it escapes both. Do not hand-write `<span class="badge badge-*">`. A badge needing an extra attribute (`title`, live `data-deploy-status`) stays literal.
 
 ## R15 Open a POST handler with portal_guard_post($connection, $user) instead of an inline csrf_verify
 
@@ -93,7 +93,7 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 ## R23 Which stylesheets the portal loads, and in which order, is decided once in layout_app_styles()
 
-- Which stylesheets the portal loads, and in which order, is decided once in `layout_app_styles()` (`lib/layout.php`), used by the portal shell AND by `login.php`. The ORDER is the contract: equally specific rules are resolved by position, so the file order IS that position, `status.css` stays last, and the four domain sheets (`panels`, `tables`, `controls`, `feedback`) sit in the sequence their split was verified in. Never add a `<link rel="stylesheet">` beside the registry, never `@import` from a sheet (it bypasses the cache-busting version query, the registry and the air-gap), and never reintroduce a single component monolith. `PortalStyleRegistryContractTest` fails on a sheet that exists but is not loaded, on a registered sheet that does not exist, on a hand-written link and on a returning `components.css`. A CSS guard scans `CssRules::stylesheets()`, never one filename: two guards named `components.css` and would have gone quiet the moment their rules moved one file over.
+- Which stylesheets the portal loads, and in which order, is decided once in `layout_app_styles()` (`lib/layout.php`), used by the portal shell AND by `login.php`. The ORDER is the contract: equally specific rules are resolved by position, so the file order IS that position (`layout_style_registry()`), `status.css` is the last domain sheet with only the `forced-colors.css` policy sheet after it, and the four domain sheets (`panels`, `tables`, `controls`, `feedback`) sit in the sequence their split was verified in. Never add a `<link rel="stylesheet">` beside the registry, never `@import` from a sheet (it bypasses the cache-busting version query, the registry and the air-gap), and never reintroduce a single component monolith. `PortalStyleRegistryContractTest` fails on a sheet that exists but is not loaded, on a registered sheet that does not exist, on a hand-written link and on a returning `components.css`. A CSS guard scans `CssRules::stylesheets()`, never one filename: two guards named `components.css` and would have gone quiet the moment their rules moved one file over.
 
 ## R24 base.css is the only stylesheet allowed to NAME a colour; every other one asks for it with var(
 
@@ -103,9 +103,9 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 - Where modal content sits is decided once in `feedback.css`, by `.modal[open]`, `.modal-box`, `.modal-msg` and `.modal-actions`; `tests/Static/ModalAxisContractTest.php` pins it. Never align a message per dialog. `.modal-msg` derives alignment from the text length: `width: fit-content` plus auto inline margins recentre a one-line message, a wrapping one keeps its left edge. Its `overflow-wrap: anywhere` is load-bearing rather than cosmetic, because `:name` is user input and a clipped name defeats the naming rule above.
 
-## R26 __t() substitutes placeholders but does not pluralize. Pick the sentence by count (confirm_dele
+## R26 __t() substitutes placeholders but does not pluralize. Pick the sentence by count (a _one and a
 
-- `__t()` substitutes placeholders but does not pluralize. Pick the sentence by count (`confirm_delete_unused` / `_one` / `_many`) instead of writing "VM(s)".
+- `__t()` substitutes placeholders but does not pluralize. Pick the sentence by count (a `_one` and a `_many` key, e.g. `deploy.blocker_count_one` / `deploy.blocker_count_many`) instead of writing "VM(s)".
 
 ## R27 The two tabbed pages carry their tab differently, and both fall back to the *first* tab when it
 
@@ -117,7 +117,7 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 ## R29 logs.php takes its tab from ?tab=<tab> and scopes the category filter to that tab, so a deep li
 
-- `logs.php` takes its tab from `?tab=<tab>` and scopes the category filter to that tab, so a deep link must name both. Build it with `log_category_url()` (`lib/repo/log.php`), which looks the tab up in `VIRTUSPHERE_LOG_TABS` rather than hardcoding it, so the link follows a category that later moves tabs. A hand-written `logs.php?category=mecm` lands on the default `security` tab, which does not contain `mecm`, so the filter is dropped without an error: the operator chasing a failed MECM sync reads sign-in rows instead. `tests/Static/LogDeepLinkContractTest.php` rejects a hand-written link, `LogTaxonomyTest` re-runs the page's own tab/category check against every URL the builder emits.- `system_status.php` is the third page a link reaches by fragment, and the quietest: a fragment naming a section it does not render is not an error, the browser simply stays at the top, so a message that just named a thing leads to a page not showing it. Build every one with `system_status_url()` (`lib/system_status.php`), never by hand; the named anchors are the `VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_*` constants, walked against the ids the `lib/system_status*.php` renderers emit by `tests/Static/SystemStatusDeepLinkContractTest.php`, which also rejects a hand-written `system_status.php#` outside the builder. `reassign` and the per-row `credential-<id>` stay outside that walk on purpose: one is a details element, the other is generated per row.
+- `logs.php` takes its tab from `?tab=<tab>` and scopes the category filter to that tab, so a deep link must name both. Build it with `log_category_url()` (`lib/repo/log.php`), which looks the tab up in `VIRTUSPHERE_LOG_TABS` rather than hardcoding it, so the link follows a category that later moves tabs. A hand-written `logs.php?category=mecm` lands on the default `security` tab, which does not contain `mecm`, so the filter is dropped without an error: the operator chasing a failed MECM sync reads sign-in rows instead. `tests/Static/LogDeepLinkContractTest.php` rejects a hand-written link, `LogTaxonomyTest` re-runs the page's own tab/category check against every URL the builder emits.- `system_status.php` is the third page a link reaches by fragment, and the quietest: a fragment naming a section it does not render is not an error, the browser simply stays at the top, so a message that just named a thing leads to a page not showing it. Build every one with `system_status_url()` (`lib/system_status_urls.php`), never by hand; the named anchors are the `VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_*` constants, walked against the ids the `lib/system_status*.php` renderers emit by `tests/Static/SystemStatusDeepLinkContractTest.php`, which also rejects a hand-written `system_status.php#` outside the builder. `reassign` and the per-row `credential-<id>` stay outside that walk on purpose: one is a details element, the other is generated per row.
 
 ## R30 Two links side by side, separated only by a space, read as one long link, and a place that has
 
@@ -125,7 +125,7 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 ## R31 A list export and the table above it must be ONE query, not two derivations of the same query s
 
-- A list export and the table above it must be ONE query, not two derivations of the same query string. `lib/log_filter.php` builds the validated filter struct once per request and `log_filter_repo_args()` produces the exact repository arguments; the table, its count and `lib/logs_export.php` all read that. A download is evidence, and evidence that quietly answers a slightly different question than the screen it was started from is worse than no download. The match count is established BEFORE the first row streams, because once output has begun no header can be added and no decision revised, and "was this capped" has to be known while it is still answerable. A cap is announced or it is a lie: the page says "the first N of M" before the download starts and the response carries `X-VirtuSphere-Total-Rows`, `-Export-Limit` and `-Truncated`. The file itself gets no note row, because a comment line contradicts the CSV's own header and every RFC 4180 reader parses it as a record. Exactly `VIRTUSPHERE_LOG_EXPORT_MAX_ROWS` matches is NOT truncated: every matching row is in the file, and saying otherwise sends an operator hunting for rows already in front of them. The cap is a diagnostic limit, never an authorization boundary; `users.manage` already decided this reader may see all of it.
+- A list export and the table above it must be ONE query, not two derivations of the same query string. `lib/log_filter.php` builds the validated filter struct once per request (`log_filter_from_query()`), and the table (`repo_log_page()`), its count (`repo_count_logs()`) and `lib/logs_export.php` all pass that same struct to the repository. A download is evidence, and evidence that quietly answers a slightly different question than the screen it was started from is worse than no download. The match count is established BEFORE the first row streams, because once output has begun no header can be added and no decision revised, and "was this capped" has to be known while it is still answerable. A cap is announced or it is a lie: the page says "the first N of M" before the download starts and the response carries `X-VirtuSphere-Total-Rows`, `-Export-Limit` and `-Truncated`. The file itself gets no note row, because a comment line contradicts the CSV's own header and every RFC 4180 reader parses it as a record. Exactly `VIRTUSPHERE_LOG_EXPORT_MAX_ROWS` matches is NOT truncated: every matching row is in the file, and saying otherwise sends an operator hunting for rows already in front of them. The cap is a diagnostic limit, never an authorization boundary; `users.manage` already decided this reader may see all of it.
 
 ## R32 An export writes exactly one audit row, after its rows were read (so the file cannot contain it
 
@@ -199,8 +199,9 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
   every non-common stylesheet/script in the two layout registries. Do not add a
   page-local `<link>` or `<script>`. Selection removes entries from the global
   order; it never reorders the survivors. `status.css` currently has exactly
-  two page consumers: System status owns its domain rules, while Deploy log
-  deliberately shares the fact-grid and technical-detail selectors. A new
+  three page consumers: System status owns its domain rules, while Deploy log
+  and the package-run diagnosis deliberately share the fact-grid and
+  technical-detail selectors. A new
   feature hook and its module are classified together and held by
   `PortalPageAssetSelectionTest` plus the browser action suite.
 

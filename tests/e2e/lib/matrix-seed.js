@@ -1,5 +1,6 @@
 // Fixtures for the pages of the health/a11y matrix that only render against a
-// concrete object: the two editor pages and the deploy page *with* a mission.
+// concrete object: the two editor pages, the deploy page *with* a mission and
+// the job log of one seeded job.
 //
 // Without a mission, deploy.php renders neither the storage table nor the host
 // warning boxes, so the whole block of markup this slice added was never
@@ -87,9 +88,24 @@ foreach (['${mark}VM1', '${mark}VM2'] as $vmName) {
     $stmt->execute();
 }
 
+// deploy_log.php renders only a concrete job. A failed export job is terminal,
+// so the page does not poll, and it shows the error box and the log window
+// with lines from more than one stream instead of the empty "no output" state.
+$payload = json_encode(['mode' => 'export', 'verbose' => false, 'vm_ids' => $vmIds, 'powercycle_wait' => 5], JSON_THROW_ON_ERROR);
+$stmt = $db->prepare("INSERT INTO deploy_jobs (mission_id, user_id, status, payload_json, credential_esxi_id, credential_ansible_id, last_error) VALUES (?, ?, 'failed', ?, ?, ?, 'seeded failure')");
+$stmt->bind_param('iisii', $missionId, $admin, $payload, $esxiA, $ansible);
+$stmt->execute();
+$jobId = (int) $db->insert_id;
+$stmt = $db->prepare('INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES (?, ?, ?, ?)');
+foreach ([[1, 'system', '${mark} job started'], [2, 'ansible', '${mark} TASK [export] ok'], [3, 'worker_error', '${mark} seeded failure']] as [$seq, $stream, $line]) {
+    $stmt->bind_param('iiss', $jobId, $seq, $stream, $line);
+    $stmt->execute();
+}
+
 echo 'JSON' . json_encode([
     'missionId' => $missionId,
     'vmId' => $vmIds[0],
+    'jobId' => $jobId,
     'esxiId' => $esxiA,
     'esxiOtherId' => $esxiB,
     'ansibleId' => $ansible,
@@ -105,6 +121,7 @@ function cleanupMatrixFixtures(mark) {
 $db = db();
 $db->query("DELETE FROM deploy_interfaces WHERE vm_id IN (SELECT id FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${mark}%'))");
 $db->query("DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${mark}%')");
+$db->query("DELETE FROM deploy_job_logs WHERE job_id IN (SELECT id FROM deploy_jobs WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${mark}%'))");
 $db->query("DELETE FROM deploy_jobs WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${mark}%')");
 $db->query("DELETE FROM deploy_missions WHERE mission_name LIKE '${mark}%'");
 $db->query("DELETE FROM deploy_esxi_inventory WHERE credential_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '${mark}%')");

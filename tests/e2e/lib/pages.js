@@ -50,6 +50,11 @@ const PORTAL_PAGES = [
   { path: 'package_reports.php', access: 'user' },
   { path: 'package_run.php', access: 'user', query: (ids) => `mission_id=${ids.missionId}&vm_id=${ids.vmId}` },
 
+  // The job log needs a job id; without one it answers with its "not found"
+  // state. The seed's job is a failed export, terminal, so the page does not
+  // poll while the matrix scans it.
+  { path: 'deploy_log.php', access: 'user', query: (ids) => `id=${ids.jobId}` },
+
   { path: 'credentials.php', access: 'admin' },
   // system_status.php is viewable by any signed-in user: it uses
   // portal_require_user() and gates the privileged actions per feature (inventory
@@ -82,10 +87,7 @@ const NON_PAGE_ENDPOINTS = [
 // PortalPageInventoryContractTest derives that set from the directory, so a new
 // page cannot stay unscanned without an entry here.
 const MATRIX_DEFERRED_PAGES = [
-  {
-    path: 'deploy_log.php',
-    reason: 'needs a seeded deploy job; the matrix seed creates none while the deploy job schema is in flux',
-  },
+  // Empty. deploy_log.php left this list once lib/matrix-seed.js seeded a job.
 ];
 
 /**

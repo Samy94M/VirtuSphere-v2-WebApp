@@ -44,7 +44,7 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | Seiten-403 je Rolle (users/settings/logs für user-Rolle) | automatisiert | E2E `health-matrix.spec.js` (denied-Matrix) |
 | IDOR: IDs werden gegen Mission/Besitzer-Scope geprüft (vm_id∈mission, job∈mission) | automatisiert | Repo-Guards (`repo_reset_vm_mecm_id`, `db_importMAC` 409-Pfad) + `MacImportCallbackTest`; Portal-Handler mit Scope-Checks |
 | Machine-API: IP-Allowlist; optionaler Token nur für den Report-Rückkanal; frühere Desktop-Token-Pfade bleiben 404 | automatisiert | `MachineApiWireTest`, `MachineApiDenialTraceTest`, Restore-Drill-Smoke; ADR-0035 |
-| ESXi-Schreibzugriffe binden Name an Instance-UUID; fremder Namenszwilling blockiert, Adoption ist ausdrücklich | automatisiert | `AnsibleVmIdentityContractTest`, `VmIdentityCollisionTest`, `MacImportCallbackTest`; ADR-0036 |
+| ESXi-Schreibzugriffe binden Name an Instance-UUID; ein fremder Namenszwilling blockiert, bis er auf ESXi umbenannt oder gelöscht oder die Portal-VM gelöscht ist; es gibt keine Übernahme, ein nachgebauter `adopt_vm`-POST ändert nichts; nur der eigene Create bindet, auch als Ersatz einer extern gelöschten gebundenen VM (IDR-P02) | automatisiert | `AnsibleVmIdentityContractTest`, `VmIdentityCollisionTest`, `DeployCreateReplacementTest`, `MacImportCallbackTest`, E2E `deploy-actions.spec.js`; ADR-0036 mit Nachtrag WM-E2a |
 
 ## V5 Input-Validierung / Injection
 
@@ -98,7 +98,7 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | CRYP (Cryptography) | V7-Zeilen; libsodium + TLS-Flow |
 | ERRH (Error Handling) | V10-Zeilen; PhaseC-Contract |
 | CONF (Configuration) | Versionsoffenlegung, deny-Regeln, Secret-Scan, Compose-Härtung und Digest-Pins |
-| BUSL (Business Logic) | Deploy-Statusmaschine (ADR-0030/0033), VM-Identität/Adoption (ADR-0036), Idempotenz-/409-Beweise `MacImportCallbackTest` |
+| BUSL (Business Logic) | Deploy-Statusmaschine (ADR-0030/0033), VM-Identität ohne Übernahme (ADR-0036, Nachtrag WM-E2a), Idempotenz-/409-Beweise `MacImportCallbackTest` |
 | CLNT (Client-side) | CSP-Nonce-Contract, keine Inline-Handler, `health-matrix` Konsolen-/CSP-Scan |
 
 ## Pflege

@@ -16,7 +16,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung 
 | `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
 | `inventory` (Inventar abrufen) | `inventoryESXi` | nein | nichts | nein | nein |
 
-Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, dessen Create-Einheit eine Ansible-Job-ID dauerhaft gespeichert hat, unabhängig vom Endstatus. Quelle der Reihenfolge ist `ansible_playbooks_for_mode()`. MAC-Erwartung und Create-Zeilen werden aus den Playbooks abgeleitet; die Staffelung und die Inventaraktualisierung verwenden dagegen die festen Listen `VIRTUSPHERE_DEPLOY_STAGGER_MODES` und `VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES`. Der Worker erkennt die Create-Einheit weiterhin mit dem Modusliteral `create`. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
+Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, dessen Create-Einheit eine Ansible-Job-ID dauerhaft gespeichert hat, unabhängig vom Endstatus. Quelle der Reihenfolge der Missionsmodi ist `ansible_playbooks_for_mode()`; `inventory` hat dort keinen Zweig, der Worker verzweigt vorher und startet `inventoryESXi` aus `VIRTUSPHERE_SYSTEM_PLAYBOOKS`. MAC-Erwartung und Create-Zeilen werden aus den Playbooks abgeleitet; die Staffelung und die Inventaraktualisierung verwenden dagegen die festen Listen `VIRTUSPHERE_DEPLOY_STAGGER_MODES` und `VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES`. Auch der Worker erkennt die Create-Einheit an den Playbooks (`ansible_mode_creates_vms()`), nicht an einem Modusliteral. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
 
 Für `start`, `export`, `powercycle` und `autostart` friert derselbe Resolver die Auswahl ein und nimmt VMs ohne gebundene Instance-UUID aus dem Arbeitsumfang. Eine leere Auswahl ohne Formularmarker (interne Aufrufer) gilt dabei vorher als ganze Mission; im Formular sperrt eine leere Auswahl. Die übersprungenen IDs bleiben als Auftragsdiagnose getrennt von den ausführbaren `vm_ids`. Vorschau und Staffelplan enthalten nur ausführbare VMs. Ein Auftrag, bei dem alle VMs übersprungen werden, behält einen ausdrücklich leeren Arbeitsumfang und endet als No-op ohne Remote-Schritt; er wird niemals auf die ganze Mission ausgeweitet. Die übersprungenen VMs bleiben ohne Journal-Capture, Markierung, Touch oder Zustandsänderung. Ergebnis, Protokoll und Vorschau melden „N VMs nicht angelegt, übersprungen“; der Link „VMs anlegen“ wird nur Lesern mit `deploy.run` gezeigt.
 
@@ -29,7 +29,7 @@ flowchart TD
   F["Formular: Mission, Zugänge, Modus, VM-Auswahl, Wartezeiten, Start sofort oder geplant, Staffelung, ausführliche Ausgabe"]
   F --> B{"Einreihsperren frei?"}
   B -->|nein| BX["Sperre mit Verweis anzeigen, nichts eingereiht"]
-  B -->|ja| T{"Zeitplan gültig? (nicht in der Vergangenheit, im Planungshorizont; Staffelung nur bei full, powercycle, start und im erlaubten Bereich)"}
+  B -->|ja| T{"Zeitplan gültig? (höchstens 5 Minuten in der Vergangenheit, im Planungshorizont; Staffelung nur bei full, powercycle, start und im erlaubten Bereich)"}
   T -->|nein| TX["Feldfehler am Formular, nichts eingereiht"]
   T -->|ja| R["Gemeinsame Scope-Auflösung: Auswahl einfrieren, für Start, Export, Power-Cycle und Autostart ungebundene VMs ausnehmen"]
   R --> HM{"Create-fähiger Modus und gebundene VMs, deren Bindung auf einem anderen Host liegt?"}
@@ -176,9 +176,10 @@ flowchart TD
   LA -->|rejected: vm_not_powered_off| UV
   LA -->|rejected, anderer Code| LF["failed"]
   LA -->|Hostidentität vor Anmeldung abgelehnt| HF
-  LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LU["uncertain (launch_unconfirmed)"]
+  LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LP["uncertain (protocol_error)"]
   LA -->|Transport abgerissen| JD{"Job-ID im Async-Verzeichnis gefunden?"}
-  JD -->|nein| LU["uncertain"]
+  JD -->|mehr als eine| LP
+  JD -->|keine bis zur Frist| LU["uncertain (launch_unconfirmed)"]
   JD -->|Hostidentität der Suchverbindung abgelehnt| HU["uncertain (host_identity_rejected), Ausgang bleibt unbekannt"]
   JD -->|ja| PO
   LA -->|launched| PO["createVMStatus im Takt VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS"]
@@ -203,6 +204,7 @@ flowchart TD
   PF --> N
   LF --> N
   LU --> HOLD
+  LP --> HOLD
   TU --> HOLD
   SU --> HOLD
   HF --> HOLD
@@ -217,7 +219,7 @@ Der Vokabular-Wächter leitet Werte aus den Code-Listen ab. Ein Wert ohne Knoten
 
 | Vokabular | Wert | Ausnahmegrund |
 |---|---|---|
-| Create-Fehler | `ownership_lost` | Das Token steht im geschlossenen Registry-Array, hat im Produktionscode aber derzeit keinen Writer; bei Einführung eines Writers gehört es in den Worker- oder Create-Fluss. |
+| Create-Fehler | `ownership_lost` | Gespeichert wird es nur von der Ablaufbereinigung: `repo_deploy_create_converge_reaped()` schließt die offenen Einheiten eines Auftrags, dessen Worker sich nicht mehr meldet (siehe [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat)). Im Worker ist es nur der Stoppgrund bei verlorenem Besitz und wird nicht an die Einheit geschrieben. |
 | Create-Fehler | `operator_released` | Dieses Token entsteht nur durch die explizite Operatorfreigabe einer ungeklärten Create-Einheit; die Freigabe liegt in der Wiederholungs-/Verwaltungsaktion, nicht im Worker-Ablauf. |
 | Terminalgrund | `stale_heartbeat` | Der Wartungsdienst beendet veraltete Aufträge; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
 | Terminalgrund | `cancel_converged` | Der Wartungsdienst konvergiert eine bereits angeforderte Abbrechung; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
@@ -353,7 +355,7 @@ Je VM meldet das Playbook `[n/total] RUN`, `pass` oder `fail Powercycle <VM>`. E
 
 ### exportVMs-Informations und export_vm_info
 
-Liest die MACs und schickt sie an das Portal. Ein Fehler betrifft nur die einzelne VM.
+Liest die MACs und schickt sie an das Portal. Ein Abfragefehler oder eine Identitätsabweichung betrifft nur die einzelne VM; weist das Portal die Zugriffsbestätigung einer VM ab, bricht der ganze Lauf vor deren Abfrage ab.
 
 ```mermaid
 flowchart TD

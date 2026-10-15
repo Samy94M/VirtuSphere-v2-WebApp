@@ -6,9 +6,9 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 - Portal-only state labels live in `lib/portal_status_display.php` (lifecycle, MECM), `lib/deploy_display.php` (job status, visible payload) and `lib/deploy_mode_labels.php` (display-only mode names shared with input validation); the stored value stays technical everywhere it is persisted or transported, and an unknown value renders a neutral localized sentence rather than its raw token. `deploy_service_health_snapshot()` (`lib/deploy_service_health.php`) is the single source of the deploy service state for dashboard, deploy page, System status and the anonymous health endpoint; its three axes stay separate in every detail view and the claim gate lives inside the claim transaction.
 
-## A27 Render display-only timestamps through portal_format_timestamp() in lib/layout.php (d.m.Y H:i:s
+## A27 Render display-only timestamps through portal_format_timestamp() in lib/layout_response.php (d.
 
-- Render display-only timestamps through `portal_format_timestamp()` in `lib/layout.php` (`d.m.Y H:i:s`); do not echo raw MySQL datetime strings in portal views. VM and mission editors round-trip the raw `edit_version` counter, independently of display timestamps; portal writes require it (`docs/operations/edit-concurrency.md`).
+- Render display-only timestamps through `portal_format_timestamp()` in `lib/layout_response.php` (`d.m.Y H:i:s`, via `portal_format_datetime()` in `lib/portal_time.php`); do not echo raw MySQL datetime strings in portal views. VM and mission editors round-trip the raw `edit_version` counter, independently of display timestamps; portal writes require it (`docs/operations/edit-concurrency.md`).
 
 ## A28 Solid buttons take their fill/text from the --btn-bg/--btn-fg theme tokens (base.css); do not h
 

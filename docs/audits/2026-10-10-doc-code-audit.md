@@ -35,7 +35,7 @@ gilt; der Code ist nicht automatisch richtig.
 | Cluster | Doku | Status |
 |---|---|---|
 | A Installation/Betrieb | README, INSTALLATION-ANLEITUNG, go-live, offline-install, upgrade-recovery, backup, https, app-key-rotation, PRE-SHIP-CHECKLIST | geprüft, nachgemessen |
-| B Deploy | siehe Quellstand | zurückgestellt |
+| B Deploy | siehe Quellstand | geprüft, nachgemessen (15.10.2026, Abschnitt „Cluster B“) |
 | C1 MECM-Betrieb | mecm-integration, mecm-scheduled-tasks | geprüft, nachgemessen |
 | C2 PowerShell | Powershell-MECM/README, clients/README, reference/powershell | geprüft, nachgemessen |
 | D Maschine/Ansible/ESXi | contracts/machine, reference/machine-api, reference/ansible, trust-flows, esxi-inventory, ansible-full-test, flows | geprüft, nachgemessen |
@@ -172,5 +172,67 @@ Blockabschluss K13 bis K16 bestanden: Health-Matrix und Axe für `package_report
 `package_run.php` in beiden Themes erwartet (`qa-artifacts/block-k13-k16/green-2/e2e/`).
 Die oben als vorbestehend rot genannten Gates sind mit diesem Blockabschluss grün.
 
-Offen: Cluster B, X-03 und `deploy_log.php` in der e2e-Matrix. Das Deploy-Paket (K13 bis
-K16) ist seit dem 11.10.2026 auf `main`, damit sind alle drei freigegeben.
+Offen waren danach Cluster B, X-03 und `deploy_log.php` in der e2e-Matrix (Deploy-Paket
+K13 bis K16 seit 11.10.2026 auf `main`). Abgearbeitet am 15.10.2026, siehe unten.
+
+## Cluster B, X-03 und Matrixrest (15.10.2026)
+
+Quellstand: `main` `16cde1d` (ESXi-Hardwareversion aus der Hostversion) zusammengeführt.
+Inventur je Doku-Datei durch fünf nur lesende Haiku-Agenten (Effort xhigh); jeder der 46
+umsetzbaren Agentenbefunde vom Koordinator am Code nachgemessen. Zeilen unten nach der
+Korrektur.
+
+### Korrigiert
+
+| ID | Fundstelle (korrigiert) | Befund | Beleg |
+|---|---|---|---|
+| B-01 | `deploy-chain.md:43` | „liest der aktive Worker diese Grundlage noch nicht“; der Claim liest Runtime-Generation, Lease-Epoch und Claim-Pause, Vertrag bleibt `legacy` | `lib/repo/deploy_job_worker.php:92-107,216` |
+| B-02 | `deploy-chain.md:191`, Geschwister `DEPLOYMENT.md` keine | „Test veraltet“ nach 7 Tagen; gilt das Maximum aus 7 Tagen und doppeltem Intervall | `lib/status.php:234` |
+| B-03 | `deploy-chain.md:230` | Trap auf HUP/INT/TERM nur in Modusschritten, Create-Steueraufrufe bewusst ohne | `lib/ansible_command_modes.php:286`, `lib/ansible_command_create.php:16-20` |
+| B-04 | `deploy-chain.md:378`, `DEPLOYMENT.md:117` | „jeder `ansible-playbook` mit `PYTHONUNBUFFERED=1`“; der Inventarabruf setzt es nicht | `lib/ansible_inventory_artifacts.php:46-57`, `lib/ansible_command_create.php:126`, `lib/ansible_command_modes.php:303` |
+| B-05 | `deploy-chain.md:415` | „mindestens ein Erfolg“: übersprungene Einheiten zählen mit | `lib/deploy_worker_create.php:271-277` |
+| B-06 | `deploy-flows.md:19` | Reihenfolge aus `ansible_playbooks_for_mode()` gilt nur für Missionsmodi; Create-Erkennung über Playbooks, kein Modusliteral | `lib/ansible_command_modes.php:94-112,171-174`, `lib/deploy_worker_mission.php:40,153` |
+| B-07 | `deploy-flows.md:32` | Zeitplan darf bis 300 s in der Vergangenheit liegen | `lib/repo/deploy_job_input.php:240`, `lib/deploy_constants.php:191` |
+| B-08 | `deploy-flows.md:179-183` | Launch ohne lesbare Antwort ergibt `protocol_error`, nicht `launch_unconfirmed`; dieses nur bei fehlender Job-ID nach Transportabriss, mehrere Job-IDs ergeben `protocol_error` | `lib/deploy_worker_create_launch.php:258-260,292-306`, `lib/deploy_worker_create_remote.php:154-178` |
+| B-09 | `deploy-flows.md:222` | Create-Fehler `ownership_lost` hat einen Writer (Ablaufbereinigung) | `lib/repo/deploy_create_identity.php:257-285` |
+| B-10 | `deploy-flows.md:358` | abgewiesene Touch-Bestätigung bricht den ganzen Export ab | `Ansible/export_vm_info.yml:22-31` |
+| B-11 | `DEPLOYMENT.md:14` | sieben von acht Inventarabfragen unter `ignore_errors` | `Ansible/inventoryESXi_playbook.yml:23-138` |
+| B-12 | `DEPLOYMENT.md:27`, `help_deploy` `deploy_warn_p3` DE/EN | freie Lizenz sperrt schreibende Modi beim Einreihen, nicht nur Hinweis; dazu sperrt jetzt der Create-Befund der Hostversion | `lib/esxi_capabilities.php:178-185`, `lib/deploy_capability_blockers.php:27-31`, `lib/esxi_create_compatibility.php:125-168` |
+| B-13 | `DEPLOYMENT.md:39`, `:413` | Labels „Check connection and environment“, „Catalog and inventory“ | `lang/en/credentials.php:46`, `lang/en/settings.php:14` |
+| B-14 | `DEPLOYMENT.md:50,52` | Generator liegt in `lib/ansible_yaml.php`; `accounts.yml` trägt auch `esxi_validate_certs`, `esxi_ca_bundle_path` | `lib/ansible_yaml.php:18,30-38` |
+| B-15 | `DEPLOYMENT.md:107` | `VIRTUSPHERE_CREATE_ARTIFACTS` hat sieben Einträge | `lib/deploy_create_constants.php:231-239` |
+| B-16 | `DEPLOYMENT.md:165` | MAC-Upload wiederholt bis zu dreimal (5/15/45 s), auch bei Netzfehlern; protokolliert das begrenzte `error`-Feld | `Ansible/upload_mac_list.py:44,269-292` |
+| B-17 | `DEPLOYMENT.md:326` | Step-Policy wird vom MAC-Rückruf geladen (`remote_step_callback_expectation()`) | `lib/mac_import_callback.php:10,125`, `db_importMAC.php:185` |
+| B-18 | `DEPLOYMENT.md:347` | `setup.sh` legt Verzeichnisse vor der `.env` an | `Docker/scripts/setup.sh:37-47` |
+| B-19 | `DEPLOYMENT.md:351` | `health.php` liest den Dienst-Snapshot statt eigener Heartbeat-Abfrage; Pause ist nicht `degraded` | `portal/health.php:44-74,95` |
+| B-20 | `help_deploy` `service_p3` DE/EN | „Beeinträchtigt“ auch bei unbekanntem oder widersprüchlichem Prozessvertrag und fehlendem Arbeitsprozess der Aufsicht | `lib/deploy_service_health.php:52-83` |
+| B-21 | `help_deploy` `deploy_cancel_p2` DE/EN | nicht die Aufsicht, sondern die Ablaufbereinigung schließt den Abbruch, frühestens nach 600 s | `lib/repo/deploy_job_maintenance.php:132-136`, `lib/deploy_worker_loop.php:139`, `lib/maintenance_tasks.php:181`, `lib/deploy_constants.php:92` |
+| B-22 | `ai/reference/portal.md` R14, R29, R26 | Owner `lib/layout_presenters.php`, `lib/system_status_urls.php`; Pluralbeispiel existierte nicht | `lib/layout_presenters.php:14`, `lib/system_status_urls.php:12`, `lang/de/deploy.php:65-66` |
+| B-23 | `ai/reference/portal.md` R23, R47 | `forced-colors.css` steht nach `status.css`; `status.css` hat drei Seiten | `lib/layout.php:120-136` |
+| B-24 | `ai/reference/portal.md` R31 | `log_filter_repo_args()` existiert nicht; Tabelle, Zählung und Export reichen dieselbe Filterstruktur weiter | `portal/logs.php:28,47,50`, `lib/logs_export.php:73` |
+| B-25 | `ai/contracts/portal.md` A27 | `portal_format_timestamp()` liegt in `lib/layout_response.php` | `lib/layout_response.php:10`, `lib/portal_time.php:52` |
+| B-26 | `ai/contracts/deploy.md` A42, A48 | MAC-Zuweisungssperren in `lib/repo/vms_mac_assignments.php`; „five machine status strings“ = die fünf Legacy-Statuswerte | `lib/repo/vms_mac_assignments.php:23,61`, `lib/vm_network_mac_assignments.php:16`, `lib/constants.php:62-66` |
+| B-27 | `ai/reference/webapi.md` R3, `GROK.md:18` | Ausnahmen von `repo_transaction()`: Lesesnapshot des Rohprotokolls in `lib/`, `mecm_client_ack.php` fehlte; GROK verweist jetzt auf R3 (spart 356 Byte Budget) | `lib/repo/deploy_job_queries.php:208`, `tests/Static/DeployJobLogReadContractTest.php:76`, `mecm_client_ack.php:63` |
+| B-28 | `ai/reference/webapi.md:81` | Ereigniscode heißt `vm.rollout_hostname_changed` | `lib/audit_event_definitions.php:44` |
+| X-03 | `troubleshooting.md:75-76`, `asvs-wstg-matrix.md:47,101`, `PRE-SHIP-CHECKLIST.md:20` | „Vorhandene VM übernehmen“/Adoption ist zurückgebaut; eine vorhandene VM einer ungeklärten Einheit hat noch keine positive Auflösung; Create ersetzt nur eine extern gelöschte gebundene VM, eine umbenannte sperrt | ADR-0036 Nachtrag WM-E2a, `lib/deploy_blockers.php:86-100`, `lib/repo/deploy_create_identity.php:32-42`, `lib/deploy_create_constants.php:111`, `lang/de/help_deploy.php` `create_progress_p3` |
+| X-04-Rest | `tests/e2e/lib/pages.js`, `tests/e2e/lib/matrix-seed.js`, `docs/QUALITY-GATES.md:92` | `deploy_log.php` in `PORTAL_PAGES` mit geseedetem fehlgeschlagenem Export-Auftrag samt drei Protokollzeilen; `MATRIX_DEFERRED_PAGES` leer | `PortalPageInventoryContractTest` |
+
+### Verworfen
+
+| ID | Grund |
+|---|---|
+| B-v1 `deploy-flows.md:17` inventory „Braucht Datacenter/Datastore: nein“ | stimmt für die Laufzeit: der Systempfad verzweigt vor jedem Standort-Gate (`lib/deploy_worker_mission.php:40`); `virtusphere_deploy_mode_needs_location()` antwortet nur formal |
+| B-v2 `DEPLOYMENT.md:30` vCenter „deploy no“ | Supportentscheidung der Matrix, kein Codeanspruch |
+
+### Laborgebunden (nicht geändert)
+
+Power-Cycle nach hartem Prozessabbruch (`deploy-flows.md:354`), Messwerte zu SIGQUIT,
+30,4 s und 0,4 s (`deploy-chain.md`, `DEPLOYMENT.md`), Ausgabeumfang von `ansible-doc`,
+VMware-Verhalten der Autostart-Hilfe (`autostart_limit_*`, `autostart_heartbeat_*`).
+
+### Agenteneinsatz
+
+Fünf Haiku-Agenten, Effort xhigh, nur lesend, je 8 bis 12 min, rund 1,48 Mio. Tokens.
+Von 46 umsetzbaren Befunden hielten 37 der Nachmessung stand, 2 waren falsch (B-v1,
+B-v2), 7 nur im Labor prüfbar. Übersehen hat die Inventur `DEPLOYMENT.md:27` (freie
+Lizenz), gefunden über den Hilfebefund B-12. Alle Formulierungen schrieb der Koordinator.
