@@ -24,6 +24,7 @@ BeforeAll {
     $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
     $script:ClientPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientPreflight.ps1') -Raw
     $script:LegacyRetirement = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-LegacyRetirement.ps1') -Raw
+    $script:SiteSurvey = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-SiteSurvey.ps1') -Raw
     $script:ClientBundles = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientBundles.ps1') -Raw
     $script:PackageWrapper = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage/install.ps1') -Raw
     $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
@@ -71,6 +72,12 @@ Describe 'Visible progress reporting contract' {
         $script:LegacyRetirement | Should -Match '\[\$index/\$total\] pass \$label'
         $script:LegacyRetirement | Should -Match '\[\$index/\$total\] fail \$label'
         $script:LegacyRetirement | Should -Match '\[\{0\}/\{1\}\] skip \{2\}'
+    }
+
+    It 'reports the site survey start and each section before and after it runs' {
+        $script:SiteSurvey | Should -Match "Format-VsSurveyProgress -Position 0 -Total \`$total -Phase 'RUN' -Unit 'site-survey'"
+        $script:SiteSurvey | Should -Match "Format-VsSurveyProgress -Position \`$Position -Total \`$Total -Phase 'RUN' -Unit \`$Name"
+        $script:SiteSurvey | Should -Match "Format-VsSurveyProgress -Position \`$Position -Total \`$Total -Phase \`$status -Unit \`$Name"
     }
 
     It 'reports each package step around the existing hash and child decision' {

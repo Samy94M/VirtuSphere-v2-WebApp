@@ -1104,6 +1104,42 @@ eingeschaltet. Retire deinstalliert nichts und ändert bereits ausgerollte VMs
 nicht. Laut Microsoft löscht MECM die Revisionen einer Anwendung, die 60 Tage
 retired ist; eine Rücknahme ist deshalb nur in diesem Zeitraum verlustfrei.
 
+### Standort-Erhebung (nur lesend, Grundlage für MC02 und MC03)
+
+`survey-VirtuSphere-MecmSite.ps1` liest einmal, wie die eigene Site tatsächlich
+aussieht: Feldformen des SMS-Providers, die Client-Anwendungen samt Deployment
+Types, ihre Deployments, Abhängigkeiten, Sicherheitsbereiche und die eigene
+RBAC-Sicht, Sammlungen mit Limiting-Kette und Wartungsfenstern,
+Content-Verteilung, Konsolenordner, Content-Orte mit lokaler Zuordnung und
+ähnlich benannte Altanwendungen. Das Skript ändert nichts in MECM, WMI, Registry
+oder an einer Freigabe; geschrieben wird nur das Tageslog (Komponente
+`site-survey`).
+
+Es läuft auf jeder Site, auch ohne VirtuSphere-Installation. Dann ist der
+Bericht die Ausgangslage: leere Listen und der Registryteil `absent`. Nötig ist
+ein Rechner mit MECM-Konsole und erreichbarem SMS-Provider, also der lokale
+Namespace `root\SMS` oder ein bereits vorhandenes CMSite-Laufwerk. Das Skript
+legt kein Laufwerk an.
+
+1. **Bereitstellen:** den Ordner `Powershell-MECM` aus einem `git archive` des
+   Commits, der das Skript enthält, nach `C:\Temp\VirtuSphere-<commit>\`
+   kopieren. Nichts installieren; ältere Offline-Bundles enthalten das Skript
+   nicht.
+2. **Ausführen** in einer PowerShell als Administrator aus diesem Ordner:
+   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\survey-VirtuSphere-MecmSite.ps1 | Out-File -Encoding utf8 C:\Temp\vs-site-survey.json`.
+   Die Konsole zählt die Abschnitte von `[1/11]` bis `[11/11]` hoch und nennt je
+   Abschnitt `ok`, `partial`, `failed` oder `absent`.
+3. **Prüfen:** Exit-Code 0 heißt, der Bericht ist vollständig geschrieben.
+   Einzelne Abschnitte können trotzdem `partial` oder `failed` sein; den Grund
+   nennt `error` im jeweiligen Abschnitt. Exit-Code 2 heißt, es war kein
+   Site-Code ermittelbar und nichts wurde abgefragt. Exit-Code 1 ist ein
+   unerwarteter Fehler; die Ursache steht in der Konsole und im Tageslog.
+4. **Mitnehmen:** Die JSON-Datei enthält Namen von Sammlungen, Anwendungen und
+   Administratoren, SIDs und UNC-Pfade, aber keine Kennwörter: Felder, deren
+   Name `password`, `secret` oder `credential` enthält, stehen als `[redacted]`
+   im Bericht. Vor der Weitergabe ansehen und wie eine interne Konfiguration
+   behandeln.
+
 ## Edge Cases der Server-Skripte (Referenz)
 
 Den regulären Ablauf jeder Aufgabe zeigt [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md); die Tabellen hier listen die Sonderfälle.

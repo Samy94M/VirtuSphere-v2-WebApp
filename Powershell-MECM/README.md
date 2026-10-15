@@ -35,6 +35,14 @@ journalisiert und zurückgelesen. Es löscht nichts. Ablauf und Voraussetzungen
 stehen in `docs/operations/mecm-integration.md` im Abschnitt zu den
 Altanwendungen unter „Client-Anwendungen“.
 
+`survey-VirtuSphere-MecmSite.ps1` ist eine rein lesende Standort-Erhebung für
+MC02 und MC03 (Modul `mecm\VirtuSphere-SiteSurvey.ps1`). Es läuft auf jeder
+MECM-Site, auch ohne VirtuSphere-Registry, und gibt einen JSON-Bericht auf
+stdout aus. Es wird nicht installiert und von keiner Aufgabe aufgerufen; der
+Server-Installer kopiert das Modul nur wie alle Dateien unter `mecm\` mit.
+Aufruf und Auswertung stehen in `docs/operations/mecm-integration.md` im
+Abschnitt „Standort-Erhebung“.
+
 JSON wird explizit als UTF-8-`byte[]` gesendet. Die beiden ausgelieferten
 Server-/Client-Helper geben das Array als ein einziges Funktionsobjekt zurück,
 damit PowerShell es nicht zu `object[]` entpackt und die HTTP-Bindung den
