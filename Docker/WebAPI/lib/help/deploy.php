@@ -94,7 +94,7 @@ require_once __DIR__ . '/../deploy_late_start.php';
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1b')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p1c')); ?></p>
-            <p><?php echo h(__t('help_deploy.deploy_cancel_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_cancel_p2', ['minutes' => intdiv(VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, 60)])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_cancel_p3')); ?></p>
         </section>
 
