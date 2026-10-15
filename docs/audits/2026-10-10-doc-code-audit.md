@@ -230,6 +230,28 @@ Power-Cycle nach hartem Prozessabbruch (`deploy-flows.md:354`), Messwerte zu SIG
 30,4 s und 0,4 s (`deploy-chain.md`, `DEPLOYMENT.md`), Ausgabeumfang von `ansible-doc`,
 VMware-Verhalten der Autostart-Hilfe (`autostart_limit_*`, `autostart_heartbeat_*`).
 
+### Gates
+
+Erster Lauf (`5fdbe8a` auf `16cde1d`, `qa-artifacts/audit-2026-10-15/`): php-lint und qa-stack
+grün, zwei rot:
+
+- `phpunit-unit`: `DeployFlowsDocContractTest` verlangte den Satz „Modusliteral `create`“,
+  also genau die falsche Aussage aus B-06. Der Wächter prüft jetzt, dass der Worker
+  `ansible_mode_creates_vms(` nutzt und die Doku diese Funktion nennt
+  (`tests/Static/DeployFlowsDocContractTest.php:74-79`).
+- `e2e-portal`: 312 grün, 1 rot in `deploy-create-progress.spec.js:207`, nicht durch dieses
+  Audit: Seit `16cde1d` zitiert ein `module_failed`-Befund die Hostmeldung als
+  `<code class="log-line">` neben einem `span.muted`, der Selektor `li code` traf zwei
+  Elemente. Der Spec wählt Code und Befundsatz jetzt gezielt und prüft, dass nur
+  `module_failed` die Hostmeldung trägt (`lib/deploy_create_progress.php:313-324`,
+  `lib/deploy_create_progress_findings.php:59-66`).
+
+Wiederholung nach Rebase auf `c017875` (`qa-artifacts/audit-2026-10-15-rerun/`): lang-parity,
+doc-hygiene, doc-semantics, js-syntax, php-lint, phpunit-unit (ohne Skips), qa-stack grün;
+`e2e-portal` funktional grün (`.last-run.json` `passed`, darin Health-Matrix und Axe mit
+`deploy_log.php`), Bildteil `infrastructure_error` wegen abweichender Schrift-Prüfsummen des
+Runners, unverändert seit K13 (UX02-Abnahme offen).
+
 ### Agenteneinsatz
 
 Fünf Haiku-Agenten, Effort xhigh, nur lesend, je 8 bis 12 min, rund 1,48 Mio. Tokens.
