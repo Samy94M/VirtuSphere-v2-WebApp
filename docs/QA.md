@@ -972,6 +972,7 @@ These checks guard SSoT mirrors, doc hygiene and the file-size budget. All but `
 ```powershell
 sh scripts/check-enum-sync.sh          # PHP-Const-SSoT vs. ENUM in struktur.sql und migrate.php
 sh scripts/check-php-version-sync.sh   # Dockerfile-FROM (SSoT) vs. composer.json, constants.php, Docs
+sh scripts/check-version-sync.sh       # Release-Nummer Docker/WebAPI/lib/VERSION (SSoT) == Powershell-MECM/VERSION, Form JJJJ.MM.N
 sh scripts/check-doc-hygiene.sh        # Changelog-Marker-Verbot + Zeilen-Budgets fuer AGENTS/GROK/CLAUDE/README
 sh scripts/check-doc-semantics.sh      # Betriebsdoku behauptet keine veraltbaren Staende (Zahlen, Level, Pfade)
 php scripts/check-bounds-sync.php      # keine Konstante als ausgeschriebene Zahl in Portal-Texten

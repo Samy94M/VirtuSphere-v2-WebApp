@@ -8,6 +8,7 @@ require_once __DIR__ . '/repo/api_access.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/backup_encryption.php';
+require_once __DIR__ . '/version_overview.php';
 
 /** @return array<string,mixed> */
 function settings_build_view_model(mysqli $connection): array
@@ -92,12 +93,15 @@ function settings_build_view_model(mysqli $connection): array
     $httpsListenerLive = https_listener_live();
     $httpsPort = envboot_optional('WEB_HTTPS_PORT', '8443');
 
+    $versionOverview = version_overview($connection);
+
     $settingsTabs = [
         'deploy' => __t('settings.tab_deploy'),
         'machine-api' => __t('settings.tab_machine_api'),
         'catalog' => __t('settings.tab_catalog'),
         'https' => __t('settings.tab_https'),
         'system' => __t('settings.tab_system'),
+        'version' => __t('settings.tab_version'),
     ];
 
     return compact(
@@ -139,6 +143,7 @@ function settings_build_view_model(mysqli $connection): array
         'httpsMeta',
         'httpsListenerLive',
         'httpsPort',
+        'versionOverview',
         'settingsTabs'
     );
 }

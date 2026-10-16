@@ -38,5 +38,6 @@ layout_header(__t('settings.title'), $user, 'settings', 'settings');
     <?php require __DIR__ . '/../lib/settings/catalog_panel.php'; ?>
     <?php require __DIR__ . '/../lib/settings/https_panel.php'; ?>
     <?php require __DIR__ . '/../lib/settings/system_panel.php'; ?>
+    <?php require __DIR__ . '/../lib/settings/version_panel.php'; ?>
 </div>
 <?php layout_footer(); ?>

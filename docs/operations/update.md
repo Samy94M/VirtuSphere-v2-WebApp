@@ -22,7 +22,7 @@ Runbook setzt genau diesen Vertrag in Befehle um.
 | MECM-Server | der Windows-Server mit den vier VirtuSphere-Aufgaben in der Aufgabenplanung |
 | Projektordner | das Verzeichnis mit `docker-compose.yml` auf dem Docker-Host. In den Befehlen steht dafür `/opt/VirtuSphere-v2-WebApp`; auf einem anderen Host den eigenen Pfad einsetzen |
 | Betriebskonto | das Linux-Konto, unter dem du Docker-Befehle ausführst und dem der Projektordner gehört (nicht `root`) |
-| Release | ein bestimmter Git-Commit; er steht in `provenance.json` des Offline-Bundles oder in `git log -1` |
+| Release | ein ausgelieferter Stand mit Release-Nummer `JJJJ.MM.N` aus genau einem Git-Commit. Die Nummer steht in `Docker/WebAPI/lib/VERSION`, im Portal unter Einstellungen > Version und im Offline-Bundle in `provenance.json`; den Commit nennt `git log -1` oder `provenance.json` |
 | Offline-Bundle | das Paket aus `scripts/build-offline-bundle.sh` mit fertigen Images, Quellarchiv, Prüfsummen und `verify.sh` |
 | Wartungsfenster | die Zeit, in der Portal und Worker gestoppt sind; Aufträge laufen in dieser Zeit nicht |
 
@@ -396,8 +396,11 @@ Bindet der Webserver an eine LAN-Adresse, antwortet `localhost` nicht
    nennen oft eine einmalige Aufgabe des Release (Schritt 5).
 3. Einen lesenden Integrationsweg auslösen: ESXi „Inventarabruf starten“ je
    Zugang, beim Ansible-Zugang „Verbindung und Umgebung prüfen“.
-4. Erst danach unter **Systemstatus > Bereitstellungsdienst** „Fortsetzen“.
-5. Ein Backup mit dem neuen Skript: `sudo sh scripts/backup.sh`.
+4. **Einstellungen > Version** ansehen: Das Portal nennt die Nummer des neuen
+   Release, die Datenbank „passt“. Die MECM-Zeilen passen erst nach Schritt 4, die
+   Ansible-Zeile nach dem Test aus Punkt 3.
+5. Erst danach unter **Systemstatus > Bereitstellungsdienst** „Fortsetzen“.
+6. Ein Backup mit dem neuen Skript: `sudo sh scripts/backup.sh`.
 
 ## Schritt 4: Integrationen nachziehen
 
@@ -488,7 +491,7 @@ nach dem [Backup-Runbook](backup.md) **dieses alten Stands** ausführen (Abschni
 
 ## Nach dem Update festhalten
 
-Für die nächste Person, die dieses System betreut: Ziel-Commit, Zeitstempel des
+Für die nächste Person, die dieses System betreut: Release-Nummer und Ziel-Commit, Zeitstempel des
 Backups aus Schritt 3.2, Liste der gesicherten Images aus Schritt 3.3, neue
 `.env`-Schlüssel, erledigte und offene einmalige Aufgaben sowie den Stand des
 MECM-Teils. Die vollständige Liste der Angaben steht in

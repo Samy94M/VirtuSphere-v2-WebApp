@@ -10,7 +10,8 @@ liegen.
 
 Vor einem Wartungsfenster werden gemeinsam festgehalten:
 
-1. Git-Commit und SHA-256 des verifizierten `source.tar.gz`;
+1. Release-Nummer (`Docker/WebAPI/lib/VERSION`, Einstellungen > Version),
+   Git-Commit und SHA-256 des verifizierten `source.tar.gz`;
 2. angewandte und ausstehende Einträge aus `deploy_migrations` beziehungsweise
    `migrate.php --check`;
 3. aufgelöste Compose-Dateien einschließlich Host-Override, Image-IDs und die

@@ -332,6 +332,29 @@ $cases = @(
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-php-version-sync.sh') @('--ci') $fx) @(1) '\[php-version-sync\.no-ssot\]'
     } }
 
+    # Release-Nummer: die Werte stehen explizit in den Fixtures (keine Mutation
+    # einer echten Nummer), damit der Fall bei jedem Release gleich bleibt.
+    @{ Name = 'version-sync.green'; Body = {
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci')) @(0)
+    } }
+    @{ Name = 'version-sync.drift'; Body = {
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/VERSION' "2026.10.1`n"
+        Add-FixtureFile $fx 'Powershell-MECM/VERSION' "2026.10.2`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci') $fx) @(1) '\[version-sync\.drift\]'
+    } }
+    @{ Name = 'version-sync.format'; Body = {
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/VERSION' "2026.1.1`n"
+        Add-FixtureFile $fx 'Powershell-MECM/VERSION' "2026.1.1`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci') $fx) @(1) '\[version-sync\.format\]'
+    } }
+    @{ Name = 'version-sync.zero-match'; Body = {
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Powershell-MECM/VERSION' "2026.10.1`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci') $fx) @(1) '\[version-sync\.no-ssot\]'
+    } }
+
     @{ Name = 'doc-hygiene.green'; Body = {
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci')) @(0)
     } }

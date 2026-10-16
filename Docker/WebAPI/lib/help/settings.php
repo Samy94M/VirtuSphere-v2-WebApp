@@ -104,4 +104,12 @@ require_once __DIR__ . '/../ansible_test_config.php';
             ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_backup_p4')); ?></p>
         </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('settings.tab_version')); ?></h2>
+            <h3><?php echo h(__t('help_settings.settings_version_heading')); ?></h3>
+            <p><?php echo h(__t('help_settings.settings_version_p1')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_version_p2')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_version_p3')); ?></p>
+        </section>
     </div>

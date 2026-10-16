@@ -418,17 +418,33 @@ $script:VsReportDetailMaxBytes = 2048
 # zuordnen).
 $script:VsServerManifestName = 'manifest.json'
 $script:VsServerBuildFileName = 'BUILD.json'
+# Release-Nummer JJJJ.MM.N aus Powershell-MECM/VERSION. N hoechstens 99: dann
+# bleibt jede Kennung mit Release innerhalb der 32 Wire-Zeichen.
+$script:VsServerReleaseFileName = 'VERSION'
+$script:VsReleasePattern = '^[0-9]{4}\.(0[1-9]|1[0-2])\.[1-9][0-9]?$'
 
 function Get-VsServerBuildInfo {
     param([Parameter(Mandatory)][string]$PackageRoot)
-    $result = [pscustomobject]@{ Commit = ''; Date = '' }
+    $result = [pscustomobject]@{ Commit = ''; Date = ''; Release = '' }
     $path = Join-Path $PackageRoot $script:VsServerBuildFileName
     try {
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $result }
-        $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if ([string]$raw.commit -cmatch '^[0-9a-f]{40}$') {
-            $result.Commit = [string]$raw.commit
-            if ([string]$raw.date -match '^\d{4}-\d{2}-\d{2}$') { $result.Date = [string]$raw.date }
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ([string]$raw.commit -cmatch '^[0-9a-f]{40}$') {
+                $result.Commit = [string]$raw.commit
+                if ([string]$raw.date -match '^\d{4}-\d{2}-\d{2}$') { $result.Date = [string]$raw.date }
+            }
+        }
+    } catch {
+        Write-Debug $_
+    }
+    # VERSION wird unabhaengig von BUILD.json gelesen: ein Git-Checkout hat die
+    # Datei, aber keinen eingesetzten Commit. Nur ein gueltiger Inhalt zaehlt.
+    try {
+        $releasePath = Join-Path $PackageRoot $script:VsServerReleaseFileName
+        if (Test-Path -LiteralPath $releasePath -PathType Leaf) {
+            $release = ([string](Get-Content -LiteralPath $releasePath -Raw -ErrorAction Stop)).Trim()
+            if ($release -cmatch $script:VsReleasePattern) { $result.Release = $release }
         }
     } catch {
         Write-Debug $_
@@ -454,6 +470,7 @@ function New-VsServerManifest {
         schema_version = 1
         commit = [string]$Build.Commit
         commit_date = [string]$Build.Date
+        release = $(if ($Build.PSObject.Properties['Release']) { [string]$Build.Release } else { '' })
         installed_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         mode = $Mode
         files = $entries.ToArray()
@@ -467,7 +484,7 @@ function New-VsServerManifest {
 # Verzeichnis (Journal, Altdateien) sind kein Befund; sie werden nicht geladen.
 function Get-VsServerFileSetState {
     param([Parameter(Mandatory)][string]$InstallDir)
-    $state = [pscustomobject]@{ ManifestPresent = $false; Commit = ''; Date = ''; Checked = 0; Deviations = @() }
+    $state = [pscustomobject]@{ ManifestPresent = $false; Commit = ''; Date = ''; Release = ''; Checked = 0; Deviations = @() }
     $path = Join-Path $InstallDir $script:VsServerManifestName
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $state }
     $state.ManifestPresent = $true
@@ -477,6 +494,11 @@ function Get-VsServerFileSetState {
         if ([string]$manifest.commit -cmatch '^[0-9a-f]{40}$') {
             $state.Commit = [string]$manifest.commit
             $state.Date = [string]$manifest.commit_date
+        }
+        # Eine fehlende oder ungueltige release ist keine Abweichung: aeltere
+        # Manifeste haben kein Feld dafuer.
+        if (($manifest.release -is [string]) -and ($manifest.release -cmatch $script:VsReleasePattern)) {
+            $state.Release = [string]$manifest.release
         }
         $entries = @($manifest.files)
         if ([int]$manifest.schema_version -ne 1 -or $entries.Count -eq 0) { [void]$deviations.Add($script:VsServerManifestName) }
@@ -498,14 +520,20 @@ function Get-VsServerFileSetState {
     return $state
 }
 
-# Rein: Grundkennung plus Build. "+1234567" = Commit, "+unbekannt" = installiert
-# aus einem Git-Checkout, "+ohne-manifest" = nicht ueber den Installer
-# installiert, Nachsatz "-abw" = mindestens eine Datei weicht vom Manifest ab.
+# Rein: Grundkennung plus Build. "+2026.10.1" = Release aus VERSION (bevorzugt,
+# Entscheidung 16.10.2026; dann wird kein Commit angehaengt). Ohne gueltige
+# Release: "+1234567" = Commit, "+unbekannt" = installiert aus einem
+# Git-Checkout, "+ohne-manifest" = nicht ueber den Installer installiert.
+# Nachsatz "-abw" = mindestens eine Datei weicht vom Manifest ab.
 function Format-VsReportedScriptVersion {
     param([Parameter(Mandatory)][string]$BaseVersion, [Parameter(Mandatory)]$State)
     $suffix = 'unbekannt'
+    $release = ''
+    if ($null -ne $State.PSObject.Properties['Release']) { $release = [string]$State.Release }
     if (-not $State.ManifestPresent) {
         $suffix = 'ohne-manifest'
+    } elseif ($release -cmatch $script:VsReleasePattern) {
+        $suffix = $release
     } elseif ([string]$State.Commit -cmatch '^[0-9a-f]{40}$') {
         $suffix = ([string]$State.Commit).Substring(0, 7)
     }

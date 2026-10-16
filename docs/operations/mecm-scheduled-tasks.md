@@ -24,7 +24,7 @@ flowchart TD
   T --> C{"Registry-Konfiguration vorhanden?"}
   C -->|nein| CW["Fehler ins Log, Registry jede Minute neu lesen"] --> C
   C -->|ja| I["Tageslog öffnen, TLS 1.2 und Zertifikats-Pin setzen, Intervall aus der Registry lesen und auf die erlaubte Spanne begrenzen"]
-  I --> B["Einmal beim Start: eigene Dateien mit manifest.json des Installers vergleichen, eine Logzeile schreiben und Build an die Kennung hängen (+Commit, -abw bei Abweichung, +ohne-manifest ohne Installer)"]
+  I --> B["Einmal beim Start: eigene Dateien mit manifest.json des Installers vergleichen, eine Logzeile schreiben und Stand an die Kennung hängen (+Release-Nummer, -abw bei Abweichung, +ohne-manifest ohne Installer)"]
   B --> S["Neuer Lauf: Lauf-ID, „started“ melden (Site Health meldet nur „completed“)"]
   S --> A["Eigentliche Arbeit (Abschnitte unten)"]
   A --> F{"Fehler im Lauf?"}

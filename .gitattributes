@@ -9,3 +9,4 @@ Ansible/host-cleanup/* text eol=lf
 # git archive (Updatepaket, Offline-Bundle) schreibt Commit und Commitdatum in
 # die Build-Kennung des MECM-Serverpakets; ein Checkout behaelt die Platzhalter.
 Powershell-MECM/BUILD.json export-subst
+Docker/WebAPI/lib/BUILD.json export-subst

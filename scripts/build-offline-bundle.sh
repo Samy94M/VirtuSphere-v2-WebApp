@@ -12,7 +12,7 @@
 #   reports/        CVE-Bericht je Image; offene Critical/High brechen den
 #                   Build (.trivyignore.yaml ist der befristete Ausnahme-Vertrag)
 #   source.tar.gz   git archive HEAD
-#   provenance.json Commit, Dirty-Flag, Zeit, Toolversionen (keine Secrets)
+#   provenance.json Commit, Release-Nummer, Dirty-Flag, Zeit, Toolversionen (keine Secrets)
 #   INSTALL.md      Offline-Installationsschritte
 #   verify.sh       prueft SHA256SUMS vollstaendig offline
 #   SHA256SUMS      Manifest ueber jede Datei des Bundles
@@ -81,6 +81,24 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
         exit 1
     fi
     echo "offline-bundle: WARNUNG: Worktree ist nicht sauber; Provenance traegt dirty=true (Release verlangt Clean Checkout; --release macht daraus einen Abbruch)."
+fi
+
+# Release-Nummer aus der SSoT (Docker/WebAPI/lib/VERSION): genau eine nichtleere
+# Zeile ohne CR (Windows-Checkout), Form JJJJ.MM.N. Mit --release ein Abbruch wie
+# bei dirty, ohne --release eine Warnung und ein leerer Wert in provenance.json.
+VERSION_FILE="$ROOT/Docker/WebAPI/lib/VERSION"
+RELEASE_RE='^[0-9]{4}\.(0[1-9]|1[0-2])\.[1-9][0-9]?$'
+VERSION_VALUE=''
+if [ -f "$VERSION_FILE" ] && [ "$(tr -d '\r' < "$VERSION_FILE" | grep -c . || true)" -eq 1 ]; then
+    VERSION_VALUE=$(tr -d '\r' < "$VERSION_FILE" | grep . | head -n 1)
+fi
+if ! printf '%s\n' "$VERSION_VALUE" | grep -Eq "$RELEASE_RE"; then
+    if [ "$RELEASE" = true ]; then
+        echo "offline-bundle: [bundle.version] ABBRUCH: Release-Nummer in Docker/WebAPI/lib/VERSION fehlt oder ist nicht JJJJ.MM.N (Monat 01-12, N 1-99)." >&2
+        exit 1
+    fi
+    echo "offline-bundle: WARNUNG: Release-Nummer in Docker/WebAPI/lib/VERSION fehlt oder ist nicht JJJJ.MM.N; Provenance traegt version leer."
+    VERSION_VALUE=''
 fi
 
 OUT=${1:-"$ROOT/dist/virtusphere-offline-$COMMIT_SHORT"}
@@ -327,6 +345,7 @@ cat > "$STAGE/provenance.json" <<EOF
     "schema": 1,
     "bundle": "virtusphere-offline",
     "commit": "$COMMIT",
+    "version": "$VERSION_VALUE",
     "dirty": $DIRTY,
     "release": $RELEASE,
     "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",

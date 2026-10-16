@@ -489,38 +489,6 @@ const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE = 'deploy-service';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY = 'directory-status';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_REASSIGN = 'reassign';
 
-// The same idea one page over: settings.php spreads its forms over tabs, and a
-// link that names the page without its panel lands on the first tab, which is
-// not the one holding the field the message just named. Nothing errors, so the
-// operator reads the message as wrong rather than the link. These are the ids
-// settings.php actually renders; settings_url() (lib/settings_page.php) is the
-// only place allowed to turn one into a URL, and
-// tests/Static/SettingsDeepLinkContractTest.php pins both directions.
-const VIRTUSPHERE_SETTINGS_TAB_DEPLOY = 'deploy';
-const VIRTUSPHERE_SETTINGS_TAB_MACHINE_API = 'machine-api';
-const VIRTUSPHERE_SETTINGS_TAB_CATALOG = 'catalog';
-const VIRTUSPHERE_SETTINGS_TAB_HTTPS = 'https';
-const VIRTUSPHERE_SETTINGS_TAB_SYSTEM = 'system';
-
-const VIRTUSPHERE_SETTINGS_TABS = [
-    VIRTUSPHERE_SETTINGS_TAB_DEPLOY,
-    VIRTUSPHERE_SETTINGS_TAB_MACHINE_API,
-    VIRTUSPHERE_SETTINGS_TAB_CATALOG,
-    VIRTUSPHERE_SETTINGS_TAB_HTTPS,
-    VIRTUSPHERE_SETTINGS_TAB_SYSTEM,
-];
-
-// Sections inside a tab that a link may target directly. core.js opens the
-// owning tab and scrolls to them, so they are valid anchors even though they
-// are not tabpanels; the dashboard's backup banner uses one.
-const VIRTUSPHERE_SETTINGS_SECTIONS = [
-    'time',
-    'session',
-    'password-policy',
-    'retention',
-    'backup',
-];
-
 const VIRTUSPHERE_INTEGRATION_SOURCES = [
     VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC,
     VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC,

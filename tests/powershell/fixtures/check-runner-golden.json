@@ -3,14 +3,14 @@
   "lanes": {
     "Fast": [
       "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
-      "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
+      "lang-parity", "enum-sync", "php-version-sync", "version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
       "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
       "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-create-async", "ansible-output-buffering", "ansible-vars-files-lifetime", "host-secret-cleanup", "yaml-roundtrip",
       "shellcheck", "hadolint", "python-client-tests"
     ],
     "Integration": [
       "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
-      "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
+      "lang-parity", "enum-sync", "php-version-sync", "version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
       "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
       "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-create-async", "ansible-output-buffering", "ansible-vars-files-lifetime", "host-secret-cleanup", "yaml-roundtrip",
       "shellcheck", "hadolint", "python-client-tests", "qa-stack", "migrate-check", "phpunit-full", "schema-convergence",
@@ -18,7 +18,7 @@
     ],
     "Release": [
       "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
-      "lang-parity", "enum-sync", "php-version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
+      "lang-parity", "enum-sync", "php-version-sync", "version-sync", "bounds-sync", "file-size", "audit-contract", "doc-hygiene",
       "doc-semantics", "csp-patterns", "js-syntax", "powershell-syntax", "powershell-tests", "yaml-lint", "actionlint",
       "ansible-syntax", "ansible-lint", "ansible-module-contract", "ansible-powercycle-selection", "ansible-create-async", "ansible-output-buffering", "ansible-vars-files-lifetime", "host-secret-cleanup", "yaml-roundtrip",
       "shellcheck", "hadolint", "python-client-tests", "qa-stack", "migrate-check", "phpunit-full", "schema-convergence",

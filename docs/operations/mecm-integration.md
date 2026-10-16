@@ -284,26 +284,36 @@ an; der Übergangsmodus endet also mit dem Cutover von selbst.
 Jedes per `git archive` gebaute Paket (Updatepaket, Offline-Bundle) trägt in
 `Powershell-MECM\BUILD.json` Commit und Commitdatum; Git setzt sie beim Packen
 ein (`.gitattributes`, `export-subst`). Ein Git-Checkout behält die Platzhalter,
-der Build heißt dann „unbekannt“.
+der Build heißt dann „unbekannt“. Daneben liegt `Powershell-MECM\VERSION` mit der
+Release-Nummer (`JJJJ.MM.N`, dieselbe wie im Portal); sie steht in jedem Paket und
+auch im Checkout. Updatepakete werden wie das Prod-Bundle nur aus einem
+Release-Commit gebaut: Die Kennung trägt keinen Commit, ein Paket von einem
+Zwischenstand sähe also aus wie das Release.
 
 Der Installer schreibt beim Aktivieren
-`%ProgramFiles%\VirtuSphere\mecm\manifest.json` mit Commit, Commitdatum,
-Installationszeit, Modus (`install`, `upgrade`, `server-only`) und SHA-256
-jeder Serverdatei. Das Manifest wird als letzte Datei aktiviert und beim
+`%ProgramFiles%\VirtuSphere\mecm\manifest.json` mit Release-Nummer, Commit,
+Commitdatum, Installationszeit, Modus (`install`, `upgrade`, `server-only`) und
+SHA-256 jeder Serverdatei. Das Manifest wird als letzte Datei aktiviert und beim
 Rollback mit zurückgenommen. Denselben Build schreibt er nach
 `HKLM:\SOFTWARE\VirtuSphere\MECM` (`InstalledBuild`, `InstalledBuildDate`) und
 in die Beschreibung der vier Aufgaben.
 
 Jede Aufgabe vergleicht beim Start ihre Dateien mit dem Manifest, schreibt eine
 Zeile ins Tageslog und hängt das Ergebnis an ihre Kennung im Laufbericht. Die
-Systemstatusseite zeigt sie unter „Skript“:
+Systemstatusseite zeigt sie unter „Skript“, der Einstellungen-Tab „Version“
+vergleicht die Release-Nummer mit der des Portals:
 
 | Kennung | Bedeutung |
 |---|---|
-| `device-sync/2.1+53ba24a` | installiert aus Commit `53ba24a`, alle Dateien wie installiert |
-| `…+53ba24a-abw` | mindestens eine Datei weicht vom Manifest ab, etwa nach einer Handkopie; das Tageslog nennt sie. Den vollständigen Satz mit dem Installer neu installieren |
-| `…+unbekannt` | mit dem Installer installiert, aber aus einem Git-Checkout statt aus einem Paket |
+| `device-sync/2.1+2026.10.1` | installiert aus Release `2026.10.1`, alle Dateien wie installiert |
+| `…+2026.10.1-abw` | mindestens eine Datei weicht vom Manifest ab, etwa nach einer Handkopie; das Tageslog nennt sie. Den vollständigen Satz mit dem Installer neu installieren |
+| `device-sync/2.1+53ba24a` | Altstand: installiert aus Commit `53ba24a`, bevor das Paket eine Release-Nummer trug |
+| `…+unbekannt` | Altstand aus einem Git-Checkout ohne Release-Nummer |
 | `…+ohne-manifest` | nicht über diesen Installer installiert (Altstand oder Handkopie) |
+
+Der Commit steht seit der Release-Nummer nicht mehr in der Kennung: Das Feld ist
+auf 32 Zeichen begrenzt, und Nummer, Commit und `-abw` zusammen passen nicht
+hinein. Er bleibt im Manifest und in der Registry.
 
 Den installierten Stand direkt auf dem MECM-Server lesen:
 

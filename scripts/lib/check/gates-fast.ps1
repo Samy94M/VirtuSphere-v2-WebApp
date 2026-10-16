@@ -90,6 +90,12 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'PHP-Version ueberall synchron' 'PHP-Version-Drift'
     }
 
+    Add-Gate -Name 'version-sync' -Lanes $allLanes -Kind 'native' -Body {
+        $r = Invoke-CheckShell 'check-version-sync.sh' @('--ci')
+        if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }
+        Format-ToolResult $r 'Release-Nummer ueberall synchron' 'Release-Nummer-Drift'
+    }
+
     Add-Gate -Name 'bounds-sync' -Lanes $allLanes -Kind 'native' -Body {
         $r = Invoke-CheckPhp 'check-bounds-sync.php' @('--ci')
         if ($null -eq $r) { return New-InfraResult 'weder Host-PHP noch Projekt-Image verfuegbar' }

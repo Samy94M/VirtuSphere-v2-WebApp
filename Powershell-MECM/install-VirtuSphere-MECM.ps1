@@ -671,11 +671,17 @@ $finalExitCode = 0
 # meldet den Build aber ehrlich als unbekannt statt einen zu raten.
 $buildInfo = Get-VsServerBuildInfo -PackageRoot $PSScriptRoot
 $buildLabel = if ($buildInfo.Commit) { [string]$buildInfo.Commit } else { 'unbekannt' }
+$releaseLabel = if ($buildInfo.Release) { [string]$buildInfo.Release } else { 'unbekannt' }
 $installMode = if ($ServerOnly) { 'server-only' } elseif ($Upgrade) { 'upgrade' } else { 'install' }
 if ($buildInfo.Commit) {
     Write-Ok ("Build {0} vom {1}" -f $buildInfo.Commit, $buildInfo.Date)
 } else {
     Write-Hint 'Build unbekannt: BUILD.json traegt keinen Commit (Quelle ist kein git-archive-Paket). Manifest und Aufgaben nennen den Build als "unbekannt".'
+}
+if ($buildInfo.Release) {
+    Write-Ok ("Release {0}" -f $buildInfo.Release)
+} else {
+    Write-Hint 'Release unbekannt: VERSION fehlt oder ist ungueltig. Die Aufgaben melden dann den Build statt einer Release-Nummer.'
 }
 
 # -ServerOnly friert die Live-Vorlage ein. Der Autoimporter dieses Pakets
@@ -1123,7 +1129,7 @@ if (-not $installedFileSet.ManifestPresent -or @($installedFileSet.Deviations).C
     throw ('Installationsmanifest passt nicht zum aktivierten Dateisatz ({0}). Aufgaben bleiben deaktiviert.' -f (@($installedFileSet.Deviations) -join ', '))
 }
 Write-Ok "Skripte samt Loggingmodul nach $installDir kopiert und verifiziert"
-Write-Ok ("Installationsmanifest geschrieben: Build {0}, {1} Dateien" -f $buildLabel, $installedFileSet.Checked)
+Write-Ok ("Installationsmanifest geschrieben: Release {0}, Build {1}, {2} Dateien" -f $releaseLabel, $buildLabel, $installedFileSet.Checked)
 if ($ServerOnly) {
     Write-Ok "Package-Vorlage $templateDest unveraendert gelassen (-ServerOnly)"
 } else {

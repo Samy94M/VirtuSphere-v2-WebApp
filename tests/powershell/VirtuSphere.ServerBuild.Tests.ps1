@@ -21,7 +21,7 @@ BeforeAll {
         foreach ($name in @('VirtuSphere-Common.ps1', 'VirtuSphere-Logging.ps1', 'mecm_site-health.ps1')) {
             [IO.File]::WriteAllText((Join-Path $Root $name), ('# ' + $name), (New-Object Text.UTF8Encoding($false)))
         }
-        $build = [pscustomobject]@{ Commit = '53ba24ae0123456789abcdef0123456789abcdef'; Date = '2026-10-15' }
+        $build = [pscustomobject]@{ Commit = '53ba24ae0123456789abcdef0123456789abcdef'; Date = '2026-10-15'; Release = '2026.10.1' }
         [void](New-VsServerManifest -Directory $Root -FileNames @('VirtuSphere-Common.ps1', 'VirtuSphere-Logging.ps1', 'mecm_site-health.ps1') -Build $build -Mode 'server-only')
     }
 }
@@ -51,6 +51,55 @@ Describe 'Build-Kennung des Pakets (BUILD.json)' {
     }
 }
 
+Describe 'Release-Nummer des Pakets (VERSION)' {
+    BeforeAll {
+        # Format JJJJ.MM.N, N hoechstens 99 (Entscheidung 16.10.2026).
+        $script:ReleaseFormat = '^[0-9]{4}\.(0[1-9]|1[0-2])\.[1-9][0-9]?$'
+    }
+
+    It 'liegt als eine Zeile im Paket vor und stimmt mit der Docker-Kopie ueberein' {
+        $repoVersion = Join-Path $script:PsRoot 'VERSION'
+        $dockerVersion = Join-Path $script:RepoRoot 'Docker/WebAPI/lib/VERSION'
+        Test-Path -LiteralPath $repoVersion -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $dockerVersion -PathType Leaf | Should -BeTrue
+        $release = (Get-Content -LiteralPath $repoVersion -Raw).Trim()
+        $release | Should -CMatch $script:ReleaseFormat
+        $release | Should -BeExactly (Get-Content -LiteralPath $dockerVersion -Raw).Trim()
+    }
+
+    It 'liest die Release aus VERSION mit LF und mit CRLF' {
+        $lf = Join-Path $TestDrive 'version-lf'
+        $crlf = Join-Path $TestDrive 'version-crlf'
+        New-Item -ItemType Directory -Path $lf, $crlf -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $lf 'VERSION'), "2026.10.1`n", (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText((Join-Path $crlf 'VERSION'), "2026.10.1`r`n", (New-Object Text.UTF8Encoding($false)))
+        (Get-VsServerBuildInfo -PackageRoot $lf).Release | Should -BeExactly '2026.10.1'
+        (Get-VsServerBuildInfo -PackageRoot $crlf).Release | Should -BeExactly '2026.10.1'
+    }
+
+    It 'verwirft ungueltigen Inhalt (<name>) und liefert dann keine Release' -ForEach @(
+        @{ name = 'Monat 13'; content = '2026.13.1' }
+        @{ name = 'Monat einstellig'; content = '2026.1.1' }
+        @{ name = 'N gleich 0'; content = '2026.10.0' }
+        @{ name = 'N dreistellig'; content = '2026.10.100' }
+        @{ name = 'leer'; content = '' }
+    ) {
+        $root = Join-Path $TestDrive ('bad-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'VERSION'), $content, (New-Object Text.UTF8Encoding($false)))
+        (Get-VsServerBuildInfo -PackageRoot $root).Release | Should -BeExactly ''
+    }
+
+    It 'behaelt den Commit eines Pakets ohne VERSION-Datei und meldet dann keine Release' {
+        $root = Join-Path $TestDrive 'build-only'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'BUILD.json') -Value '{"commit":"53ba24ae0123456789abcdef0123456789abcdef","date":"2026-10-15"}' -Encoding UTF8
+        $info = Get-VsServerBuildInfo -PackageRoot $root
+        $info.Commit | Should -BeExactly '53ba24ae0123456789abcdef0123456789abcdef'
+        $info.Release | Should -BeExactly ''
+    }
+}
+
 Describe 'Installationsmanifest' {
     It 'bestaetigt einen unveraenderten Satz und ignoriert Nicht-Manifest-Dateien' {
         $root = Join-Path $TestDrive 'clean'
@@ -59,10 +108,12 @@ Describe 'Installationsmanifest' {
         $state = Get-VsServerFileSetState -InstallDir $root
         $state.ManifestPresent | Should -BeTrue
         $state.Commit | Should -BeExactly '53ba24ae0123456789abcdef0123456789abcdef'
+        $state.Release | Should -BeExactly '2026.10.1'
         $state.Checked | Should -Be 3
         @($state.Deviations).Count | Should -Be 0
         $manifest = Get-Content -LiteralPath (Join-Path $root 'manifest.json') -Raw | ConvertFrom-Json
         $manifest.mode | Should -BeExactly 'server-only'
+        $manifest.release | Should -BeExactly '2026.10.1'
         @($manifest.files).Count | Should -Be 3
     }
 
@@ -87,6 +138,18 @@ Describe 'Installationsmanifest' {
         New-Item -ItemType Directory -Path $none -Force | Out-Null
         (Get-VsServerFileSetState -InstallDir $none).ManifestPresent | Should -BeFalse
     }
+
+    It 'wertet eine ungueltige release im Manifest weder als Abweichung noch als Release' {
+        $root = Join-Path $TestDrive 'bad-release'
+        New-InstalledSet -Root $root
+        $manifestPath = Join-Path $root 'manifest.json'
+        $doc = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $doc.release = '2026.1.1'
+        [IO.File]::WriteAllText($manifestPath, (($doc | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
+        $state = Get-VsServerFileSetState -InstallDir $root
+        $state.Release | Should -BeExactly ''
+        @($state.Deviations).Count | Should -Be 0
+    }
 }
 
 Describe 'Kennung im Laufbericht' {
@@ -95,6 +158,11 @@ Describe 'Kennung im Laufbericht' {
         @{ why = 'Abweichung markiert'; state = @{ ManifestPresent = $true; Commit = '53ba24ae0123456789abcdef0123456789abcdef'; Deviations = @('x.ps1') }; expect = 'device-sync/2.1+53ba24a-abw' }
         @{ why = 'Installation aus Git-Checkout'; state = @{ ManifestPresent = $true; Commit = ''; Deviations = @() }; expect = 'device-sync/2.1+unbekannt' }
         @{ why = 'ohne Installer kopiert'; state = @{ ManifestPresent = $false; Commit = ''; Deviations = @() }; expect = 'device-sync/2.1+ohne-manifest' }
+        @{ why = 'Release ohne Commit'; state = @{ ManifestPresent = $true; Commit = ''; Release = '2026.10.1'; Deviations = @() }; expect = 'device-sync/2.1+2026.10.1' }
+        @{ why = 'Release mit Abweichung'; state = @{ ManifestPresent = $true; Commit = ''; Release = '2026.10.1'; Deviations = @('x.ps1') }; expect = 'device-sync/2.1+2026.10.1-abw' }
+        @{ why = 'Release gewinnt ueber Commit'; state = @{ ManifestPresent = $true; Commit = '53ba24ae0123456789abcdef0123456789abcdef'; Release = '2026.10.1'; Deviations = @() }; expect = 'device-sync/2.1+2026.10.1' }
+        @{ why = 'ungueltige Release faellt auf Commit zurueck'; state = @{ ManifestPresent = $true; Commit = '53ba24ae0123456789abcdef0123456789abcdef'; Release = '2026.1.1'; Deviations = @() }; expect = 'device-sync/2.1+53ba24a' }
+        @{ why = 'Release ohne Manifest'; state = @{ ManifestPresent = $false; Commit = ''; Release = '2026.10.1'; Deviations = @() }; expect = 'device-sync/2.1+ohne-manifest' }
     ) {
         Format-VsReportedScriptVersion -BaseVersion 'device-sync/2.1' -State ([pscustomobject]$state) | Should -BeExactly $expect
     }
@@ -107,9 +175,11 @@ Describe 'Kennung im Laufbericht' {
             foreach ($case in @(
                 [pscustomobject]@{ ManifestPresent = $true; Commit = ('a' * 40); Deviations = @('x') },
                 [pscustomobject]@{ ManifestPresent = $true; Commit = ''; Deviations = @('x') },
-                [pscustomobject]@{ ManifestPresent = $false; Commit = ''; Deviations = @() }
+                [pscustomobject]@{ ManifestPresent = $false; Commit = ''; Deviations = @() },
+                [pscustomobject]@{ ManifestPresent = $true; Commit = ('a' * 40); Release = '2026.12.99'; Deviations = @('x') }
             )) {
-                $value = '{0}+{1}' -f $base, $(if (-not $case.ManifestPresent) { 'ohne-manifest' } elseif ($case.Commit) { 'aaaaaaa' } else { 'unbekannt' })
+                $release = if ($case.PSObject.Properties['Release']) { [string]$case.Release } else { '' }
+                $value = '{0}+{1}' -f $base, $(if (-not $case.ManifestPresent) { 'ohne-manifest' } elseif ($release -cmatch '^[0-9]{4}\.(0[1-9]|1[0-2])\.[1-9][0-9]?$') { $release } elseif ($case.Commit) { 'aaaaaaa' } else { 'unbekannt' })
                 if (@($case.Deviations).Count -gt 0) { $value += '-abw' }
                 $value.Length | Should -BeLessOrEqual 32 -Because $value
                 Format-VsReportedScriptVersion -BaseVersion $base -State $case | Should -BeExactly $value
