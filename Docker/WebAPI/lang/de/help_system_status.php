@@ -135,7 +135,7 @@ return [
     'esxi_cause_host_placeholder' => 'dem Host',
     'esxi_cause_fix_dns' => 'Hostnamen im Zugangsdatum prüfen, dazu DNS und Suchdomäne des Portal-Containers.',
     'esxi_cause_fix_unreachable' => 'Netzwerk, Firewall und Port prüfen. Der Abruf wird beim nächsten Intervall automatisch wiederholt; der alte Bestand bleibt erhalten.',
-    'esxi_cause_fix_certificate' => 'In den Zugangsdaten das CA-Bundle oder Serverzertifikat und den ESXi-Hostnamen prüfen, danach den strikten Verbindungstest erneut starten.',
+    'esxi_cause_fix_certificate' => 'In den Zugangsdaten das CA-Bundle oder Serverzertifikat und den ESXi-Hostnamen prüfen und den Zugang speichern; das startet den Test neu. Soll der Zugang ohne Prüfung laufen, dort „Ohne Zertifikatsprüfung“ wählen.',
     'esxi_cause_fix_tls' => 'TLS-Version, HTTPS-Port und Gegenstelle prüfen. Zertifikatsfehler erscheinen getrennt als certificate.',
     'esxi_cause_fix_auth' => 'Benutzername und Secret korrigieren. Der automatische Abruf pausiert bis zur Änderung, damit das ESXi-Konto nicht gesperrt wird.',
     'esxi_cause_fix_authz' => 'Die Rolle des ESXi-Kontos erweitern. Für das Inventar genügen Leserechte, für Bereitstellen und Autostart nicht.',

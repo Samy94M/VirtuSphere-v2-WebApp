@@ -178,6 +178,43 @@ test('Dashboard: the MECM tile shows two separate signal rows', async ({ page })
   await expect(tile.locator('.signal-row')).toHaveCount(2);
   await expect(tile).toContainText(/Integration/);
   await expect(tile).toContainText(/MECM-Site|MECM site/);
+
+  // At 900px the portal sidebar is still visible and the dashboard's fixed three
+  // columns leave each tile only about 192px wide, so the MECM badge is measured
+  // in that narrow layout as well as at the wider widths.
+  for (const width of [1280, 1024, 900]) {
+    await page.setViewportSize({ width, height: 900 });
+    const measurements = await tile.evaluate((node) => {
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      const rows = [...node.querySelectorAll('.signal-row')].map((row) => {
+        const label = row.querySelector('.signal-label');
+        const badge = row.querySelector('.badge');
+        const labelBox = label.getBoundingClientRect();
+        const badgeBox = badge.getBoundingClientRect();
+        return {
+          name: label.textContent.trim(),
+          label: { left: labelBox.left, right: labelBox.right },
+          badge: { left: badgeBox.left, right: badgeBox.right },
+        };
+      });
+      return {
+        contentLeft: box.left + parseFloat(style.paddingLeft),
+        contentRight: box.right - parseFloat(style.paddingRight),
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+        rows,
+      };
+    });
+
+    expect(measurements.scrollWidth, `${width}px: MECM tile has no horizontal overflow`).toBeLessThanOrEqual(measurements.clientWidth + 1);
+    for (const row of measurements.rows) {
+      for (const [part, child] of [['label', row.label], ['badge', row.badge]]) {
+        expect(child.left, `${width}px: row "${row.name}" ${part} starts inside the tile padding`).toBeGreaterThanOrEqual(measurements.contentLeft - 1);
+        expect(child.right, `${width}px: row "${row.name}" ${part} ends inside the tile padding`).toBeLessThanOrEqual(measurements.contentRight + 1);
+      }
+    }
+  }
 });
 
 test('ESXi cards stay compact, load one detail on demand and ignore foreign ids', async ({ page }) => {
@@ -185,7 +222,7 @@ test('ESXi cards stay compact, load one detail on demand and ignore foreign ids'
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role = 'admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
 $ansible = repo_create_credential($db, ['type' => 'ansible', 'name' => '${MARK}-ansible', 'host' => '127.0.0.1', 'port' => 22, 'username' => 'ansible'], 'secret123', $admin);
-$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi', 'host' => '2001:db8::44', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi', 'host' => '2001:db8::44', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
 repo_esxi_inventory_apply($db, $esxi, [
     'hosts' => [['name' => 'esxi-01']],
     'datacenters' => ['DC-QA'],
@@ -319,9 +356,11 @@ test('unknown Systemstatus POST action is rejected with HTTP 400', async ({ brow
   }
 });
 
-// The overview now has six fixed signals and one optional directory signal.
-// Its auto-fit grid is measured at the wrap boundary because a conditional
-// card count cannot be mirrored safely in CSS.
+// The overview has six fixed signals and one optional directory signal. Desktop
+// shows three cards per row; seven cards take four on the first row so that no
+// card sits alone on the last one (4 + 3, never 3 + 3 + 1). The renderer derives
+// that from the count, so this test measures the rows the browser actually
+// placed, grouped by card top, instead of asserting the modifier class.
 test('Systemstatus overview: all visible cards share the responsive grid', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto('system_status.php');
@@ -331,18 +370,31 @@ test('Systemstatus overview: all visible cards share the responsive grid', async
   expect(count, 'the strip carries all six fixed health signals').toBeGreaterThanOrEqual(6);
   expect(count, 'at most the directory signal is conditional').toBeLessThanOrEqual(7);
 
+  // Cards per row, in document order.
   const rowsAt = async () => page.locator('.status-overview').evaluate((strip) => {
-    const tops = [...strip.querySelectorAll('.status-overview-card')].map((c) => Math.round(c.getBoundingClientRect().top));
-    return new Set(tops).size;
+    const rows = new Map();
+    for (const card of strip.querySelectorAll('.status-overview-card')) {
+      const top = Math.round(card.getBoundingClientRect().top);
+      rows.set(top, (rows.get(top) || 0) + 1);
+    }
+    return [...rows.values()];
   });
 
-  expect(await rowsAt(), 'all visible cards sit on one row at desktop width').toBe(1);
+  const desktopRows = count === 7 ? [4, 3] : [3, 3];
+  expect(await rowsAt(), 'desktop shows three cards per row, four on the first row for seven cards').toEqual(desktopRows);
 
+  // Still the desktop rule at a narrow laptop width, where the sidebar leaves
+  // little room: the columns are fixed, so the row split must not change.
   await page.setViewportSize({ width: 1000, height: 900 });
-  expect(await rowsAt(), 'below the wrap boundary the strip reflows instead of squeezing').toBeGreaterThan(1);
+  expect(await rowsAt(), 'the desktop split holds down to the 850px step').toEqual(desktopRows);
+
+  // At 850px and below the strip takes two columns, so the last row may be short.
+  await page.setViewportSize({ width: 800, height: 900 });
+  const tabletRows = count === 7 ? [2, 2, 2, 1] : [2, 2, 2];
+  expect(await rowsAt(), 'at 850px and below the strip takes two columns').toEqual(tabletRows);
 
   await page.setViewportSize({ width: 500, height: 900 });
-  expect(await rowsAt(), 'on a narrow viewport every card gets its own row').toBe(count);
+  expect(await rowsAt(), 'on a narrow viewport every card gets its own row').toEqual(Array(count).fill(1));
 });
 
 test('Systemstatus overview: long labels and statuses stay readable inside each card', async ({ page }) => {
@@ -396,7 +448,7 @@ test('Systemstatus overview: long labels and statuses stay readable inside each 
     }
   };
 
-  for (const width of [1600, 1366, 1024, 768, 560, 360, 320]) {
+  for (const width of [1600, 1366, 1024, 900, 768, 560, 360, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await assertContained(`${width}px at normal text size`);
   }

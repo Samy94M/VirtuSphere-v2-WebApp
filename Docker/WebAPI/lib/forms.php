@@ -160,6 +160,17 @@ function form_error_id(string $form, string $field, string|int|null $scope = nul
  *
  * @param bool|list<string> $hints
  */
+/**
+ * `aria-describedby` for a control whose explanation is a separate element that
+ * is neither a field hint nor a field error: the open-job line of a disabled
+ * button, for example. The form contract owns the attribute, so renderers ask
+ * for it here instead of writing it.
+ */
+function form_described_by_attr(string $describedById): string
+{
+    return ' aria-describedby="' . h($describedById) . '"';
+}
+
 function form_control_attrs(
     string $form,
     string $field,

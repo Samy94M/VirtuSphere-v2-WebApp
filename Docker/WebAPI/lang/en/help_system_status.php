@@ -134,7 +134,7 @@ return [
     'esxi_cause_host_placeholder' => 'the host',
     'esxi_cause_fix_dns' => 'Check the hostname in the credential, plus the DNS and search domain of the portal container.',
     'esxi_cause_fix_unreachable' => 'Check network, firewall and port. The pull retries automatically at the next interval; the existing cache is kept.',
-    'esxi_cause_fix_certificate' => 'Under Credentials, check the CA bundle or server certificate and the ESXi host name, then run the strict connection test again.',
+    'esxi_cause_fix_certificate' => 'Under Credentials, check the CA bundle or server certificate and the ESXi host name and save the credential; that starts the test again. If the credential should run without verification, choose “No certificate verification” there.',
     'esxi_cause_fix_tls' => 'Check the TLS version, HTTPS port and peer. Certificate failures are reported separately as certificate.',
     'esxi_cause_fix_auth' => 'Correct the username and secret. The automatic pull pauses until the credential changes, so the ESXi account cannot be locked out.',
     'esxi_cause_fix_authz' => 'Extend the role of the ESXi account. Read rights are enough for the inventory, but not for deploying or autostart.',

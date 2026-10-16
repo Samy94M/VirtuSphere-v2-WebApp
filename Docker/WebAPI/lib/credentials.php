@@ -21,23 +21,36 @@ const VIRTUSPHERE_CREDENTIAL_LABELS = [
 
 const VIRTUSPHERE_ESXI_SCHEMES = ['http', 'https'];
 
-// ESXi transport trust (Etappe 9b). A newly created credential must verify the
-// peer; a row without the column can only be an upgraded legacy row and keeps
-// the historical behaviour until an operator explicitly activates strict mode.
+// ESXi transport trust (Etappe 9b). The certificate choice of the form decides
+// the mode of a save: a certificate type verifies the peer (strict), 'none'
+// stores no certificate and turns verification off (legacy_insecure). A row
+// without the column can only be an upgraded legacy row and keeps the
+// historical behaviour until an operator explicitly activates strict mode.
 const VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE = 'legacy_insecure';
 const VIRTUSPHERE_ESXI_TRUST_STRICT = 'strict';
 const VIRTUSPHERE_ESXI_TRUST_MODES = [
     VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
     VIRTUSPHERE_ESXI_TRUST_STRICT,
 ];
-const VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW = VIRTUSPHERE_ESXI_TRUST_STRICT;
 
+// The stored certificate kinds (DB ENUM). 'none' is a form choice only: it is
+// never stored, the stored kind and the PEM become NULL.
 const VIRTUSPHERE_ESXI_CERT_CA_BUNDLE = 'ca_bundle';
 const VIRTUSPHERE_ESXI_CERT_SERVER = 'server_certificate';
 const VIRTUSPHERE_ESXI_CERT_KINDS = [
     VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
     VIRTUSPHERE_ESXI_CERT_SERVER,
 ];
+const VIRTUSPHERE_ESXI_CERT_NONE = 'none';
+// The three values of the certificate type select, in the order the form shows them.
+const VIRTUSPHERE_ESXI_CERT_CHOICES = [
+    VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
+    VIRTUSPHERE_ESXI_CERT_SERVER,
+    VIRTUSPHERE_ESXI_CERT_NONE,
+];
+// The create form preselects "no verification": a verifying credential needs a
+// certificate, which a new credential is not expected to have yet.
+const VIRTUSPHERE_ESXI_CERT_DEFAULT_NEW = VIRTUSPHERE_ESXI_CERT_NONE;
 const VIRTUSPHERE_ESXI_CERT_MAX_BYTES = 262144;
 const VIRTUSPHERE_ESXI_TRUST_FILE = 'esxi-trust.pem';
 
@@ -80,6 +93,41 @@ function credential_esxi_trust_mode(array $credential): string
     return in_array($mode, VIRTUSPHERE_ESXI_TRUST_MODES, true)
         ? $mode
         : VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
+}
+
+/**
+ * The single definition of "a strict probe is due": a legacy row that stores a
+ * certificate to test strictly. The manual test, the save path and the row
+ * button all ask this.
+ */
+function credential_esxi_strict_probe_ready(array $credential): bool
+{
+    return credential_esxi_trust_mode($credential) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE
+        && trim((string) ($credential['esxi_certificate_pem'] ?? '')) !== '';
+}
+
+/**
+ * The trust mode an ESXi save leaves behind (ADR-0037 as amended), or null for
+ * a row that is not ESXi, whose stored value is not touched.
+ *
+ * 'none' is the one way to legacy_insecure. A verifying choice on a row that was
+ * not ESXi before (a type change from Ansible) starts strict like a create; on
+ * an ESXi row the mode stays, so a legacy row stays legacy until the staged
+ * activation proves the certificate.
+ *
+ * @param array<string, mixed> $values validated payload of credential_validate_payload()
+ * @param string|null $beforeTrustMode the stored ESXi mode, null when the row was not ESXi
+ */
+function credential_esxi_trust_mode_after_save(array $values, ?string $beforeTrustMode): ?string
+{
+    if (($values['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        return null;
+    }
+    if (($values['esxi_cert_choice'] ?? '') === VIRTUSPHERE_ESXI_CERT_NONE) {
+        return VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
+    }
+
+    return $beforeTrustMode ?? VIRTUSPHERE_ESXI_TRUST_STRICT;
 }
 
 /**

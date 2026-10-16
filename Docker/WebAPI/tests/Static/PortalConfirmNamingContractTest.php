@@ -28,7 +28,9 @@ final class PortalConfirmNamingContractTest extends TestCase
     private const ROW_ACTIONS = [
         'credentials.confirm_activate_strict',
         'credentials.confirm_delete',
-        'credentials.confirm_use_legacy',
+        // The downgrade to "no certificate verification" names its row. It is
+        // carried by data-downgrade-confirm and set on the Save button by forms.js.
+        'credentials.confirm_disable_verification',
         'credentials.host_identity_confirm',
         // K21-F: the acknowledgement of the ESXi access files left on one Ansible target. The question
         // names the target (host:port), which the server renders from the stored credential target, not
@@ -121,6 +123,13 @@ final class PortalConfirmNamingContractTest extends TestCase
             // one as the message key.
             preg_match_all('/data-confirm="[^"]*?__t\(\'([a-z0-9_.]+)\'/', $source, $inline);
             foreach ($inline[1] as $key) {
+                $keys[$key] = true;
+            }
+
+            // The question that forms.js copies onto a Save button while the
+            // downgrade is selected: rendered on the form, so it counts too.
+            preg_match_all('/data-downgrade-confirm="[^"]*?__t\(\'([a-z0-9_.]+)\'/', $source, $downgrade);
+            foreach ($downgrade[1] as $key) {
                 $keys[$key] = true;
             }
 

@@ -99,6 +99,9 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'repo_deploy_group_vm_list',
         'repo_purge_deploy_job_logs',
         'repo_purge_finished_system_jobs',
+        // The one "open system job" predicate: the enqueue dedupe and the portal's
+        // pending inventory view both read it, so they cannot disagree.
+        'repo_open_system_job_condition',
         // Added in Etappe 2: the reap message as a pure function, so the wording
         // that is an operator's whole account of a reap can be pinned without a
         // database (see DeployJobReapObservationTest).

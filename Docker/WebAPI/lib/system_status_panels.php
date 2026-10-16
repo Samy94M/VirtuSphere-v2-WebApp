@@ -52,8 +52,14 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
     if ($directoryData !== null) {
         $cards[] = [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY, __t('system_status.overview_directory'), $directoryData['snapshot']['overall'], 'directory'];
     }
+    // Three cards per row on desktop. A count that would leave a single card
+    // alone in the last row (seven: 3 + 3 + 1) switches to four columns (4 + 3)
+    // instead. It is derived from the same list the strip renders, so the
+    // optional directory card cannot put the grid out of step with its cards.
+    // The list always holds the six fixed cards, so no lower bound is needed.
+    $overviewModifier = count($cards) % 3 === 1 ? ' status-overview-four' : '';
     ?>
-    <nav class="status-overview" aria-label="<?php echo h(__t('system_status.overview_heading')); ?>">
+    <nav class="status-overview<?php echo $overviewModifier; ?>" aria-label="<?php echo h(__t('system_status.overview_heading')); ?>">
         <?php foreach ($cards as [$anchor, $label, $state, $kind]) { ?>
             <a class="status-overview-card" href="<?php echo h(system_status_url((string) $anchor, $query)); ?>">
                 <span class="status-overview-label"><?php echo h((string) $label); ?></span>

@@ -25,7 +25,7 @@ $user = portal_require_user($connection);
 
 $missionCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) <> ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
 $templateCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) = ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
-$vmCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms');
+$vmCount = repo_vm_count_in_real_missions($connection);
 $mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ?', 's', [VIRTUSPHERE_MECM_SYNC_PENDING]);
 $vmProgressAttention = repo_vm_progress_attention_count($connection);
 $healthSnapshot = integration_health_snapshot($connection);
@@ -85,7 +85,7 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
             <p class="alert-actions"><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE)); ?>"><?php echo h(__t('dashboard.service_attention_link')); ?></a></p>
         </div>
     <?php } ?>
-    <section class="grid" aria-label="<?php echo h(__t('dashboard.key_metrics')); ?>">
+    <section class="grid kpi-grid" aria-label="<?php echo h(__t('dashboard.key_metrics')); ?>">
         <a class="card kpi" href="missions.php?type=missions"><span class="muted"><?php echo h(__t('dashboard.kpi_missions')); ?></span><span class="value"><?php echo h($missionCount); ?></span></a>
         <a class="card kpi" href="missions.php?type=templates"><span class="muted"><?php echo h(__t('dashboard.kpi_templates')); ?></span><span class="value"><?php echo h($templateCount); ?></span></a>
         <article class="card kpi"><span class="muted"><?php echo h(__t('dashboard.kpi_vms')); ?></span><span class="value"><?php echo h($vmCount); ?></span></article>

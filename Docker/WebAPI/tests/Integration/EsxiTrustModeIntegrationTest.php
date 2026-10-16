@@ -113,8 +113,172 @@ final class EsxiTrustModeIntegrationTest extends TestCase
 
     public function testFreshStrictCredentialRejectsAnExplicitHttpEndpoint(): void
     {
+        // A certificate type makes the credential strict, so the https rule is what refuses it.
         $this->expectException(ValidationException::class);
-        $this->credential('esxi', 'http://esxi-' . bin2hex(random_bytes(4)) . '.invalid');
+        $this->credential('esxi', 'http://esxi-' . bin2hex(random_bytes(4)) . '.invalid', [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
+            'esxi_certificate_pem' => $this->certificate(),
+        ]);
+    }
+
+    public function testNoneCreatesALegacyCredentialWithoutAnyStoredCertificate(): void
+    {
+        $id = $this->credential('esxi', 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid', [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_NONE,
+        ]);
+        $row = repo_credential($this->db, $id);
+        self::assertNotNull($row);
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, $row['esxi_trust_mode']);
+        self::assertNull($row['esxi_cert_kind'], "'none' is a form choice and is never stored");
+        self::assertNull($row['esxi_certificate_pem']);
+        self::assertNull($row['esxi_strict_tested_at']);
+    }
+
+    public function testCertificateTypeNeedsItsPemAndNoneRefusesOne(): void
+    {
+        $host = 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid';
+        $this->assertRefusedOn('esxi_certificate_pem', fn (): int => $this->credential('esxi', $host, [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
+        ]));
+        $this->assertRefusedOn('esxi_certificate_pem', fn (): int => $this->credential('esxi', $host, [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_NONE,
+            'esxi_certificate_pem' => $this->certificate(),
+        ]));
+        $this->assertRefusedOn('esxi_cert_kind', fn (): int => $this->credential('esxi', $host));
+    }
+
+    public function testDowngradeFromStrictClearsTheCertificateAndTheStrictProof(): void
+    {
+        $id = $this->credential('esxi', 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid', [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_SERVER,
+            'esxi_certificate_pem' => $this->certificate(),
+        ]);
+        self::assertTrue(repo_record_esxi_strict_test_success($this->db, $id));
+        $cleared = false;
+        $trust = ['before' => null, 'after' => null];
+
+        repo_update_credential($this->db, $id, $this->esxiPayload(repo_credential($this->db, $id) ?? [], VIRTUSPHERE_ESXI_CERT_NONE, ''), null, $cleared, $trust);
+
+        self::assertSame(['before' => VIRTUSPHERE_ESXI_TRUST_STRICT, 'after' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE], $trust);
+        $row = repo_credential($this->db, $id);
+        self::assertNotNull($row);
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, $row['esxi_trust_mode']);
+        self::assertNull($row['esxi_cert_kind']);
+        self::assertNull($row['esxi_certificate_pem']);
+        self::assertNull($row['esxi_strict_tested_at']);
+    }
+
+    public function testNoneWithTheStoredCertificatePostedBackRemovesIt(): void
+    {
+        // The editor's textarea is prefilled with the stored PEM; a browser submits its line breaks as CRLF.
+        $id = $this->credential('esxi', 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid', [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
+            'esxi_certificate_pem' => $this->certificate(),
+        ]);
+        self::assertTrue(repo_record_esxi_strict_test_success($this->db, $id));
+        $row = repo_credential($this->db, $id);
+        self::assertNotNull($row);
+        $posted = str_replace("\n", "\r\n", (string) $row['esxi_certificate_pem']);
+        $cleared = false;
+        $trust = ['before' => null, 'after' => null];
+
+        repo_update_credential($this->db, $id, $this->esxiPayload($row, VIRTUSPHERE_ESXI_CERT_NONE, $posted), null, $cleared, $trust);
+
+        self::assertSame(['before' => VIRTUSPHERE_ESXI_TRUST_STRICT, 'after' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE], $trust);
+        $after = repo_credential($this->db, $id);
+        self::assertNotNull($after);
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, $after['esxi_trust_mode']);
+        self::assertNull($after['esxi_cert_kind']);
+        self::assertNull($after['esxi_certificate_pem']);
+        self::assertNull($after['esxi_strict_tested_at']);
+    }
+
+    public function testNoneWithADifferentCertificateIsRefusedAndChangesNothing(): void
+    {
+        $id = $this->credential('esxi', 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid', [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
+            'esxi_certificate_pem' => $this->certificate(),
+        ]);
+        $row = repo_credential($this->db, $id);
+        self::assertNotNull($row);
+
+        $this->assertRefusedOn('esxi_certificate_pem', fn (): bool => repo_update_credential(
+            $this->db,
+            $id,
+            $this->esxiPayload($row, VIRTUSPHERE_ESXI_CERT_NONE, $this->certificate() . $this->certificate())
+        ));
+        $after = repo_credential($this->db, $id);
+        self::assertNotNull($after);
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_STRICT, $after['esxi_trust_mode']);
+        self::assertNotEmpty($after['esxi_certificate_pem']);
+    }
+
+    public function testVerifyingSaveOfALegacyRowStaysLegacyAndStoresTheCertificate(): void
+    {
+        $id = $this->credential('esxi', 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid', [
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_NONE,
+        ]);
+        $cleared = false;
+        $trust = ['before' => null, 'after' => null];
+
+        repo_update_credential($this->db, $id, $this->esxiPayload(repo_credential($this->db, $id) ?? [], VIRTUSPHERE_ESXI_CERT_CA_BUNDLE, $this->certificate()), null, $cleared, $trust);
+
+        self::assertSame(['before' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, 'after' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE], $trust);
+        $row = repo_credential($this->db, $id);
+        self::assertNotNull($row);
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, $row['esxi_trust_mode'], 'the staged certificate waits for the strict probe');
+        self::assertSame(VIRTUSPHERE_ESXI_CERT_CA_BUNDLE, $row['esxi_cert_kind']);
+        self::assertNotEmpty($row['esxi_certificate_pem']);
+        self::assertNull($row['esxi_strict_tested_at']);
+    }
+
+    public function testAnsibleRowBecomingEsxiIsStrictWithACertificateAndLegacyWithout(): void
+    {
+        $withCertificate = $this->credential('ansible', 'ansible-' . bin2hex(random_bytes(4)) . '.invalid');
+        $cleared = false;
+        $trust = ['before' => null, 'after' => null];
+        repo_update_credential($this->db, $withCertificate, $this->esxiPayload(repo_credential($this->db, $withCertificate) ?? [], VIRTUSPHERE_ESXI_CERT_CA_BUNDLE, $this->certificate(), [
+            'host' => 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid',
+            'port' => 443,
+        ]), null, $cleared, $trust);
+        self::assertSame(['before' => null, 'after' => VIRTUSPHERE_ESXI_TRUST_STRICT], $trust, 'a row that was not ESXi starts strict like a create');
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_STRICT, repo_credential($this->db, $withCertificate)['esxi_trust_mode']);
+
+        $withoutVerification = $this->credential('ansible', 'ansible-' . bin2hex(random_bytes(4)) . '.invalid');
+        $trust = ['before' => null, 'after' => null];
+        repo_update_credential($this->db, $withoutVerification, $this->esxiPayload(repo_credential($this->db, $withoutVerification) ?? [], VIRTUSPHERE_ESXI_CERT_NONE, '', [
+            'host' => 'https://esxi-' . bin2hex(random_bytes(4)) . '.invalid',
+            'port' => 443,
+        ]), null, $cleared, $trust);
+        self::assertSame(['before' => null, 'after' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE], $trust);
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, repo_credential($this->db, $withoutVerification)['esxi_trust_mode']);
+    }
+
+    /** @param array<string,mixed> $row @param array<string,mixed> $overrides @return array<string,mixed> */
+    private function esxiPayload(array $row, string $choice, string $pem, array $overrides = []): array
+    {
+        return array_replace([
+            'type' => VIRTUSPHERE_CREDENTIAL_TYPE_ESXI,
+            'name' => (string) ($row['name'] ?? ''),
+            'host' => (string) ($row['host'] ?? ''),
+            'port' => $row['port'] ?? 443,
+            'username' => (string) ($row['username'] ?? ''),
+            'esxi_cert_kind' => $choice,
+            'esxi_certificate_pem' => $pem,
+        ], $overrides);
+    }
+
+    /** @param callable(): mixed $attempt */
+    private function assertRefusedOn(string $field, callable $attempt): void
+    {
+        try {
+            $attempt();
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey($field, $exception->errors());
+
+            return;
+        }
+        self::fail('The save was accepted, but ' . $field . ' must refuse it.');
     }
 
     /** @param array<string,string> $extra */

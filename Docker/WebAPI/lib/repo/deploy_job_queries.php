@@ -125,6 +125,28 @@ function repo_deploy_job(mysqli $db, int $jobId): ?array
     );
 }
 
+/**
+ * The one definition of an open mission-less system job (the ESXi inventory
+ * pull, ADR-0023): queued, running or cancelling and not cancelled. A cancelling
+ * pull still owns its credential until the worker confirms (ADR-0033). The
+ * enqueue dedupe of repo_create_system_job() and the portal's pending view
+ * repo_esxi_inventory_pending_jobs() both read it, so the greyed-out button and
+ * the dedupe cannot disagree.
+ *
+ * @return array{sql:string,types:string,params:list<string>} a WHERE fragment over deploy_jobs and its bindings
+ */
+function repo_open_system_job_condition(): array
+{
+    $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
+    $placeholders = implode(', ', array_fill(0, count($active), '?'));
+
+    return [
+        'sql' => 'mission_id IS NULL AND status IN (' . $placeholders . ') AND cancelled_at IS NULL',
+        'types' => str_repeat('s', count($active)),
+        'params' => $active,
+    ];
+}
+
 /** @return array{logs:array<int,array>,oldest_seq:?int,newest_seq:?int,has_older:bool,has_more:bool,caught_up:bool} */
 function repo_deploy_job_log_initial_tail(mysqli $db, int $jobId, int $limit = VIRTUSPHERE_DEPLOY_LOG_INITIAL_TAIL_LIMIT): array
 {

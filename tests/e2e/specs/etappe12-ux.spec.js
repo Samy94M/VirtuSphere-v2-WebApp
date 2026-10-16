@@ -55,7 +55,7 @@ function seed() {
   return phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
 $ansible = repo_create_credential($db, ['type' => 'ansible', 'name' => '${MARK}-ansible', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'ansible'], 'secret123', $admin);
 $mission = repo_create_mission($db, ['mission_name' => '${MARK}-mission', 'hypervisor_datastorage' => 'ds1', 'hypervisor_datacenter' => 'DC1', 'domain' => 'e12.invalid'], false, $admin);
 $name = '${MARK}-vm';

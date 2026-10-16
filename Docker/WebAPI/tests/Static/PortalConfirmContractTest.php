@@ -76,7 +76,10 @@ final class PortalConfirmContractTest extends TestCase
         'users.php:directory_sync_user' => 'refreshes the cached display attributes of one imported user',
 
         // Edits of the record the user is already looking at, with its own form.
-        'credentials.php:update' => 'edits the credential the form belongs to',
+        // The one destructive variant, switching verification off on a strict row, is
+        // asked for at runtime: forms.js puts data-confirm on the Save button while
+        // "No certificate verification" is chosen. The markup itself has no prompt.
+        'credentials.php:update' => 'edits the credential the form belongs to; the downgrade to no verification is confirmed by forms.js on the Save button',
         'mission_details.php:update' => 'edits the mission the form belongs to',
 
         // Settings writes: the previous value is visible in the field being replaced.

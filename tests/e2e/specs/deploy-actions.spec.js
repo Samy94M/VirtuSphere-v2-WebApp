@@ -16,7 +16,7 @@ function seedBase() {
   return phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
 $ans = repo_create_credential($db, ['type' => 'ansible', 'name' => '${MARK}-ans', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'ans'], 'secret123', $admin);
 $mid = repo_create_mission($db, ['mission_name' => '${MARK}-m1', 'hypervisor_datastorage' => 'ds1', 'hypervisor_datacenter' => 'DC1', 'domain' => 'seed.example.local'], false, $admin);
 $vmIds = [];
@@ -185,7 +185,7 @@ test('create on another host: warning names the previous host and queueing needs
   const seed = seedBase();
   const second = phpJson(`
 $db = db();
-$esxiB = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi-b', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', ${seed.admin});
+$esxiB = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi-b', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', ${seed.admin});
 test_prepare_network_mac_fixture($db, ${seed.missionId}, $esxiB, 'WDS', 'DC1');
 $stmt = $db->prepare("UPDATE deploy_vms SET vm_moid = 'vm-17', vm_instance_uuid = '4217e2e0-0000-4000-8000-000000000017', vm_bound_credential_id = ?, vm_bound_esxi_host = '127.0.0.1' WHERE mission_id = ? AND vm_name = 'E2EDVM1'");
 $esxiA = ${seed.esxi};

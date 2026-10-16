@@ -369,15 +369,15 @@ function repo_create_system_job(mysqli $db, string $mode, int $esxiCredentialId,
     }
 
     return repo_transaction($db, static function () use ($db, $mode, $esxiCredentialId, $ansibleCredentialId, $userId, $strictTrustProbe): ?int {
-        // Same active SSoT as the mission guard: a cancelling pull still owns
-        // its credential until the worker confirms (ADR-0033).
-        $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
-        $placeholders = implode(', ', array_fill(0, count($active), '?'));
+        // The open-pull predicate comes from repo_open_system_job_condition(),
+        // the same definition the portal's pending view reads: a cancelling pull
+        // still owns its credential until the worker confirms (ADR-0033).
+        $open = repo_open_system_job_condition();
         $existing = repo_fetch_one(
             $db,
-            'SELECT id FROM deploy_jobs WHERE mission_id IS NULL AND credential_esxi_id = ? AND status IN (' . $placeholders . ') AND cancelled_at IS NULL LIMIT 1 FOR UPDATE',
-            'i' . str_repeat('s', count($active)),
-            array_merge([$esxiCredentialId], $active)
+            'SELECT id FROM deploy_jobs WHERE ' . $open['sql'] . ' AND credential_esxi_id = ? LIMIT 1 FOR UPDATE',
+            $open['types'] . 'i',
+            array_merge($open['params'], [$esxiCredentialId])
         );
         if ($existing !== null) {
             return null;

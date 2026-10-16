@@ -54,6 +54,7 @@ final class RemoteActivationMaterializationTest extends TestCase
 
         repo_update_credential($this->db, $id, [
             'type' => VIRTUSPHERE_CREDENTIAL_TYPE_ESXI,
+            'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_NONE,
             'name' => self::NAME,
             'host' => 'https://esxi.example.test',
             'port' => 443,

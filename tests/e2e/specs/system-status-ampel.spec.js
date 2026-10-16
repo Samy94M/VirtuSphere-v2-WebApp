@@ -328,7 +328,7 @@ test('the deviation count picks its sentence by number, never ":count" and never
   const seeded = phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role = 'admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${PREFIX}-dev', 'host' => '127.0.0.1', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${PREFIX}-dev', 'host' => '127.0.0.1', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
 repo_esxi_inventory_apply($db, $esxi, [
     'hosts' => [['name' => 'esxi-01']],
     'datacenters' => ['DC-QA'],

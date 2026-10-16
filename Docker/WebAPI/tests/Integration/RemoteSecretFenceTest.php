@@ -541,12 +541,15 @@ final class RemoteSecretFenceTest extends TestCase
     /** @param array<string, mixed> $row @param array<string, mixed> $changes @return array<string, mixed> */
     private function payloadFor(array $row, array $changes): array
     {
+        // The certificate fields mirror the row, so an ESXi payload is valid and keeps the stored choice.
         return array_replace([
             'type' => (string) $row['type'],
             'name' => (string) $row['name'],
             'host' => (string) $row['host'],
             'port' => credential_ssh_port($row['port']),
             'username' => (string) $row['username'],
+            'esxi_cert_kind' => (string) ($row['esxi_cert_kind'] ?? '') !== '' ? (string) $row['esxi_cert_kind'] : VIRTUSPHERE_ESXI_CERT_NONE,
+            'esxi_certificate_pem' => (string) ($row['esxi_certificate_pem'] ?? ''),
         ], $changes);
     }
 

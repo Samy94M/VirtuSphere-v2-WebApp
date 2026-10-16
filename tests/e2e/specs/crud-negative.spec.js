@@ -38,7 +38,7 @@ $db = db();
 $db->query("DELETE FROM deploy_jobs WHERE locked_by = '${MARK}'");
 $db->query("DELETE FROM deploy_credentials WHERE name LIKE '${MARK}%'");
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi', 'host' => '10.0.0.9', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi', 'host' => '10.0.0.9', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
 $ans = repo_create_credential($db, ['type' => 'ansible', 'name' => '${MARK}-ans', 'host' => '10.0.0.8', 'port' => 22, 'username' => 'ans'], 'secret123', $admin);
 $stmt = $db->prepare("INSERT INTO deploy_jobs (mission_id, user_id, status, credential_esxi_id, credential_ansible_id, locked_by, heartbeat_at) VALUES (NULL, NULL, 'running', ?, ?, '${MARK}', NOW())");
 $stmt->bind_param('ii', $esxi, $ans);

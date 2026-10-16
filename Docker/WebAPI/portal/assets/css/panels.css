@@ -297,6 +297,25 @@
     color: var(--info);
 }
 
+/* The dashboard's tile section has a fixed column count, so its tiles do not
+   fall into an auto-fit row of four or five. The shared .grid stays auto-fit
+   for the other pages. The steps use the System status strip's breakpoints. */
+.kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 850px) {
+    .kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    .kpi-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 a.card {
     color: inherit;
     transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
@@ -570,7 +589,9 @@ a.card:hover {
 }
 
 /* Dashboard MECM tile: two labeled signal rows that never collapse into one
-   worst-of. Overrides the oversized single-value KPI number. */
+   worst-of. Overrides the oversized single-value KPI number. A row wraps so
+   the status moves under its label when the fixed three-column grid makes
+   the tile narrow (sidebar visible, about 861 to 1000px). */
 
 .value-signals {
     display: flex;
@@ -582,9 +603,10 @@ a.card:hover {
 
 .signal-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 4px 10px;
 }
 
 .signal-label {

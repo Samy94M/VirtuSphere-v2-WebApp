@@ -87,13 +87,20 @@
     font-size: 13px;
 }
 
-/* The optional directory card makes the count permission- and setup-dependent.
-   Auto-fit keeps every visible card in the same responsive grid without a
-   second hard-coded count; the geometry remains pinned in the browser. */
+/* Three columns is the desktop rule. Auto-fit was dropped on purpose: it put all
+   six fixed cards on one row, and the optional directory card made the count
+   vary. The renderer adds .status-overview-four only when the count would leave
+   one card alone in the last row, so the grid never has to count cards itself. */
 .status-overview {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--space-3);
+}
+
+/* Same specificity as .status-overview and declared after it, so the modifier
+   wins on position. The breakpoint steps below therefore name it too. */
+.status-overview-four {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /* No min-height: the card holds a label and a badge, and a floor sized for a
@@ -378,22 +385,19 @@
     font-weight: 700;
 }
 
-/* Six fixed cards plus an optional directory card need explicit wrap steps:
-   below these widths the labels would otherwise compete for narrow columns. */
-@media (max-width: 1180px) {
-    .status-overview {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-}
-
+/* No 1180px step: it only forced three columns, which is already the default,
+   and above 850px it would also have overridden the four-column modifier back
+   to 3 + 3 + 1. Below 850px both counts take two columns, below 560px one. */
 @media (max-width: 850px) {
-    .status-overview {
+    .status-overview,
+    .status-overview-four {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
 @media (max-width: 560px) {
-    .status-overview {
+    .status-overview,
+    .status-overview-four {
         grid-template-columns: minmax(0, 1fr);
     }
 

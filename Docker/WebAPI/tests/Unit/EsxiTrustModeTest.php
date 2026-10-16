@@ -6,6 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/ansible.php';
 require_once dirname(__DIR__, 2) . '/lib/credentials.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/credentials.php';
 require_once dirname(__DIR__, 2) . '/lib/deploy_worker_outcome.php';
 require_once dirname(__DIR__, 2) . '/lib/ansible_inventory.php';
 
@@ -19,13 +20,104 @@ final class EsxiTrustModeTest extends TestCase
         return $pem;
     }
 
-    public function testNewDefaultIsStrictWhileAMissingLegacyColumnStaysInsecure(): void
+    public function testTheCertificateChoiceHasThreeFormValuesAndNoneIsNeverAStoredKind(): void
     {
-        self::assertSame(VIRTUSPHERE_ESXI_TRUST_STRICT, VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW);
+        self::assertSame('none', VIRTUSPHERE_ESXI_CERT_NONE);
+        self::assertSame(VIRTUSPHERE_ESXI_CERT_NONE, VIRTUSPHERE_ESXI_CERT_DEFAULT_NEW, 'the create form preselects no verification');
+        self::assertSame([
+            VIRTUSPHERE_ESXI_CERT_CA_BUNDLE,
+            VIRTUSPHERE_ESXI_CERT_SERVER,
+            VIRTUSPHERE_ESXI_CERT_NONE,
+        ], VIRTUSPHERE_ESXI_CERT_CHOICES);
+        // The DB ENUM keeps the two stored kinds; 'none' is stored as NULL.
+        self::assertSame([VIRTUSPHERE_ESXI_CERT_CA_BUNDLE, VIRTUSPHERE_ESXI_CERT_SERVER], VIRTUSPHERE_ESXI_CERT_KINDS);
+        self::assertFalse(defined('VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW'), 'the new-credential default is the choice now, not a trust constant');
+    }
+
+    public function testAMissingLegacyColumnStaysInsecureAndAStrictRowStaysStrict(): void
+    {
         self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, credential_esxi_trust_mode([]));
         self::assertSame(VIRTUSPHERE_ESXI_TRUST_STRICT, credential_esxi_trust_mode([
             'esxi_trust_mode' => VIRTUSPHERE_ESXI_TRUST_STRICT,
         ]));
+    }
+
+    public function testStrictProbeIsExactlyALegacyRowWithAStoredCertificate(): void
+    {
+        $pem = $this->certificate();
+        self::assertTrue(credential_esxi_strict_probe_ready([
+            'esxi_trust_mode' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
+            'esxi_certificate_pem' => $pem,
+        ]));
+        self::assertFalse(credential_esxi_strict_probe_ready([
+            'esxi_trust_mode' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
+            'esxi_certificate_pem' => "  \n",
+        ]));
+        self::assertFalse(credential_esxi_strict_probe_ready([
+            'esxi_trust_mode' => VIRTUSPHERE_ESXI_TRUST_STRICT,
+            'esxi_certificate_pem' => $pem,
+        ]));
+    }
+
+    public function testSaveDerivesTheTrustModeFromTheChosenCertificateType(): void
+    {
+        $esxi = ['type' => VIRTUSPHERE_CREDENTIAL_TYPE_ESXI];
+        // A create (no row before) with a verifying choice starts strict; 'none' is legacy.
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_STRICT, credential_esxi_trust_mode_after_save($esxi + ['esxi_cert_choice' => VIRTUSPHERE_ESXI_CERT_CA_BUNDLE], null));
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, credential_esxi_trust_mode_after_save($esxi + ['esxi_cert_choice' => VIRTUSPHERE_ESXI_CERT_NONE], null));
+        // An existing ESXi row keeps its mode for a verifying choice; 'none' always means legacy.
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, credential_esxi_trust_mode_after_save($esxi + ['esxi_cert_choice' => VIRTUSPHERE_ESXI_CERT_SERVER], VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE));
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_STRICT, credential_esxi_trust_mode_after_save($esxi + ['esxi_cert_choice' => VIRTUSPHERE_ESXI_CERT_SERVER], VIRTUSPHERE_ESXI_TRUST_STRICT));
+        self::assertSame(VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE, credential_esxi_trust_mode_after_save($esxi + ['esxi_cert_choice' => VIRTUSPHERE_ESXI_CERT_NONE], VIRTUSPHERE_ESXI_TRUST_STRICT));
+        // Ansible rows carry no ESXi trust mode of their own.
+        self::assertNull(credential_esxi_trust_mode_after_save([
+            'type' => VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE,
+            'esxi_cert_choice' => null,
+        ], null));
+    }
+
+    public function testNoneStillRefusesADifferentCertificateOfAnUpdatedRow(): void
+    {
+        // Only the row's own stored certificate is taken off with "none"; another one is refused
+        // before the name lookup, so no database access happens here.
+        $db = $this->createStub(mysqli::class);
+        $stored = $this->certificate();
+        try {
+            credential_validate_payload($db, [
+                'type' => 'esxi',
+                'name' => 'esxi-choice',
+                'host' => 'esxi.invalid',
+                'username' => 'root',
+                'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_NONE,
+                'esxi_certificate_pem' => $stored . $stored,
+            ], null, false, 1, $stored);
+            self::fail('a different certificate was accepted under "none"');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('esxi_certificate_pem', $exception->errors());
+        }
+    }
+
+    public function testCertificateChoiceIsCheckedBeforeAnythingIsStored(): void
+    {
+        // The validator throws before the name lookup, so no database access happens here.
+        $db = $this->createStub(mysqli::class);
+        $pem = $this->certificate();
+        $base = ['type' => 'esxi', 'name' => 'esxi-choice', 'host' => 'esxi.invalid', 'username' => 'root'];
+        $cases = [
+            'empty choice' => [['esxi_cert_kind' => ''], 'esxi_cert_kind'],
+            'unknown choice' => [['esxi_cert_kind' => 'pinned'], 'esxi_cert_kind'],
+            'none with a certificate' => [['esxi_cert_kind' => 'none', 'esxi_certificate_pem' => $pem], 'esxi_certificate_pem'],
+            'CA bundle without a certificate' => [['esxi_cert_kind' => 'ca_bundle', 'esxi_certificate_pem' => ''], 'esxi_certificate_pem'],
+            'server certificate without a certificate' => [['esxi_cert_kind' => 'server_certificate'], 'esxi_certificate_pem'],
+        ];
+        foreach ($cases as $label => [$extra, $field]) {
+            try {
+                credential_validate_payload($db, $base + $extra, 'secret', true);
+                self::fail($label . ' was accepted');
+            } catch (ValidationException $exception) {
+                self::assertArrayHasKey($field, $exception->errors(), $label);
+            }
+        }
     }
 
     public function testCaBundleAcceptsSeveralCertificatesAndServerPinExactlyOne(): void

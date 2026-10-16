@@ -6,6 +6,8 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/esxi_automation.php';
+require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_urls.php';
 
 /**
  * Credentials page: the cadence note that sits under a status badge.
@@ -71,4 +73,35 @@ function credential_cadence_ansible(int $intervalHours = VIRTUSPHERE_ANSIBLE_TES
     return __t($intervalHours === 0 ? 'ansible_test.cadence_off' : 'ansible_test.cadence', [
         'hours' => $intervalHours, 'days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS,
     ]);
+}
+
+/**
+ * The open inventory job of one ESXi row, as its button and its status line show
+ * it. Null when no job is open, and the caller then renders the plain button.
+ *
+ * The job comes from repo_esxi_inventory_pending_jobs(), which reads the active
+ * SSoT (queued, running, cancelling) once for the whole table. A cancelling pull
+ * still occupies the credential, so it counts as running here.
+ *
+ * @param array<string, mixed>|null $job The open job of this credential, or null.
+ * @return array{job_id: int, running: bool, title: string, line: string, url: string}|null
+ */
+function credential_inventory_pending_notice(?array $job): ?array
+{
+    if ($job === null) {
+        return null;
+    }
+    $jobId = (int) ($job['id'] ?? 0);
+    $running = in_array((string) ($job['status'] ?? ''), [
+        VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLING,
+    ], true);
+
+    return [
+        'job_id' => $jobId,
+        'running' => $running,
+        'title' => __t($running ? 'credentials.inventory_running_title' : 'credentials.inventory_queued_title', ['job' => (string) $jobId]),
+        'line' => __t($running ? 'credentials.inventory_running_line' : 'credentials.inventory_queued_line'),
+        'url' => deploy_job_log_url($jobId),
+    ];
 }

@@ -8,8 +8,9 @@ use PHPUnit\Framework\TestCase;
  * The overview strip and the deviation count it now carries.
  *
  * Two things drift silently here and neither shows up as an error. The first is
- * the responsive grid: the optional AD card means the count is not fixed. The
- * second is the deviation count itself. It used to be summed inside
+ * the responsive grid: the optional directory card means the count is not fixed,
+ * and seven cards would leave one alone on the last row of a three-column grid.
+ * The second is the deviation count itself. It used to be summed inside
  * the deviation renderer; with a second reader in the strip above, two sums
  * would be two numbers the moment one of them is edited, and a strip saying
  * "3 deviations" over a section listing four is worse than no strip at all. So
@@ -46,21 +47,82 @@ final class SystemStatusOverviewContractTest extends TestCase
         return $m[0];
     }
 
-    public function testTheGridAdaptsToTheConditionalCardCount(): void
+    /** The whole renderer function, up to its closing brace, so the nav markup is in scope too. */
+    private function overviewFunction(): string
+    {
+        $source = $this->source('lib/system_status_panels.php');
+        $start = strpos($source, 'function system_status_render_overview(');
+        self::assertNotFalse($start);
+        $end = strpos($source, "\n}", $start);
+        self::assertNotFalse($end);
+
+        return substr($source, $start, $end - $start);
+    }
+
+    /** The one CSS block of a selector, with the leading block name anchored. */
+    private function cssBlock(string $css, string $selector): string
+    {
+        self::assertSame(
+            1,
+            preg_match('/^' . preg_quote($selector, '/') . ' \{(.*?)\}/ms', $css, $block),
+            $selector . ' must exist in status.css'
+        );
+
+        return $block[1];
+    }
+
+    public function testTheGridIsThreeColumnsWithAFourColumnModifierForSevenCards(): void
     {
         $cards = $this->overviewCards();
+        $function = $this->overviewFunction();
         $css = $this->source('portal/assets/css/status.css');
 
+        // The modifier comes from the same list the nav iterates, so the count
+        // the layout uses is the count the strip shows.
         self::assertSame(
             1,
-            preg_match('/^\.status-overview \{(.*?)\}/ms', $css, $block),
-            '.status-overview must exist in status.css'
+            preg_match('/\$overviewModifier = count\(\$cards\) % 3 === 1 \? \' status-overview-four\' : \'\';/', $function),
+            'the modifier must be derived from the card list: one card alone in the last row of a 3-column grid'
         );
         self::assertSame(
             1,
-            preg_match('/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(/', $block[1]),
-            'the strip must adapt to the permission- and setup-dependent directory card'
+            preg_match('/<nav class="status-overview<\?php echo \$overviewModifier; \?>"/', $function),
+            'the nav must carry the derived modifier'
         );
+        self::assertSame(
+            1,
+            preg_match('/foreach \(\$cards as/', $function),
+            'the nav must render the same card list the count is taken from'
+        );
+
+        // Desktop: three per row by default, four only with the modifier. No
+        // auto-fit: the count is not fixed, but the column count is decided here.
+        $base = $this->cssBlock($css, '.status-overview');
+        self::assertMatchesRegularExpression('/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/', $base);
+        self::assertDoesNotMatchRegularExpression('/auto-fit/', $base, 'auto-fit put all six cards on one row');
+        self::assertMatchesRegularExpression(
+            '/grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/',
+            $this->cssBlock($css, '.status-overview-four'),
+            'the modifier must give the 4 + 3 layout for seven cards'
+        );
+
+        // Small screens: two columns at 850px, one at 560px, for both counts.
+        self::assertSame(
+            1,
+            preg_match('/@media \(max-width: 850px\) \{\s*\.status-overview,\s*\.status-overview-four \{\s*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/', $css),
+            'the 850px step must hold both counts at two columns'
+        );
+        self::assertSame(
+            1,
+            preg_match('/@media \(max-width: 560px\) \{\s*\.status-overview,\s*\.status-overview-four \{\s*grid-template-columns:\s*minmax\(0,\s*1fr\);/', $css),
+            'the 560px step must hold both counts at one column'
+        );
+        self::assertDoesNotMatchRegularExpression(
+            '/@media \(max-width: 1180px\)\s*\{\s*\.status-overview/',
+            $css,
+            'the 1180px step would override the four-column modifier back to three'
+        );
+
         self::assertSame($cards, array_values(array_unique($cards)), 'an overview target may appear only once');
         self::assertContains('VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE', $cards);
         self::assertContains('VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY', $cards);

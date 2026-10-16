@@ -137,7 +137,7 @@ test('refresh_inventory: the targeted refresh enqueues a system job for the cred
   const seed = phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
 $hasAnsible = (int) ($db->query("SELECT COUNT(*) AS c FROM deploy_credentials WHERE type = 'ansible'")->fetch_assoc()['c'] ?? 0) > 0;
 if (!$hasAnsible) {
     repo_create_credential($db, ['type' => 'ansible', 'name' => '${MARK}-ans', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'ans'], 'secret123', $admin);
@@ -173,8 +173,8 @@ test('reassign_vlan: renders only with a real deviation, Cancel keeps assignment
   const seed = phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$esxi = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-inv', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
-$unknown = repo_create_credential($db, ['type' => 'esxi', 'name' => '${MARK}-unknown', 'host' => '127.0.0.3', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-inv', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$unknown = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-unknown', 'host' => '127.0.0.3', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
 repo_esxi_inventory_record_success($db, $esxi);
 repo_esxi_inventory_replace_kind($db, $esxi, VIRTUSPHERE_INVENTORY_KIND_NETWORK, [['name' => 'E2EVLAN-OK']]);
 repo_esxi_inventory_record_kind_evidence($db, $esxi, [VIRTUSPHERE_INVENTORY_KIND_NETWORK], [

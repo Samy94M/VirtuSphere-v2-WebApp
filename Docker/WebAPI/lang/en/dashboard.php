@@ -12,7 +12,7 @@ return [
     'key_metrics' => 'Key metrics',
     'kpi_missions' => 'Missions',
     'kpi_templates' => 'Templates',
-    'kpi_vms' => 'VMs',
+    'kpi_vms' => 'VMs in missions',
     'kpi_mecm_pending' => 'MECM pending',
     'kpi_vm_attention' => 'VM check due',
     'kpi_system_status' => 'MECM system status',

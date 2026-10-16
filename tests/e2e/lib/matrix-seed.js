@@ -31,8 +31,8 @@ function seedMatrixFixtures(mark) {
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
 
-$esxiA = repo_create_credential($db, ['type' => 'esxi', 'name' => '${mark}-esxi-a', 'host' => '127.0.0.1', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
-$esxiB = repo_create_credential($db, ['type' => 'esxi', 'name' => '${mark}-esxi-b', 'host' => '127.0.0.2', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
+$esxiA = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${mark}-esxi-a', 'host' => '127.0.0.1', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
+$esxiB = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${mark}-esxi-b', 'host' => '127.0.0.2', 'port' => 443, 'username' => 'root'], 'secret123', $admin);
 $ansible = repo_create_credential($db, ['type' => 'ansible', 'name' => '${mark}-ans', 'host' => '127.0.0.1', 'port' => 22, 'username' => 'ans'], 'secret123', $admin);
 
 // Host A: the mission's datacenter and datastore, plus one shared datastore.

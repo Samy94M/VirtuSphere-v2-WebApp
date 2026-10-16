@@ -39,8 +39,7 @@ function credentials_test_esxi(mysqli $db, int $credentialId, int $userId): arra
     if ($credential === null || (string) ($credential['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
         throw new RuntimeException(__t('credentials.err_not_found'));
     }
-    $strictProbe = credential_esxi_trust_mode($credential) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE
-        && trim((string) ($credential['esxi_certificate_pem'] ?? '')) !== '';
+    $strictProbe = credential_esxi_strict_probe_ready($credential);
     repo_esxi_inventory_clear_pause($db, $credentialId);
     $result = esxi_inventory_enqueue_for_credential($db, $credentialId, $userId, $strictProbe);
     $result['strict_trust_probe'] = $strictProbe;
@@ -143,7 +142,10 @@ function credentials_after_esxi_save(mysqli $db, string $type, int $credentialId
                 'reason' => 'credential saved',
             ], $userId);
         }
-        esxi_inventory_enqueue_for_credential($db, $credentialId, $userId);
+        // A legacy row with a stored certificate gets the strict probe: the one pull
+        // that tells whether that certificate verifies. Every other save is a plain pull.
+        $credential = repo_credential($db, $credentialId) ?? [];
+        esxi_inventory_enqueue_for_credential($db, $credentialId, $userId, credential_esxi_strict_probe_ready($credential));
     } catch (Throwable $exception) {
         error_log('[credentials] ESXi inventory pull enqueue failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }
@@ -166,7 +168,7 @@ function credentials_handle_post(mysqli $connection, array $user): string
 
     try {
         $action = request_string($_POST, 'action');
-        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'use_legacy', 'confirm_host_identity', 'remote_secret_acknowledge'], true)) {
+        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'confirm_host_identity', 'remote_secret_acknowledge'], true)) {
             http_response_code(400);
             echo h(__t('common.unknown_action'));
             exit;
@@ -185,9 +187,13 @@ function credentials_handle_post(mysqli $connection, array $user): string
 
         if ($action === 'create') {
             $createdId = repo_create_credential($connection, $payload, $secret, (int) $user['id']);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'created',
-            ], (int) $user['id']);
+            // The stored mode, read back: a verifying choice and 'none' end up in different modes.
+            $createdRow = repo_credential($connection, $createdId) ?? [];
+            $createdContext = ['action' => 'created'];
+            if ((string) ($createdRow['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+                $createdContext['trust_mode'] = credential_esxi_trust_mode($createdRow);
+            }
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $createdContext, (int) $user['id']);
             flash_set('success', __t('credentials.flash_created'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $createdId, (int) $user['id']);
         } elseif ($action === 'update') {
@@ -195,7 +201,11 @@ function credentials_handle_post(mysqli $connection, array $user): string
             // rotation is reported as "secret: changed", not with its value.
             $before = repo_credential($connection, $id, true) ?? [];
             $preflightCleared = false;
-            repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null, $preflightCleared);
+            $trustChange = ['before' => null, 'after' => null];
+            repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null, $preflightCleared, $trustChange);
+            // Verification switched off on a strict ESXi row: the downgrade gets its own audit row and warning.
+            $verificationDisabled = ($trustChange['before'] ?? null) === VIRTUSPHERE_ESXI_TRUST_STRICT
+                && ($trustChange['after'] ?? null) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
             // Certificate material is public, not a secret, but a PEM block is
             // still bulk configuration data that must not flood the audit log.
             $credentialDiff = audit_change_summary($before, $payload, ['esxi_certificate_pem']);
@@ -220,7 +230,15 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 'action' => 'updated',
                 'changes' => $credentialDiff === '' ? 'no field changes' : $credentialDiff,
             ], (int) $user['id']);
-            flash_set('success', __t('credentials.flash_updated'));
+            if ($verificationDisabled) {
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'trust_mode_changed',
+                    'trust_mode' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
+                ], (int) $user['id']);
+                flash_set('warning', __t('credentials.flash_verification_disabled'));
+            } else {
+                flash_set('success', __t('credentials.flash_updated'));
+            }
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
         } elseif ($action === 'confirm_host_identity') {
             repo_confirm_ansible_host_identity($connection, $id, request_int($_POST, 'config_revision'),
@@ -266,13 +284,8 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 'trust_mode' => 'strict',
             ], (int) $user['id']);
             flash_set('success', __t('credentials.flash_strict_activated'));
-        } elseif ($action === 'use_legacy') {
-            repo_activate_esxi_legacy_trust($connection, $id);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'trust_mode_changed',
-                'trust_mode' => 'legacy_insecure',
-            ], (int) $user['id']);
-            flash_set('warning', __t('credentials.flash_legacy_activated'));
+            // Same follow-up as a save: the pull that shows the activated mode on the status page.
+            credentials_after_esxi_save($connection, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, $id, (int) $user['id']);
         } elseif ($action === 'delete') {
             $before = repo_credential($connection, $id) ?? [];
             repo_delete_credential($connection, $id);

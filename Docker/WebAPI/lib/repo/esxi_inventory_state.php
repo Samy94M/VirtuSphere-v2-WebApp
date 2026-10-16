@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/deploy_job_queries.php';
+
 /**
  * Records a successful fetch: clears the failure streak and pause, and stores
  * the capability facts of this pull.
@@ -130,20 +132,18 @@ function repo_esxi_inventory_counts(mysqli $db): array
  */
 function repo_esxi_inventory_pending_jobs(mysqli $db): array
 {
-    // The active SSoT (queued/running/cancelling, ADR-0033): a cancelling pull
-    // still owns its credential and its link, and the enqueue dedupe reads
-    // this same predicate through repo_create_system_job.
-    $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
-    $placeholders = implode(', ', array_fill(0, count($active), '?'));
+    // The open pull (queued/running/cancelling, ADR-0033): a cancelling pull
+    // still owns its credential and its link. This view and the enqueue dedupe
+    // of repo_create_system_job both read repo_open_system_job_condition(), so
+    // they cannot drift apart.
+    $open = repo_open_system_job_condition();
     $stmt = $db->prepare(
         'SELECT id, credential_esxi_id, status, correlation_id, created_at, locked_at
          FROM deploy_jobs
-         WHERE mission_id IS NULL
-           AND status IN (' . $placeholders . ')
-           AND cancelled_at IS NULL
+         WHERE ' . $open['sql'] . '
          ORDER BY id DESC'
     );
-    $stmt->bind_param(str_repeat('s', count($active)), ...$active);
+    $stmt->bind_param($open['types'], ...$open['params']);
     $stmt->execute();
 
     $jobs = [];

@@ -16,7 +16,7 @@ function seedCredential(name, host = '127.0.0.1', port = 1, type = 'esxi') {
   const data = phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
-$id = repo_create_credential($db, ['type' => '${type}', 'name' => '${name}', 'host' => '${host}', 'port' => ${Number(port)}, 'username' => 'root'], 'secret123', $admin);
+$id = repo_create_credential($db, ['type' => '${type}', 'esxi_cert_kind' => 'none', 'name' => '${name}', 'host' => '${host}', 'port' => ${Number(port)}, 'username' => 'root'], 'secret123', $admin);
 echo 'JSON' . json_encode(['id' => $id]) . 'JSON';
 `, ['lib/repo/credentials.php']);
   return data.id;
@@ -46,6 +46,8 @@ $row = repo_credential(db(), ${Number(id)});
 echo 'JSON' . json_encode([
   'mode' => $row['esxi_trust_mode'] ?? null,
   'tested' => $row['esxi_strict_tested_at'] ?? null,
+  'kind' => $row['esxi_cert_kind'] ?? null,
+  'pem' => trim((string) ($row['esxi_certificate_pem'] ?? '')) !== '',
 ]) . 'JSON';
 `, ['lib/repo/credentials.php']);
 }
@@ -260,9 +262,7 @@ echo 'JSON' . json_encode(['jobs' => $jobs, 'audit' => $audit]) . 'JSON';
 
 // e2e-covers: credentials.php:activate_strict
 // e2e-covers-cancel: credentials.php:activate_strict
-// e2e-covers: credentials.php:use_legacy
-// e2e-covers-cancel: credentials.php:use_legacy
-test('ESXi trust: legacy is visible and strict activation is a separate confirmed action', async ({ page }) => {
+test('ESXi trust: a staged certificate is visible as no verification and strict activation is a separate confirmed action', async ({ page }) => {
   const name = PREFIX + 'trust-staged';
   const id = seedCredential(name, 'https://esxi-trust.invalid', 443, 'esxi');
   runPhp(`
@@ -277,7 +277,7 @@ echo 'SEEDED';
 
   await page.goto('credentials.php');
   let row = page.locator('tr', { hasText: name }).first();
-  await expect(row).toContainText(/Legacy/);
+  await expect(row).toContainText(/No certificate verification/);
   await expect(row.locator('form:has(button[value="activate_strict"])')).toBeVisible();
   const dialog = page.locator('[data-confirm-dialog]');
 
@@ -290,16 +290,67 @@ echo 'SEEDED';
   await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'credentials.php');
   expect(credentialTrust(id).mode).toBe('strict');
   row = page.locator('tr', { hasText: name }).first();
-  await expect(row).toContainText(/Strikt|Strict/);
+  await expect(row).toContainText(/Strict: verification enabled/);
+  // The strict row has no button of its own any more: turning verification off is the editor's choice (next case).
+  await expect(row.locator('button[value="activate_strict"]')).toHaveCount(0);
+});
 
-  await row.locator('button[value="use_legacy"]').click();
-  await expect(dialog).toBeVisible();
-  await dialog.locator('button[value="cancel"]').click();
+// The downgrade of a strict row goes through the editor's Save button, which asks first. Choosing
+// "No certificate verification" alone asks nothing; Cancel keeps the row strict. The update action itself is
+// proven by the update case above, so this case proves the question and its Cancel branch.
+test('ESXi downgrade: a strict row asks before verification is switched off, Cancel keeps it strict', async ({ page }) => {
+  const name = PREFIX + 'trust-downgrade';
+  const id = seedCredential(name, 'https://esxi-downgrade.invalid', 443, 'esxi');
+  runPhp(`
+$db = db();
+$pem = file_get_contents('/var/www/html/tests/fixtures/https/valid.crt.txt');
+$stmt = $db->prepare("UPDATE deploy_credentials SET esxi_trust_mode = 'strict', esxi_cert_kind = 'ca_bundle', esxi_certificate_pem = ? WHERE id = ?");
+$id = ${Number(id)};
+$stmt->bind_param('si', $pem, $id);
+$stmt->execute();
+echo 'SEEDED';
+`);
   expect(credentialTrust(id).mode).toBe('strict');
-  await row.locator('button[value="use_legacy"]').click();
+
+  await page.goto('credentials.php');
+  const row = page.locator('tr', { hasText: name }).first();
+  await expect(row).toContainText(/Strict: verification enabled/);
+  await row.locator(`button[data-row-toggle="credential-editor-${id}"]`).click();
+  const editor = page.locator(`#credential-editor-${id}`);
+  await expect(editor).toBeVisible();
+  await expect(editor.locator('select[name="esxi_cert_kind"]')).toHaveValue('ca_bundle');
+  const dialog = page.locator('[data-confirm-dialog]');
+
+  const certSelect = editor.locator('select[name="esxi_cert_kind"]');
+  const pemText = editor.locator('textarea[name="esxi_certificate_pem"]');
+  await certSelect.selectOption('none');
+  await expect(pemText, 'the stored certificate is not used while none is chosen').toBeDisabled();
+  await editor.locator('button[type="submit"]').click();
+  await expect(dialog, 'the Save button of the downgrade asks first').toBeVisible();
+  await expect(page.locator('[data-confirm-msg]'), 'the question names the credential').toContainText(name);
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(credentialTrust(id).mode, 'Cancel changes nothing').toBe('strict');
+  await expect(pemText).toBeDisabled();
+
+  // Choosing a certificate type brings the text back; choosing none again disables it.
+  await certSelect.selectOption('server_certificate');
+  await expect(pemText).toBeEnabled();
+  await certSelect.selectOption('none');
+  await expect(pemText).toBeDisabled();
+
+  // Save and accept: the stored certificate goes, the row shows no verification and the warning flash names it.
+  await editor.locator('button[type="submit"]').click();
   await expect(dialog).toBeVisible();
   await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'credentials.php');
-  expect(credentialTrust(id).mode).toBe('legacy_insecure');
+  const after = credentialTrust(id);
+  expect(after.mode, 'the downgrade is stored').toBe('legacy_insecure');
+  expect(after.kind, 'none is never stored as a kind').toBeNull();
+  expect(after.pem, 'the stored certificate is removed').toBe(false);
+  expect(after.tested).toBeNull();
+  await expect(page.locator('[data-flash]').first()).toContainText(/Certificate verification turned off|Zertifikatsprüfung abgeschaltet/);
+  const downgraded = page.locator('tr', { hasText: name }).first();
+  await expect(downgraded).toContainText(/No certificate verification/);
 });
 
 // e2e-covers: credentials.php:delete

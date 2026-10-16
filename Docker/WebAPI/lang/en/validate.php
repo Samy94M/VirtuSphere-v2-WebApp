@@ -114,6 +114,8 @@ return [
     'deploy_stagger_range' => 'The stagger interval must be between :min and :max minutes.',
     'esxi_certificate_invalid' => 'The ESXi certificate is not a valid PEM certificate or CA bundle.',
     'esxi_strict_https' => 'Strict ESXi certificate verification requires an HTTPS host URL.',
+    'esxi_certificate_missing' => 'Paste a certificate for this certificate type, or choose “No certificate verification”.',
+    'esxi_certificate_unexpected' => 'With “No certificate verification”, no certificate is stored. Clear the field or choose a certificate type.',
     // Bytes, not characters: the hashing algorithm truncates after :max bytes and
     // an umlaut takes two of them. The text says bytes on purpose.
     'password_max_bytes' => 'The password must be at most :max bytes long. Umlauts and emoji count more than once.',

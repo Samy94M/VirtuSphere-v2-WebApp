@@ -93,7 +93,17 @@ function credential_name_exists(mysqli $db, string $type, string $name, int $exc
     return $row !== null;
 }
 
-function credential_validate_payload(mysqli $db, array $data, ?string $secret, bool $secretRequired, int $excludeId = 0): array
+/** A PEM text as the stored value compares it: line endings unified, outer whitespace removed. */
+function credential_pem_comparable(string $pem): string
+{
+    return trim(str_replace("\r\n", "\n", $pem));
+}
+
+/**
+ * @param string|null $storedCertificatePem the PEM the row stores now (updates only). A "none" choice that posts
+ *        this very certificate back, as the editor's textarea does, removes it as decided instead of refusing it.
+ */
+function credential_validate_payload(mysqli $db, array $data, ?string $secret, bool $secretRequired, int $excludeId = 0, ?string $storedCertificatePem = null): array
 {
     $validator = new Validator();
     $type = $validator->enum('type', $data['type'] ?? '', validator_label('credential_type', 'Credential type'), VIRTUSPHERE_CREDENTIAL_TYPES);
@@ -101,18 +111,32 @@ function credential_validate_payload(mysqli $db, array $data, ?string $secret, b
     $host = credential_validate_host($validator, $type, $data['host'] ?? '');
     $port = $validator->optionalIntRange('port', $data['port'] ?? null, validator_label('port', 'Port'), 1, 65535);
     $username = $validator->requireString('username', $data['username'] ?? '', validator_label('username', 'Username'), 191);
+    $esxiCertChoice = null;
     $esxiCertKind = null;
     $esxiCertificatePem = null;
     if ($type === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        // The certificate type is the one control of the trust mode: a certificate
+        // type verifies the peer and needs its PEM, 'none' verifies nothing and
+        // stores no PEM at all.
+        $esxiCertChoice = $validator->enum(
+            'esxi_cert_kind',
+            $data['esxi_cert_kind'] ?? '',
+            validator_label('esxi_cert_kind', 'ESXi certificate type'),
+            VIRTUSPHERE_ESXI_CERT_CHOICES
+        );
         $rawCertificate = trim((string) ($data['esxi_certificate_pem'] ?? ''));
-        if ($rawCertificate !== '') {
-            $esxiCertKind = $validator->enum(
-                'esxi_cert_kind',
-                $data['esxi_cert_kind'] ?? '',
-                validator_label('esxi_cert_kind', 'ESXi certificate type'),
-                VIRTUSPHERE_ESXI_CERT_KINDS
-            );
-            if (in_array($esxiCertKind, VIRTUSPHERE_ESXI_CERT_KINDS, true)) {
+        if ($esxiCertChoice === VIRTUSPHERE_ESXI_CERT_NONE) {
+            // Browsers submit textarea line breaks as CRLF, the stored PEM has LF: compare after normalizing both.
+            $postedSame = $storedCertificatePem !== null
+                && credential_pem_comparable($rawCertificate) === credential_pem_comparable($storedCertificatePem);
+            if ($rawCertificate !== '' && !$postedSame) {
+                $validator->add('esxi_certificate_pem', validator_text('validate.esxi_certificate_unexpected', 'With "No certificate verification", no certificate is stored. Clear the field or choose a certificate type.'));
+            }
+        } elseif (in_array($esxiCertChoice, VIRTUSPHERE_ESXI_CERT_KINDS, true)) {
+            $esxiCertKind = $esxiCertChoice;
+            if ($rawCertificate === '') {
+                $validator->add('esxi_certificate_pem', validator_text('validate.esxi_certificate_missing', 'Paste a certificate for this certificate type, or choose "No certificate verification".'));
+            } else {
                 try {
                     $esxiCertificatePem = credential_esxi_certificate_normalize($esxiCertKind, $rawCertificate);
                 } catch (InvalidArgumentException $exception) {
@@ -141,6 +165,8 @@ function credential_validate_payload(mysqli $db, array $data, ?string $secret, b
         'username' => $username,
         'esxi_cert_kind' => $esxiCertKind,
         'esxi_certificate_pem' => $esxiCertificatePem,
+        // The chosen form value, 'none' included; null for a row that is not ESXi.
+        'esxi_cert_choice' => $esxiCertChoice,
     ];
 }
 
@@ -189,9 +215,10 @@ function repo_credential_secret(mysqli $db, int $id): string
 function repo_create_credential(mysqli $db, array $data, string $secret, int $createdBy): int
 {
     $values = credential_validate_payload($db, $data, $secret, true);
-    credential_assert_strict_esxi_https($values, VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW);
+    // A non-ESXi row keeps the stored value it has always had.
+    $trustMode = credential_esxi_trust_mode_after_save($values, null) ?? VIRTUSPHERE_ESXI_TRUST_STRICT;
+    credential_assert_strict_esxi_https($values, $trustMode);
     $ciphertext = crypto_encrypt_secret($secret);
-    $trustMode = VIRTUSPHERE_ESXI_TRUST_DEFAULT_NEW;
 
     return repo_transaction($db, static function () use ($db, $values, $ciphertext, $trustMode, $createdBy): int {
         $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, created_by, ansible_host_accept_new) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
@@ -203,9 +230,14 @@ function repo_create_credential(mysqli $db, array $data, string $secret, int $cr
     });
 }
 
-function repo_update_credential(mysqli $db, int $id, array $data, ?string $secret = null, bool &$preflightCleared = false): bool
+/**
+ * @param array{before: string|null, after: string|null} $trustChange out: the ESXi trust mode
+ *        before and after this save (null for a row that is not ESXi), for the audit and the flash
+ */
+function repo_update_credential(mysqli $db, int $id, array $data, ?string $secret = null, bool &$preflightCleared = false, array &$trustChange = ['before' => null, 'after' => null]): bool
 {
     $preflightCleared = false;
+    $trustChange = ['before' => null, 'after' => null];
     if ($id <= 0) {
         throw new InvalidArgumentException('Credential id is required.');
     }
@@ -214,11 +246,18 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
     if ($current === null) {
         throw new RuntimeException('Credential not found.');
     }
-    $values = credential_validate_payload($db, $data, $secret, false, $id);
-    $effectiveTrustMode = $values['type'] === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI
+    $storedPem = isset($current['esxi_certificate_pem']) ? (string) $current['esxi_certificate_pem'] : null;
+    $values = credential_validate_payload($db, $data, $secret, false, $id, $storedPem);
+    $beforeTrustMode = (string) ($current['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI
         ? credential_esxi_trust_mode($current)
-        : VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
-    credential_assert_strict_esxi_https($values, $effectiveTrustMode);
+        : null;
+    $trustMode = credential_esxi_trust_mode_after_save($values, $beforeTrustMode);
+    $trustChange = ['before' => $beforeTrustMode, 'after' => $trustMode];
+    credential_assert_strict_esxi_https($values, $trustMode ?? VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE);
+    // Only a real change of the mode is written. An unchanged mode is left to the
+    // row as it is now, so a save with a stale read cannot undo a concurrent activation.
+    $trustWriteInt = $trustMode !== null && $trustMode !== $beforeTrustMode ? 1 : 0;
+    $trustValue = $trustMode ?? VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
     $secretChanges = $secret !== null && trim($secret) !== '';
     $resetStrictTest = $secretChanges
         || (string) ($current['type'] ?? '') !== $values['type']
@@ -226,18 +265,20 @@ function repo_update_credential(mysqli $db, int $id, array $data, ?string $secre
         || (string) ($current['port'] ?? '') !== (string) ($values['port'] ?? '')
         || trim((string) ($current['username'] ?? '')) !== trim((string) $values['username'])
         || (string) ($current['esxi_cert_kind'] ?? '') !== (string) ($values['esxi_cert_kind'] ?? '')
-        || trim((string) ($current['esxi_certificate_pem'] ?? '')) !== trim((string) ($values['esxi_certificate_pem'] ?? ''));
+        || trim((string) ($current['esxi_certificate_pem'] ?? '')) !== trim((string) ($values['esxi_certificate_pem'] ?? ''))
+        // Choosing "none" leaves no strict proof behind, even when the stored certificate was already empty.
+        || ($values['esxi_cert_choice'] ?? null) === VIRTUSPHERE_ESXI_CERT_NONE;
     $resetStrictTestInt = $resetStrictTest ? 1 : 0;
 
     // A blank or whitespace-only secret means "keep the stored secret". Real
     // secrets are encrypted verbatim (no trim), so surrounding spaces survive.
     if ($secretChanges) {
         $ciphertext = crypto_encrypt_secret($secret);
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssissssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_trust_mode = IF(? = 1, ?, esxi_trust_mode), esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sssississsii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $trustWriteInt, $trustValue, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     } else {
-        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
-        $stmt->bind_param('sssisssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_trust_mode = IF(? = 1, ?, esxi_trust_mode), esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sssisisssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $trustWriteInt, $trustValue, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
     }
 
     return repo_transaction($db, static function () use ($db, $stmt, $id, $values, &$preflightCleared): bool {

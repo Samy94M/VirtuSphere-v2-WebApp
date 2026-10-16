@@ -114,6 +114,8 @@ return [
     'deploy_stagger_range' => 'Der Staffelabstand muss zwischen :min und :max Minuten liegen.',
     'esxi_certificate_invalid' => 'Das ESXi-Zertifikat ist kein gültiges PEM-Zertifikat bzw. CA-Bundle.',
     'esxi_strict_https' => 'Die strikte ESXi-Zertifikatsprüfung erfordert eine HTTPS-Host-URL.',
+    'esxi_certificate_missing' => 'Für diesen Zertifikatstyp ein Zertifikat einfügen oder „Ohne Zertifikatsprüfung“ wählen.',
+    'esxi_certificate_unexpected' => 'Bei „Ohne Zertifikatsprüfung“ wird kein Zertifikat gespeichert. Das Feld leeren oder einen Zertifikatstyp wählen.',
     // Bytes, nicht Zeichen: das Hash-Verfahren schneidet nach :max Bytes ab, und
     // ein Umlaut belegt zwei davon. Der Text sagt deshalb bewusst Bytes.
     'password_max_bytes' => 'Das Passwort darf höchstens :max Bytes lang sein. Umlaute und Emojis zählen mehrfach.',

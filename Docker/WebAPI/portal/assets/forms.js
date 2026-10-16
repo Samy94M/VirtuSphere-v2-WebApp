@@ -144,6 +144,42 @@
         }
     }
 
+    // The one downgrade of the credential editor: a strict ESXi row whose
+    // certificate type is switched to "none" stops verifying the host, so its
+    // Save button asks first. The question sits on the form (data-downgrade-confirm,
+    // rendered for strict rows only). The button carries data-confirm only while
+    // that choice is selected and loses the attribute otherwise: core.js matches
+    // any data-confirm, even an empty one, so a blank value must never be left behind.
+    function syncVerificationDowngrade(form) {
+        var question = (form.getAttribute('data-downgrade-confirm') || '').trim();
+        var submit = form.querySelector('button[type="submit"]');
+        var typeField = form.querySelector('select[name="type"]');
+        var certField = form.querySelector('select[name="esxi_cert_kind"]');
+        if (!submit || !typeField || !certField) {
+            return;
+        }
+        var downgrade = question !== ''
+            && typeField.value === 'esxi'
+            && certField.value === 'none';
+        if (downgrade) {
+            submit.setAttribute('data-confirm', question);
+        } else {
+            submit.removeAttribute('data-confirm');
+        }
+    }
+
+    // The certificate text means nothing while "No certificate verification" is
+    // chosen: the server removes the stored certificate then. The field is disabled,
+    // so it is visibly unused and not submitted, until a certificate type is chosen.
+    function syncCertificateText(form) {
+        var certField = form.querySelector('select[name="esxi_cert_kind"]');
+        var pemField = form.querySelector('textarea[name="esxi_certificate_pem"]');
+        if (!certField || !pemField) {
+            return;
+        }
+        pemField.disabled = certField.value === 'none';
+    }
+
     function initDynamicControls(root) {
         root.querySelectorAll('[data-mode-select]').forEach(function (select) {
             syncInterfaceMode(select);
@@ -239,6 +275,14 @@
     });
 
     document.addEventListener('change', function (event) {
+        var downgradeForm = event.target.form;
+        if (event.target.name === 'esxi_cert_kind' && downgradeForm) {
+            syncCertificateText(downgradeForm);
+        }
+        if (downgradeForm && downgradeForm.hasAttribute('data-downgrade-confirm')) {
+            syncVerificationDowngrade(downgradeForm);
+        }
+
         if (event.target.closest('[data-bulk-all]')) {
             var bulkForm = document.querySelector('[data-bulk-form]');
             if (bulkForm) {
@@ -332,4 +376,10 @@
     // Back/forward navigation restores checkbox state without change events, so
     // the counter and buttons must be derived from the DOM once at load.
     document.querySelectorAll('[data-bulk-form]').forEach(syncBulkForm);
+    document.querySelectorAll('select[name="esxi_cert_kind"]').forEach(function (select) {
+        if (select.form) {
+            syncCertificateText(select.form);
+        }
+    });
+    document.querySelectorAll('form[data-downgrade-confirm]').forEach(syncVerificationDowngrade);
 }());

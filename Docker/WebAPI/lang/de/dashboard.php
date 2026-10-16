@@ -12,7 +12,7 @@ return [
     'key_metrics' => 'Kennzahlen',
     'kpi_missions' => 'Missionen',
     'kpi_templates' => 'Vorlagen',
-    'kpi_vms' => 'VMs',
+    'kpi_vms' => 'VMs in Missionen',
     'kpi_mecm_pending' => 'MECM ausstehend',
     'kpi_vm_attention' => 'VM-Prüfung fällig',
     'kpi_system_status' => 'MECM-Systemstatus',

@@ -225,7 +225,7 @@ final class DeployCreateHistoricalFenceTest extends TestCase
 
     private function credentialPayload(string $host): array
     {
-        return ['type' => 'esxi', 'name' => $this->prefix . '_esxi', 'host' => $host, 'port' => 443, 'username' => 'repair-user'];
+        return ['type' => 'esxi', 'esxi_cert_kind' => VIRTUSPHERE_ESXI_CERT_NONE, 'name' => $this->prefix . '_esxi', 'host' => $host, 'port' => 443, 'username' => 'repair-user'];
     }
 
     private function history(string $status): array
