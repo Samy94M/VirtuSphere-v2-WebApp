@@ -384,6 +384,66 @@ final class PackageSyncTest extends TestCase
     }
 
     /**
+     * AV-R14 (15.10.2026): a version change is not a catalog loss. A sync that
+     * replaces all eight packages by their higher version retires the old rows,
+     * but no package is lost, so the brake must not reject it with 409.
+     */
+    public function testAMassVersionBumpIsNotRejected(): void
+    {
+        $oldNames = [];
+        $newNames = [];
+        for ($i = 1; $i <= 8; $i++) {
+            $oldNames[] = self::PREFIX . 'Bulk' . $i . '-1.0';
+            $newNames[] = self::PREFIX . 'Bulk' . $i . '-2.0';
+        }
+        [$status, $body] = $this->post($this->payload($oldNames));
+        self::assertSame(200, $status, $body);
+
+        [$status, $body] = $this->post($this->payload($newNames));
+        self::assertSame(200, $status, $body);
+
+        foreach ($oldNames as $name) {
+            $row = $this->packageRow($name);
+            self::assertNotNull($row, $name);
+            self::assertSame('Retired', $row['package_status'], $name . ' is replaced by its higher version');
+        }
+        foreach ($newNames as $name) {
+            $row = $this->packageRow($name);
+            self::assertNotNull($row, $name);
+            self::assertNotSame('Retired', $row['package_status'], $name . ' is the active successor');
+        }
+    }
+
+    /**
+     * AV-R14 counter-case: a name replaced only by a LOWER version is a real
+     * retirement. Seven packages on 2.0 that come back as 1.0 must still trip the
+     * brake, so the version rule cannot be used to slip a catalog loss through.
+     */
+    public function testAVersionReplacedOnlyByALowerOneStillCounts(): void
+    {
+        $highNames = [];
+        for ($i = 1; $i <= 8; $i++) {
+            $highNames[] = self::PREFIX . 'Bulk' . $i . '-2.0';
+        }
+        [$status, $body] = $this->post($this->payload($highNames));
+        self::assertSame(200, $status, $body);
+
+        // Bulk1 keeps its 2.0; Bulk2 to Bulk8 come back as LOWER 1.0 versions.
+        $payloadNames = [self::PREFIX . 'Bulk1-2.0'];
+        for ($i = 2; $i <= 8; $i++) {
+            $payloadNames[] = self::PREFIX . 'Bulk' . $i . '-1.0';
+        }
+        [$status, $body] = $this->post($this->payload($payloadNames));
+        self::assertSame(409, $status, $body);
+
+        foreach ($highNames as $name) {
+            $row = $this->packageRow($name);
+            self::assertNotNull($row, $name);
+            self::assertNotSame('Retired', $row['package_status'], $name . ' must stay active after the rejected sync');
+        }
+    }
+
+    /**
      * Payload always includes all pre-existing active names so this test can
      * never retire real catalog data.
      */

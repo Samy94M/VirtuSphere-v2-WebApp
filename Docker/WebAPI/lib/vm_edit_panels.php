@@ -367,6 +367,12 @@ declare(strict_types=1);
                 <p class="alert alert-warning"><?php echo h(__t('vm_edit.package_retired_selected', ['name' => (string) ($package['package_name'] ?? '')])); ?></p>
             <?php }
             } ?>
+            <?php
+            // AV-R10: two versions of one package may be ticked. MECM installs each
+            // ticked one, so the editor says it before a transfer.
+            foreach (catalog_selected_version_groups($packages, $selectedPackages) as $basename => $names) { ?>
+                <p class="alert alert-warning"><?php echo h(__t('vm_edit.package_versions_duplicate', ['basename' => (string) $basename, 'names' => implode(', ', $names)])); ?></p>
+            <?php } ?>
             <div class="checkbox-grid">
                 <?php foreach ($packages as $package) {
                     $packageId = (int) $package['id'];

@@ -45,7 +45,8 @@ function catalog_retire_missing(mysqli $db, string $table, string $nameColumn, s
 
 // Threshold brake: refuse mass retirement (partial WMI reads, wrong folder)
 // BEFORE any write. Loud on purpose - the sync loop retries visibly instead
-// of silently emptying the catalog.
+// of silently emptying the catalog. AV-R14: a package name that the same payload
+// replaces with a strictly higher version is a version change and is not counted.
 function packages_retire_guard(mysqli $db, string $table, string $nameColumn, string $statusColumn, array $keepNames, string $clientIp): void
 {
     $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
@@ -60,7 +61,15 @@ function packages_retire_guard(mysqli $db, string $table, string $nameColumn, st
         $placeholders = implode(',', array_fill(0, count($keepNames), '?'));
         $types = 's' . str_repeat('s', count($keepNames));
         $params = array_merge([$retired], $keepNames);
-        $wouldRetire = (int) repo_scalar($db, "SELECT COUNT(*) FROM {$table} WHERE {$statusColumn} <> ? AND {$nameColumn} NOT IN ({$placeholders})", $types, $params);
+        $stmt = $db->prepare("SELECT {$nameColumn} FROM {$table} WHERE {$statusColumn} <> ? AND {$nameColumn} NOT IN ({$placeholders})");
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $names = array_map(static fn (array $row): string => (string) $row[$nameColumn], repo_fetch_all($stmt->get_result()));
+        $wouldRetire = count($names);
+        if ($table === 'deploy_packages') {
+            // AV-R14: a name the same sync replaces with a higher version of its package is no loss.
+            $wouldRetire -= count(catalog_names_replaced_by_higher_version($names, $keepNames));
+        }
     }
 
     $threshold = (int) repo_setting_value($db, VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD, (string) VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT);

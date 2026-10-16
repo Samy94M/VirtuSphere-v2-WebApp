@@ -784,8 +784,10 @@ fallen.
 Portal → Einstellungen → Tab „Kataloge und Inventar") der aktiven Pakete zurückziehen (typisch bei
 WMI-Lesefehlern oder falschem Collections-Ordner), wird er mit HTTP 409
 abgelehnt und im Log vermerkt. Der Sync wiederholt sich dann sichtbar, statt
-still den Katalog zu leeren. Task Sequences (`deploy_os`) haben denselben
-Schutz. Der Betriebssystem-Katalog wird wie die Paketliste ausschließlich aus
+still den Katalog zu leeren. Ein Versionswechsel zählt nicht mit (AV-R14):
+Verschwindet eine Paketversion, weil derselbe Sync eine höhere Version desselben
+Basisnamens meldet, ist das kein Katalogausfall. Task Sequences (`deploy_os`)
+haben denselben Schutz, aber ohne diese Ausnahme. Der Betriebssystem-Katalog wird wie die Paketliste ausschließlich aus
 MECM gespeist; die Portalseite „Betriebssysteme" bietet nur Anzeige und ein
 Admin-Löschen als self-healende Aufräum-Aktion (existiert die Task Sequence noch
 in MECM, legt der nächste Sync den Eintrag wieder an), aber kein Anlegen oder
