@@ -1260,7 +1260,8 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Fall | Verhalten | Log |
 |---|---|---|
 | 0 Devices von der WebApp | Leerlauf-Abkürzung, keine MECM-Abfragen | still |
-| VM ohne Mission / ohne DHCP-MAC | übersprungen, nächste VM | WARN |
+| Gesperrte VM (dauerhafte Ursache: Mission, MAC, Identität, Collection, Provenienz) | bleibt in der Warteschlange; neu geprüft nur bei geänderter Portalzeile oder alle 5 Minuten, ist keine VM fällig, unterbleibt die MECM-Inventur. Die Ursache bleibt im Lauf-Report | ERROR nur beim Wechsel des Sperrgrunds; unverändert INFO „Weiterhin gesperrt" im 5-Minuten-Takt |
+| VM ohne Mission / ohne PXE-MAC (keine Karte mit MAC auf der WDS-Portgruppe der Mission) | übersprungen, nächste VM; Ursache `mac_missing` | WARN |
 | Rolloutname ungültig (`device_name_invalid`) | kein Import; im VM-Editor korrigieren | ERROR |
 | Name mit fremder MAC oder MAC mit fremdem Namen (`mac_conflict`) | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „Identitaet nicht aufloesbar" |
 | Gebundene ResourceID fehlt in MECM (`resource_id_missing`) | blockiert; kein Ersatzdatensatz wird adoptiert. „MECM-ID zurücksetzen" | ERROR |
@@ -1270,7 +1271,7 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Abweichender **Anzeigename** bei gültiger ResourceID und MAC | **kein Befund**: Windows/Discovery darf umbenennen; kein Reimport, kein Rename, keine Warnung | DEBUG |
 | Rückmeldung mit veralteter Rolloutrevision (`stale_rollout_revision`, HTTP 409) | Portal weist ab; der nächste Scan läuft mit der aktuellen Revision durch | WARN |
 | Import-Race (paralleler Scan) | toleriert; nach dem Import werden Name UND MAC erneut eindeutig gelesen, kein Fehlertext-Parsing und kein `-MergeIfExist` | still |
-| Mehrere DHCP-Interfaces an einer VM | erste MAC wird genutzt | WARN |
+| Mehrere Netzwerkkarten auf der WDS-Portgruppe einer VM (`pxe_nic_ambiguous`) | übersprungen; genau eine Karte muss der Portgruppe zugeordnet sein (Portalregel) | WARN |
 | ResourceID fehlt noch (Import noch nicht sichtbar) | Retry im nächsten Scan | WARN |
 | Ziel-Collection existiert nicht | Zuweisung übersprungen; VM **bleibt in der Warteschlange** | WARN + ERROR-Zusammenfassung |
 | Zuweisung zu einer Collection scheitert | dito: VM bleibt in der Warteschlange | ERROR |
@@ -1461,7 +1462,8 @@ Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
 1. *Systemstatus* prüfen: läuft „MECM Device-Sync"? Wenn rot → Aufgabenplanung
    auf dem MECM-Server, Task „VirtuSphere MECM Devices Sync" starten.
 2. Hat die VM eine MAC? Im Portal an der VM prüfen; ohne DHCP-MAC überspringt
-   der Sync sie (der Ansible-MAC-Import muss vorher gelaufen sein).
+   der Sync sie (der Ansible-MAC-Import muss vorher gelaufen sein). Maßgeblich
+   ist die Netzwerkkarte auf der WDS-Portgruppe der Mission, nicht die DHCP-Karte.
 3. Gehört die VM zu einer Mission (nicht Template)? Templates werden bewusst
    nicht synchronisiert.
 4. Log auf dem MECM-Server: `%ProgramFiles%\VirtuSphere\Logs\<datum>_device-sync.log`.

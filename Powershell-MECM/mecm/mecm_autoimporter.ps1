@@ -794,15 +794,23 @@ while ($true) {
             }
         }
     } catch {
-        $detail = Get-VsErrorDetail -ErrorRecord $_
-        Write-VsLog -Level ERROR -Message ("Scan-Fehler: {0}" -f $detail)
-        # MECM-Init, zentrale Abfrage oder ein abgebrochener Scan.
-        $outcome = 'fail'
-        $category = 'mecm_unavailable'
-        $siteCode = $null
-        $providerMachine = $null
+        # Ein Paket, das sich waehrend des Scans aendert oder gesperrt ist, ist ein
+        # Quellzustand (source_changing): Warnung, Verbindung bleibt bestehen, keine
+        # Pause. Alles andere ist MECM-Init, zentrale Abfrage oder ein abgebrochener Scan.
+        $category = Get-VsSyncFailureCategory -Phase 'scan' -ErrorRecord $_
+        # Der Rohtext bleibt im lokalen Log; die Portalseite bekommt Kategorie und Kuerzung.
+        $detail = Get-VsRunFailureDetail -Category $category -ErrorRecord $_
         $lastFilesStamp = ''
-        $sleepSeconds = 60
+        if ($category -eq 'source_changing') {
+            Write-VsLog -Level WARN -Message ("Paketquelle waehrend des Scans geaendert - naechster Lauf prueft erneut: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+            $outcome = 'warning'
+        } else {
+            Write-VsLog -Level ERROR -Message ("Scan-Fehler: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+            $outcome = 'fail'
+            $siteCode = $null
+            $providerMachine = $null
+            $sleepSeconds = 60
+        }
     } finally {
         # Genau EINE Abschlussmeldung pro Iteration, auch bei continue/throw.
         $durationMs = Get-VsRunDurationMilliseconds -StartedAt $cycleStart

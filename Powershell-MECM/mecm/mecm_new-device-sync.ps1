@@ -1,8 +1,8 @@
 #Requires -Version 5.1
 # ============================================================================
 # mecm_new-device-sync.ps1 - synchronisiert VMs aus der VirtuSphere-Datenbank
-# nach MECM: importiert Geraete, approved sie, weist OS-/Paket-/Mission-
-# Collections zu und meldet die ResourceID zurueck.
+# nach MECM: importiert Geraete, weist OS-/Paket-/Mission-Collections zu und
+# meldet die ResourceID zurueck.
 # Laeuft als geplante Aufgabe "VirtuSphere MECM Devices Sync".
 #
 # Haertung/Optimierung gegenueber V2:
@@ -125,6 +125,253 @@ function Get-VsStaleOwnedDisposition {
     return 'defer_until_restored'
 }
 
+# --- Gesperrte VMs (AV-F16) ----------------------------------------------------
+#
+# Eine dauerhaft gesperrte VM bleibt in der Warteschlange. Ohne Bremse lief jeder
+# 10-Sekunden-Lauf die volle MECM-Inventur und schrieb je VM eine ERROR-Zeile
+# (rund 8600 pro Tag und VM). Jetzt wird eine gesperrte VM nur neu geprueft, wenn
+# sich ihre getDeviceList-Zeile aendert oder seit der letzten Pruefung
+# $script:VsDeviceRecheckSeconds vergangen sind. Ist keine VM faellig, unterbleibt
+# die MECM-Inventur ganz; die Ursachen gesperrter VMs kommen dann aus dem
+# gespeicherten Zustand in den Lauf-Report, damit die Ampel gelb bleibt.
+#
+# Gebremst werden nur Sperren mit dauerhafter Ursache (Liste unten). Voruebergehende
+# Zustaende (ResourceID steht aus, Providerfehler, Journal-Quittung offen) laufen
+# wie bisher bei jedem Lauf weiter. Der Zustand liegt neben dem Membership-Journal.
+$script:VsDeviceRecheckSeconds = 300
+$script:VsDeviceBlockStateSchema = 1
+$script:VsDeviceGatedCauses = @(
+    'mission_missing', 'mac_missing', 'pxe_nic_ambiguous', 'mac_conflict', 'device_name_invalid',
+    'device_identity_ambiguous', 'previous_resource_present', 'resource_id_missing',
+    'resource_mac_conflict', 'collection_missing', 'membership_identity_ambiguous',
+    'membership_provenance_invalid'
+)
+$script:VsPendingDevice = $null
+$script:VsDeviceLogBuffer = $null
+
+# SHA-256 ueber die getDeviceList-Zeile einer VM. Aendert sich die Zeile, ist die
+# VM wieder faellig, auch wenn ihre Sperre nicht abgelaufen ist.
+function Get-VsDeviceFingerprint {
+    param([Parameter(Mandatory)]$Device)
+    $json = $Device | ConvertTo-Json -Depth 8 -Compress
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json))) -replace '-', '') } finally { $sha.Dispose() }
+}
+
+# Ist eine VM in diesem Lauf faellig? Rein: ohne Ein- und Ausgabe.
+function Test-VsDeviceBlockDue {
+    param(
+        $Record,
+        [Parameter(Mandatory)][string]$Fingerprint,
+        [Parameter(Mandatory)][datetime]$Now,
+        [int]$RecheckSeconds = 300
+    )
+    if ($null -eq $Record) { return [pscustomobject]@{ Due = $true; Reason = 'new' } }
+    if ([string]$Record.fingerprint -cne $Fingerprint) { return [pscustomobject]@{ Due = $true; Reason = 'changed' } }
+    $elapsed = ($Now - [datetime]$Record.checked_at).TotalSeconds
+    if ($elapsed -ge $RecheckSeconds -or $elapsed -lt 0) { return [pscustomobject]@{ Due = $true; Reason = 'timer' } }
+    return [pscustomobject]@{ Due = $false; Reason = 'held' }
+}
+
+# Liest den Sperrzustand (VM-Id -> Record). Fehlt die Datei, ist der Zustand leer.
+# Eine unlesbare oder fremde Datei wird verworfen; dann prueft der naechste Lauf
+# jede VM einmal vollstaendig.
+function Read-VsDeviceBlockState {
+    param([Parameter(Mandatory)][string]$Path)
+    $states = @{}
+    $readFailed = $false
+    if (Test-Path -LiteralPath $Path) {
+        try {
+            $document = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+            if ([int]$document.schema -ne $script:VsDeviceBlockStateSchema) { throw 'Schema der Sperrdatei passt nicht.' }
+            if ($null -ne $document.devices) {
+                foreach ($property in @($document.devices.PSObject.Properties)) { $states[[string]$property.Name] = $property.Value }
+            }
+        } catch {
+            $readFailed = $true
+            $states = @{}
+        }
+    }
+    return [pscustomobject]@{ States = $states; ReadFailed = $readFailed }
+}
+
+# Schreibt den Sperrzustand atomar (Temp-Datei, dann Ersetzen). $false, wenn das
+# nicht gelang; der Lauf arbeitet dann mit dem Stand im Speicher weiter.
+function Write-VsDeviceBlockState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][hashtable]$States
+    )
+    $saved = $false
+    $temp = Join-Path (Split-Path -Parent $Path) ('.device-block-state-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $json = ConvertTo-Json -InputObject ([ordered]@{ schema = $script:VsDeviceBlockStateSchema; devices = $States }) -Depth 8
+        [IO.File]::WriteAllText($temp, $json, (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $temp -Destination $Path -Force -ErrorAction Stop
+        $saved = $true
+    } catch {
+        $saved = $false
+    } finally {
+        if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+    }
+    return $saved
+}
+
+# Die PXE-Karte einer VM ist die eine Netzwerkkarte auf der WDS-Portgruppe der
+# Mission. Dieselbe Regel wie im Portal (ansible_vm_needs_mac, db_importMAC.php):
+# exakter, case-sensitiver Vergleich. Genau eine Karte liefert die Import-MAC;
+# keine oder mehrere sind eine Sperre mit eigener Ursache.
+function Get-VsPxeImportMac {
+    param([Parameter(Mandatory)]$Device)
+    $wdsVlan = if ($Device.mission) { [string]$Device.mission.wds_vlan } else { '' }
+    $pxeNics = @()
+    if (-not [string]::IsNullOrWhiteSpace($wdsVlan)) {
+        $pxeNics = @($Device.interfaces | Where-Object { [string]$_.vlan -ceq $wdsVlan })
+    }
+    if ($pxeNics.Count -eq 1) {
+        $mac = ConvertTo-VsNormalizedMac ([string]$pxeNics[0].mac)
+        if ($mac) { return [pscustomobject]@{ Mac = $mac; Cause = '' } }
+        return [pscustomobject]@{ Mac = $null; Cause = 'mac_missing' }
+    }
+    if ($pxeNics.Count -gt 1) { return [pscustomobject]@{ Mac = $null; Cause = 'pxe_nic_ambiguous' } }
+    return [pscustomobject]@{ Mac = $null; Cause = 'mac_missing' }
+}
+
+# AV-F03: Eine Collection-ID, die der Collection-Cache dieses Scans nicht kennt,
+# existiert in MECM nicht mehr. Ihre Regel gilt dann als nicht vorhanden, ohne
+# Providerabfrage: ein Providerfehler dort wuerde die VM sonst dauerhaft festhalten.
+function Get-VsKnownCollectionMembershipState {
+    param(
+        [Parameter(Mandatory)][string]$CollectionId,
+        [Parameter(Mandatory)]$ResourceId,
+        [Parameter(Mandatory)][System.Collections.Generic.HashSet[string]]$KnownCollectionIds
+    )
+    if (-not $KnownCollectionIds.Contains($CollectionId)) {
+        return [pscustomobject]@{ State = 'absent'; Rule = $null }
+    }
+    return Get-VsDirectMembershipState -CollectionId $CollectionId -ResourceId $ResourceId
+}
+
+# PS-23: Das Nachlesen nach einem Import laeuft mit -ErrorAction Stop. Ein
+# Providerfehler wirft bis in den aeusseren Catch (mecm_unavailable); er darf nicht
+# als leerer Bestand ("noch nicht sichtbar") durchschlagen.
+function Get-VsPostImportIdentity {
+    param(
+        [Parameter(Mandatory)][string]$RolloutName,
+        [Parameter(Mandatory)][string]$Mac
+    )
+    $fresh = New-VsMecmDeviceIndex -Devices @(Get-CMDevice -Name $RolloutName -Fast -ErrorAction Stop | Select-Object Name, MACAddress, ResourceID)
+    return (Resolve-VsDeviceIdentity -Index $fresh -RolloutHostname $RolloutName -Mac $Mac)
+}
+
+# Schreibt eine Zeile der VM-Verarbeitung. Bei einer bekannten gesperrten VM sammelt
+# der Puffer die Zeilen, bis Complete-VsPendingDeviceBlock entscheidet, ob sie
+# gebraucht werden (Zustandswechsel) oder schweigen (unveraenderte Sperre).
+function Write-VsDeviceLog {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [ValidateSet('DEBUG', 'INFO', 'WARN', 'ERROR')][string]$Level = 'INFO',
+        [string]$Context = '-'
+    )
+    if ($null -ne $script:VsDeviceLogBuffer) {
+        $script:VsDeviceLogBuffer.Add([pscustomobject]@{ Message = $Message; Level = $Level; Context = $Context })
+        return
+    }
+    Write-VsLog -Message $Message -Level $Level -Context $Context
+}
+
+# Uebernimmt die gespeicherte Sperre einer nicht faelligen VM in den Lauf: dieselben
+# Ursachen und Zaehler wie beim letzten Durchgang, damit der Report gelb bleibt.
+function Add-VsReplayedDeviceBlock {
+    param(
+        [Parameter(Mandatory)]$Record,
+        [Parameter(Mandatory)]$Causes
+    )
+    foreach ($cause in @($Record.causes)) { $Causes.Add([string]$cause) }
+    return [pscustomobject]@{ ItemFailures = [int]$Record.item_failures; DataWarnings = [int]$Record.data_failures }
+}
+
+# Schliesst die zuletzt verarbeitete VM ab. Aus den Ursachen und Zaehlern dieses
+# Durchgangs entsteht ihr neuer Sperrzustand, nur bei dauerhaften Ursachen.
+#  - Unveraenderte Sperre: Pufferzeilen verwerfen; INFO nur beim Fristablauf.
+#  - Neue oder geaenderte Sperre: Pufferzeilen schreiben (ERROR/WARN wie bisher).
+#  - Aufgehobene Sperre: Pufferzeilen schreiben und einmal INFO.
+# -Abort schreibt nur den Puffer (Lauf bricht mitten in der VM ab, Zustand bleibt).
+function Complete-VsPendingDeviceBlock {
+    param(
+        [Parameter(Mandatory)]$Causes,
+        [int]$ItemFailures = 0,
+        [int]$DataWarnings = 0,
+        [Parameter(Mandatory)][hashtable]$BlockStates,
+        [Parameter(Mandatory)][string]$StatePath,
+        [switch]$Abort
+    )
+    $pending = $script:VsPendingDevice
+    $buffer = $script:VsDeviceLogBuffer
+    $script:VsPendingDevice = $null
+    $script:VsDeviceLogBuffer = $null
+    if ($null -eq $pending) { return }
+
+    if ($Abort) {
+        if ($null -ne $buffer) {
+            foreach ($line in $buffer) { Write-VsLog -Level $line.Level -Message $line.Message -Context $line.Context }
+        }
+        return
+    }
+
+    $newCauses = @()
+    for ($index = [int]$pending.CauseStart; $index -lt $Causes.Count; $index++) { $newCauses += [string]$Causes[$index] }
+    $gated = $newCauses.Count -gt 0
+    foreach ($cause in $newCauses) {
+        if ($script:VsDeviceGatedCauses -notcontains ([string]$cause).Split(' ')[0]) { $gated = $false }
+    }
+    $signature = if ($gated) { (@($newCauses | Sort-Object) -join '|') } else { '' }
+    $previousSignature = [string]$pending.PreviousSignature
+    $unchanged = $gated -and ($signature -ceq $previousSignature)
+    $nowText = (Get-Date).ToString('o')
+
+    if (-not $unchanged -and $null -ne $buffer) {
+        foreach ($line in $buffer) { Write-VsLog -Level $line.Level -Message $line.Message -Context $line.Context }
+    }
+
+    $key = [string]$pending.Id
+    if ($gated) {
+        if ($unchanged -and [string]$pending.Reason -eq 'timer') {
+            Write-VsLog -Context ([string]$pending.Name) -Message ('Weiterhin gesperrt, Ursache unveraendert: {0}' -f $signature)
+        }
+        $since = if ($unchanged -and [string]$pending.PreviousSince -ne '') { [string]$pending.PreviousSince } else { $nowText }
+        $BlockStates[$key] = [ordered]@{
+            fingerprint   = [string]$pending.Fingerprint
+            checked_at    = $nowText
+            since         = $since
+            signature     = $signature
+            name          = [string]$pending.Name
+            causes        = @($newCauses)
+            item_failures = [int]($ItemFailures - [int]$pending.ItemStart)
+            data_failures = [int]($DataWarnings - [int]$pending.DataStart)
+        }
+    } else {
+        if ($BlockStates.ContainsKey($key)) { $BlockStates.Remove($key) }
+        if ($previousSignature -ne '') {
+            Write-VsLog -Context ([string]$pending.Name) -Message 'Sperrgrund entfallen - die VM wird wieder regulaer geprueft.'
+        }
+    }
+
+    if ($gated -or $previousSignature -ne '') {
+        if (-not (Write-VsDeviceBlockState -Path $StatePath -States $BlockStates)) {
+            Write-VsLog -Level WARN -Message 'Sperrzustand konnte nicht gespeichert werden; der naechste Lauf prueft die Sperre erneut.'
+        }
+    }
+}
+
+# Sperrzustand beim Start einlesen (Datei liegt neben dem Membership-Journal).
+$deviceBlockStatePath = Join-Path $PSScriptRoot 'device-block-state.json'
+$deviceBlockStateRead = Read-VsDeviceBlockState -Path $deviceBlockStatePath
+$deviceBlockStates = $deviceBlockStateRead.States
+if ($deviceBlockStateRead.ReadFailed) {
+    Write-VsLog -Level WARN -Message 'Sperrzustand ist nicht lesbar - jede VM wird in diesem Lauf vollstaendig geprueft.'
+}
+
 while ($true) {
     $loop++
     $scanStart = Get-Date
@@ -133,9 +380,10 @@ while ($true) {
     $runId = New-VsRunId
     Send-VsRunReport -Config $config -Source 'device-sync' -RunEvent 'started' -RunId $runId -IntervalSeconds $intervalSeconds -ScriptVersion $SCRIPT_VERSION
 
-    # Phase entscheidet die Fehlerkategorie: bricht der Geraetelisten-Abruf, ist
-    # das Portal weg (portal_unreachable); bricht danach etwas, ist es MECM
-    # (mecm_unavailable).
+    # Phase entscheidet die Fehlerkategorie (Get-VsSyncFailureCategory): bricht der
+    # Geraetelisten-Abruf, hat das Portal entweder mit Status geantwortet
+    # (portal_rejected) oder gar nicht (portal_unreachable). Die Journal-Phase meldet
+    # journal_blocked, alles danach ist MECM (mecm_unavailable).
     $phase = 'portal'
     $outcome = 'ok'
     $category = $null
@@ -162,9 +410,41 @@ while ($true) {
         $received = $devices.Count
         $phase = 'mecm'
 
+        # Gesperrte VMs: wer ist in diesem Lauf faellig? (AV-F16) Ist keine faellig,
+        # bleibt die MECM-Inventur aus. Zustaende entfernter VMs fallen weg.
+        $deviceBlockNow = Get-Date
+        $dueByDevice = @{}
+        $fingerprintByDevice = @{}
+        $queuedDeviceIds = @{}
+        $anyDeviceDue = $false
+        foreach ($queuedDevice in $devices) {
+            $queuedKey = [string]$queuedDevice.id
+            $queuedFingerprint = Get-VsDeviceFingerprint -Device $queuedDevice
+            $fingerprintByDevice[$queuedKey] = $queuedFingerprint
+            $queuedDecision = Test-VsDeviceBlockDue -Record $deviceBlockStates[$queuedKey] -Fingerprint $queuedFingerprint -Now $deviceBlockNow -RecheckSeconds $script:VsDeviceRecheckSeconds
+            $dueByDevice[$queuedKey] = $queuedDecision
+            $queuedDeviceIds[$queuedKey] = $true
+            if ($queuedDecision.Due) { $anyDeviceDue = $true }
+        }
+        $staleBlockKeys = @($deviceBlockStates.Keys | Where-Object { -not $queuedDeviceIds.ContainsKey([string]$_) })
+        if ($staleBlockKeys.Count -gt 0) {
+            foreach ($staleKey in $staleBlockKeys) { $deviceBlockStates.Remove($staleKey) }
+            if (-not (Write-VsDeviceBlockState -Path $deviceBlockStatePath -States $deviceBlockStates)) {
+                Write-VsLog -Level WARN -Message 'Sperrzustand konnte nicht gespeichert werden; der naechste Lauf prueft die Sperre erneut.'
+            }
+        }
+
         if ($devices.Count -eq 0) {
             # Leerlauf-Abkuerzung: keine MECM-Vollabfragen ausloesen. Ein leerer
             # Scan ist ein gelungener Lauf (outcome bleibt ok).
+        } elseif (-not $anyDeviceDue) {
+            # Keine VM ist faellig: keine MECM-Inventur, nur die Ursachen der
+            # gesperrten VMs aus dem Zustand in den Lauf-Report uebernehmen.
+            foreach ($device in $devices) {
+                $replayed = Add-VsReplayedDeviceBlock -Record $deviceBlockStates[[string]$device.id] -Causes $causes
+                $itemFailures += $replayed.ItemFailures
+                $dataWarnings += $replayed.DataWarnings
+            }
         } else {
             if (-not $siteCode) {
                 $siteCode = Initialize-VsCmSite -Config $config
@@ -194,7 +474,11 @@ while ($true) {
             $taskSequences = @(Get-CMTaskSequence -Fast -ErrorAction Stop | Select-Object -ExpandProperty Name)
             $collectionCache = [System.Collections.Generic.Dictionary[string,object]]::new([System.StringComparer]::Ordinal)
             $ambiguousCollectionNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            # Jede ID, die MECM heute kennt - auch die mehrdeutiger Namen. Eine
+            # Owned-ID ausserhalb dieser Menge ist nicht vorhanden (AV-F03).
+            $knownCollectionIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
             foreach ($c in @(Get-CMDeviceCollection -ErrorAction Stop | Select-Object Name, CollectionID)) {
+                if ($c.CollectionID) { [void]$knownCollectionIds.Add([string]$c.CollectionID) }
                 if (-not $c.Name) { continue }
                 $collectionName = [string]$c.Name
                 if ($collectionCache.ContainsKey($collectionName)) {
@@ -237,6 +521,40 @@ while ($true) {
             }
 
             foreach ($device in $devices) {
+                # Die vorige VM abschliessen, dann: gesperrt und nicht faellig -> nur
+                # die gespeicherten Ursachen uebernehmen (AV-F16).
+                Complete-VsPendingDeviceBlock -Causes $causes -ItemFailures $itemFailures -DataWarnings $dataWarnings -BlockStates $deviceBlockStates -StatePath $deviceBlockStatePath
+                $deviceBlockKey = [string]$device.id
+                $deviceDecision = $dueByDevice[$deviceBlockKey]
+                if (-not $deviceDecision.Due) {
+                    $replayed = Add-VsReplayedDeviceBlock -Record $deviceBlockStates[$deviceBlockKey] -Causes $causes
+                    $itemFailures += $replayed.ItemFailures
+                    $dataWarnings += $replayed.DataWarnings
+                    continue
+                }
+                # Diese VM ist faellig: ihr Durchgang sammelt Ursachen und Zaehler, und
+                # ihre Zeilen gehen in den Puffer, wenn sie schon gesperrt war.
+                $previousBlockRecord = $deviceBlockStates[$deviceBlockKey]
+                $previousBlockSignature = ''
+                $previousBlockSince = ''
+                if ($null -ne $previousBlockRecord) {
+                    $previousBlockSignature = [string]$previousBlockRecord.signature
+                    $previousBlockSince = [string]$previousBlockRecord.since
+                }
+                $script:VsPendingDevice = @{
+                    Id                = $deviceBlockKey
+                    Name              = [string]$device.vm_name
+                    Fingerprint       = [string]$fingerprintByDevice[$deviceBlockKey]
+                    Reason            = [string]$deviceDecision.Reason
+                    PreviousSignature = $previousBlockSignature
+                    PreviousSince     = $previousBlockSince
+                    CauseStart        = $causes.Count
+                    ItemStart         = $itemFailures
+                    DataStart         = $dataWarnings
+                }
+                $script:VsDeviceLogBuffer = $null
+                if ($previousBlockSignature -ne '') { $script:VsDeviceLogBuffer = New-Object System.Collections.Generic.List[object] }
+
                 # $deviceName ist der ESXi-/Portalname und dient AUSSCHLIESSLICH
                 # der Protokollierung: er benennt die Zeile, die der Operator im
                 # Portal sucht. Was MECM als Geraetenamen bekommt, ist seit
@@ -255,12 +573,10 @@ while ($true) {
                 $deviceOS = [string]$device.vm_os
                 $missionName = if ($device.mission) { [string]$device.mission.mission_name } else { '' }
 
-                # DHCP-MAC ermitteln (PXE-NIC)
-                $dhcpMacs = @($device.interfaces | Where-Object { $_.mode -eq 'DHCP' } | Select-Object -ExpandProperty mac)
-                if ($dhcpMacs.Count -gt 1) {
-                    Write-VsLog -Level WARN -Context $deviceName -Message ("Mehrere DHCP-Interfaces ({0}) - nutze die erste MAC. Falls PXE ueber eine andere NIC laeuft, Interfaces im Portal pruefen." -f $dhcpMacs.Count)
-                }
-                $deviceMac = if ($dhcpMacs.Count -gt 0) { ConvertTo-VsNormalizedMac $dhcpMacs[0] } else { $null }
+                # PXE-MAC: die eine Netzwerkkarte auf der WDS-Portgruppe der Mission
+                # (Regel wie im Portal). Keine oder mehrere Karten sind eine Sperre.
+                $pxeImport = Get-VsPxeImportMac -Device $device
+                $deviceMac = $pxeImport.Mac
                 # Alle MACs, die das Portal fuer diese VM kennt (getDeviceList
                 # liefert jedes Interface mit MAC). Sie gelten nur fuer die
                 # Pruefung einer GEBUNDENEN ResourceID (MECM-ID1); Import und
@@ -268,15 +584,20 @@ while ($true) {
                 $knownMacs = @($device.interfaces | Select-Object -ExpandProperty mac -ErrorAction SilentlyContinue)
 
                 if ([string]::IsNullOrWhiteSpace($missionName)) {
-                    Write-VsLog -Level WARN -Context $deviceName -Message ("Mission fehlt (Id {0}) - Device uebersprungen." -f $device.mission_id)
+                    Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Mission fehlt (Id {0}) - Device uebersprungen." -f $device.mission_id)
                     $dataWarnings++
                     Add-VsRunCause -Causes $causes -Cause 'mission_missing' -Target $deviceName
                     continue
                 }
                 if (-not $deviceMac) {
-                    Write-VsLog -Level WARN -Context $deviceName -Message 'Keine MAC-Adresse - Device uebersprungen.'
+                    if ($pxeImport.Cause -eq 'pxe_nic_ambiguous') {
+                        Write-VsDeviceLog -Level WARN -Context $deviceName -Message 'Mehrere Netzwerkkarten auf der WDS-Portgruppe - genau eine muss zugeordnet sein. Device uebersprungen.'
+                        Add-VsRunCause -Causes $causes -Cause 'pxe_nic_ambiguous' -Target $deviceName
+                    } else {
+                        Write-VsDeviceLog -Level WARN -Context $deviceName -Message 'Keine PXE-MAC (keine Netzwerkkarte mit MAC auf der WDS-Portgruppe der Mission) - Device uebersprungen.'
+                        Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target $deviceName
+                    }
                     $dataWarnings++
-                    Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target $deviceName
                     continue
                 }
 
@@ -290,7 +611,7 @@ while ($true) {
                             Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Target $deviceName -Collection $missionName
                         }
                     } catch {
-                        Write-VsLog -Level WARN -Context $missionName -Message ("Mission-Collection fehlgeschlagen: {0}" -f $_.Exception.Message)
+                        Write-VsDeviceLog -Level WARN -Context $missionName -Message ("Mission-Collection fehlgeschlagen: {0}" -f $_.Exception.Message)
                         $dataWarnings++
                         Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $deviceName -Collection $missionName
                     }
@@ -310,7 +631,7 @@ while ($true) {
                     # mutation ein: eine Collection-Zuweisung an den falschen
                     # ResourceID-Datensatz ist nicht zurueckzunehmen, ohne dass
                     # jemand weiss, dass sie passiert ist.
-                    Write-VsLog -Level ERROR -Context $deviceName -Message ("Identitaet nicht aufloesbar ({0}): Rolloutname '{1}', MAC {2}, Portal-MACs '{5}', gebundene ResourceID '{3}', Vorgaenger '{4}' - Device bleibt in der Warteschlange." -f $identity.Cause, $rolloutName, $deviceMac, $boundResourceId, $previousResourceId, ($knownMacs -join ','))
+                    Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Identitaet nicht aufloesbar ({0}): Rolloutname '{1}', MAC {2}, Portal-MACs '{5}', gebundene ResourceID '{3}', Vorgaenger '{4}' - Device bleibt in der Warteschlange." -f $identity.Cause, $rolloutName, $deviceMac, $boundResourceId, $previousResourceId, ($knownMacs -join ','))
                     $itemFailures++
                     Add-VsRunCause -Causes $causes -Cause $identity.Cause -Target $deviceName
                     continue
@@ -322,7 +643,7 @@ while ($true) {
                     $importThrew = $false
                     try {
                         Import-CMComputerInformation -ComputerName $rolloutName -MacAddress $deviceMac -CollectionName 'All Systems' -ErrorAction Stop | Out-Null
-                        Write-VsLog -Context $deviceName -Message ("Device als '{0}' importiert (MAC {1})." -f $rolloutName, $deviceMac)
+                        Write-VsDeviceLog -Context $deviceName -Message ("Device als '{0}' importiert (MAC {1})." -f $rolloutName, $deviceMac)
                         $imported++
                         Start-Sleep -Seconds 2
                     } catch {
@@ -332,7 +653,7 @@ while ($true) {
                         # wird Name UND MAC erneut EINDEUTIG gelesen, und das
                         # Ergebnis entscheidet. Ein Import-Race sieht danach
                         # genauso aus wie ein gelungener Import, was er auch ist.
-                        Write-VsLog -Level DEBUG -Context $deviceName -Message ("Import meldete einen Fehler, Ergebnis wird nachgelesen: {0}" -f $_.Exception.Message)
+                        Write-VsDeviceLog -Level DEBUG -Context $deviceName -Message ("Import meldete einen Fehler, Ergebnis wird nachgelesen: {0}" -f $_.Exception.Message)
                     }
 
                     # Nachlesen ueber dieselbe Entscheidung wie oben, nur gegen
@@ -340,8 +661,7 @@ while ($true) {
                     # waere hier genau der Fehlgriff, den der Tombstone verhindern
                     # soll: er wuerde ein fremdes Geraet gleichen Namens adoptieren.
                     Start-Sleep -Seconds 2
-                    $freshIndex = New-VsMecmDeviceIndex -Devices @(Get-CMDevice -Name $rolloutName -Fast -ErrorAction SilentlyContinue | Select-Object Name, MACAddress, ResourceID)
-                    $confirmed = Resolve-VsDeviceIdentity -Index $freshIndex -RolloutHostname $rolloutName -Mac $deviceMac
+                    $confirmed = Get-VsPostImportIdentity -RolloutName $rolloutName -Mac $deviceMac
                     if ($confirmed.Action -ne 'use') {
                         if ($confirmed.Action -eq 'import' -and $importThrew) {
                             # Nichts da UND der Aufruf hat geworfen: das ist ein
@@ -350,18 +670,18 @@ while ($true) {
                             # ein dauerhaft gescheiterter Import haette sich als
                             # "kommt beim naechsten Scan" gemeldet, und die Ampel
                             # waere gelb statt rot geblieben, fuer immer.
-                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Import von '{0}' fehlgeschlagen und kein Datensatz vorhanden." -f $rolloutName)
+                            Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Import von '{0}' fehlgeschlagen und kein Datensatz vorhanden." -f $rolloutName)
                             $itemFailures++
                             Add-VsRunCause -Causes $causes -Cause 'device_import_failed' -Target $deviceName
                         } elseif ($confirmed.Action -eq 'import') {
                             # Der Aufruf lief durch, MECM hat den Datensatz nur
                             # noch nicht sichtbar gemacht. Kein Konflikt, ein
                             # spaeterer Scan.
-                            Write-VsLog -Level WARN -Context $deviceName -Message ("Import von '{0}' ist noch nicht sichtbar - naechster Scan." -f $rolloutName)
+                            Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Import von '{0}' ist noch nicht sichtbar - naechster Scan." -f $rolloutName)
                             $dataWarnings++
                             Add-VsRunCause -Causes $causes -Cause 'resource_id_pending' -Target $deviceName
                         } else {
-                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Import von '{0}' nicht eindeutig bestaetigt ({1}) - Device bleibt in der Warteschlange." -f $rolloutName, $confirmed.Cause)
+                            Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Import von '{0}' nicht eindeutig bestaetigt ({1}) - Device bleibt in der Warteschlange." -f $rolloutName, $confirmed.Cause)
                             $itemFailures++
                             Add-VsRunCause -Causes $causes -Cause $confirmed.Cause -Target $deviceName
                         }
@@ -371,17 +691,7 @@ while ($true) {
                 }
 
                 if (-not $resourceId) {
-                    # Approve nur fuer ein frisch importiertes, noch nicht
-                    # freigegebenes Geraet; adressiert ueber den Rolloutnamen.
-                    try { Approve-CMDevice -Name $rolloutName -ErrorAction Stop; Start-Sleep -Seconds 5 } catch {
-                        Write-VsLog -Level DEBUG -Context $deviceName -Message ("Auto-Approve nicht moeglich: {0}" -f $_.Exception.Message)
-                    }
-                    $approvedIndex = New-VsMecmDeviceIndex -Devices @(Get-CMDevice -Name $rolloutName -Fast -ErrorAction SilentlyContinue | Select-Object Name, MACAddress, ResourceID)
-                    $approved = Resolve-VsDeviceIdentity -Index $approvedIndex -RolloutHostname $rolloutName -Mac $deviceMac
-                    $resourceId = if ($approved.Action -eq 'use') { $approved.ResourceId } else { $null }
-                }
-                if (-not $resourceId) {
-                    Write-VsLog -Level WARN -Context $deviceName -Message 'Noch keine ResourceID - naechster Scan.'
+                    Write-VsDeviceLog -Level WARN -Context $deviceName -Message 'Noch keine ResourceID - naechster Scan.'
                     $dataWarnings++
                     Add-VsRunCause -Causes $causes -Cause 'resource_id_pending' -Target $deviceName
                     continue
@@ -391,7 +701,11 @@ while ($true) {
                 # remote result may be reported again idempotently; an intent
                 # without that confirmation is an ownership-uncertain crash
                 # window and must never be reconstructed from current presence.
+                # Journalzugriffe ausserhalb der try-Bloecke: ein gesperrtes oder
+                # unlesbares Journal endet als journal_blocked, nicht als MECM-Fehler.
+                $phase = 'journal'
                 $journalEntries = @(Get-VsMembershipJournalEntriesForVm -Path $membershipJournalPath -VmId ([int]$device.id))
+                $phase = 'mecm'
                 if ($journalEntries.Count -gt 0) {
                     $journalBlocked = $false
                     $journalReplayed = $false
@@ -420,7 +734,9 @@ while ($true) {
                     }
                     foreach ($journalEntry in $journalEntries) {
                         if ([int]$journalEntry.rollout_revision -ne [int]$rolloutRevision -or [string]$journalEntry.resource_id -ne [string]$resourceId) {
+                            $phase = 'journal'
                             Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'rollout_or_resource_changed'
+                            $phase = 'mecm'
                             $journalBlocked = $true
                             continue
                         }
@@ -441,9 +757,11 @@ while ($true) {
                             $removeReplayState = Get-VsDirectMembershipState -CollectionId ([string]$journalEntry.collection_id) -ResourceId ([string]$resourceId)
                             if ($removeReplayState.State -ne 'absent') {
                                 $removeReplayReason = if ($removeReplayState.State -eq 'present') { 'replay_remove_still_present' } else { 'replay_remove_presence_unknown' }
+                                $phase = 'journal'
                                 Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason $removeReplayReason
+                                $phase = 'mecm'
                                 $journalBlocked = $true
-                                Write-VsLog -Level WARN -Context $deviceName -Message ("Entfernte Membership aus altem Journal ist nicht als abwesend bestaetigt ({0}); Provenienz bleibt zur manuellen Klaerung erhalten." -f $journalEntry.collection_id)
+                                Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Entfernte Membership aus altem Journal ist nicht als abwesend bestaetigt ({0}); Provenienz bleibt zur manuellen Klaerung erhalten." -f $journalEntry.collection_id)
                                 continue
                             }
                         }
@@ -468,13 +786,15 @@ while ($true) {
                         } catch {
                             $statusCode = Get-VsErrorStatusCode -ErrorRecord $_
                             if ($statusCode -in @(404, 409)) {
+                                $phase = 'journal'
                                 Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason ('portal_http_' + $statusCode)
+                                $phase = 'mecm'
                             }
                             $journalBlocked = $true
                             $journalFailureCounted = $true
                             $itemFailures++
                             Add-VsRunCause -Causes $causes -Cause 'membership_operation_uncertain' -Target $deviceName
-                            Write-VsLog -Level WARN -Context $deviceName -Message ("Membership-Journal konnte nicht quittiert werden; VM bleibt blockiert: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+                            Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Membership-Journal konnte nicht quittiert werden; VM bleibt blockiert: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
                         }
                     }
                     if ($journalBlocked -or $journalReplayed) {
@@ -498,7 +818,7 @@ while ($true) {
                 $desired.Add(@{ name = [string]$missionName; type = 'mission' })
 
                 if (-not (Test-VsDesiredMembershipTargets -Desired $desired)) {
-                    Write-VsLog -Level ERROR -Context $deviceName -Message 'Gewuenschte Collectionnamen sind leer oder demselben exakten Namen sind widerspruechliche Typen zugeordnet; keine Mitgliedschaft geaendert.'
+                    Write-VsDeviceLog -Level ERROR -Context $deviceName -Message 'Gewuenschte Collectionnamen sind leer oder demselben exakten Namen sind widerspruechliche Typen zugeordnet; keine Mitgliedschaft geaendert.'
                     $itemFailures++
                     Add-VsRunCause -Causes $causes -Cause 'membership_identity_ambiguous' -Target $deviceName
                     continue
@@ -521,7 +841,7 @@ while ($true) {
                     }
                 }
                 if (-not $ownedRulesValid) {
-                    Write-VsLog -Level ERROR -Context $deviceName -Message 'Portal-Provenienz ist unvollstaendig oder ungueltig; keine Mitgliedschaft wird geaendert und die VM bleibt in der Warteschlange.'
+                    Write-VsDeviceLog -Level ERROR -Context $deviceName -Message 'Portal-Provenienz ist unvollstaendig oder ungueltig; keine Mitgliedschaft wird geaendert und die VM bleibt in der Warteschlange.'
                     $itemFailures++
                     Add-VsRunCause -Causes $causes -Cause 'membership_provenance_invalid' -Target $deviceName
                     continue
@@ -536,13 +856,13 @@ while ($true) {
                 $membershipReadCause = 'membership_query_failed'
                 foreach ($target in $desired) {
                     if ($ambiguousCollectionNames.Contains([string]$target.name)) {
-                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Collectionname '{0}' ist im MECM-Bestand mehrfach vorhanden; keine zufaellige ID wird verwendet." -f $target.name)
+                        Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Collectionname '{0}' ist im MECM-Bestand mehrfach vorhanden; keine zufaellige ID wird verwendet." -f $target.name)
                         $membershipReadUnknown = $true
                         $membershipReadCause = 'membership_identity_ambiguous'
                         break
                     }
                     if (-not $collectionCache.ContainsKey($target.name)) {
-                        Write-VsLog -Level WARN -Context $deviceName -Message ("Collection '{0}' existiert nicht - uebersprungen." -f $target.name)
+                        Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Collection '{0}' existiert nicht - uebersprungen." -f $target.name)
                         $dataWarnings++
                         Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $deviceName -Collection $target.name
                         $targetsSkipped++
@@ -552,17 +872,17 @@ while ($true) {
                     $membership = Get-VsDirectMembershipState -CollectionId $collectionId -ResourceId $resourceId
                     if ($membership.State -eq 'unknown') {
                         $membershipReadUnknown = $true
-                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Mitgliedschaft in Collection '{0}' ist wegen Providerfehler unbekannt; keine Aenderung ausgefuehrt." -f $target.name)
+                        Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Mitgliedschaft in Collection '{0}' ist wegen Providerfehler unbekannt; keine Aenderung ausgefuehrt." -f $target.name)
                         break
                     }
                     if ($membership.State -eq 'present') { $present += @{ collection_id = $collectionId; collection_name = [string]$target.name } }
                 }
                 if (-not $membershipReadUnknown) { foreach ($ownedRule in $ownedRules) {
                     if (@($present | Where-Object { $_.collection_id -eq $ownedRule.collection_id }).Count -gt 0) { continue }
-                    $membership = Get-VsDirectMembershipState -CollectionId $ownedRule.collection_id -ResourceId $resourceId
+                    $membership = Get-VsKnownCollectionMembershipState -CollectionId ([string]$ownedRule.collection_id) -ResourceId $resourceId -KnownCollectionIds $knownCollectionIds
                     if ($membership.State -eq 'unknown') {
                         $membershipReadUnknown = $true
-                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Eigene Mitgliedschaft in Collection '{0}' ist wegen Providerfehler unbekannt; keine Aenderung und kein Provenienzrueckzug ausgefuehrt." -f $ownedRule.collection_name)
+                        Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Eigene Mitgliedschaft in Collection '{0}' ist wegen Providerfehler unbekannt; keine Aenderung und kein Provenienzrueckzug ausgefuehrt." -f $ownedRule.collection_name)
                         break
                     }
                     if ($membership.State -eq 'present') { $present += @{ collection_id = [string]$ownedRule.collection_id; collection_name = [string]$ownedRule.collection_name } }
@@ -579,7 +899,7 @@ while ($true) {
                 # malformed removal must not discard otherwise valid additions
                 # only after MECM was already changed.
                 if (-not (Test-VsMembershipPlanOperations -Plan $plan)) {
-                    Write-VsLog -Level ERROR -Context $deviceName -Message 'Mitgliedschaftsplan enthaelt keine vollstaendig meldbare ID-/Name-/Typ-Provenienz; keine Remote-Aenderung ausgefuehrt.'
+                    Write-VsDeviceLog -Level ERROR -Context $deviceName -Message 'Mitgliedschaftsplan enthaelt keine vollstaendig meldbare ID-/Name-/Typ-Provenienz; keine Remote-Aenderung ausgefuehrt.'
                     $itemFailures++
                     Add-VsRunCause -Causes $causes -Cause 'membership_provenance_invalid' -Target $deviceName
                     continue
@@ -608,6 +928,7 @@ while ($true) {
                         Set-VsMembershipJournalEntry -Path $membershipJournalPath -Entry $journalEntry
                         Add-CMDeviceCollectionDirectMembershipRule -CollectionId $collectionId -ResourceId $resourceId -ErrorAction Stop | Out-Null
                         Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State remote_confirmed
+                        Write-VsDeviceLog -Context $deviceName -Message ("Mitgliedschaft gesetzt: '{0}' ({1})." -f $target.name, $collectionId)
                         $collectionsToUpdate[$target.name] = $true
                         $appliedMembershipAdds.Add(@{ collection_id = $collectionId; collection_name = [string]$target.name })
                         $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = $collectionId; collection_name = [string]$target.name; type = [string]$target.type; change = 'added' })
@@ -615,9 +936,9 @@ while ($true) {
                         try { Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'remote_add_not_confirmed' } catch {
                             $itemFailures++
                             Add-VsRunCause -Causes $causes -Cause 'membership_operation_uncertain' -Target $deviceName
-                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Membership-Journal konnte nach unklarem Add nicht aktualisiert werden: {0}" -f $_.Exception.Message)
+                            Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Membership-Journal konnte nach unklarem Add nicht aktualisiert werden: {0}" -f $_.Exception.Message)
                         }
-                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Zuweisung zu '{0}' fehlgeschlagen: {1}" -f $target.name, $_.Exception.Message)
+                        Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Zuweisung zu '{0}' fehlgeschlagen: {1}" -f $target.name, $_.Exception.Message)
                         $itemFailures++
                         Add-VsRunCause -Causes $causes -Cause 'collection_assign_failed' -Target $deviceName -Collection $target.name
                         $targetsSkipped++
@@ -636,14 +957,14 @@ while ($true) {
                         Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State remote_confirmed
                         $collectionsToUpdate[$rule.collection_name] = $true
                         $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
-                        Write-VsLog -Context $deviceName -Message ("Eigene, nicht mehr zugewiesene Regel entfernt: '{0}' ({1})." -f $rule.collection_name, $rule.collection_id)
+                        Write-VsDeviceLog -Context $deviceName -Message ("Eigene, nicht mehr zugewiesene Regel entfernt: '{0}' ({1})." -f $rule.collection_name, $rule.collection_id)
                     } catch {
                         try { Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason 'remote_remove_not_confirmed' } catch {
                             $itemFailures++
                             Add-VsRunCause -Causes $causes -Cause 'membership_operation_uncertain' -Target $deviceName
-                            Write-VsLog -Level ERROR -Context $deviceName -Message ("Membership-Journal konnte nach unklarem Remove nicht aktualisiert werden: {0}" -f $_.Exception.Message)
+                            Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Membership-Journal konnte nach unklarem Remove nicht aktualisiert werden: {0}" -f $_.Exception.Message)
                         }
-                        Write-VsLog -Level ERROR -Context $deviceName -Message ("Entfernen der eigenen Regel '{0}' fehlgeschlagen: {1}" -f $rule.collection_name, $_.Exception.Message)
+                        Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("Entfernen der eigenen Regel '{0}' fehlgeschlagen: {1}" -f $rule.collection_name, $_.Exception.Message)
                         $itemFailures++
                         Add-VsRunCause -Causes $causes -Cause 'collection_remove_failed' -Target $deviceName -Collection $rule.collection_name
                         $targetsSkipped++
@@ -664,18 +985,20 @@ while ($true) {
                     # Die Apply-Grenze braucht ein echtes Object-Array.
                     $staleDisposition = Get-VsStaleOwnedDisposition -CollectionId ([string]$rule.collection_id) -CollectionName ([string]$rule.collection_name) -PlannedAdds @($plan.add) -AppliedAdds ($appliedMembershipAdds.ToArray())
                     if ($staleDisposition -eq 'restored_same_id') {
-                        Write-VsLog -Context $deviceName -Message ("Eigene Regel '{0}' ({1}) wurde unter derselben CollectionID wiederhergestellt; Provenienz bleibt erhalten." -f $rule.collection_name, $rule.collection_id)
+                        Write-VsDeviceLog -Context $deviceName -Message ("Eigene Regel '{0}' ({1}) wurde unter derselben CollectionID wiederhergestellt; Provenienz bleibt erhalten." -f $rule.collection_name, $rule.collection_id)
                         continue
                     }
                     if ($staleDisposition -eq 'defer_until_restored') {
-                        Write-VsLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' ist weiterhin gewuenscht, wurde aber nicht bestaetigt wiederhergestellt; Provenienz bleibt bis zum sicheren Folgelauf erhalten." -f $rule.collection_name)
+                        Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' ist weiterhin gewuenscht, wurde aber nicht bestaetigt wiederhergestellt; Provenienz bleibt bis zum sicheren Folgelauf erhalten." -f $rule.collection_name)
                         continue
                     }
                     $journalRevision = if ([int]$rolloutRevision -gt 0) { [int]$rolloutRevision } else { 1 }
                     $journalEntry = New-VsMembershipJournalEntry -VmId ([int]$device.id) -RolloutRevision $journalRevision -ResourceId ([string]$resourceId) -CollectionId ([string]$rule.collection_id) -CollectionName ([string]$rule.collection_name) -Type ([string]$rule.type) -Change removed -State remote_confirmed
+                    $phase = 'journal'
                     Set-VsMembershipJournalEntry -Path $membershipJournalPath -Entry $journalEntry
+                    $phase = 'mecm'
                     $membershipReport.Add(@{ operation_id = $journalEntry.operation_id; collection_id = [string]$rule.collection_id; collection_name = [string]$rule.collection_name; type = [string]$rule.type; change = 'removed' })
-                    Write-VsLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' wurde in MECM entfernt oder durch eine neue CollectionID ersetzt - alte Provenienz {1} wird zurueckgezogen." -f $rule.collection_name, $rule.collection_id)
+                    Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Eigene Regel '{0}' wurde in MECM entfernt oder durch eine neue CollectionID ersetzt - alte Provenienz {1} wird zurueckgezogen." -f $rule.collection_name, $rule.collection_id)
                 }
 
                 # Angewandte Aenderungen zurueckmelden, BEVOR die ResourceID das
@@ -720,7 +1043,7 @@ while ($true) {
                         # gibt.
                         $isStale = ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409)
                         $cause = if ($isStale) { 'stale_rollout_revision' } else { 'membership_report_failed' }
-                        Write-VsLog -Level WARN -Context $deviceName -Message ("Provenienz-Meldung nicht uebernommen ({0}): {1} - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $cause, (Get-VsErrorDetail -ErrorRecord $_))
+                        Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Provenienz-Meldung nicht uebernommen ({0}): {1} - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $cause, (Get-VsErrorDetail -ErrorRecord $_))
                         $itemFailures++
                         Add-VsRunCause -Causes $causes -Cause $cause -Target $deviceName
                         continue
@@ -740,7 +1063,7 @@ while ($true) {
                 # dessen Zuweisung unvollstaendig ist. Es bleibt in getDeviceList
                 # und der naechste Scan versucht es erneut.
                 if ($targetsSkipped -gt 0) {
-                    Write-VsLog -Level ERROR -Context $deviceName -Message ("{0} von {1} Mitgliedschaftsoperationen unvollstaendig - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $targetsSkipped, $targetsPlanned)
+                    Write-VsDeviceLog -Level ERROR -Context $deviceName -Message ("{0} von {1} Mitgliedschaftsoperationen unvollstaendig - ResourceID wird NICHT gemeldet, Device bleibt in der Warteschlange." -f $targetsSkipped, $targetsPlanned)
                     $itemFailures++
                     continue
                 }
@@ -762,11 +1085,14 @@ while ($true) {
                 } catch {
                     $isStale = ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409)
                     $cause = if ($isStale) { 'stale_rollout_revision' } else { 'resource_update_failed' }
-                    Write-VsLog -Level WARN -Context $deviceName -Message ("ResourceID-Update nicht uebernommen ({0}): {1}" -f $cause, (Get-VsErrorDetail -ErrorRecord $_))
+                    Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("ResourceID-Update nicht uebernommen ({0}): {1}" -f $cause, (Get-VsErrorDetail -ErrorRecord $_))
                     $resourceUpdateFailures++
                     Add-VsRunCause -Causes $causes -Cause $cause -Target $deviceName
                 }
             }
+
+            # Die letzte VM des Durchgangs abschliessen (Sperrzustand und Puffer).
+            Complete-VsPendingDeviceBlock -Causes $causes -ItemFailures $itemFailures -DataWarnings $dataWarnings -BlockStates $deviceBlockStates -StatePath $deviceBlockStatePath
 
             # Collection-Updates gesammelt anstossen (einmal je geaenderter Collection)
             foreach ($name in $collectionsToUpdate.Keys) {
@@ -797,12 +1123,16 @@ while ($true) {
         $consecutiveErrors = 0
     } catch {
         $consecutiveErrors++
-        $detail = Get-VsErrorDetail -ErrorRecord $_
+        # Die VM im Durchgang abbrechen: ihre Zeilen werden geschrieben, ihr Sperrzustand
+        # bleibt unveraendert.
+        Complete-VsPendingDeviceBlock -Abort -Causes $causes -BlockStates $deviceBlockStates -StatePath $deviceBlockStatePath
+        $category = Get-VsSyncFailureCategory -Phase $phase -ErrorRecord $_
         # Get-VsErrorDetail statt .Exception.Message: bei einem API-Fehler steht der
-        # Grund in der JSON-Envelope der WebApp, die Statuszeile sagt nur "400".
-        Write-VsLog -Level ERROR -Message ("Scan-Fehler (Versuch {0}): {1}" -f $consecutiveErrors, $detail)
+        # Grund in der JSON-Envelope der WebApp, die Statuszeile sagt nur "400". Der
+        # Rohtext bleibt im lokalen Log; die Portalseite bekommt Kategorie und Kuerzung.
+        Write-VsLog -Level ERROR -Message ("Scan-Fehler (Versuch {0}, {1}): {2}" -f $consecutiveErrors, $category, (Get-VsErrorDetail -ErrorRecord $_))
+        $detail = Get-VsRunFailureDetail -Category $category -ErrorRecord $_
         $outcome = 'fail'
-        $category = if ($phase -eq 'portal') { 'portal_unreachable' } else { 'mecm_unavailable' }
         if ($consecutiveErrors -ge 3) {
             $siteCode = $null
             $sleepSeconds = 60

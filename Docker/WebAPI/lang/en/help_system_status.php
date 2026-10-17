@@ -89,6 +89,8 @@ return [
     'system_status_identity_5' => 'mac_conflict: name and MAC point at different MECM devices, or one of the two belongs to a foreign device. Decide by hand which record applies and remove the other one in MECM.',
     'system_status_identity_6' => 'device_identity_ambiguous: several MECM records match the same name, the same MAC or the same ResourceID. Resolve the duplicates in the MECM console; the script deliberately picks none of them.',
     'system_status_identity_7' => 'stale_rollout_revision: the scan worked with an outdated state because a reset happened in between. Nothing to do here, the next scan runs through with the current state.',
+    'system_status_identity_8' => 'pxe_nic_ambiguous: more than one NIC of the VM is on the WDS portgroup of the mission, so it is not clear which MAC MECM should get for PXE. Keep exactly one NIC on the WDS portgroup in the VM editor.',
+    'system_status_identity_9' => 'mac_missing: no NIC of the VM is on the WDS portgroup of the mission, or its MAC is still missing. The MAC exists only after the MAC export; the portgroup name must match the mission exactly, including upper and lower case.',
     'system_status_work_heading' => 'Working with the status hints',
     'system_status_work_0' => 'If neither a synchronisation task nor the site-health reporter has ever reported, MECM simply is not connected yet. The rows then carry no hint texts, because there is nothing to repair that does not exist yet; instead the section names the next step once.',
     'system_status_work_1' => 'On "Delayed" or "Down", first read the hint text right next to the row. It states the most likely cause and the next step in plain language; nobody has to memorise what each source means.',

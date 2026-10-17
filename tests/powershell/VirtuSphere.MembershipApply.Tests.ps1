@@ -40,6 +40,7 @@ BeforeAll {
             $deviceName = 'VM-A'
 
             function Write-VsLog { param($Level, $Context, $Message) }
+            function Write-VsDeviceLog { param($Message, $Level, $Context) }
             function New-VsMembershipJournalEntry {
                 param($VmId, $RolloutRevision, $ResourceId, $CollectionId, $CollectionName, $Type, $Change, $State)
                 [pscustomobject]@{ operation_id = 'op-' + $CollectionId; collection_id = $CollectionId; collection_name = $CollectionName; type = $Type; change = $Change }
@@ -88,6 +89,7 @@ BeforeAll {
                 [void]$stateChanges.Add([pscustomobject]@{ operation_id = $OperationId; state = $State; reason = $Reason })
             }
             function Write-VsLog { param($Level, $Context, $Message) }
+            function Write-VsDeviceLog { param($Message, $Level, $Context) }
             function Add-VsRunCause { param($Causes, $Cause, $Target) }
             function Get-VsErrorStatusCode { param($ErrorRecord) 500 }
             function Get-VsErrorDetail { param($ErrorRecord) 'mock failure' }

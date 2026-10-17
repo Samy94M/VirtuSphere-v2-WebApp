@@ -721,7 +721,10 @@ Describe 'Die Fehlerkategorie nennt den Gespraechspartner, der ausgefallen ist' 
         $text = Get-ScriptText -Name $name
         $text | Should -Match "\`$phase\s*=\s*'portal'"
         $text | Should -Match "\`$phase\s*=\s*'mecm'"
-        $text | Should -Match "\`$category\s*=\s*if \(\`$phase -eq 'portal'\) \{ 'portal_unreachable' \} else \{ 'mecm_unavailable' \}"
+        # Die Zuordnung Phase -> Kategorie (portal_rejected, portal_unreachable,
+        # journal_blocked, mecm_unavailable) liegt in Get-VsSyncFailureCategory.
+        $text | Should -Match "\`$category\s*=\s*Get-VsSyncFailureCategory -Phase \`$phase -ErrorRecord \`$_"
+        $text | Should -Not -Match "'portal_unreachable' \} else \{ 'mecm_unavailable' \}"
     }
 }
 

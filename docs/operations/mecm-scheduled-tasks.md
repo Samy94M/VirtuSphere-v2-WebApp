@@ -50,15 +50,15 @@ flowchart TD
   QE -->|nein| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; je Task Sequence eine Collection anlegen"]
   M --> V
   subgraph JE["Je VM in der Warteschlange"]
-    V{"Mission und DHCP-MAC vorhanden?"}
-    V -->|nein| V1["VM übersprungen, bleibt in der Warteschlange"]
+    V{"Mission und genau eine Netzwerkkarte auf der WDS-Portgruppe mit MAC?"}
+    V -->|nein| V1["VM übersprungen, bleibt in der Warteschlange; gesperrt: Prüfung nur bei geänderter Portalzeile oder alle 5 Minuten"]
     V -->|ja| MC["Mission-Collection anlegen, falls sie fehlt"]
-    MC --> ID{"Identität eindeutig? (Rolloutname, DHCP-MAC, ResourceID; eine gebundene ResourceID passt auf jede Portal-MAC der VM)"}
+    MC --> ID{"Identität eindeutig? (Rolloutname, PXE-MAC, ResourceID; eine gebundene ResourceID passt auf jede Portal-MAC der VM)"}
     ID -->|nein| ID1["Keine Änderung, VM bleibt mit Ursache in der Warteschlange"]
     ID -->|ja| G{"Gerät schon in MECM?"}
     G -->|nein| IMP["Rolloutname und MAC importieren und nachlesen; nicht sichtbar oder Fehler: VM wartet auf den nächsten Lauf"]
     IMP -->|importiert| RID
-    G -->|ja| RID["ResourceID lesen; fehlt sie: nächster Lauf. Die vorgesehene Freigabe per Approve-CMDevice läuft nur ohne ResourceID und wird praktisch nie erreicht (PS-05)"]
+    G -->|ja| RID["ResourceID lesen; fehlt sie: nächster Lauf"]
     RID --> J{"Offene Einträge im Mitgliedschafts-Journal?"}
     J -->|ja| J1["Erst nachmelden; unklare Einträge bleiben zur Klärung stehen; VM wartet auf den nächsten Lauf"]
     J -->|nein| PL["Plan: Soll (OS-, Paket-, Missions-Collection) gegen eigene und vorhandene Regeln"]

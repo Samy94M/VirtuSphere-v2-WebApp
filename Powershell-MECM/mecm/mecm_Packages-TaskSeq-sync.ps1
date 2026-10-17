@@ -146,8 +146,8 @@ while ($true) {
                             # zurueckgezogen. Laut und ohne Hash-Update, damit der
                             # naechste Durchlauf erneut versucht. Der Grund steht in der
                             # JSON-Envelope der WebApp, nicht in der Statuszeile.
-                            $detail = Get-VsErrorDetail -ErrorRecord $_
-                            Write-VsLog -Level WARN -Message ('WebApp hat den Sync abgelehnt (409, Schutzschwelle) - Katalogquelle pruefen (richtiger Ordner? WMI ok?). {0}' -f $detail)
+                            Write-VsLog -Level WARN -Message ('WebApp hat den Sync abgelehnt (409, Schutzschwelle) - Katalogquelle pruefen (richtiger Ordner? WMI ok?). {0}' -f (Get-VsErrorDetail -ErrorRecord $_))
+                            $detail = Get-VsRunFailureDetail -Category 'catalog_conflict' -ErrorRecord $_
                             $outcome = 'warning'
                             $category = 'catalog_conflict'
                         } else {
@@ -162,14 +162,15 @@ while ($true) {
         $consecutiveErrors = 0
     } catch {
         $consecutiveErrors++
-        $detail = Get-VsErrorDetail -ErrorRecord $_
-        Write-VsLog -Level ERROR -Message ("Sync-Fehler in Phase '{0}' (Versuch {1}): {2}" -f $phase, $consecutiveErrors, $detail)
         # Die Kategorie folgt der Phase, in der es gescheitert ist: SMS-Provider,
         # WMI-Abfrage oder Site-Init sind MECM, alles ab dem Sendeblock ist das
-        # Portal. Vorher stand hier immer mecm_unavailable, und ein abgelehnter
-        # Payload (etwa der 400 aus E1) beschuldigte dauerhaft MECM.
+        # Portal. Hat das Portal mit einem HTTP-Status geantwortet, ist der Payload
+        # abgelehnt (portal_rejected); portal_unreachable nur ohne Antwort.
+        $category = Get-VsSyncFailureCategory -Phase $phase -ErrorRecord $_
+        # Der Rohtext gehoert ins lokale Log, nicht auf die Portalseite.
+        Write-VsLog -Level ERROR -Message ("Sync-Fehler in Phase '{0}' ({1}, Versuch {2}): {3}" -f $phase, $category, $consecutiveErrors, (Get-VsErrorDetail -ErrorRecord $_))
+        $detail = Get-VsRunFailureDetail -Category $category -ErrorRecord $_
         $outcome = 'fail'
-        $category = if ($phase -eq 'portal') { 'portal_unreachable' } else { 'mecm_unavailable' }
         if ($consecutiveErrors -ge 3) {
             $siteCode = $null   # naechster Durchlauf initialisiert MECM neu (Site-Drive-Recovery)
             $sleepSeconds = 60

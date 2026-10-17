@@ -322,6 +322,73 @@ function Get-VsErrorStatusCode {
     return $null
 }
 
+# --- Laufkategorie eines Sync-Fehlers (AV-F30, PS-21, PS-26) ----------------
+#
+# Eine Exception, die eine feste Kategorie tragen soll, markiert sich selbst
+# ueber Exception.Data. Der aeussere Catch liest nur die Markierung, nie den
+# Fehlertext. Geschlossen: nur Kategorien aus VsRunSyncErrorCategories.
+$script:VsRunCategoryMarkerKey = 'VsRunCategory'
+
+function New-VsRunCategoryError {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [Parameter(Mandatory)][ValidateSet('source_changing', 'journal_blocked')][string]$Category
+    )
+    $exception = New-Object System.Exception $Message
+    $exception.Data[$script:VsRunCategoryMarkerKey] = $Category
+    return $exception
+}
+
+# Kategorie, mit der eine Exception markiert wurde, sonst $null.
+function Get-VsExceptionRunCategory {
+    param($ErrorRecord)
+    if ($null -eq $ErrorRecord -or $null -eq $ErrorRecord.Exception) { return $null }
+    $data = $ErrorRecord.Exception.Data
+    if ($null -eq $data -or -not $data.Contains($script:VsRunCategoryMarkerKey)) { return $null }
+    $value = [string]$data[$script:VsRunCategoryMarkerKey]
+    if ($script:VsRunSyncErrorCategories -contains $value) { return $value }
+    return $null
+}
+
+# Kategorie eines Schleifenfehlers nach Phase. Das Portal gilt als abgelehnt,
+# wenn es mit einem HTTP-Status geantwortet hat; als nicht erreichbar nur, wenn
+# gar keine Antwort kam. Eine markierte Exception gewinnt vor der Phase.
+function Get-VsSyncFailureCategory {
+    param(
+        [Parameter(Mandatory)][string]$Phase,
+        $ErrorRecord
+    )
+    $marked = Get-VsExceptionRunCategory -ErrorRecord $ErrorRecord
+    if ($marked) { return $marked }
+    switch ($Phase) {
+        'portal' {
+            if ($null -ne (Get-VsErrorStatusCode -ErrorRecord $ErrorRecord)) { return 'portal_rejected' }
+            return 'portal_unreachable'
+        }
+        'journal' { return 'journal_blocked' }
+        default { return 'mecm_unavailable' }
+    }
+}
+
+# Detailtext fuer das Portal: Kategorie, dann der Fehlertext nach Schwaerzung
+# (Geheimnisse ueber die Logging-Redaktion, Laufwerks- und UNC-Pfade) und
+# Kuerzung auf 512 Bytes. Der Rohtext bleibt dem lokalen Log vorbehalten.
+function Get-VsRunFailureDetail {
+    param(
+        [Parameter(Mandatory)][string]$Category,
+        [Parameter(Mandatory)]$ErrorRecord
+    )
+    $text = [string](Get-VsErrorDetail -ErrorRecord $ErrorRecord)
+    $safe = Protect-VsLogText -Text $text
+    # UNC zuerst, dann Laufwerkspfade: Zwischensegmente duerfen Leerzeichen tragen
+    # (Program Files), das letzte Segment endet am naechsten Leerraum.
+    $safe = [regex]::Replace($safe, '\\\\[^\s''"]+', '<Pfad>')
+    $safe = [regex]::Replace($safe, '[A-Za-z]:\\(?:[^\\\r\n:*?"<>|]+\\)*[^\s\\''"<>|]*', '<Pfad>')
+    $safe = [regex]::Replace($safe, '[\x00-\x1F\x7F]+', ' ').Trim()
+    $bounded = Get-VsTruncatedUtf8 -Text $safe -MaxBytes 512
+    return ('{0}: {1}' -f $Category, $bounded)
+}
+
 function Invoke-VsApi {
     param(
         [Parameter(Mandatory)]$Config,
@@ -652,7 +719,8 @@ $script:VsRunSiteErrorOutcome = @{
 # Operator braucht, um die Zeile zu finden.
 $script:VsRunCauseVocabulary = @(
     'mission_missing',           # VM ohne Mission: nichts zuzuweisen
-    'mac_missing',               # VM ohne DHCP-MAC: PXE kann nie greifen
+    'mac_missing',               # VM ohne PXE-MAC: keine Netzwerkkarte auf der WDS-Portgruppe mit MAC (PXE kann nie greifen)
+    'pxe_nic_ambiguous',         # mehrere Netzwerkkarten auf der WDS-Portgruppe: keine eindeutige PXE-MAC
     'mac_conflict',              # Rolloutname mit fremder MAC ODER MAC mit fremdem Namen
     'device_import_failed',      # Import-CMComputerInformation fehlgeschlagen
     # --- Identitaet des Rolloutnamens (Etappe 14D, ADR-0043) ---------------
@@ -1080,6 +1148,28 @@ function Test-VsLegacyPackageTemplate {
         -not (Test-Path -LiteralPath (Join-Path $TemplateRoot 'reporting')))
 }
 
+# SHA-256 einer Paketdatei fuer den Stempel. Eine gesperrte oder gerade
+# geschriebene Datei ist ein Quellzustand im Wandel (source_changing), kein
+# MECM-Ausfall: der Aufrufer soll weder die Verbindung zuruecksetzen noch pausieren.
+function Get-VsStampFileHash {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Relative
+    )
+    try {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
+    } catch {
+        # Get-FileHash verpackt den Lesefehler in WriteErrorException mit der Id
+        # FileReadError; ein direkter IOException-Treffer zaehlt ebenso.
+        $inner = $_.Exception
+        $locked = ($inner -is [System.IO.IOException]) -or ($inner.InnerException -is [System.IO.IOException]) -or ([string]$_.FullyQualifiedErrorId -like 'FileReadError*')
+        if ($locked) {
+            throw (New-VsRunCategoryError -Message ("Paketdatei ist gesperrt oder nicht lesbar: {0}" -f $Relative) -Category 'source_changing')
+        }
+        throw
+    }
+}
+
 function Get-VsFilesManifestStamp {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -1098,17 +1188,19 @@ function Get-VsFilesManifestStamp {
         $relative = $file.FullName.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
         $beforeLength = $file.Length
         $beforeTicks = $file.LastWriteTimeUtc.Ticks
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+        $hash = Get-VsStampFileHash -Path $file.FullName -Relative $relative
         $after = Get-Item -LiteralPath $file.FullName -ErrorAction Stop
         if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
-            throw ("Paketdatei hat sich waehrend des Scans geaendert: {0}" -f $relative)
+            throw (New-VsRunCategoryError -Message ("Paketdatei hat sich waehrend des Scans geaendert: {0}" -f $relative) -Category 'source_changing')
         }
         $parts.Add(('{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
     }
     $afterNames = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop |
         Where-Object { $_.Name -notmatch '^(\.~|~\$)' -and $_.Extension -notin @('.tmp', '.partial') } |
         Sort-Object FullName | ForEach-Object { $_.FullName })
-    if ((@($files.FullName) -join "`n") -cne ($afterNames -join "`n")) { throw 'Paketdateiliste hat sich waehrend des Scans geaendert.' }
+    if ((@($files.FullName) -join "`n") -cne ($afterNames -join "`n")) {
+        throw (New-VsRunCategoryError -Message 'Paketdateiliste hat sich waehrend des Scans geaendert.' -Category 'source_changing')
+    }
 
     if ($TemplateScript) {
         if (Test-Path -LiteralPath $TemplateScript) {
@@ -1125,17 +1217,17 @@ function Get-VsFilesManifestStamp {
                 $relative = $file.FullName.Substring($templateRoot.Length).TrimStart('\', '/').Replace('\', '/')
                 $beforeLength = $file.Length
                 $beforeTicks = $file.LastWriteTimeUtc.Ticks
-                $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+                $hash = Get-VsStampFileHash -Path $file.FullName -Relative ('template/' + $relative)
                 $after = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
                 if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
-                    throw ("Paketvorlagendatei hat sich waehrend des Scans geaendert: {0}" -f $relative)
+                    throw (New-VsRunCategoryError -Message ("Paketvorlagendatei hat sich waehrend des Scans geaendert: {0}" -f $relative) -Category 'source_changing')
                 }
                 $parts.Add(('template/{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
             }
             $afterTemplateNames = @(Get-ChildItem -LiteralPath $templateRoot -Recurse -File -Force -ErrorAction Stop |
                 Where-Object { $_.Name -ne '.gitkeep' } | Sort-Object FullName | ForEach-Object { $_.FullName })
             if ((@($templateFiles.FullName) -join "`n") -cne ($afterTemplateNames -join "`n")) {
-                throw 'Paketvorlagendateiliste hat sich waehrend des Scans geaendert.'
+                throw (New-VsRunCategoryError -Message 'Paketvorlagendateiliste hat sich waehrend des Scans geaendert.' -Category 'source_changing')
             }
         } else { $parts.Add('template-tree|absent') }
     }
@@ -1715,7 +1807,7 @@ function Add-VsRunCause {
     param(
         [Parameter(Mandatory)]$Causes,
         [Parameter(Mandatory)]
-        [ValidateSet('mission_missing', 'mac_missing', 'mac_conflict', 'device_import_failed',
+        [ValidateSet('mission_missing', 'mac_missing', 'pxe_nic_ambiguous', 'mac_conflict', 'device_import_failed',
             'device_name_invalid', 'device_identity_ambiguous', 'previous_resource_present',
             'resource_id_missing', 'resource_mac_conflict', 'stale_rollout_revision',
             'collection_missing', 'collection_assign_failed', 'collection_update_failed',

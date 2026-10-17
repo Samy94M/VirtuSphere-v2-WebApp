@@ -395,8 +395,13 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
 3. Ordner `VirtuSphere_OS` und `VirtuSphere_Missions` sicherstellen; für jede
    Task Sequence eine gleichnamige Collection im OS-Ordner anlegen.
 4. Je Device:
-   - PXE-MAC aus dem ersten DHCP-Interface ermitteln (Warnung bei mehreren);
-     ohne Mission oder MAC wird das Device übersprungen.
+   - PXE-MAC aus der einen Netzwerkkarte auf der WDS-Portgruppe der Mission
+     ermitteln (exakter Vergleich, dieselbe Regel wie im Portal). Keine oder
+     mehrere Karten sind eine Sperre (`mac_missing`, `pxe_nic_ambiguous`): die VM
+     bleibt in der Warteschlange. Gesperrte VMs werden nur bei geänderter
+     Portalzeile oder alle 5 Minuten erneut geprüft; die ERROR-Zeile steht nur
+     beim Wechsel des Sperrgrunds, unverändert gibt es alle 5 Minuten eine
+     INFO-Zeile.
    - Mission-Collection bei Bedarf anlegen.
    - **Identität auflösen** (`Resolve-VsDeviceIdentity`, rein und ohne
      Providerzugriff, damit Pester jeden Zweig fahren kann). Die Reihenfolge ist
@@ -413,8 +418,11 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
      Wire-Feld `vm_hostname`, nicht der ESXi-Name. Danach wird **nicht** nach
      Fehlertext geraten, sondern Name und MAC werden erneut eindeutig gelesen
      (kein `-MergeIfExist`, kein Name-only-Fallback).
-   - ResourceID beschaffen. Der vorgesehene `Approve-CMDevice`-Zweig läuft nur bei leerer ResourceID und wird nach „use“ oder bestätigtem Import praktisch nie erreicht (PS-05, offen);
-     ohne ResourceID: nächster Scan.
+   - ResourceID beschaffen: Nach dem Import werden Name und MAC erneut
+     eindeutig gelesen (Lesefehler des Providers sind ein MECM-Ausfall, kein
+     „noch nicht sichtbar"). Fehlt die ResourceID danach, bleibt die VM bis zum
+     nächsten Scan in der Warteschlange; eine Freigabe per `Approve-CMDevice`
+     gibt es nicht.
    - Direct-Membership-Regeln für OS-, Paket- und Mission-Collections setzen.
      Vor jedem Remote-Write wird ein lokaler Journal-Intent dauerhaft
      gespeichert. Nur ein bestätigtes Remote-Ergebnis wird idempotent ans

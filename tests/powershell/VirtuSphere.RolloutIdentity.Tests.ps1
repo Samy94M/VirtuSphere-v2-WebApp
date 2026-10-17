@@ -272,11 +272,14 @@ Describe 'Wire-Vertrag des Device-Sync' {
         $script:SyncCode | Should -Match '\$knownMacs\s*=\s*@\(\$device\.interfaces \| Select-Object -ExpandProperty mac'
         $joined = $script:SyncCode -replace '`\r?\n\s*', ' '
         $calls = @([regex]::Matches($joined, 'Resolve-VsDeviceIdentity [^\r\n]*'))
-        $calls.Count | Should -Be 3
+        # Zwei Aufrufe: die Hauptaufloesung und das Nachlesen in
+        # Get-VsPostImportIdentity (das Nachlesen traegt keine Portal-MACs).
+        $calls.Count | Should -Be 2
         @($calls | Where-Object { $_.Value -match '-KnownMacs \$knownMacs' }).Count | Should -Be 1
-        $calls[0].Value | Should -Match '-BoundResourceId \$boundResourceId'
-        $calls[0].Value | Should -Match '-KnownMacs \$knownMacs'
-        # Import und Nachlesen bleiben bei der DHCP-MAC allein.
+        $main = @($calls | Where-Object { $_.Value -match '-BoundResourceId \$boundResourceId' })
+        $main.Count | Should -Be 1
+        $main[0].Value | Should -Match '-KnownMacs \$knownMacs'
+        # Import und Nachlesen bleiben bei der PXE-MAC allein.
         $script:SyncCode | Should -Match 'Import-CMComputerInformation -ComputerName \$rolloutName -MacAddress \$deviceMac'
     }
 

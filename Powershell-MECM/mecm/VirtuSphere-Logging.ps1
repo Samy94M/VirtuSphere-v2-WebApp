@@ -2,10 +2,19 @@
 # Lokale Logging-Domaene der MECM-Server-Skripte (Etappe 10D).
 # Das Clientpaket besitzt eine getrennte Implementation mit demselben Vertrag;
 # beide Laufzeitpakete teilen absichtlich keine Datei (ADR-0029).
+#
+# Obergrenze je Tageslogdatei: 10 MiB (VsLogFileMaxBytes = 10485760 Bytes). Wuerde
+# eine Zeile die Datei darueber bringen, wird die volle Datei vorher in den
+# naechsten freien Nachbarn `yyyy-MM-dd_<component>.<N>.log` umbenannt (N = 1, 2,
+# ...) und die Tagesdatei neu begonnen. Die Retention (30 Tage nach Aenderungs-
+# zeit) erfasst die Nachbarn wie die Tagesdateien; eine Umbenennung behaelt die
+# Aenderungszeit. Die Client-Implementation (VirtuSphere-Client-Logging.ps1) hat
+# diese Grenze noch nicht; die Paritaet dafuer ist offen.
 Set-StrictMode -Version 1.0
 
 $script:VsLoggingContractVersion = 1
 $script:VsLogLevels = @('DEBUG', 'INFO', 'WARN', 'ERROR')
+$script:VsLogFileMaxBytes = 10485760
 $script:VsLogRetentionDays = 30
 $script:VsLogRetentionCheckHours = 24
 $script:VsLogComponentMaxChars = 64
@@ -202,6 +211,26 @@ function Initialize-VsLog {
     }
 }
 
+# Haelt eine Tageslogdatei unter VsLogFileMaxBytes: wuerde die naechste Zeile
+# (AddBytes inklusive Zeilenende) die Grenze reissen, wandert die volle Datei in
+# den naechsten freien Nachbarn `<Basis>.<N>.log`. Die neue Tagesdatei entsteht
+# danach beim Anhaengen. Ohne Datei passiert nichts.
+function Invoke-VsLogRotation {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][int]$AddBytes
+    )
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $current = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if (($current.Length + $AddBytes) -le $script:VsLogFileMaxBytes) { return }
+
+    $directory = Split-Path -Parent $Path
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $number = 1
+    while (Test-Path -LiteralPath (Join-Path $directory ('{0}.{1}.log' -f $base, $number))) { $number++ }
+    Move-Item -LiteralPath $Path -Destination (Join-Path $directory ('{0}.{1}.log' -f $base, $number)) -ErrorAction Stop
+}
+
 function Write-VsLog {
     param(
         [Parameter(Mandatory)][string]$Message,
@@ -218,6 +247,7 @@ function Write-VsLog {
 
     try {
         $file = Join-Path $script:VsLogRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), (Get-VsLogComponentName -Component $script:VsLogComponent))
+        Invoke-VsLogRotation -Path $file -AddBytes ([System.Text.Encoding]::UTF8.GetByteCount($line) + 2)
         Add-Content -Path $file -Value $line -Encoding UTF8 -ErrorAction Stop
         $retentionHealthy = $true
         if ($null -eq $script:VsLogRetentionNextCheck -or (Get-Date) -ge $script:VsLogRetentionNextCheck) {

@@ -92,7 +92,7 @@ require_once __DIR__ . '/../log_filter.php';
             <h3><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_identity_p1')); ?></p>
             <ul>
-                <?php for ($identityCause = 1; $identityCause <= 7; $identityCause++) { ?>
+                <?php for ($identityCause = 1; $identityCause <= 9; $identityCause++) { ?>
                     <li><?php echo h(__t('help_system_status.system_status_identity_' . $identityCause, [
                         'max' => VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH,
                     ])); ?></li>
