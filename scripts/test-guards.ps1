@@ -50,38 +50,9 @@ $workRoot = $null
 $hostShell = 'powershell'
 if ($PSVersionTable.PSEdition -eq 'Core') { $hostShell = 'pwsh' }
 
-# --- Werkzeuge (identische Muster wie scripts/check.ps1) ----------------------
-function Invoke-Tool {
-    param([string]$Exe, [string[]]$Arguments = @())
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $lines = @()
-    try {
-        $lines = @(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" })
-        $code = $LASTEXITCODE
-    } catch {
-        $lines = @("$($_.Exception.Message)")
-        $code = 127
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return @{ ExitCode = $code; Output = $lines }
-}
-
-function Test-Command { param([string]$Name) return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
-
-function Find-Sh {
-    if (Test-Command 'sh') { return (Get-Command 'sh').Source }
-    $git = Get-Command 'git' -ErrorAction SilentlyContinue
-    if ($git) {
-        $gitRoot = Split-Path (Split-Path $git.Source -Parent) -Parent
-        foreach ($candidate in @('usr/bin/sh.exe', 'bin/sh.exe')) {
-            $probe = Join-Path $gitRoot $candidate
-            if (Test-Path $probe) { return $probe }
-        }
-    }
-    return $null
-}
+# --- Werkzeuge: Invoke-Tool, Test-Command und Find-Sh kommen aus runtime.ps1 ----
+# (eine Quelle; das Modul definiert nur Funktionen und fuehrt beim Import nichts aus)
+. (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'runtime.ps1')
 $shExe = Find-Sh
 $phpImage = 'virtusphere-php:8.4-tooling'
 $dockerAvailable = Test-Command 'docker'
@@ -220,6 +191,7 @@ $enumFixtureFiles = @(
     'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/permissions.php',
     'Docker/WebAPI/lib/deploy_constants.php', 'Docker/WebAPI/lib/credentials.php',
     'Docker/WebAPI/lib/directory_constants.php', 'Docker/WebAPI/lib/deploy_create_constants.php',
+    'Docker/WebAPI/lib/auth_rate_limit.php',
     'Docker/mysql/mysql-init/struktur.sql', 'Docker/WebAPI/lib/migrate.php',
     'Docker/WebAPI/lib/migrations'
 )

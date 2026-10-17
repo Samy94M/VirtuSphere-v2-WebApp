@@ -130,8 +130,10 @@ Erwartung:
 Wenn kein Admin per `.env` angelegt wurde:
 
 ```bash
-docker compose exec -T php php /var/www/html/lib/seed.php admin '<lange-zufaellige-passphrase>' admin@localhost
+read -rs ADMIN_PW && printf '%s\n' "$ADMIN_PW" | docker compose exec -T php php /var/www/html/lib/seed.php admin admin@localhost; unset ADMIN_PW
 ```
+
+`read -rs` fragt eine lange, zufällige Passphrase verdeckt ab; `seed.php` liest sie von STDIN, sie steht also weder in der Befehlszeile noch in der Shell-Historie.
 
 Danach im Browser öffnen:
 

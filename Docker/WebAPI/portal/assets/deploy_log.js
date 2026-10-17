@@ -41,8 +41,11 @@
     var afterSeq = parseInt(root.getAttribute('data-after-seq') || '0', 10);
     var beforeSeq = parseInt(root.getAttribute('data-before-seq') || '0', 10);
     var domLimit = Math.max(1, parseInt(root.getAttribute('data-dom-limit') || '1500', 10));
-    // Both numbers belong to lib/deploy_constants.php; reading them from the
-    // attribute keeps the browser from carrying a second copy that can drift.
+    // Both numbers come from lib/deploy_log_constants.php (loaded through
+    // lib/deploy_constants.php) and reach the browser as data attributes that
+    // portal/deploy_log.php always renders. Reading them from the attribute
+    // keeps the browser from carrying a second copy that can drift; the `||`
+    // literals only cover a missing attribute.
     var bottomTolerance = Math.max(0, parseInt(root.getAttribute('data-bottom-tolerance') || '4', 10));
     var statusThrottle = Math.max(0, parseInt(root.getAttribute('data-status-throttle') || '4000', 10));
     var followStorageKey = 'virtusphere.deploy_log.follow';

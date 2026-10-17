@@ -35,22 +35,9 @@ $root = $env:VIRTUSPHERE_CHECK_ROOT
 if (-not $root) { $root = Split-Path $scriptDir -Parent }
 $root = ($root -replace '\\', '/').TrimEnd('/')
 
-function Invoke-Tool {
-    param([string]$Exe, [string[]]$Arguments = @())
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $lines = @()
-    try {
-        $lines = @(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" })
-        $code = $LASTEXITCODE
-    } catch {
-        $lines = @("$($_.Exception.Message)")
-        $code = 127
-    } finally {
-        $ErrorActionPreference = $prev
-    }
-    return @{ ExitCode = $code; Output = $lines }
-}
+# Invoke-Tool aus dem Runner-Modul (eine Quelle fuer alle nativen Aufrufe); das
+# Modul definiert nur Funktionen und fuehrt beim Import nichts aus.
+. (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'runtime.ps1')
 
 if (-not (Get-Command 'docker' -ErrorAction SilentlyContinue)) {
     Write-Output 'check-compose-hardening: docker nicht gefunden'

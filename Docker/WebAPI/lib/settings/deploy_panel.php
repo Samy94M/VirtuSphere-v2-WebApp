@@ -50,7 +50,7 @@ declare(strict_types=1);
                 <article class="runtime-fact">
                     <div class="runtime-fact-head">
                         <h3><?php echo h(__t('settings.effective_api_url')); ?></h3>
-                        <span class="badge <?php echo h($apiBaseUrlSourceBadge); ?>"><?php echo h($apiBaseUrlSourceLabel); ?></span>
+                        <?php echo portal_badge((string) preg_replace('/^badge-/', '', $apiBaseUrlSourceBadge), $apiBaseUrlSourceLabel); ?>
                     </div>
                     <?php if ($effectiveApiBaseUrlError === '') { ?>
                         <code class="runtime-value" data-effective-api-url><?php echo h($effectiveApiBaseUrl); ?></code>
@@ -61,7 +61,7 @@ declare(strict_types=1);
                 <article class="runtime-fact">
                     <div class="runtime-fact-head">
                         <h3><?php echo h(__t('settings.ansible_access')); ?></h3>
-                        <span class="badge badge-info"><?php echo h(__t('settings.ansible_access_per_job')); ?></span>
+                        <?php echo portal_badge('info', __t('settings.ansible_access_per_job')); ?>
                     </div>
                     <span class="runtime-value"><?php echo h(__t('settings.ansible_access_value')); ?></span>
                     <p class="muted"><?php echo h(__t('settings.ansible_access_detail')); ?></p>

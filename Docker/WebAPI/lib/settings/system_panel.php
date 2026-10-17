@@ -112,7 +112,7 @@ declare(strict_types=1);
                 <tbody>
                     <tr>
                         <th><?php echo h(__t('settings.backup_state')); ?></th>
-                        <td><span class="badge <?php echo h(backup_status_badge_class($backupState)); ?>"><?php echo h(backup_status_label($backupState)); ?></span></td>
+                        <td><?php echo portal_badge((string) preg_replace('/^badge-/', '', backup_status_badge_class($backupState)), backup_status_label($backupState)); ?></td>
                     </tr>
                     <tr>
                         <th><?php echo h(__t('settings.backup_schedule')); ?></th>

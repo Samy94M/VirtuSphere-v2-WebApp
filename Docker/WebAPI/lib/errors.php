@@ -256,7 +256,7 @@ function virtusphere_render_error_json(Throwable $exception, string $refId): voi
 function virtusphere_error_context(Throwable $exception, string $refId, bool $fromShutdown): string
 {
     $request = PHP_SAPI === 'cli'
-        ? 'cli ' . implode(' ', array_map('strval', $_SERVER['argv'] ?? []))
+        ? 'cli ' . basename((string) ($_SERVER['argv'][0] ?? 'unknown')) . ' (' . max(0, count($_SERVER['argv'] ?? []) - 1) . ' args)'
         : trim((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET') . ' ' . (string) ($_SERVER['REQUEST_URI'] ?? ''));
     $userId = session_status() === PHP_SESSION_ACTIVE ? (string) ($_SESSION['user_id'] ?? 'none') : 'none';
 

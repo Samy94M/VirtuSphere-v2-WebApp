@@ -387,9 +387,13 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    setzt du das Passwort selbst.
 
    ```bash
-   docker compose exec php \
-     php /var/www/html/lib/seed.php admin '<starkes Passwort>' admin@example.lan
+   read -rs ADMIN_PW && printf '%s\n' "$ADMIN_PW" | docker compose exec -T php \
+     php /var/www/html/lib/seed.php admin admin@example.lan
    ```
+
+   `read -rs` fragt das Passwort verdeckt ab, Enter beendet die Eingabe. `seed.php`
+   liest es von STDIN, es steht also weder in der Befehlszeile noch in der
+   Shell-Historie. Das zweite Argument ist die E-Mail-Adresse des Kontos.
 
    Der zweite Weg: `SEED_ADMIN_USER` und `SEED_ADMIN_PASSWORD` in der `.env`
    setzen (in `.env.example` als Kommentar vorbereitet), dann legt

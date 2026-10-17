@@ -13,15 +13,41 @@ if (PHP_SAPI !== 'cli') {
 // No elvis-style env fallback here (GROK forbidden pattern #6): getenv()
 // returns false when unset, the string cast folds that to '', and the usage
 // check below rejects empty credentials. There is no silent default secret.
-$name = (string) ($argv[1] ?? getenv('SEED_ADMIN_USER'));
-$password = (string) ($argv[2] ?? getenv('SEED_ADMIN_PASSWORD'));
-$email = (string) ($argv[3] ?? getenv('SEED_ADMIN_EMAIL'));
+//
+// Forms, by argument count (argv[0] is the script):
+//   <user> <email>             the documented form. The password is read from
+//                              STDIN, one line: an argument would stay in the
+//                              shell history and in the process list.
+//   <user> <password> [email]  the legacy positional form, kept for scripts.
+//   no arguments               SEED_ADMIN_* (Docker/scripts/setup.sh); an empty
+//                              password is read from STDIN.
+$usage = "Usage: php lib/seed.php <admin-user> <admin-email>   (password: one line on STDIN)\n"
+    . "       php lib/seed.php <admin-user> <admin-password> [email]   (legacy form)\n";
+$arguments = array_slice($argv ?? [], 1);
+$name = (string) ($arguments[0] ?? getenv('SEED_ADMIN_USER'));
+if (count($arguments) === 2) {
+    $email = (string) $arguments[1];
+    if (!str_contains($email, '@')) {
+        // The legacy form `<user> <password>` lands here too: it must not turn
+        // the password into an email address.
+        fwrite(STDERR, $usage);
+        exit(2);
+    }
+    $password = '';
+} else {
+    $password = (string) ($arguments[1] ?? getenv('SEED_ADMIN_PASSWORD'));
+    $email = (string) ($arguments[2] ?? getenv('SEED_ADMIN_EMAIL'));
+}
 if ($email === '') {
     $email = 'admin@localhost';
 }
+if ($name !== '' && $password === '') {
+    // One line from STDIN; only the line terminator is removed.
+    $password = rtrim((string) fgets(STDIN), "\r\n");
+}
 
 if ($name === '' || $password === '') {
-    fwrite(STDERR, "Usage: php lib/seed.php <admin-user> <admin-password> [email]\n");
+    fwrite(STDERR, $usage);
     exit(2);
 }
 

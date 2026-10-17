@@ -12,6 +12,7 @@
 #   deploy_users.role            <-> VIRTUSPHERE_ROLE_*             (lib/permissions.php)
 #   deploy_users/deploy_login_attempts.auth_source
 #                               <-> VIRTUSPHERE_AUTH_SOURCE_*       (lib/directory_constants.php)
+#   deploy_login_attempts.result <-> VIRTUSPHERE_LOGIN_RESULT_*     (lib/auth_rate_limit.php)
 #   deploy_jobs.status           <-> VIRTUSPHERE_DEPLOY_STATUS_*    (lib/deploy_constants.php)
 #   deploy_credentials.type      <-> VIRTUSPHERE_CREDENTIAL_TYPE_*  (lib/credentials.php)
 #   deploy_esxi_inventory.kind   <-> VIRTUSPHERE_INVENTORY_KIND_*   (lib/deploy_constants.php)
@@ -157,6 +158,7 @@ check_table_pair() { # $1=label $2=php-file $3=const-prefix $4=table $5=column
 check_table_pair "Create-Aktionen" "$LIB/deploy_create_constants.php" "VIRTUSPHERE_CREATE_ACTION_" "deploy_create_vm_results" "action"
 check_table_pair "Create-Status"   "$LIB/deploy_create_constants.php" "VIRTUSPHERE_CREATE_RESULT_STATUS_" "deploy_create_vm_results" "status"
 check_table_pair "Create-Outcomes" "$LIB/deploy_create_constants.php" "VIRTUSPHERE_CREATE_OUTCOME_" "deploy_create_vm_results" "outcome"
+check_table_pair "Login-Ergebnisse" "$LIB/auth_rate_limit.php" "VIRTUSPHERE_LOGIN_RESULT_" "deploy_login_attempts" "result"
 
 if [ "$errors" -gt 0 ]; then
   echo "check-enum-sync: $errors Drift-Fehler." >&2

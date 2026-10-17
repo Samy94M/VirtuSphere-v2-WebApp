@@ -8,7 +8,12 @@ declare(strict_types=1);
  * consumes the stash exactly once.
  */
 
-const VIRTUSPHERE_FORM_SENSITIVE_FIELDS = ['_csrf', 'password', 'secret', 'pfx_password'];
+// Exact names of every password input field (QL-05; tests/Static/FormSensitiveFieldsContractTest.php
+// derives them). No substring rule: password_min_length is a setting that must keep its value.
+const VIRTUSPHERE_FORM_SENSITIVE_FIELDS = [
+    '_csrf', 'password', 'secret', 'pfx_password',
+    'bind_password', 'current_password', 'new_password', 'confirm_password',
+];
 
 function form_state(): array
 {
