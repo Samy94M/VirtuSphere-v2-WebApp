@@ -99,6 +99,7 @@ const VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR = 'system.unhandled_error';
 const VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED = 'logs.csv_exported';
 const VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED = 'machine_api.access_denied';
 const VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED = 'machine_api.callback_rejected';
+const VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_TOUCH_REFUSED = 'machine_api.touch_refused';
 const VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE = 'machine_api.internal_failure';
 const VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM = 'mecm.unknown_vm_reported';
 // Etappe 14D: a mutating callback whose rollout revision is not current. It is
@@ -237,9 +238,12 @@ function audit_event_registry(): array
         VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_SYSTEM, ['log_view'], $success, ['filter_fingerprint', 'rows_exported', 'total_rows', 'limit', 'truncated'], [], 'required', [], [], [], $logTabs),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, ['machine_endpoint'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], [], ['action', 'reason', ...$throttle], 'required', [], [], [], $endpoints),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], ['reason_code'], $throttle),
+        // MA-08: a refused VM access confirmation (deploy_vm_touch.php); reason_code is the closed cause.
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_TOUCH_REFUSED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, ['deploy_job'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], ['reason_code'], $throttle),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MACHINE_API, ['machine_endpoint'], [VIRTUSPHERE_AUDIT_RESULT_FAILURE], ['error_class'], $throttle, 'required', [], [], [], $endpoints),
         VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['vm'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['report_type'], ['resource_id', ...$throttle]),
-        VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['vm'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['report_type', 'reported_revision', 'rollout_revision'], [...$throttle]),
+        // MA-07: `reason` is the closed fence cause (revision_mismatch or binding_conflict); callers without one omit it.
+        VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['vm'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['report_type', 'reported_revision', 'rollout_revision'], [...$throttle, 'reason']),
         VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], [VIRTUSPHERE_AUDIT_RESULT_DENIED], ['retire_count', 'active_count', 'threshold_percent'], $throttle, 'required', [], [], [], $catalogs),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], $success, ['items', 'item_count'], [], 'required', [], [], [], $catalogs),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => audit_definition(VIRTUSPHERE_LOG_CATEGORY_MECM, ['catalog'], [VIRTUSPHERE_AUDIT_RESULT_WARNING], ['items', 'item_count'], [], 'required', [], [], [], $catalogs),

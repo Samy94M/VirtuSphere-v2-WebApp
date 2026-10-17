@@ -36,7 +36,20 @@ if (!is_int($jobId) || $jobId <= 0 || !is_int($vmId) || $vmId <= 0 || !is_int($a
     || !is_string($generation) || !is_string($phase)) {
     machine_api_json(['error' => 'Invalid touch fields', 'reason_code' => 'touch_refused'], 400);
 }
-if (!repo_deploy_job_vm_admit_touch($connection, $jobId, $vmId, $attempt, $generation, $phase)) {
-    machine_api_json(['error' => 'Deploy job does not admit this VM step', 'reason_code' => 'touch_refused'], 409);
+$refusal = repo_deploy_job_vm_touch_refusal($connection, $jobId, $vmId, $attempt, $generation, $phase);
+if ($refusal !== null) {
+    // MA-08: one throttled audit row per (job, closed cause), an event of its own
+    // so the log never calls a refused VM access a MAC callback. The raw request is not logged.
+    machine_api_audit_warning(
+        $connection,
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_TOUCH_REFUSED,
+        'deploy_job',
+        $jobId,
+        VIRTUSPHERE_AUDIT_RESULT_DENIED,
+        ['reason_code' => $refusal],
+        $clientIp,
+        'job:' . $jobId . ':' . $refusal
+    );
+    machine_api_json(['error' => 'Deploy job does not admit this VM step', 'reason_code' => 'touch_refused', 'cause' => $refusal], 409);
 }
 machine_api_json(['success' => true, 'job_id' => $jobId, 'vm_id' => $vmId, 'attempt' => $attempt, 'generation' => $generation, 'phase' => $phase]);

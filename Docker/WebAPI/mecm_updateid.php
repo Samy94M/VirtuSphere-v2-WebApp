@@ -93,18 +93,14 @@ if ($action === 'reportMembership') {
                 return ['status' => 'unknown_vm', 'vm' => []];
             }
 
-            $verdict = mecm_rollout_fence_decide(
-                $reportedRevision,
-                $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'],
-                null,
-                null,
-                $vm['mecm_previous_id'] === null ? null : (string) $vm['mecm_previous_id']
-            );
+            $storedRevision = $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'];
+            $tombstone = $vm['mecm_previous_id'] === null ? null : (string) $vm['mecm_previous_id'];
+            $verdict = mecm_rollout_fence_decide($reportedRevision, $storedRevision, null, null, $tombstone);
             if ($verdict === VIRTUSPHERE_MECM_FENCE_STALE) {
                 // Returned rather than thrown: no domain row was written, so
                 // there is nothing to roll back, and the refusal's own audit row
                 // is written outside where no rollback can take it away.
-                return ['status' => 'stale', 'vm' => $vm];
+                return ['status' => 'stale', 'vm' => $vm, 'cause' => mecm_rollout_fence_refusal_cause($reportedRevision, $storedRevision, null, null, $tombstone)];
             }
 
             repo_mecm_rules_apply_report($connection, $vmId, $entries, $clientIp);
@@ -125,7 +121,7 @@ if ($action === 'reportMembership') {
             machine_api_json(['error' => 'Unknown VM id'], 404);
         }
         if ($outcome['status'] === 'stale') {
-            machine_api_rollout_revision_refused($connection, $vmId, 'membership', $reportedRevision, $outcome['vm'], $clientIp);
+            machine_api_rollout_revision_refused($connection, $vmId, 'membership', $reportedRevision, $outcome['vm'], $clientIp, $outcome['cause']);
         }
 
         machine_api_json(['success' => 'Data updated successfully']);
@@ -177,15 +173,12 @@ try {
             return ['status' => 'unknown_vm', 'vm' => []];
         }
 
-        $verdict = mecm_rollout_fence_decide(
-            $reportedRevision,
-            $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'],
-            $vm['mecm_id'] === null ? null : (string) $vm['mecm_id'],
-            $mecmId,
-            $vm['mecm_previous_id'] === null ? null : (string) $vm['mecm_previous_id']
-        );
+        $storedRevision = $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'];
+        $storedBinding = $vm['mecm_id'] === null ? null : (string) $vm['mecm_id'];
+        $tombstone = $vm['mecm_previous_id'] === null ? null : (string) $vm['mecm_previous_id'];
+        $verdict = mecm_rollout_fence_decide($reportedRevision, $storedRevision, $storedBinding, $mecmId, $tombstone);
         if ($verdict === VIRTUSPHERE_MECM_FENCE_STALE) {
-            return ['status' => 'stale', 'vm' => $vm];
+            return ['status' => 'stale', 'vm' => $vm, 'cause' => mecm_rollout_fence_refusal_cause($reportedRevision, $storedRevision, $storedBinding, $mecmId, $tombstone)];
         }
         // Whether this callback answers the transfer that is queued now. A caller
         // without a generation (the sync before AV-P0) answers whatever is
@@ -246,7 +239,7 @@ try {
         machine_api_json(['error' => 'Unknown VM id'], 404);
     }
     if ($outcome['status'] === 'stale') {
-        machine_api_rollout_revision_refused($connection, $vmId, 'resource_id', $reportedRevision, $outcome['vm'], $clientIp);
+        machine_api_rollout_revision_refused($connection, $vmId, 'resource_id', $reportedRevision, $outcome['vm'], $clientIp, $outcome['cause']);
     }
 
     machine_api_json(['success' => 'Data updated successfully']);

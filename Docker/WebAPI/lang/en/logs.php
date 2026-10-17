@@ -138,6 +138,7 @@ return [
     'eventcode_logs_csv_exported' => 'Log exported as CSV',
     'eventcode_machine_api_access_denied' => 'Machine API access denied',
     'eventcode_machine_api_callback_rejected' => 'Callback rejected',
+    'eventcode_machine_api_touch_refused' => 'VM access refused',
     'eventcode_machine_api_internal_failure' => 'Machine API failure',
     'eventcode_mecm_catalog_sync_rejected' => 'Catalog sync rejected',
     'eventcode_mecm_client_event_cap_reached' => 'Client event cap reached',

@@ -262,6 +262,42 @@ final class MecmRolloutContractTest extends TestCase
     }
 
     /**
+     * MA-07: the audit row names WHICH check refused. The wire answer is the same
+     * 409 for both causes, so this table is the only place the difference is pinned.
+     *
+     * @return array<string, array{0: ?int, 1: ?int, 2: ?string, 3: ?string, 4: ?string, 5: ?string}>
+     */
+    public static function refusalCauses(): array
+    {
+        return [
+            'older revision is a revision mismatch' => [2, 3, null, 'RID', null, 'revision_mismatch'],
+            'legacy caller after a reset is a revision mismatch' => [null, 2, null, 'RID', null, 'revision_mismatch'],
+            'legacy caller with a tombstone is a revision mismatch' => [null, 1, null, 'RID', 'OLD', 'revision_mismatch'],
+            'stale revision over a different binding is still a revision mismatch' => [2, 3, 'RID', 'OTHER', null, 'revision_mismatch'],
+            'current caller with a second ResourceID is a binding conflict' => [3, 3, 'RID', 'OTHER', null, 'binding_conflict'],
+            'legacy caller with a different binding is a binding conflict' => [null, 1, 'RID', 'OTHER', null, 'binding_conflict'],
+            'accepted caller has no cause' => [3, 3, null, 'RID', null, null],
+            'noop caller has no cause' => [3, 3, 'RID', 'RID', null, null],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('refusalCauses')]
+    public function testTheRefusalCauseNamesTheCheckThatFailed(?int $reported, ?int $stored, ?string $storedBinding, ?string $incoming, ?string $tombstone, ?string $expected): void
+    {
+        self::assertSame($expected, mecm_rollout_fence_refusal_cause($reported, $stored, $storedBinding, $incoming, $tombstone));
+    }
+
+    /** A cause exists exactly for the refusals of the decision table, and nowhere else. */
+    #[\PHPUnit\Framework\Attributes\DataProvider('fenceCases')]
+    public function testACauseExistsExactlyForARefusal(?int $reported, ?int $stored, ?string $storedBinding, ?string $incoming, ?string $tombstone, string $expected): void
+    {
+        $cause = mecm_rollout_fence_refusal_cause($reported, $stored, $storedBinding, $incoming, $tombstone);
+
+        self::assertSame($expected === VIRTUSPHERE_MECM_FENCE_STALE, $cause !== null);
+        self::assertTrue($cause === null || in_array($cause, [VIRTUSPHERE_MECM_FENCE_CAUSE_REVISION, VIRTUSPHERE_MECM_FENCE_CAUSE_BINDING], true));
+    }
+
+    /**
      * A future revision cannot be a legal caller: only this server hands them
      * out. Accepting one would bind a ResourceID to a rollout that does not
      * exist here, which is why it is refused as firmly as an old one.

@@ -163,6 +163,24 @@ final class MecmReportWireTest extends TestCase
         self::assertSame(['error' => 'Invalid interval_seconds'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
     }
 
+    /**
+     * MA-02: only a JSON integer is an interval. A string such as "12abc", an
+     * array or an absent value used to be cast to 12 or 1 and was accepted; now
+     * each answers the existing 400 body of an out-of-range interval.
+     */
+    public function testIntervalSecondsAcceptsOnlyAJsonInteger(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach ([['interval_seconds' => '12abc'], ['interval_seconds' => ['10']], ['interval_seconds' => '10'], []] as $extra) {
+            $payload = array_merge(['source' => 'device-sync'], $extra);
+            [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', $payload);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(400, $status, json_encode($extra, JSON_THROW_ON_ERROR) . ' ' . $body);
+            self::assertSame(['error' => 'Invalid interval_seconds'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), json_encode($extra, JSON_THROW_ON_ERROR));
+        }
+    }
+
     public function testHeartbeatRoundTripLandsInDatabase(): void
     {
         // Selbst allowlisten statt skippen (ADR-0015-Ergaenzung).

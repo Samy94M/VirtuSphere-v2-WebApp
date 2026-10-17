@@ -33,6 +33,31 @@ function repo_record_client_event(mysqli $db, int $vmId, string $mac, string $ph
     return $stmt->execute();
 }
 
+/**
+ * Stores one client event, or says why it did not (MA-11). The duplicate check,
+ * the daily cap and the insert run in ONE transaction behind a lock on the VM
+ * row, so two identical reports cannot both be stored and the cap cannot be
+ * overrun. Answers `recorded`, `duplicate` or `capped`; the cap audit row is
+ * written by the caller after this transaction has ended.
+ */
+function repo_client_event_record_once(mysqli $db, int $vmId, string $mac, string $phase, string $event, ?string $detail, string $clientIp, int $dailyCap = VIRTUSPHERE_CLIENT_EVENT_MAX_PER_DAY): string
+{
+    return (string) repo_transaction($db, static function () use ($db, $vmId, $mac, $phase, $event, $detail, $clientIp, $dailyCap): string {
+        repo_fetch_one($db, 'SELECT id FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$vmId]);
+
+        if (repo_client_event_is_duplicate($db, $vmId, $phase, $event, $detail)) {
+            return 'duplicate';
+        }
+        if (repo_client_event_count_recent($db, $vmId, 86400) >= $dailyCap) {
+            return 'capped';
+        }
+
+        repo_record_client_event($db, $vmId, $mac, $phase, $event, $detail, $clientIp);
+
+        return 'recorded';
+    });
+}
+
 // Latest stored event for one (vm, phase) pair or null.
 function repo_client_event_latest(mysqli $db, int $vmId, string $phase): ?array
 {

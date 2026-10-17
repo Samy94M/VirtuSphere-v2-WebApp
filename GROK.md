@@ -69,7 +69,7 @@ Read 1.1 for code/configuration changes and the affected topic sections below. T
 
 ### 1.4 Machine boundaries
 
-- Reintroducing the removed desktop token path in any form (token-issuing endpoints, plaintext machine tokens, `createVM`/`createOrUpdateVm`-style flows). Machine auth is the IP allowlist plus the optional hashed report-channel token (ADR-0035).
+- Reintroducing the removed desktop token path (token-issuing endpoints, plaintext machine tokens, `createVM`/`createOrUpdateVm`-style flows). Machine auth is the IP allowlist, a known MAC on client paths and the optional hashed report-channel token (ADR-0035).
 - A machine IP gate that does not name its caller role, or a second endpoint-to-role list next to `VIRTUSPHERE_MACHINE_API_GATE_ROLES` (`lib/machine_api_roles.php`, K20). `machine_api_ip_allowed()` takes the gate key; `MachineApiRoleContractTest` derives the gates from the endpoint files.
 - Normal VM edits that reset `mecm_id`, `updated` or machine-owned status transitions. Use only the explicit `Reset MECM ID` action for MECM requeue recovery.
 - `db_importMAC.php` requires `job_id` (ADR-0035) and validates it (exists, same mission, `running`/`cancelling`) before its raw request transaction, rechecks it with a locking read inside, and then uses only raw prepared statements for interface, VM-state, status-event and `result_json` writes. Do not call `repo_set_vm_state()` or any `repo_transaction()`-wrapped helper from that transaction.

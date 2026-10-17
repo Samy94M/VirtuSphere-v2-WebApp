@@ -116,6 +116,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
                 ? ': the IP is on the machine API allowlist only under a role this endpoint does not accept (and no known MAC presented).'
                 : ': not on the machine API IP allowlist (and no known MAC presented).'),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED => 'MAC callback rejected for job id ' . $id . ': ' . ($context['reason_code'] ?? 'conflict'),
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_TOUCH_REFUSED => 'VM access confirmation refused for job id ' . $id . ': ' . ($context['reason_code'] ?? 'refused'),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE => 'Machine endpoint ' . $id . ' failed internally (' . ($context['error_class'] ?? 'Throwable') . ')',
         VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM => ($context['report_type'] ?? 'report') . ' for unknown VM id ' . $id . (isset($context['resource_id']) ? ' (ResourceID ' . $context['resource_id'] . ')' : ''),
         // Etappe 14D. Reported revision 0 means the caller sent none at all,

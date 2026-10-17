@@ -98,3 +98,20 @@ function virtusphere_mac_import_callback_reasons(): array
 }
 
 const VIRTUSPHERE_MAC_IMPORT_CALLBACK_OBSERVABILITY_THROTTLE_SECONDS = 3600;
+
+/**
+ * One text field of a result entry (MA-01). An absent or null field, and an array
+ * or object where text belongs, answer null, so the caller falls through exactly
+ * as it does for an absent field instead of casting an array into a warning that
+ * ends the request as a 500. A scalar keeps the legacy string cast, so a numeric
+ * VM name that is valid today still matches.
+ */
+function mac_import_text_field(array $source, string $key): ?string
+{
+    $value = $source[$key] ?? null;
+    if ($value === null || is_array($value) || is_object($value)) {
+        return null;
+    }
+
+    return (string) $value;
+}

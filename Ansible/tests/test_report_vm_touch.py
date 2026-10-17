@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 import socket
 import ssl
 import sys
@@ -135,6 +136,37 @@ class ReportVmTouchTest(unittest.TestCase):
         self.assertEqual(1, len(opener.requests))
         self.assertEqual([], self.sleeps)
 
+    def test_refusal_prints_the_closed_cause_and_never_the_body(self):
+        body = json.dumps({
+            'error': 'Deploy job does not admit this VM step',
+            'reason_code': 'touch_refused',
+            'cause': 'attempt_stale',
+        }).encode('utf-8')
+        error = HTTPError('https://portal.invalid/deploy_vm_touch.php', 409, 'Conflict', None, io.BytesIO(body))
+        result, output, opener = self.run_touch([error])
+
+        self.assertFalse(result)
+        self.assertEqual(1, len(opener.requests))
+        self.assertEqual([], self.sleeps)
+        self.assertIn('touch_refused: server rejected this VM access attempt. cause=attempt_stale', output)
+        self.assertNotIn('does not admit', output)
+
+    def test_an_unknown_malformed_or_missing_cause_is_not_printed(self):
+        for raw in (
+            b'{"cause": "free text from the wire"}',
+            b'{"cause": ["attempt_stale"]}',
+            b'{"reason_code": "touch_refused"}',
+            b'not json',
+        ):
+            with self.subTest(raw=raw):
+                error = HTTPError('https://portal.invalid/deploy_vm_touch.php', 409, 'Conflict', None, io.BytesIO(raw))
+                result, output, _ = self.run_touch([error])
+
+                self.assertFalse(result)
+                self.assertIn('touch_refused: server rejected this VM access attempt.', output)
+                self.assertNotIn('cause=', output)
+                self.assertNotIn('free text', output)
+
     def test_transient_http_and_network_errors_reuse_the_upload_retry_policy(self):
         server_error = HTTPError(
             'https://portal.invalid/deploy_vm_touch.php', 503, 'Unavailable', None, io.BytesIO(b'ignored')
@@ -189,6 +221,20 @@ class ReportVmTouchTest(unittest.TestCase):
         default_opener.assert_called_once_with(
             'https://portal.invalid/deploy_vm_touch.php', 'b' * 64
         )
+
+
+    def test_the_printed_causes_are_the_portal_closed_set(self):
+        # The mirror of VIRTUSPHERE_DEPLOY_TOUCH_REFUSAL_CAUSES (A68, MA-08). The
+        # portal sources are optional in a split checkout; the parity is pinned where both exist.
+        portal_source = ANSIBLE_DIR.parent / 'Docker' / 'WebAPI' / 'lib' / 'repo' / 'deploy_job_vm_states.php'
+        if not portal_source.exists():
+            self.skipTest('portal sources are not part of this checkout')
+        source = portal_source.read_text(encoding='utf-8')
+        block = re.search(r'const VIRTUSPHERE_DEPLOY_TOUCH_REFUSAL_CAUSES = \[(.*?)\];', source, re.S)
+        self.assertIsNotNone(block)
+        portal_causes = set(re.findall(r"'([a-z_]+)'", block.group(1)))
+
+        self.assertEqual(portal_causes, set(TOUCH.TOUCH_CAUSES))
 
 
 if __name__ == '__main__':

@@ -35,13 +35,12 @@ const VIRTUSPHERE_MECM_FENCE_ACCEPT = 'accept';
 const VIRTUSPHERE_MECM_FENCE_NOOP = 'noop';
 const VIRTUSPHERE_MECM_FENCE_STALE = 'stale';
 
+/** Closed causes of a stale refusal (MA-07); the audit row carries one as `reason`. */
+const VIRTUSPHERE_MECM_FENCE_CAUSE_REVISION = 'revision_mismatch';
+const VIRTUSPHERE_MECM_FENCE_CAUSE_BINDING = 'binding_conflict';
+
 /**
- * Pure decision, so it can be driven through every branch without a database.
- *
- * `$reported` is the revision the caller sent, or null when it sent none.
- * `$stored` is the row's current revision, `$storedBinding` what is already
- * written for the thing the caller wants to write (a ResourceID, an ACK marker),
- * `$incomingBinding` what it wants to write.
+ * The revision half of the fence: whether the caller is the current rollout.
  *
  * The legacy branch is the one deliberate hole and it is fail-closed: a callback
  * with NO revision is accepted only for revision 1 with no tombstone, i.e. a VM
@@ -52,16 +51,29 @@ const VIRTUSPHERE_MECM_FENCE_STALE = 'stale';
  * into the wrong rollout. Removing this branch after a proven cutover is its own
  * E3/ADR decision, not a cleanup.
  */
-function mecm_rollout_fence_decide(?int $reported, ?int $stored, ?string $storedBinding, ?string $incomingBinding, ?string $tombstone): string
+function mecm_rollout_fence_revision_current(?int $reported, ?int $stored, ?string $tombstone): bool
 {
     $stored = $stored ?? VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL;
     $hasTombstone = $tombstone !== null && $tombstone !== '';
 
     if ($reported === null) {
-        if ($stored !== VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL || $hasTombstone) {
-            return VIRTUSPHERE_MECM_FENCE_STALE;
-        }
-    } elseif ($reported !== $stored) {
+        return $stored === VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL && !$hasTombstone;
+    }
+
+    return $reported === $stored;
+}
+
+/**
+ * Pure decision, so it can be driven through every branch without a database.
+ *
+ * `$reported` is the revision the caller sent, or null when it sent none.
+ * `$stored` is the row's current revision, `$storedBinding` what is already
+ * written for the thing the caller wants to write (a ResourceID, an ACK marker),
+ * `$incomingBinding` what it wants to write.
+ */
+function mecm_rollout_fence_decide(?int $reported, ?int $stored, ?string $storedBinding, ?string $incomingBinding, ?string $tombstone): string
+{
+    if (!mecm_rollout_fence_revision_current($reported, $stored, $tombstone)) {
         return VIRTUSPHERE_MECM_FENCE_STALE;
     }
 
@@ -78,6 +90,24 @@ function mecm_rollout_fence_decide(?int $reported, ?int $stored, ?string $stored
     }
 
     return VIRTUSPHERE_MECM_FENCE_STALE;
+}
+
+/**
+ * Which check refused a callback (MA-07), for the audit row only: null when
+ * the same arguments are not a stale refusal. A stale caller whose revision is
+ * not current is `revision_mismatch`; a current caller refused by a different
+ * ResourceID over an existing binding is `binding_conflict`. The wire answer is
+ * the same 409 for both and does not depend on this function.
+ */
+function mecm_rollout_fence_refusal_cause(?int $reported, ?int $stored, ?string $storedBinding, ?string $incomingBinding, ?string $tombstone): ?string
+{
+    if (mecm_rollout_fence_decide($reported, $stored, $storedBinding, $incomingBinding, $tombstone) !== VIRTUSPHERE_MECM_FENCE_STALE) {
+        return null;
+    }
+
+    return mecm_rollout_fence_revision_current($reported, $stored, $tombstone)
+        ? VIRTUSPHERE_MECM_FENCE_CAUSE_BINDING
+        : VIRTUSPHERE_MECM_FENCE_CAUSE_REVISION;
 }
 
 /**

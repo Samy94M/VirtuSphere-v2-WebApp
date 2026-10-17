@@ -23,7 +23,9 @@ final class K15VmTouchEndpointContractTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 2) . '/deploy_vm_touch.php');
         self::assertIsString($source);
-        self::assertStringContainsString('repo_deploy_job_vm_admit_touch($connection, $jobId, $vmId, $attempt, $generation, $phase)', $source);
+        // MA-08: the route asks for the closed refusal cause; repo_deploy_job_vm_admit_touch() stays the boolean wrapper for the other callers.
+        self::assertStringContainsString('repo_deploy_job_vm_touch_refusal($connection, $jobId, $vmId, $attempt, $generation, $phase)', $source);
+        self::assertStringContainsString("'cause' => \$refusal", $source);
         self::assertStringContainsString('[\'success\' => true, \'job_id\' => $jobId, \'vm_id\' => $vmId, \'attempt\' => $attempt, \'generation\' => $generation, \'phase\' => $phase]', $source);
         self::assertStringNotContainsString('UPDATE deploy_vms', $source);
         self::assertStringNotContainsString('correlation_id', $source);

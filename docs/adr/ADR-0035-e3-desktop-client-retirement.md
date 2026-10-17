@@ -96,3 +96,19 @@ package catalog (finding VT-01, released by the user on 2026-10-05).
 - The refusal stays the frozen legacy 403 including the IP echo; the audit row
   adds the closed `reason`. The MAC-based client paths are unchanged, and the
   Ansible preflight probe keeps asking the MAC callback gate.
+
+## Amendment 2 (2026-10-17, MA-06): the MAC path of the client endpoints stays, deliberately
+
+The three client paths (`getDeviceInfos` in `mecm-api.php`, `reportPhase` in
+`mecm_report.php`, `mecm_client_ack.php`) admit a request when the IP allowlist
+admits it for the client role OR the reported MAC belongs to a known interface
+(`machine_api_mac_allowed()`). This stays (user decision 2026-10-17, audit
+finding MA-06), because the client calls `getDeviceInfos` in the task sequence
+with its DHCP address, before its static IP exists, and the allowlist holds
+exact addresses only.
+
+- Risk, accepted under the LAN and air-gap assumption: a MAC is not a secret.
+  Any host in the deploy network that sees a MAC can read that VM's network
+  bootstrap data and, through the acknowledgement, move its lifecycle to 5/5.
+- Candidate, not built: subnet entries for the client role; once they exist,
+  the acknowledgement and `getDeviceInfos` could require the IP role.

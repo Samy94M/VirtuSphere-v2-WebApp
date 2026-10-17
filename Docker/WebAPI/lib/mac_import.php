@@ -143,8 +143,8 @@ function mac_import_build_plan(mysqli $db, int $missionId, array $results, bool 
         $instance = is_array($entry['instance'] ?? null) ? $entry['instance'] : null;
         $item = is_array($entry['item'] ?? null) ? $entry['item'] : [];
         // Result names are ESXi-owned identity. Do not trim or case-fold them.
-        $instanceName = is_array($instance) ? (string) ($instance['hw_name'] ?? '') : '';
-        $itemName = (string) ($item['vm_name'] ?? $item['name'] ?? '');
+        $instanceName = is_array($instance) ? (mac_import_text_field($instance, 'hw_name') ?? '') : '';
+        $itemName = mac_import_text_field($item, 'vm_name') ?? mac_import_text_field($item, 'name') ?? '';
         $vmName = $instanceName !== '' ? $instanceName : $itemName;
         $row['vm_name'] = mac_import_bounded_identifier($vmName, 191);
 

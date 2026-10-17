@@ -344,22 +344,32 @@ function machine_api_throttle_allows(mysqli $db, string $category, string $event
  * the one field an attacker steers, and deploy_logs is readable by every
  * `users.manage` holder.
  *
+ * $reason is the closed cause from mecm_rollout_fence_refusal_cause() (MA-07). A
+ * refusal without one keeps its former row: no reason key, the IP-only throttle scope.
+ * With one, the throttle scope is the IP plus the cause, so a binding conflict is not
+ * silenced by a revision refusal of the same IP.
+ *
  * @param array<string, mixed> $vm the locked row, for the stored revision
  */
-function machine_api_rollout_revision_refused(mysqli $db, int $vmId, string $reportType, ?int $reported, array $vm, ?string $clientIp): never
+function machine_api_rollout_revision_refused(mysqli $db, int $vmId, string $reportType, ?int $reported, array $vm, ?string $clientIp, ?string $reason = null): never
 {
+    $context = [
+        'report_type' => $reportType,
+        'reported_revision' => $reported === null ? 0 : $reported,
+        'rollout_revision' => $vm['mecm_rollout_revision'] === null ? 0 : (int) $vm['mecm_rollout_revision'],
+    ];
+    if ($reason !== null) {
+        $context['reason'] = $reason;
+    }
     machine_api_audit_warning(
         $db,
         VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED,
         'vm',
         $vmId,
         VIRTUSPHERE_AUDIT_RESULT_WARNING,
-        [
-            'report_type' => $reportType,
-            'reported_revision' => $reported === null ? 0 : $reported,
-            'rollout_revision' => $vm['mecm_rollout_revision'] === null ? 0 : (int) $vm['mecm_rollout_revision'],
-        ],
-        $clientIp
+        $context,
+        $clientIp,
+        $reason === null || $clientIp === null || $clientIp === '' ? null : $clientIp . '|' . $reason
     );
 
     machine_api_json([

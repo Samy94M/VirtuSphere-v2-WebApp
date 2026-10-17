@@ -19,6 +19,25 @@ TOUCH_OPERATIONS = {
     'powercycle': 'VM-Touch Power-Cycle',
     'export': 'VM-Touch Export',
 }
+# Closed refusal causes of deploy_vm_touch.php (A68, MA-08); mirrors
+# VIRTUSPHERE_DEPLOY_TOUCH_REFUSAL_CAUSES in lib/repo/deploy_job_vm_states.php.
+TOUCH_CAUSES = frozenset((
+    'job_unknown',
+    'mission_missing',
+    'job_not_active',
+    'attempt_stale',
+    'generation_malformed',
+    'generation_stale',
+    'runtime_mismatch',
+    'mode_mismatch',
+    'phase_mismatch',
+    'execution_contract_mismatch',
+    'remote_handle_mismatch',
+    'create_unit_mismatch',
+    'vm_not_in_scope',
+    'journal_state_missing',
+))
+REFUSAL_MAX_BYTES = 2048
 
 
 def build_payload(vm_id_value, phase, attempt_value, generation_value):
@@ -66,6 +85,24 @@ def exact_confirmation(response, expected):
         and response['generation'] == expected['generation']
         and response['phase'] == expected['phase']
     )
+
+
+def refusal_cause(error):
+    """The closed cause a refusal body names, or None. The body itself is never printed."""
+    try:
+        raw = error.read(REFUSAL_MAX_BYTES + 1)
+    except Exception:
+        return None
+    if not isinstance(raw, bytes) or len(raw) > REFUSAL_MAX_BYTES:
+        return None
+    try:
+        decoded = json.loads(raw.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    cause = decoded.get('cause') if isinstance(decoded, dict) else None
+    if isinstance(cause, str) and cause in TOUCH_CAUSES:
+        return cause
+    return None
 
 
 def send_touch(payload, base_url=transport.api_base_url, opener=None, pinned_fingerprint=None, sleeper=None):
@@ -116,7 +153,9 @@ def send_touch(payload, base_url=transport.api_base_url, opener=None, pinned_fin
         return True
     except HTTPError as error:
         if 400 <= error.code < 500:
-            print('touch_refused: server rejected this VM access attempt.')
+            cause = refusal_cause(error)
+            suffix = '' if cause is None else ' cause=' + cause
+            print('touch_refused: server rejected this VM access attempt.' + suffix)
         else:
             print('touch_transport_failed: portal did not confirm the access attempt.')
         return False

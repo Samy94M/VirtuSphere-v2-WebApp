@@ -52,11 +52,11 @@ function mac_import_instance_nics(array $instance): array
             $nics[] = ['vlan' => '', 'mac' => '', 'normalized_mac' => null];
             continue;
         }
-        $mac = trim((string) ($value['macaddress'] ?? ''));
+        $mac = trim(mac_import_text_field($value, 'macaddress') ?? '');
         $nics[] = [
             // ESXi owns this object name. Keep its bytes intact so a case or
             // boundary-whitespace difference can never become a match here.
-            'vlan' => (string) ($value['summary'] ?? ''),
+            'vlan' => mac_import_text_field($value, 'summary') ?? '',
             'mac' => $mac,
             // MA-14: normalising strips every non-hex character before it checks the
             // length, so "00:50:56:AB:CD:EF xyz" would pass as a MAC. Only a whole

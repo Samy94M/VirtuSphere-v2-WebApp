@@ -322,41 +322,47 @@ try {
     // throttled line in the job log the caller named, one throttled portal audit row.
     // Raw prepared statement on purpose (this file's transaction rule) and
     // after the rollback, so the trace survives independently of the request.
-    // Only for an EXISTING job row - the FK would refuse anything else, and a
-    // rejected callback must never be able to crash into a 500.
-    if (isset($jobId, $traceJob) && is_array($traceJob)) {
-        try {
-            $stream = 'system';
-            $line = 'Rejected a MAC callback (' . $exception->reasonCode . ').';
-            $connection->begin_transaction();
-            $stmt = $connection->prepare('SELECT id FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
-            $stmt->bind_param('i', $jobId);
-            $stmt->execute();
-            $knownJob = $stmt->get_result()->fetch_assoc();
-            if (is_array($knownJob)) {
-                $stmt = $connection->prepare(
-                    'SELECT id FROM deploy_job_logs WHERE job_id = ? AND stream = ? AND line = ? '
-                    . 'AND TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP()) < ? LIMIT 1'
-                );
-                $throttleSeconds = VIRTUSPHERE_MAC_IMPORT_CALLBACK_OBSERVABILITY_THROTTLE_SECONDS;
-                $stmt->bind_param('issi', $jobId, $stream, $line, $throttleSeconds);
-                $stmt->execute();
-                if ($stmt->get_result()->fetch_assoc() === null) {
-                    $stmt = $connection->prepare(
-                        'INSERT INTO deploy_job_logs (job_id, seq, stream, line) '
-                        . 'SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ? FROM deploy_job_logs WHERE job_id = ?'
-                    );
-                    $stmt->bind_param('issi', $jobId, $stream, $line, $jobId);
-                    $stmt->execute();
-                }
-            }
-            $connection->commit();
-        } catch (Throwable $traceError) {
+    // The job-log line needs an EXISTING job row - the FK would refuse anything
+    // else, and a rejected callback must never be able to crash into a 500. An
+    // unknown job id (MA-09) has no job to write into, so it keeps only the
+    // throttled audit row below, under the same closed reason.
+    if (isset($jobId)) {
+        if (isset($traceJob) && is_array($traceJob)) {
             try {
-                $connection->rollback();
-            } catch (Throwable) {
+                $stream = 'system';
+                $line = 'Rejected a MAC callback (' . $exception->reasonCode . ').';
+                $connection->begin_transaction();
+                $stmt = $connection->prepare('SELECT id FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
+                $stmt->bind_param('i', $jobId);
+                $stmt->execute();
+                $knownJob = $stmt->get_result()->fetch_assoc();
+                if (is_array($knownJob)) {
+                    $stmt = $connection->prepare(
+                        'SELECT id FROM deploy_job_logs WHERE job_id = ? AND stream = ? AND line = ? '
+                        . 'AND TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP()) < ? LIMIT 1'
+                    );
+                    $throttleSeconds = VIRTUSPHERE_MAC_IMPORT_CALLBACK_OBSERVABILITY_THROTTLE_SECONDS;
+                    $stmt->bind_param('issi', $jobId, $stream, $line, $throttleSeconds);
+                    $stmt->execute();
+                    if ($stmt->get_result()->fetch_assoc() === null) {
+                        // ADR-0032: the trace line carries its job's correlation id, like every other job-log line.
+                        $stmt = $connection->prepare(
+                            'INSERT INTO deploy_job_logs (job_id, seq, stream, line, correlation_id) '
+                            . 'SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, (SELECT j.correlation_id FROM deploy_jobs j WHERE j.id = ?) '
+                            . 'FROM deploy_job_logs WHERE job_id = ?'
+                        );
+                        $stmt->bind_param('issii', $jobId, $stream, $line, $jobId, $jobId);
+                        $stmt->execute();
+                    }
+                }
+                $connection->commit();
+            } catch (Throwable $traceError) {
+                try {
+                    $connection->rollback();
+                } catch (Throwable) {
+                }
+                machine_api_log_warning('db_importMAC', 'Conflict trace failed (' . $traceError::class . ').');
             }
-            machine_api_log_warning('db_importMAC', 'Conflict trace failed (' . $traceError::class . ').');
         }
         machine_api_audit_warning(
             $connection,
@@ -373,6 +379,8 @@ try {
         'error' => 'Deploy job does not accept this MAC import',
         'reason_code' => $exception->reasonCode,
         'job_id' => $jobId ?? null,
+        // Additive (MA-09): the same key the 200 body uses, null when the caller sent none or an invalid one.
+        'correlation_id' => $correlationId ?? null,
     ], 409);
 } catch (Throwable $exception) {
     if ($transactionStarted) {

@@ -40,8 +40,8 @@ function mac_import_callback_semantic_entry(mixed $rawEntry): array
 
     $instance = is_array($rawEntry['instance'] ?? null) ? $rawEntry['instance'] : null;
     $item = is_array($rawEntry['item'] ?? null) ? $rawEntry['item'] : [];
-    $instanceName = is_array($instance) ? (string) ($instance['hw_name'] ?? '') : '';
-    $itemName = (string) ($item['vm_name'] ?? $item['name'] ?? '');
+    $instanceName = is_array($instance) ? (mac_import_text_field($instance, 'hw_name') ?? '') : '';
+    $itemName = mac_import_text_field($item, 'vm_name') ?? mac_import_text_field($item, 'name') ?? '';
     $vmName = $instanceName !== '' ? $instanceName : $itemName;
     $failed = !empty($rawEntry['failed']);
     $semantic = [
@@ -57,8 +57,8 @@ function mac_import_callback_semantic_entry(mixed $rawEntry): array
     }
 
     $semantic['identity'] = [
-        'moid' => trim((string) ($instance['moid'] ?? '')),
-        'instance_uuid' => trim((string) ($instance['instance_uuid'] ?? '')),
+        'moid' => trim(mac_import_text_field($instance, 'moid') ?? ''),
+        'instance_uuid' => trim(mac_import_text_field($instance, 'instance_uuid') ?? ''),
     ];
     $nics = [];
     foreach ($instance as $key => $value) {
@@ -69,9 +69,9 @@ function mac_import_callback_semantic_entry(mixed $rawEntry): array
             $nics[] = ['shape' => 'malformed'];
             continue;
         }
-        $rawMac = trim((string) ($value['macaddress'] ?? ''));
+        $rawMac = trim(mac_import_text_field($value, 'macaddress') ?? '');
         $nics[] = [
-            'summary' => (string) ($value['summary'] ?? ''),
+            'summary' => mac_import_text_field($value, 'summary') ?? '',
             'mac' => virtusphere_normalize_mac($rawMac) ?? $rawMac,
         ];
     }

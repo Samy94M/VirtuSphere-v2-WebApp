@@ -36,8 +36,8 @@ function mac_import_error(string $code, ?int $vmId, string $vmName, string $vlan
 function mac_import_extract_identity(array $instance): array
 {
     return [
-        'moid' => mac_import_bounded_identifier(trim((string) ($instance['moid'] ?? '')), 64),
-        'instance_uuid' => mac_import_bounded_identifier(trim((string) ($instance['instance_uuid'] ?? '')), 64),
+        'moid' => mac_import_bounded_identifier(trim(mac_import_text_field($instance, 'moid') ?? ''), 64),
+        'instance_uuid' => mac_import_bounded_identifier(trim(mac_import_text_field($instance, 'instance_uuid') ?? ''), 64),
     ];
 }
 

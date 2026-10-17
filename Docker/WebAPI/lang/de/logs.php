@@ -139,6 +139,7 @@ return [
     'eventcode_logs_csv_exported' => 'Protokoll als CSV exportiert',
     'eventcode_machine_api_access_denied' => 'Maschinen-API abgewiesen',
     'eventcode_machine_api_callback_rejected' => 'Rückmeldung abgewiesen',
+    'eventcode_machine_api_touch_refused' => 'VM-Zugriff abgewiesen',
     'eventcode_machine_api_internal_failure' => 'Maschinen-API-Fehler',
     'eventcode_mecm_catalog_sync_rejected' => 'Katalogabgleich abgewiesen',
     'eventcode_mecm_client_event_cap_reached' => 'Client-Ereignisgrenze erreicht',

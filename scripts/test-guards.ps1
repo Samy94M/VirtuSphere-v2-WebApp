@@ -243,13 +243,13 @@ $boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang', 'Docker/mysql
 # liest die Registry als SSoT. Die Wurzeldateien gehoeren dazu, weil die
 # Machine-API-Endpunkte eigene Producer sind; ohne sie waere jeder Negativfall
 # aus einem anderen Grund rot als aus seiner Mutation.
-$auditFixtureFiles = @(
-    'Docker/WebAPI/lib', 'Docker/WebAPI/portal',
-    'Docker/WebAPI/db_importMAC.php', 'Docker/WebAPI/mecm-api.php',
-    'Docker/WebAPI/mecm_client_ack.php', 'Docker/WebAPI/mecm_packages.php',
-    'Docker/WebAPI/mecm_report.php', 'Docker/WebAPI/mecm_updateid.php',
-    'Docker/WebAPI/function.php', 'Docker/WebAPI/index.php',
-    'Docker/WebAPI/intern.php', 'Docker/WebAPI/mysql.php'
+# Abgeleitet, nicht aufgezaehlt: Jede PHP-Datei im WebAPI-Wurzelverzeichnis kann
+# ein Audit-Ereignis erzeugen. Die frueher handgeschriebene Liste kannte
+# deploy_vm_touch.php nicht; sein Ereignis galt im Fixture deshalb als ungenutzt.
+$auditFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/portal') + @(
+    Get-ChildItem -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI') -Filter '*.php' -File |
+        Sort-Object Name |
+        ForEach-Object { 'Docker/WebAPI/' + $_.Name }
 )
 # Muss dem AKTUELLEN Spiegel folgen (ADR-0016): 'cancelling' kam mit
 # Migration 0031, und ein Anker auf einem Literal, das es nicht mehr gibt,

@@ -111,6 +111,8 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'repo_deploy_lock_mission',
         // K15: per-job VM journal (prestate, marker, touch evidence).
         'repo_deploy_job_vm_admit_touch',
+        // MA-08: the same admission with its closed refusal cause (the boolean wrapper calls it).
+        'repo_deploy_job_vm_touch_refusal',
         'repo_deploy_job_vm_capture',
         'repo_deploy_job_vm_scope',
         'repo_deploy_job_vm_states',

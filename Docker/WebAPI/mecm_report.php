@@ -147,11 +147,12 @@ try {
         }
         $detail = repo_client_event_sanitize_detail($rawDetail);
 
-        if (repo_client_event_is_duplicate($connection, $vmId, $phase, $event, $detail)) {
+        // MA-11: duplicate check, daily cap and insert share one locked transaction.
+        $outcome = repo_client_event_record_once($connection, $vmId, $mac, $phase, $event, $detail, $clientIp);
+        if ($outcome === 'duplicate') {
             machine_api_json(['success' => true, 'vm_id' => $vmId, 'deduplicated' => true]);
         }
-
-        if (repo_client_event_count_recent($connection, $vmId, 86400) >= VIRTUSPHERE_CLIENT_EVENT_MAX_PER_DAY) {
+        if ($outcome === 'capped') {
             // Scoped to the VM, not to the client IP: a VM that hits its cap
             // must not silence the first cap of a different VM that happens to
             // report from the same address. The MAC is deliberately not carried;
@@ -170,7 +171,6 @@ try {
             machine_api_json(['error' => 'Too many events'], 429);
         }
 
-        repo_record_client_event($connection, $vmId, $mac, $phase, $event, $detail, $clientIp);
         machine_api_json(['success' => true, 'vm_id' => $vmId]);
     }
 
@@ -184,7 +184,10 @@ try {
             machine_api_json(['error' => 'Invalid source'], 400);
         }
 
-        $interval = (int) ($data['interval_seconds'] ?? 0);
+        // MA-02: only a JSON integer is an interval. An absent value, a string such as
+        // "12abc", an array or a float answers the same 400 as an out-of-range one.
+        $rawInterval = $data['interval_seconds'] ?? null;
+        $interval = is_int($rawInterval) ? $rawInterval : 0;
         if ($interval < VIRTUSPHERE_HEARTBEAT_INTERVAL_MIN_SECONDS || $interval > VIRTUSPHERE_HEARTBEAT_INTERVAL_MAX_SECONDS) {
             machine_api_json(['error' => 'Invalid interval_seconds'], 400);
         }

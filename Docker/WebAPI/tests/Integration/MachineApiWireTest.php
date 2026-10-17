@@ -343,6 +343,8 @@ final class MachineApiWireTest extends TestCase
             'error' => 'Deploy job does not accept this MAC import',
             'reason_code' => 'callback_job_not_active',
             'job_id' => 2147483002,
+            // MA-09: additive, the same key the 200 body uses; null without a valid correlation_id.
+            'correlation_id' => null,
         ], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
 
         // What "no results" means on the wire. A `results` that is absent or

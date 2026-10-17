@@ -498,6 +498,168 @@ final class MacImportCallbackTest extends TestCase
         self::assertSame(['ready', 'not_ready', 0], $this->vmState($submittedVm));
     }
 
+    /**
+     * MA-01: an array where a text field belongs is read as absent. The callback
+     * keeps its normal envelope and the row answers its existing status; before, the
+     * cast was a warning promoted to a 500, which the Ansible sender retried three times.
+     */
+    public function testNonScalarResultFieldsAnswerTheNormalEnvelopeNotAServerError(): void
+    {
+        // A name that is an array is no name: the entry is nameless, so the VM answers missing_nic_data.
+        $nameMission = $this->insertMission('array-name');
+        $nameVm = $this->insertVm($nameMission, 'ARRAYNAME');
+        $this->insertInterface($nameVm, 'WDS');
+        $nameJob = $this->insertJob($nameMission, [$nameVm]);
+        [$status, $body] = $this->post([
+            'mission_id' => $nameMission,
+            'job_id' => $nameJob,
+            'results' => [['instance' => [
+                'hw_name' => ['not', 'a', 'name'],
+                'hw_eth0' => ['macaddress' => $this->mac('array-name'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertFalse($response['success']);
+        self::assertContains('missing_name', array_column($response['errors'], 'code'));
+        $nameResults = array_column($response['vm_results'], null, 'vm_name');
+        self::assertContains('missing_nic_data', $nameResults[$this->vmName('ARRAYNAME')]['error_codes']);
+        self::assertSame('', $this->interfaceMac($nameVm, 'WDS'));
+
+        // An array MAC is no MAC: the NIC is missing its data and nothing is written.
+        $macMission = $this->insertMission('array-mac');
+        $macVm = $this->insertVm($macMission, 'ARRAYMAC');
+        $this->insertInterface($macVm, 'WDS');
+        $macJob = $this->insertJob($macMission, [$macVm]);
+        [$status, $body] = $this->post([
+            'mission_id' => $macMission,
+            'job_id' => $macJob,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('ARRAYMAC'),
+                'hw_eth0' => ['macaddress' => [$this->mac('array-mac')], 'summary' => 'WDS'],
+            ]]],
+        ]);
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertFalse($response['success']);
+        $macResults = array_column($response['vm_results'], null, 'vm_name');
+        self::assertContains('missing_nic_data', $macResults[$this->vmName('ARRAYMAC')]['error_codes']);
+        self::assertSame('', $this->interfaceMac($macVm, 'WDS'));
+
+        // An array summary is no portgroup: the NIC cannot be matched, so the VM fails without a write.
+        $summaryMission = $this->insertMission('array-summary');
+        $summaryVm = $this->insertVm($summaryMission, 'ARRAYSUMMARY');
+        $this->insertInterface($summaryVm, 'WDS');
+        $summaryJob = $this->insertJob($summaryMission, [$summaryVm]);
+        [$status, $body] = $this->post([
+            'mission_id' => $summaryMission,
+            'job_id' => $summaryJob,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('ARRAYSUMMARY'),
+                'hw_eth0' => ['macaddress' => $this->mac('array-summary'), 'summary' => ['WDS']],
+            ]]],
+        ]);
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertFalse($response['success']);
+        $summaryResults = array_column($response['vm_results'], null, 'vm_name');
+        self::assertNotSame([], $summaryResults[$this->vmName('ARRAYSUMMARY')]['error_codes']);
+        self::assertSame('', $this->interfaceMac($summaryVm, 'WDS'));
+
+        // An array identity is no identity: the stored identity stays, and the valid NIC still imports.
+        $identityMission = $this->insertMission('array-identity');
+        $identityVm = $this->insertVm($identityMission, 'ARRAYID');
+        $this->insertInterface($identityVm, 'WDS');
+        $identityJob = $this->insertJob($identityMission, [$identityVm]);
+        $identityBefore = $this->vmIdentity($identityVm);
+        [$status, $body] = $this->post([
+            'mission_id' => $identityMission,
+            'job_id' => $identityJob,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('ARRAYID'),
+                'moid' => ['vm-1'],
+                'instance_uuid' => ['not-a-uuid'],
+                'hw_eth0' => ['macaddress' => $this->mac('array-identity'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertTrue($response['success']);
+        self::assertSame($identityBefore, $this->vmIdentity($identityVm), 'an array identity writes nothing');
+        self::assertSame(virtusphere_normalize_mac($this->mac('array-identity')), $this->interfaceMac($identityVm, 'WDS'));
+    }
+
+    /**
+     * MA-09: an unknown job id has no job to write a trace line into. It answers 409
+     * with its closed reason, the correlation id the 200 body would echo, and one
+     * throttled audit row for that job id.
+     */
+    public function testAnUnknownJobIdIsAuditedAndAnswersTheCorrelationId(): void
+    {
+        $missionId = $this->insertMission('unknown-job');
+        $vmId = $this->insertVm($missionId, 'UNKNOWNJOB');
+        $this->insertInterface($vmId, 'WDS');
+        $unknownJob = random_int(1900000000, 2100000000);
+        $correlation = 'feedface00000042';
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $unknownJob,
+            'correlation_id' => $correlation,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('UNKNOWNJOB'),
+                'hw_eth0' => ['macaddress' => $this->mac('unknown-job'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+
+        self::assertSame(409, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('callback_job_not_active', $response['reason_code']);
+        self::assertSame($correlation, $response['correlation_id'], 'the 409 names the id the 200 body would echo');
+        self::assertSame('', $this->interfaceMac($vmId, 'WDS'));
+
+        $event = 'machine_api.callback_rejected';
+        $type = 'deploy_job';
+        $object = (string) $unknownJob;
+        $stmt = $this->db->prepare('SELECT context_json FROM deploy_logs WHERE event_code = ? AND object_type = ? AND object_id = ?');
+        $stmt->bind_param('sss', $event, $type, $object);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        self::assertCount(1, $rows, 'one throttled audit row for the unknown job id');
+        self::assertSame('callback_job_not_active', json_decode((string) $rows[0]['context_json'], true, 512, JSON_THROW_ON_ERROR)['reason_code']);
+    }
+
+    /** MA-09: the trace line of a rejected callback carries its job's correlation id (ADR-0032), like every other job-log line. */
+    public function testTheRejectionTraceCarriesTheJobsCorrelationId(): void
+    {
+        $missionId = $this->insertMission('trace-correlation');
+        $vmId = $this->insertVm($missionId, 'TRACECORR');
+        $this->insertInterface($vmId, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmId], VIRTUSPHERE_DEPLOY_STATUS_CANCELLED);
+        $correlation = 'feedface00000043';
+        $stmt = $this->db->prepare('UPDATE deploy_jobs SET correlation_id = ? WHERE id = ?');
+        $stmt->bind_param('si', $correlation, $jobId);
+        $stmt->execute();
+
+        [$status] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [['instance' => [
+                'hw_name' => $this->vmName('TRACECORR'),
+                'hw_eth0' => ['macaddress' => $this->mac('trace-correlation'), 'summary' => 'WDS'],
+            ]]],
+        ]);
+        self::assertSame(409, $status);
+
+        $needle = '%MAC callback%';
+        $stmt = $this->db->prepare('SELECT correlation_id FROM deploy_job_logs WHERE job_id = ? AND line LIKE ? ORDER BY id DESC LIMIT 1');
+        $stmt->bind_param('is', $jobId, $needle);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        self::assertIsArray($row, 'the rejection trace must exist');
+        self::assertSame($correlation, $row['correlation_id']);
+    }
+
     public function testSyntheticMissingVmResultPreservesTheRawWdsPortgroup(): void
     {
         $missionId = $this->insertMission('raw-wds', 'WDS ');

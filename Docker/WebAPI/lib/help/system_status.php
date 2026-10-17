@@ -186,6 +186,7 @@ require_once __DIR__ . '/../log_filter.php';
             <p><?php echo h(__t('help_system_status.logs_texts_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_system_status.logs_texts_mac')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_touch')); ?></li>
                 <li><?php echo h(__t('help_system_status.logs_texts_catalog')); ?></li>
                 <li><?php echo h(__t('help_system_status.logs_texts_recovery')); ?></li>
                 <li><?php echo h(__t('help_system_status.logs_texts_refused')); ?></li>
