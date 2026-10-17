@@ -112,17 +112,25 @@ final class VmEditConflictTest extends TestCase
         }
     }
 
-    public function testLegacyChildOnlyWriteInvalidatesOpenVmEditor(): void
+    public function testChildOnlyWriteInvalidatesOpenVmEditor(): void
     {
         $this->db->query('SET timestamp = 1788900000');
         [$missionId, $vmId] = $this->seedVm('cfl-child');
         $version = $this->editVersion($vmId);
-        self::assertSame(1, vmListToUpdate([['id' => $vmId, 'disks' => [['disk_name' => 'Legacy', 'disk_size' => 80, 'disk_type' => 'thin']]]], $this->db));
+        $interfaceId = (int) repo_scalar($this->db, 'SELECT id FROM deploy_interfaces WHERE vm_id = ? ORDER BY id LIMIT 1', 'i', [$vmId]);
+        // A VLAN reassignment writes only deploy_interfaces and never touches the
+        // deploy_vms row. It must still advance the edit version, or an editor
+        // opened before it could save the old network back over the new VLAN.
+        $updated = repo_transaction($this->db, function () use ($interfaceId): int {
+            return repo_vm_network_update_vlan_ids($this->db, [$interfaceId], 'phpunit-vlan-moved');
+        });
+        self::assertSame(1, $updated);
+        self::assertSame('phpunit-vlan-moved', (string) repo_scalar($this->db, 'SELECT vlan FROM deploy_interfaces WHERE id = ?', 'i', [$interfaceId]));
         $before = repo_get_vm_bundle($this->db, $vmId);
         self::assertNotSame($version, $this->editVersion($vmId));
         try {
             $this->saveVm($missionId, $vmId, 'cfl-child', [], $version);
-            self::fail('A child-only legacy edit must invalidate the portal snapshot.');
+            self::fail('A child-only write must invalidate the portal snapshot.');
         } catch (RuntimeException $error) {
             self::assertStringContainsString('changed by another user', $error->getMessage());
         }

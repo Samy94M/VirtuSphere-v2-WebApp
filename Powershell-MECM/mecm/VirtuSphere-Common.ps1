@@ -624,7 +624,7 @@ $script:VsRunSummaryFields = @{
 $script:VsRunSummaryStringFields = @('site_code', 'provider')
 
 # Fehlerkategorien der Sync-Quellen (Spiegel VIRTUSPHERE_RUN_SYNC_ERROR_CATEGORIES).
-$script:VsRunSyncErrorCategories = @('portal_unreachable', 'mecm_unavailable', 'partial_failure', 'source_missing', 'catalog_conflict')
+$script:VsRunSyncErrorCategories = @('portal_unreachable', 'mecm_unavailable', 'partial_failure', 'source_missing', 'catalog_conflict', 'journal_blocked', 'portal_rejected', 'source_changing')
 # Site-Health-Kategorien mit fester Outcome-Bindung
 # (Spiegel VIRTUSPHERE_RUN_SITE_ERROR_OUTCOME): ein Providerfehler ist grau
 # (unknown), nie "MECM kritisch".

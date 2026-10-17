@@ -63,6 +63,54 @@ final class RunReportValidateTest extends TestCase
         self::assertSame('Invalid error_category', run_report_validate($this->base(['event' => 'completed', 'outcome' => 'fail', 'error_category' => 'site_critical']))['error']);
     }
 
+    /** A local journal on the MECM server is a sync category: it is accepted as a failed device-sync run, never as a site category. */
+    public function testAcceptsTheJournalBlockedCategoryOfAFailedDeviceSync(): void
+    {
+        $r = run_report_validate($this->base(['event' => 'completed', 'outcome' => 'fail', 'error_category' => 'journal_blocked']));
+
+        self::assertArrayHasKey('report', $r);
+        self::assertSame('fail', $r['report']['outcome']);
+        self::assertSame('journal_blocked', $r['report']['error_category']);
+
+        $site = run_report_validate([
+            'source' => 'mecm-site-health', 'event' => 'completed', 'run_id' => self::HEX, 'interval_seconds' => 300,
+            'outcome' => 'fail', 'error_category' => 'journal_blocked',
+        ]);
+        self::assertSame('Invalid error_category', $site['error']);
+    }
+
+    /** A refused portal call (token, IP or server error) is a sync category: the portal answered, so it is not portal_unreachable. */
+    public function testAcceptsThePortalRejectedCategoryOfAFailedDeviceSync(): void
+    {
+        $r = run_report_validate($this->base(['event' => 'completed', 'outcome' => 'fail', 'error_category' => 'portal_rejected']));
+
+        self::assertArrayHasKey('report', $r);
+        self::assertSame('fail', $r['report']['outcome']);
+        self::assertSame('portal_rejected', $r['report']['error_category']);
+
+        $site = run_report_validate([
+            'source' => 'mecm-site-health', 'event' => 'completed', 'run_id' => self::HEX, 'interval_seconds' => 300,
+            'outcome' => 'fail', 'error_category' => 'portal_rejected',
+        ]);
+        self::assertSame('Invalid error_category', $site['error']);
+    }
+
+    /** A package source that changed during the autoimporter scan is a sync category: MECM itself is fine. */
+    public function testAcceptsTheSourceChangingCategoryOfAFailedDeviceSync(): void
+    {
+        $r = run_report_validate($this->base(['event' => 'completed', 'outcome' => 'fail', 'error_category' => 'source_changing']));
+
+        self::assertArrayHasKey('report', $r);
+        self::assertSame('fail', $r['report']['outcome']);
+        self::assertSame('source_changing', $r['report']['error_category']);
+
+        $site = run_report_validate([
+            'source' => 'mecm-site-health', 'event' => 'completed', 'run_id' => self::HEX, 'interval_seconds' => 300,
+            'outcome' => 'fail', 'error_category' => 'source_changing',
+        ]);
+        self::assertSame('Invalid error_category', $site['error']);
+    }
+
     public function testSiteCategoryOutcomeBindingIsEnforced(): void
     {
         $bad = run_report_validate([

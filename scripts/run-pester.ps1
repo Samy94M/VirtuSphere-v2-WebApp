@@ -1,8 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Faehrt die PowerShell-Pruefungen der Integrationsclients: PSScriptAnalyzer
-    ueber Powershell-MECM und die Pester-Suite unter tests\powershell.
+    Faehrt die PowerShell-Pruefungen: PSScriptAnalyzer ueber Powershell-MECM
+    (Server-Regelsatz PSScriptAnalyzerSettings.psd1), PSScriptAnalyzer ueber
+    scripts und tests\powershell (Tooling-Regelsatz
+    PSScriptAnalyzerSettings.Tooling.psd1) und die Pester-Suite unter
+    tests\powershell.
 
 .DESCRIPTION
     Dev-Host- und CI-Tooling (ADR-0028-Familie): nichts davon wird ausgeliefert.
@@ -14,7 +17,8 @@
     NICHT eingecheckt - dasselbe Muster wie Playwright und Infection.
 
 .PARAMETER SkipAnalyzer
-    Nur die Pester-Suite fahren.
+    Nur die Pester-Suite fahren. Entfaellt damit beide PSScriptAnalyzer-Laeufe
+    (Powershell-MECM und scripts/tests-Tooling).
 
 .PARAMETER SkipTests
     Nur PSScriptAnalyzer fahren.
@@ -46,12 +50,42 @@ $registerPath = Join-Path $testRoot 'VirtuSphere.Haertung2026-08.Tests.ps1'
 $registerPresent = Test-Path $registerPath
 $failed = $false
 $unitTotal = 0
-if (-not $SkipAnalyzer) { $unitTotal++ }
+# Zwei Analyzer-Laeufe: Powershell-MECM (Server-Regelsatz) und scripts/tests (Tooling-Regelsatz).
+if (-not $SkipAnalyzer) { $unitTotal += 2 }
 if (-not $SkipTests) {
     $unitTotal++
     if ($registerPresent) { $unitTotal++ }
 }
 $unitPosition = 0
+
+# Liest eine Eigenschaft defensiv: fehlt sie (andere Pester-Version, Testdouble),
+# ist das Ergebnis $null statt eines Abbruchs.
+function Get-PesterRunValue {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+# Erste Zeile der ersten Fehlermeldung eines Containers; leer, wenn keine da ist.
+function Get-PesterContainerErrorLine {
+    param($Container)
+    try {
+        $first = @(Get-PesterRunValue $Container 'ErrorRecord') | Where-Object { $null -ne $_ } | Select-Object -First 1
+        if ($null -eq $first) { return '' }
+        $message = ''
+        if ($first -is [System.Management.Automation.ErrorRecord]) {
+            $message = [string]$first.Exception.Message
+        } else {
+            $message = [string]$first
+        }
+        return [string](@($message -split '\r?\n') | Select-Object -First 1)
+    } catch {
+        Write-Debug $_
+        return ''
+    }
+}
 
 # --- PSScriptAnalyzer -------------------------------------------------------
 if (-not $SkipAnalyzer) {
@@ -67,6 +101,39 @@ if (-not $SkipAnalyzer) {
         Import-Module PSScriptAnalyzer -ErrorAction Stop
         $settings = Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
         $findings = @(Invoke-ScriptAnalyzer -Path $scriptRoot -Recurse -Settings $settings)
+    } catch {
+        Write-Host ('[{0}/{1}] infrastructure_error {2}: {3}' -f $unitPosition, $unitTotal, $unitName, $_.Exception.Message) -ForegroundColor Red
+        exit 3
+    }
+
+    if ($findings.Count -gt 0) {
+        $findings | Sort-Object Severity, ScriptName, Line | ForEach-Object {
+            Write-Host ('    {0,-11} {1}:{2} {3} [{4}]' -f $_.Severity, (Split-Path $_.ScriptPath -Leaf), $_.Line, $_.Message, $_.RuleName) -ForegroundColor Yellow
+        }
+        Write-Host ('[{0}/{1}] fail {2}: {3} Befund(e)' -f $unitPosition, $unitTotal, $unitName, $findings.Count) -ForegroundColor Red
+        $failed = $true
+    } else {
+        Write-Host ('[{0}/{1}] pass {2}: keine Befunde' -f $unitPosition, $unitTotal, $unitName) -ForegroundColor Green
+    }
+}
+
+# --- PSScriptAnalyzer (Tooling) ---------------------------------------------
+# Eigener Regelsatz fuer scripts/ und tests/powershell: dieselben Befundtexte
+# wie oben, nur Pfade und Settings-Datei sind andere.
+if (-not $SkipAnalyzer) {
+    $unitPosition++
+    $unitName = 'PSScriptAnalyzer (scripts, tests\powershell)'
+    Write-Host ('[{0}/{1}] RUN  {2}' -f $unitPosition, $unitTotal, $unitName) -ForegroundColor Cyan
+    if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+        Write-Host 'PSScriptAnalyzer fehlt. Install-Module PSScriptAnalyzer -Scope CurrentUser' -ForegroundColor Red
+        Write-Host ('[{0}/{1}] infrastructure_error {2}: Modul fehlt' -f $unitPosition, $unitTotal, $unitName) -ForegroundColor Red
+        exit 3
+    }
+    try {
+        Import-Module PSScriptAnalyzer -ErrorAction Stop
+        $toolingSettings = Join-Path $repoRoot 'PSScriptAnalyzerSettings.Tooling.psd1'
+        $toolingPaths = @((Join-Path $repoRoot 'scripts'), $testRoot)
+        $findings = @(foreach ($toolingPath in $toolingPaths) { Invoke-ScriptAnalyzer -Path $toolingPath -Recurse -Settings $toolingSettings })
     } catch {
         Write-Host ('[{0}/{1}] infrastructure_error {2}: {3}' -f $unitPosition, $unitTotal, $unitName, $_.Exception.Message) -ForegroundColor Red
         exit 3
@@ -171,35 +238,71 @@ if (-not $SkipTests) {
         exit 3
     }
 
+    # Nur das Run-Objekt klassifizieren. Invoke-Pester kann neben dem Ergebnis
+    # weitere Objekte in die Pipeline geben; ein Array ohne Result/Containers
+    # liefert leere Zaehler. So lief 2026-09-28 "Failed: 874" durch, und die
+    # Ausgabe meldete trotzdem "Test(s) gruen" ohne Zahl.
+    $run = @($result) | Where-Object { $null -ne $_ -and $_.PSObject.Properties['Result'] -and $_.PSObject.Properties['Containers'] } | Select-Object -Last 1
+    if ($null -eq $run) {
+        Write-Host ('[{0}/{1}] infrastructure_error {2}: Invoke-Pester lieferte kein Ergebnisobjekt' -f $unitPosition, $unitTotal, $unitName) -ForegroundColor Red
+        exit 3
+    }
+
     $pesterFailed = $false
-    if ($null -ne $coverageFloor -and $result.CodeCoverage) {
-        $percent = [math]::Round([double]$result.CodeCoverage.CoveragePercent, 1)
-        $enforce = (Test-Path 'HKCU:\')
-        if ($percent -lt $coverageFloor) {
-            if ($enforce) {
-                Write-Host ('    Coverage-Ratchet verletzt: {0}% < Floor {1}% (Common-Module)' -f $percent, $coverageFloor) -ForegroundColor Red
-                $pesterFailed = $true
-                $failed = $true
-            } else {
-                Write-Host ('    Coverage {0}% unter Floor {1}% - nur informativ (kein Registry-Provider, Windows-Job setzt durch)' -f $percent, $coverageFloor) -ForegroundColor Yellow
-            }
+    $coverage = Get-PesterRunValue $run 'CodeCoverage'
+    if ($null -ne $coverageFloor) {
+        # Coverage ist konfiguriert: fehlt das Ergebnis, ist der Lauf rot und
+        # wird nicht still uebersprungen.
+        if ($null -eq $coverage) {
+            Write-Host '    Coverage-Ergebnis fehlt: Coverage ist konfiguriert, der Lauf liefert kein CodeCoverage-Objekt' -ForegroundColor Red
+            $pesterFailed = $true
+            $failed = $true
         } else {
-            Write-Host ('    Coverage {0}% (Floor {1}%)' -f $percent, $coverageFloor) -ForegroundColor Green
+            $percent = [math]::Round([double]$coverage.CoveragePercent, 1)
+            $enforce = (Test-Path 'HKCU:\')
+            if ($percent -lt $coverageFloor) {
+                if ($enforce) {
+                    Write-Host ('    Coverage-Ratchet verletzt: {0}% < Floor {1}% (Common-Module)' -f $percent, $coverageFloor) -ForegroundColor Red
+                    $pesterFailed = $true
+                    $failed = $true
+                } else {
+                    Write-Host ('    Coverage {0}% unter Floor {1}% - nur informativ (kein Registry-Provider, Windows-Job setzt durch)' -f $percent, $coverageFloor) -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host ('    Coverage {0}% (Floor {1}%)' -f $percent, $coverageFloor) -ForegroundColor Green
+            }
         }
     }
 
     # Nicht nur FailedCount: ein Container, der schon in der Discovery stirbt
     # (Parse-/Setup-Fehler), hat 0 rote Tests und waere sonst still gruen
-    # (so geschehen 2026-07-16 mit einem Parse-Fehler in ErrorPaths).
-    $failedContainers = @($result.Containers | Where-Object { $_.Result -eq 'Failed' })
-    if ($result.FailedCount -gt 0 -or $failedContainers.Count -gt 0) {
-        $pesterFailed = $true
+    # (so geschehen 2026-07-16 mit einem Parse-Fehler in ErrorPaths). Dasselbe
+    # gilt fuer gescheiterte Setup-/Teardown-Bloecke (FailedBlocksCount) und fuer
+    # ein Gesamtergebnis, das nicht 'Passed' ist.
+    $pesterResult = [string](Get-PesterRunValue $run 'Result')
+    $failedCount = [int](Get-PesterRunValue $run 'FailedCount')
+    $failedContainersCount = [int](Get-PesterRunValue $run 'FailedContainersCount')
+    $failedBlocksCount = [int](Get-PesterRunValue $run 'FailedBlocksCount')
+    $totalCount = [int](Get-PesterRunValue $run 'TotalCount')
+    $passedCount = [int](Get-PesterRunValue $run 'PassedCount')
+    $failedContainers = @($run.Containers | Where-Object { $null -ne $_ -and $_.Result -eq 'Failed' })
+    $pesterRunFailed = ($pesterResult -ne 'Passed') -or ($failedCount -gt 0) -or ($failedContainersCount -gt 0) -or ($failedBlocksCount -gt 0) -or ($failedContainers.Count -gt 0)
+
+    if ($pesterRunFailed -or $pesterFailed) {
+        if ($pesterResult -ne 'Passed') {
+            Write-Host ('    Pester-Gesamtergebnis: "{0}"' -f $pesterResult) -ForegroundColor Red
+        }
+        foreach ($container in @($failedContainers | Select-Object -First 10)) {
+            Write-Host ('    Container gescheitert: {0}: {1}' -f [string]$container.Item, (Get-PesterContainerErrorLine $container)) -ForegroundColor Red
+        }
+        Write-Host ('[{0}/{1}] fail {2}: {3} Test(s) rot, {4} Container gescheitert, {5} Setup/Teardown-Bloecke gescheitert' -f $unitPosition, $unitTotal, $unitName, $failedCount, $failedContainers.Count, $failedBlocksCount) -ForegroundColor Red
         $failed = $true
-    }
-    if ($pesterFailed) {
-        Write-Host ('[{0}/{1}] fail {2}: {3} Test(s) rot, {4} Container gescheitert' -f $unitPosition, $unitTotal, $unitName, $result.FailedCount, $failedContainers.Count) -ForegroundColor Red
+    } elseif ($totalCount -eq 0) {
+        # Nichts gescheitert, aber auch nichts geprueft: ein leerer Lauf ist kein Gruen.
+        Write-Host ('[{0}/{1}] infrastructure_error {2}: 0 Tests entdeckt' -f $unitPosition, $unitTotal, $unitName) -ForegroundColor Red
+        exit 3
     } else {
-        Write-Host ('[{0}/{1}] pass {2}: {3} Test(s) gruen' -f $unitPosition, $unitTotal, $unitName, $result.PassedCount) -ForegroundColor Green
+        Write-Host ('[{0}/{1}] pass {2}: {3} Test(s) gruen' -f $unitPosition, $unitTotal, $unitName, $passedCount) -ForegroundColor Green
     }
 
     # --- Haertungsregister: ausgeklammert, aber nicht unsichtbar --------------

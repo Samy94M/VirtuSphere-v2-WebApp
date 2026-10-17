@@ -588,12 +588,21 @@ const VIRTUSPHERE_RUN_ERROR_MECM_UNAVAILABLE = 'mecm_unavailable';
 const VIRTUSPHERE_RUN_ERROR_PARTIAL_FAILURE = 'partial_failure';
 const VIRTUSPHERE_RUN_ERROR_SOURCE_MISSING = 'source_missing';
 const VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT = 'catalog_conflict';
+// Local membership journal on the MECM server locked, unreadable or quarantined; MECM itself is not the cause.
+const VIRTUSPHERE_RUN_ERROR_JOURNAL_BLOCKED = 'journal_blocked';
+// Portal answered but refused the call (400, 403 wrong token or IP, 500); the portal is reachable.
+const VIRTUSPHERE_RUN_ERROR_PORTAL_REJECTED = 'portal_rejected';
+// A package file changed or was locked while the autoimporter hashed the share; MECM itself is fine.
+const VIRTUSPHERE_RUN_ERROR_SOURCE_CHANGING = 'source_changing';
 const VIRTUSPHERE_RUN_SYNC_ERROR_CATEGORIES = [
     VIRTUSPHERE_RUN_ERROR_PORTAL_UNREACHABLE,
     VIRTUSPHERE_RUN_ERROR_MECM_UNAVAILABLE,
     VIRTUSPHERE_RUN_ERROR_PARTIAL_FAILURE,
     VIRTUSPHERE_RUN_ERROR_SOURCE_MISSING,
     VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT,
+    VIRTUSPHERE_RUN_ERROR_JOURNAL_BLOCKED,
+    VIRTUSPHERE_RUN_ERROR_PORTAL_REJECTED,
+    VIRTUSPHERE_RUN_ERROR_SOURCE_CHANGING,
 ];
 const VIRTUSPHERE_RUN_ERROR_SITE_WARNING = 'site_warning';
 const VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL = 'site_critical';

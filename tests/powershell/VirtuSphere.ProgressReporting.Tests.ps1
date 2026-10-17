@@ -138,18 +138,28 @@ Describe 'Visible progress reporting contract' {
 
     It 'reports the selected analyzer, Pester suite and historical register units before and after execution' {
         $script:PowerShellRunner | Should -Match '\$unitTotal\s*=\s*0'
-        $script:PowerShellRunner | Should -Match 'if \(-not \$SkipAnalyzer\) \{ \$unitTotal\+\+ \}'
+        $script:PowerShellRunner | Should -Match 'if \(-not \$SkipAnalyzer\) \{ \$unitTotal \+= 2 \}'
         $script:PowerShellRunner | Should -Match 'if \(-not \$SkipTests\) \{\s+\$unitTotal\+\+'
         $script:PowerShellRunner | Should -Match 'if \(\$registerPresent\) \{ \$unitTotal\+\+ \}'
         $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"
-        ([regex]::Matches($script:PowerShellRunner, "Write-Host \('\[\{0\}/\{1\}\] RUN\s+\{2\}'")).Count | Should -Be 3
+        ([regex]::Matches($script:PowerShellRunner, "Write-Host \('\[\{0\}/\{1\}\] RUN\s+\{2\}'")).Count | Should -Be 4
         $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''PSScriptAnalyzer \(Powershell-MECM\)'''
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''PSScriptAnalyzer \(scripts, tests\\powershell\)'''
         $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''Pester \(tests\\powershell\)'''
         $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''Haertungsregister 2026-08 \(nicht Teil des Gates\)'''
         $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] pass \{2\}:"
         $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] fail \{2\}:"
         $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] open \{2\}:"
         $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] infrastructure_error \{2\}:"
+    }
+
+    It 'classifies the blocking Pester run from its run object with the canonical result lines' {
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] infrastructure_error \{2\}: Invoke-Pester lieferte kein Ergebnisobjekt'
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] infrastructure_error \{2\}: 0 Tests entdeckt'
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] pass \{2\}: \{3\} Test\(s\) gruen'
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] fail \{2\}: \{3\} Test\(s\) rot, \{4\} Container gescheitert, \{5\} Setup/Teardown-Bloecke gescheitert'
+        $script:PowerShellRunner | Should -Match 'Container gescheitert: \{0\}: \{1\}'
+        $script:PowerShellRunner | Should -Match 'Coverage-Ergebnis fehlt'
     }
 
     It 'shows named historical results and distinguishes discovery failure from an empty register without blocking the gate' {

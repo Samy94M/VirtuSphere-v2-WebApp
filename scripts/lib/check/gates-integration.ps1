@@ -179,7 +179,7 @@ function Register-IntegrationCheckGates {
             try {
                 $h = Invoke-WebRequest -Uri ($qaPortalBase + '/portal/health.php') -UseBasicParsing -TimeoutSec 5
                 if ([int]$h.StatusCode -eq 200) { break }
-            } catch { }
+            } catch { Write-Debug $_ }
             if ((Get-Date) -gt $deadline) {
                 return New-InfraResult ('Portal am QA-Stack nicht erreichbar: {0}/portal/health.php' -f $qaPortalBase)
             }

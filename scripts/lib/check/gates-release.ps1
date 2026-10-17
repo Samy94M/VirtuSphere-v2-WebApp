@@ -1,5 +1,21 @@
 # Dot-sourced check module. Importing defines functions only.
 
+# Zaehlt die Commits, die gitleaks (v8) in einem Lauf gescannt hat. Gemeint ist
+# die Zeile wie "INF 123 commits scanned."; ANSI-Farbcodes und Zeitstempel davor
+# sind erlaubt. Ohne so eine Zeile liefert die Funktion $null. Der Aufrufer
+# wertet das als fehlende Evidenz, nicht als "keine Funde".
+function Get-GitleaksScannedCommitCount {
+    param([string[]]$Output)
+    foreach ($line in @($Output)) {
+        if ($null -eq $line) { continue }
+        $plain = [regex]::Replace([string]$line, '\x1B\[[0-9;?]*[A-Za-z]', '')
+        if ($plain -match '(\d[\d,]*)\s+commits?\s+scanned') {
+            return [int]($Matches[1] -replace ',', '')
+        }
+    }
+    return $null
+}
+
 function Get-RuntimeImages {
     # `--profile=*` als ein Argument, nicht '--profile','*': pwsh auf Unix
     # expandiert ein einzelnes `*` zu den Dateien im Arbeitsverzeichnis
@@ -93,6 +109,14 @@ function Register-ReleaseCheckGates {
             '--config', '/repo/.gitleaks.toml', '--redact', '--exit-code', '1')
         if ($r.ExitCode -gt 1 -and (@($r.Output) -join ' ') -match 'pull|not found|no such') {
             return New-InfraResult ('Tool-Image {0} nicht verfuegbar' -f $toolImages.gitleaks) $r.Output
+        }
+        # exit 0 allein beweist nichts: gitleaks scannt in einem Worktree 0 Commits
+        # (das .git-File zeigt auf einen Host-Pfad, den der Container nicht
+        # aufloest) und endet trotzdem gruen. Ohne gescannte Commits gibt es keine
+        # Evidenz, also infrastructure_error statt Pass.
+        $scannedCommits = Get-GitleaksScannedCommitCount $r.Output
+        if ($null -eq $scannedCommits -or $scannedCommits -eq 0) {
+            return New-InfraResult 'gitleaks hat keine Commits gescannt (Git-Historie im Container nicht lesbar, etwa in einem Worktree; aus einem echten Clone pruefen)' $r.Output
         }
         Format-ToolResult $r 'Secret-Scan ueber die volle Historie: null Funde' 'gitleaks meldet Secrets'
     }

@@ -44,6 +44,8 @@ final class AppKeyRotationTest extends TestCase
     private int $controlId = 0;
     /** @var list<int> */
     private array $credentialIds = [];
+    /** @var list<string> temporary files of this test (status file, CLI harness), removed in tearDown */
+    private array $tempFiles = [];
 
     protected function setUp(): void
     {
@@ -70,6 +72,11 @@ final class AppKeyRotationTest extends TestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->tempFiles as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
         // Without a saved snapshot the directory row was never touched, so nothing may be restored.
         if (!isset($this->db) || !$this->snapshotTaken) {
             return;
@@ -470,6 +477,45 @@ final class AppKeyRotationTest extends TestCase
         self::assertSame([], $this->rotationAuditRows(), 'a CLI apply refused for the backup writes no audit row');
     }
 
+    /**
+     * CLI: a successful --apply. The backup gate reads a status file whose newest run succeeded a few minutes ago, the old
+     * key comes on STDIN, and the run re-encrypts every secret and names the actor on its audit row. The entry point reads
+     * the container mount, so a child process runs app_key_rotate_cli() with the test's status file instead.
+     */
+    public function testCliApplyWithAFreshOkBackupStatusRotatesEverySecretAndNamesTheActor(): void
+    {
+        self::requireFunction('crypto_decrypt_secret_with_key');
+        self::requireFunction('app_key_rotate_cli');
+        self::requireFunction('backup_status_read');
+        $this->seedFixture($this->oldKey);
+        $actor = $this->existingUserId();
+        $statusFile = $this->writeBackupStatus(300);
+
+        $result = $this->runCliWithBackupStatus(['--apply', '--actor=' . $actor], $this->oldKeyLine(), $statusFile);
+
+        self::assertSame(0, $result['exit'], $result['output']);
+        $this->assertProgressLinesInOrder($result['output'], [
+            '[1/2] RUN backup check',
+            '[1/2] PASS backup check',
+            '[2/2] RUN re-encrypt',
+            '[2/2] PASS re-encrypt (applied): credentials=2 directory=1 already=',
+        ]);
+        $this->assertNoSecretInOutput($result['output']);
+
+        foreach (['esxi' => $this->esxiId, 'ansible' => $this->ansibleId] as $label => $credentialId) {
+            $row = $this->credentialRow($credentialId);
+            self::assertSame($this->plain[$label], crypto_decrypt_secret_with_key((string) $row['secret_ciphertext'], $this->newKey), $label . ' reads with the new key');
+            $this->assertNotDecryptable((string) $row['secret_ciphertext'], $this->oldKey, $label . ' no longer reads with the old key');
+        }
+        $directory = $this->directoryRow();
+        self::assertSame($this->plain['directory'], crypto_decrypt_secret_with_key((string) $directory['bind_secret_ciphertext'], $this->newKey), 'the directory reads with the new key');
+        $this->assertNotDecryptable((string) $directory['bind_secret_ciphertext'], $this->oldKey, 'the directory no longer reads with the old key');
+
+        $audit = $this->rotationAuditRows();
+        self::assertCount(1, $audit, 'exactly one audit row for one apply');
+        self::assertSame($actor, (int) $audit[0]['user_id'], 'the audit row names the actor');
+    }
+
     /** Fails by name while a function of the rotation module does not exist yet. */
     private static function requireFunction(string $name): void
     {
@@ -683,6 +729,52 @@ final class AppKeyRotationTest extends TestCase
         return (int) repo_scalar($this->db, 'SELECT COALESCE(MAX(id), 0) + 1 FROM deploy_users');
     }
 
+    /** Writes a status file holding one successful backup run that is $ageSeconds old, in the line format of backup_status_read(). */
+    private function writeBackupStatus(int $ageSeconds): string
+    {
+        $file = tempnam(sys_get_temp_dir(), 'vsk22status');
+        if ($file === false) {
+            self::fail('could not create the temporary backup status file');
+        }
+        $this->tempFiles[] = $file;
+        $line = json_encode([
+            'ts' => time() - $ageSeconds,
+            'status' => 'ok',
+            'db_bytes' => 2000000,
+            'config_bytes' => 4096,
+            'duration_s' => 3,
+            'keep' => 14,
+            'disk_free_pct' => 62,
+            'disk_free_bytes' => 50000000000,
+            'error' => '',
+        ], JSON_THROW_ON_ERROR);
+        file_put_contents($file, $line . "\n");
+
+        return $file;
+    }
+
+    /**
+     * Runs app_key_rotate_cli() in a child PHP process with the given backup status file. A one-line harness requires the
+     * module and calls the CLI with the arguments and the status file, so the old key still comes on STDIN as in runCli().
+     *
+     * @param list<string> $arguments the arguments after the script name
+     * @return array{exit: int, output: string} the exit code and stdout plus stderr
+     */
+    private function runCliWithBackupStatus(array $arguments, string $stdin, string $statusFile): array
+    {
+        $module = dirname(__DIR__, 2) . '/lib/app_key_rotate.php';
+        self::assertFileExists($module, self::CLI . ' is missing (K22)');
+        $harness = tempnam(sys_get_temp_dir(), 'vsk22harness');
+        if ($harness === false) {
+            self::fail('could not create the CLI harness');
+        }
+        $this->tempFiles[] = $harness;
+        file_put_contents($harness, "<?php\n\ndeclare(strict_types=1);\n\nrequire_once " . var_export($module, true)
+            . ";\n\nexit(app_key_rotate_cli(" . var_export($arguments, true) . ', ' . var_export($statusFile, true) . "));\n");
+
+        return $this->runProcess([PHP_BINARY, $harness], $stdin);
+    }
+
     /**
      * Runs the CLI from Docker/WebAPI with the test environment.
      *
@@ -692,9 +784,20 @@ final class AppKeyRotationTest extends TestCase
     {
         self::assertFileExists(dirname(__DIR__, 2) . '/' . self::CLI, self::CLI . ' is missing (K22)');
 
+        return $this->runProcess(array_merge([PHP_BINARY, self::CLI], $arguments), $stdin);
+    }
+
+    /**
+     * Runs a PHP command from Docker/WebAPI with the test environment and the given STDIN.
+     *
+     * @param list<string> $command
+     * @return array{exit: int, output: string} the exit code and stdout plus stderr
+     */
+    private function runProcess(array $command, string $stdin): array
+    {
         $pipes = [];
         $process = proc_open(
-            array_merge([PHP_BINARY, self::CLI], $arguments),
+            $command,
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             dirname(__DIR__, 2),

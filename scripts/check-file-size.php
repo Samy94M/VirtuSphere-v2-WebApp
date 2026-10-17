@@ -133,6 +133,11 @@ const FILE_SIZE_ALLOWANCES = [
     // in lib/migrations/; the fresh-schema mirror is part of this registry. It
     // also raised constants.php 727->729 for the conditional AD card and the
     // fixed conditional VLAN-repair anchor registered by the URL owner.
+    // Lowered 729->706 (user decision 17.10.2026, ratchet follows the file):
+    // the versioning stage moved the settings link registry to
+    // lib/settings_constants.php (732 -> 697), and the three run-error
+    // categories journal_blocked, portal_rejected and source_changing (AV-F30,
+    // PS-21, PS-26) added their constants, reasons and list entries.
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     // U11 adds the require and ordered registry entry for migration 0053; its body stays separate.
@@ -147,7 +152,7 @@ const FILE_SIZE_ALLOWANCES = [
         'stage' => 'kein Abbau geplant',
     ],
     'Docker/WebAPI/lib/constants.php' => [
-        'lines' => 729,
+        'lines' => 706,
         'why' => 'SSoT constant registry; a split would create a second place to look for a value',
         'stage' => 'kein Abbau geplant',
     ],

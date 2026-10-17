@@ -174,6 +174,9 @@ Describe 'Test-VsRunErrorCategory (zentrale Kategorisierung)' {
         @{ cat = 'partial_failure' }
         @{ cat = 'source_missing' }
         @{ cat = 'catalog_conflict' }
+        @{ cat = 'journal_blocked' }
+        @{ cat = 'portal_rejected' }
+        @{ cat = 'source_changing' }
     ) {
         Invoke-InFileScope -Path $script:MecmCommon -Arguments @($cat) -Body {
             param($c) Test-VsRunErrorCategory -Source 'device-sync' -Outcome 'fail' -Category $c

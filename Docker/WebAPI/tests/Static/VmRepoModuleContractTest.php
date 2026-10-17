@@ -19,10 +19,7 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_validate_vm_payload',
         'getVMs',
         'repo_fetch_related',
-        'repo_source_to_array',
         'deleteVM',
-        'vmListToCreate',
-        'vmListToUpdate',
         'vmListToDelete',
         'repo_bulk_delete_vms',
         'repo_bulk_reset_mecm_ids',
@@ -50,7 +47,7 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_vm_network_assert_deploy_ready',
         'repo_vm_network_assert_scope_within_bounds',
         'repo_vm_network_assert_scope_idle',
-        // K14/WM-06: one MAC assignment owner for editor, legacy writers and callback.
+        // K14/WM-06: one MAC assignment owner for editor and callback.
         'repo_vm_network_lock_mac_assignments',
         'repo_vm_network_has_new_mac_assignments',
         'repo_vm_network_lock_active_jobs_for_mac_assignment',

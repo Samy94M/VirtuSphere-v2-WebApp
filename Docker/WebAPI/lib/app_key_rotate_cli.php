@@ -64,9 +64,13 @@ function app_key_rotate_actor_exists(mysqli $db, int $userId): bool
  * Command line entry. The old APP_KEY arrives on STDIN; `--apply` commits, and no argument is a dry run.
  * `--actor=<user id>` names the deploy user the audit row is written for; without it the row names no user.
  *
+ * `$backupStatusPath` is the backup status file the `--apply` gate reads. The entry point passes nothing, so the gate
+ * reads the container mount (VIRTUSPHERE_BACKUP_STATUS_PATH); a test passes its own status file to run a successful apply.
+ *
  * @param list<string> $arguments the arguments after the script name
+ * @param string|null $backupStatusPath null for the container mount
  */
-function app_key_rotate_cli(array $arguments): int
+function app_key_rotate_cli(array $arguments, ?string $backupStatusPath = null): int
 {
     $usage = 'usage: php lib/app_key_rotate.php [--apply] [--actor=<user id>] < file-with-the-old-APP_KEY' . PHP_EOL;
     $parsed = app_key_rotate_parse_arguments($arguments);
@@ -127,7 +131,7 @@ function app_key_rotate_cli(array $arguments): int
     }
 
     try {
-        return app_key_rotate_run($oldKey, $newKey, $apply, $actor);
+        return app_key_rotate_run($oldKey, $newKey, $apply, $actor, $backupStatusPath);
     } finally {
         app_key_rotate_wipe($oldKey);
         app_key_rotate_wipe($newKey);
@@ -137,12 +141,14 @@ function app_key_rotate_cli(array $arguments): int
 /**
  * The two progress units of a run: the backup gate, then the re-encryption. The gate applies only to
  * an apply, because a dry run changes nothing. A refusal ends the run with a FAIL line and exit 1.
+ *
+ * @param string|null $backupStatusPath the backup status file of the gate; null for the container mount
  */
-function app_key_rotate_run(string $oldKey, string $newKey, bool $apply, ?int $actor = null): int
+function app_key_rotate_run(string $oldKey, string $newKey, bool $apply, ?int $actor = null, ?string $backupStatusPath = null): int
 {
     fwrite(STDOUT, '[1/2] RUN backup check' . PHP_EOL);
     if ($apply) {
-        $blocker = app_key_rotate_backup_blocker(backup_status_read(), time());
+        $blocker = app_key_rotate_backup_blocker(backup_status_read($backupStatusPath), time());
         if ($blocker !== null) {
             fwrite(STDERR, '[1/2] FAIL backup check: refused ' . $blocker . ' (take a backup with scripts/backup.sh first; the newest backup status must be ok and at most '
                 . intdiv(VIRTUSPHERE_APP_KEY_ROTATE_BACKUP_MAX_AGE_SECONDS, 3600) . ' h old)' . PHP_EOL);

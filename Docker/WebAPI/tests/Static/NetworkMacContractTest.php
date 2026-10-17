@@ -34,7 +34,9 @@ final class NetworkMacContractTest extends TestCase
         self::assertStringContainsString('repo_vm_network_assert_bundle_write_allowed(', $persistence);
         self::assertStringContainsString('repo_vm_network_assert_scope_idle(', $persistence);
         self::assertStringContainsString('repo_replace_interfaces(', $this->source('lib/mission_transfer_import.php'));
-        self::assertStringContainsString('repo_replace_interfaces(', $this->source('lib/repo/vms_legacy.php'));
+        // AV-F11 removed the legacy aggregate writers (vmListToCreate, vmListToUpdate);
+        // the legacy file must not grow an interface writer back outside the gates.
+        self::assertStringNotContainsString('repo_replace_interfaces(', $this->source('lib/repo/vms_legacy.php'));
         self::assertStringContainsString('repo_vm_network_assert_scope_idle(', $this->source('lib/repo/vms_operations.php'));
         self::assertStringContainsString("require_once __DIR__ . '/repo/vlan_reassign.php';", $this->source('lib/system_status_page.php'));
         $vlanReassign = $this->source('lib/repo/vlan_reassign.php');
@@ -147,9 +149,8 @@ final class NetworkMacContractTest extends TestCase
         self::assertIsInt($vmLock);
         self::assertLessThan($vmLock, $runtimeLock, 'an editor must take Runtime before its VM row');
 
-        $legacy = $this->source('lib/repo/vms_legacy.php');
-        self::assertStringContainsString('repo_vm_network_lock_mac_assignments($mysqli)', $legacy);
-        self::assertStringContainsString('repo_vm_network_lock_mac_assignments($connection)', $legacy);
+        // The legacy aggregate writers that took this lock are gone (AV-F11);
+        // the editor above and the callback below are the remaining MAC writers.
         $endpoint = $this->source('db_importMAC.php');
         $callbackRuntime = strpos($endpoint, 'deploy_runtime_identity WHERE id = 1 FOR UPDATE');
         // The call, not the earlier comment that names the function.
