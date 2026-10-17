@@ -26,21 +26,28 @@ final class PortalCopyControlContractTest extends TestCase
         self::assertStringContainsString('portal_copy_button(', $this->source('lib/correlation_display.php'));
     }
 
-    public function testEveryPlannedSurfaceUsesTheSharedRenderer(): void
+    public function testRemainingSurfacesUseTheSharedRenderer(): void
     {
-        $list = $this->source('portal/vms.php');
-        self::assertGreaterThanOrEqual(2, substr_count($list, 'portal_copy_value('));
-
-        $names = $this->source('lib/vm_edit_names.php');
-        self::assertGreaterThanOrEqual(2, substr_count($names, 'portal_copy_input_button('));
-        self::assertStringContainsString('portal_copy_value((string) $vm[\'mecm_rollout_hostname\']', $names);
-
-        $interfaces = $this->source('lib/vm_edit_rows.php');
-        self::assertGreaterThanOrEqual(2, substr_count($interfaces, 'portal_copy_input_button('));
-        self::assertStringContainsString("__t('vm_edit.copy_configured_ip'", $interfaces);
-        self::assertStringContainsString("__t('vm_edit.copy_mac'", $interfaces);
-
         self::assertStringContainsString('portal_copy_value((string) $job[\'id\']', $this->source('portal/deploy_log.php'));
+
+        $report = $this->source('lib/package_report_page.php');
+        self::assertStringContainsString('portal_copy_local_link(', $report);
+        self::assertStringContainsString("portal_copy_input_button('package-report-support-text'", $report);
+    }
+
+    public function testVmListAndEditorOfferNoCopyAction(): void
+    {
+        // Operator decision 2026-10-17: names and network values in the VM
+        // list and editor are plain text and inputs. Derived from the file
+        // names so a new VM renderer is covered without editing a list here.
+        $root = str_replace('\\', '/', dirname(__DIR__, 2));
+        $files = array_merge(glob($root . '/lib/vm*.php') ?: [], [$root . '/portal/vms.php', $root . '/portal/vm_edit.php']);
+        self::assertGreaterThan(5, count($files), 'the VM renderers must be found');
+        foreach ($files as $file) {
+            $source = (string) file_get_contents($file);
+            self::assertStringNotContainsString('portal_copy_', $source, basename($file));
+            self::assertStringNotContainsString('copy_control.php', $source, basename($file));
+        }
     }
 
     public function testBrowserReadsCurrentFieldsAndHasARealFailureBranch(): void
@@ -49,8 +56,6 @@ final class PortalCopyControlContractTest extends TestCase
         self::assertStringContainsString('document.getElementById(sourceId)', $core);
         self::assertStringContainsString("typeof source.value === 'string' ? source.value", $core);
         self::assertStringContainsString("button.hidden = currentValue(button) === ''", $core);
-        self::assertStringContainsString('source.disabled', $core);
-        self::assertStringContainsString("mode.getAttribute('data-mode-select')", $core);
         self::assertStringContainsString('navigator.clipboard.writeText(value).then(', $core);
         self::assertStringContainsString('announce(button, failed, false)', $core);
     }

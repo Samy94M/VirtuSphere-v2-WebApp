@@ -12,13 +12,8 @@ require_once __DIR__ . '/lang.php';
  * browser reads the current input value rather than a stale server snapshot.
  */
 
-function portal_copy_button(
-    string $accessibleLabel,
-    string $value = '',
-    string $sourceId = '',
-    bool $sourceMustBeEnabled = false,
-    string $dynamicLabelTemplate = ''
-): string {
+function portal_copy_button(string $accessibleLabel, string $value = '', string $sourceId = ''): string
+{
     if ($sourceId === '' && $value === '') {
         return '';
     }
@@ -26,15 +21,9 @@ function portal_copy_button(
     $attrs = $sourceId !== ''
         ? ' data-copy-source="' . h($sourceId) . '"'
         : ' data-copy-value="' . h($value) . '"';
-    if ($sourceMustBeEnabled) {
-        $attrs .= ' data-copy-source-enabled';
-    }
-    if ($dynamicLabelTemplate !== '') {
-        $attrs .= ' data-copy-label-template="' . h($dynamicLabelTemplate) . '"';
-    }
-    if ($sourceId !== '' && ($value === '' || $sourceMustBeEnabled)) {
-        // JavaScript immediately resolves the enabled state. Hidden is the
-        // safe server fallback for an empty value or a DHCP-controlled field.
+    if ($sourceId !== '' && $value === '') {
+        // Hidden is the safe server fallback for an empty source; JavaScript
+        // re-evaluates it from the control's current value.
         $attrs .= ' hidden';
     }
 
@@ -64,20 +53,9 @@ function portal_copy_value(string $value, string $label, bool $code = false): st
 /**
  * Copy accelerator beside a form field. The input remains the value owner.
  */
-function portal_copy_input_button(
-    string $sourceId,
-    string $currentValue,
-    string $label,
-    bool $sourceMustBeEnabled = false,
-    string $dynamicLabel = ''
-): string {
-    return portal_copy_button(
-        __t('common.copy_value', ['label' => $label]),
-        $currentValue,
-        $sourceId,
-        $sourceMustBeEnabled,
-        $dynamicLabel === '' ? '' : __t('common.copy_value', ['label' => $dynamicLabel])
-    );
+function portal_copy_input_button(string $sourceId, string $currentValue, string $label): string
+{
+    return portal_copy_button(__t('common.copy_value', ['label' => $label]), $currentValue, $sourceId);
 }
 
 /** Browser resolves the local href against its actual origin; no Host header becomes copied data. */

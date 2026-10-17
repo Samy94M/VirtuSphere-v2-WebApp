@@ -652,7 +652,7 @@
         });
     }
 
-    // Copy-to-clipboard for displayed identities and diagnostic identifiers.
+    // Copy-to-clipboard for displayed diagnostic identifiers and package report values.
     //
     // A real <button> with a real label, so it is reachable with Tab and
     // activated with Enter and Space by the browser rather than by a key
@@ -689,16 +689,6 @@
             var source = sourceFor(button);
             if (!source) {
                 return '';
-            }
-            if (button.hasAttribute('data-copy-source-enabled')) {
-                var row = source.closest('[data-repeat-row]');
-                var mode = row ? row.querySelector('[data-mode-select]') : null;
-                var inactiveMode = mode
-                    && String(mode.value || '').trim().toLowerCase()
-                        === String(mode.getAttribute('data-mode-select') || '').trim().toLowerCase();
-                if (source.disabled || inactiveMode) {
-                    return '';
-                }
             }
             return typeof source.value === 'string' ? source.value : source.textContent || '';
         }
@@ -763,13 +753,7 @@
                 syncSourceButtons();
             }
         });
-        document.addEventListener('change', function () {
-            // Other handlers (notably the DHCP mode owner in forms.js) may
-            // enable/disable the source during this same event.
-            window.setTimeout(syncSourceButtons, 0);
-        });
         syncSourceButtons();
-        window.setTimeout(syncSourceButtons, 0);
     }
 
     initConfirmDialog();

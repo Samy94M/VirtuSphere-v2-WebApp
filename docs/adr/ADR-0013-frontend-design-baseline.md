@@ -190,3 +190,13 @@ cannot leave a stale copy payload behind. Empty and DHCP-disabled configured-IP
 values expose no action. Clipboard absence or refusal is a visible localized
 failure and never a success claim. Controls inside forms are non-submit buttons,
 keep keyboard focus and give repeated IP/MAC values an adapter-specific name.
+
+## Amendment (2026-10-17): no copy controls in the VM list and VM editor
+
+The operator removed the copy buttons beside VM name, Windows hostname, active
+rollout name, configured IP address and MAC address in the VM list and VM
+editor. Those values are plain text and form inputs again. The shared control,
+its `core.js` handler and its failure branch stay for the job id, the
+correlation id and the package report. The DHCP-dependent visibility and the
+adapter-specific button names of the 2026-09-13 amendment had no other caller
+and were removed with it.

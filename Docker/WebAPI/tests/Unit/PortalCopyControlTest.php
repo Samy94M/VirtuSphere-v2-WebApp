@@ -30,9 +30,9 @@ final class PortalCopyControlTest extends TestCase
     public function testFormButtonNamesOnlyItsSourceAndNeverCachesTheValue(): void
     {
         Lang::load('en');
-        $html = portal_copy_input_button('form-vm-edit-vm-name', 'current-value', 'VM name in ESXi');
+        $html = portal_copy_input_button('package-report-support-text', 'current-value', 'support copy');
 
-        self::assertStringContainsString('data-copy-source="form-vm-edit-vm-name"', $html);
+        self::assertStringContainsString('data-copy-source="package-report-support-text"', $html);
         self::assertStringNotContainsString('data-copy-value=', $html);
         self::assertStringNotContainsString('current-value', $html);
     }

@@ -91,65 +91,6 @@ function rowFor(page, vmName) {
   return page.locator('tbody tr', { hasText: vmName }).first();
 }
 
-test('copy controls use exact displayed and current values and report clipboard refusal', async ({ page, context, browserName }) => {
-  const seed = seedMission(PREFIX + 'copy', 1);
-  const vmId = seed.vmIds[0];
-  runPhp(`
-$db = db();
-$vm = ${Number(vmId)};
-$stmt = $db->prepare("UPDATE deploy_interfaces SET ip = '10.24.1.5', subnet = '255.255.255.0', gateway = '10.24.1.1', mode = 'static' WHERE vm_id = ?");
-$stmt->bind_param('i', $vm);
-$stmt->execute();
-$stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '10.24.1.6', '255.255.255.0', '10.24.1.1', 'WDS', '00:50:56:CC:DD:EE', 'static')");
-$stmt->bind_param('i', $vm);
-$stmt->execute();
-echo 'READY';
-`);
-
-  if (browserName === 'chromium') {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  }
-  await page.goto(`vms.php?mission_id=${seed.missionId}`);
-  const row = rowFor(page, 'E2EVM1');
-  const listCopy = row.getByRole('button', { name: 'Copy VM name in ESXi' });
-  await listCopy.focus();
-  await expect(listCopy).toBeFocused();
-  await listCopy.press('Enter');
-  await expect(listCopy.locator('xpath=following-sibling::*[@data-copy-status]')).toBeVisible();
-  if (browserName === 'chromium') {
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('E2EVM1');
-  }
-
-  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
-  await expect(page.getByRole('button', { name: 'Copy configured IP address of network adapter 1' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Copy configured IP address of network adapter 2' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Copy MAC address of network adapter 1' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Copy MAC address of network adapter 2' })).toBeVisible();
-
-  const firstIp = page.locator('input[name="interfaces[0][ip]"]');
-  await firstIp.fill('10.24.1.99');
-  const firstIpCopy = page.getByRole('button', { name: 'Copy configured IP address of network adapter 1' });
-  await firstIpCopy.press('Enter');
-  if (browserName === 'chromium') {
-    expect(await page.evaluate(() => navigator.clipboard.readText()), 'the live field value, not its server snapshot').toBe('10.24.1.99');
-  }
-
-  await page.evaluate(() => {
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText: () => Promise.reject(new Error('fixture refusal')) },
-    });
-  });
-  const refused = page.getByRole('button', { name: 'Copy MAC address of network adapter 2' });
-  await refused.focus();
-  await refused.press('Enter');
-  await expect(refused).toBeFocused();
-  const refusedStatus = refused.locator('xpath=following-sibling::*[@data-copy-status]');
-  await expect(refusedStatus).toHaveClass(/is-error/);
-  await expect(refusedStatus).toContainText('not available');
-  await expect(page.locator('#form-vm_edit-1-interface_mac')).toHaveValue('00:50:56:CC:DD:EE');
-});
-
 // e2e-covers: vms.php:reset_mecm_id
 // e2e-covers-cancel: vms.php:reset_mecm_id
 test('row MECM reset: Cancel keeps the ID, Confirm clears it and re-queues the sync', async ({ page }) => {

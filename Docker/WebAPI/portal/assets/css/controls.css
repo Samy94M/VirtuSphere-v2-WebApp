@@ -339,29 +339,6 @@ button.button:disabled:hover,
     gap: 6px;
 }
 
-/* Label, current form value and its copy accelerator remain one grid item.
-   The button is a sibling of the input rather than interactive content nested
-   in its label. */
-.copy-field > label {
-    display: block;
-}
-
-.copy-field-control {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 6px;
-    margin-top: 6px;
-}
-
-.copy-field-control > input {
-    min-width: 0;
-}
-
-.copy-field-control > .copy-status {
-    grid-column: 1 / -1;
-}
-
 .ram-field {
     grid-template-columns: minmax(0, 1fr) 64px minmax(0, 116px);
 }

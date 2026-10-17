@@ -16,7 +16,6 @@ require_once __DIR__ . '/../lib/mission_nav.php';
 require_once __DIR__ . '/../lib/vm_network_display.php';
 require_once __DIR__ . '/../lib/vm_urls.php';
 require_once __DIR__ . '/../lib/mecm_rollout_display.php';
-require_once __DIR__ . '/../lib/copy_control.php';
 require_once __DIR__ . '/../lib/vms_page.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -303,13 +302,13 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                 <?php foreach ($rows as $vm) { ?>
                     <tr id="vm-<?php echo h((string) $vm['id']); ?>">
                         <?php if ($canWrite) { ?><td><input type="checkbox" form="bulk-vms" name="vm_ids[]" value="<?php echo h((string) $vm['id']); ?>" data-bulk-item aria-label="<?php echo h((string) ($vm['vm_name'] ?? '')); ?>"></td><?php } ?>
-                        <td><?php echo portal_copy_value((string) ($vm['vm_name'] ?? ''), __t('vms.th_vm_name')); ?></td>
+                        <td><?php echo h((string) ($vm['vm_name'] ?? '')); ?></td>
                         <?php // Die Abweichungsmarkierung sitzt IN der Hostnamenzelle und
                               // bekommt keine eigene Spalte (14D.5.2): eine weitere Spalte
                               // haette die Tabelle auf schmalen Geraeten umgebrochen, fuer
                               // einen Zustand, den die meisten Zeilen nie haben. Der Titel
                               // traegt den Namen, unter dem der Rollout weiterlaeuft. ?>
-                        <td><?php echo portal_copy_value((string) ($vm['vm_hostname'] ?? ''), __t('vms.th_hostname'));
+                        <td><?php echo h((string) ($vm['vm_hostname'] ?? ''));
                             if (!$isTemplate && mecm_rollout_shows_divergence($vm)) { ?>
                             <span title="<?php echo h(__t('vms.rollout_diverged_title', ['current' => (string) $vm['mecm_rollout_hostname']])); ?>"><?php echo portal_badge('warning', __t('vms.rollout_diverged')); ?></span>
                         <?php } ?></td>

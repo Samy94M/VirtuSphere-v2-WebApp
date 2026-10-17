@@ -16,7 +16,6 @@ return [
     'unsaved_p2' => 'When you follow a link, use Browser Back, reload or close the tab with unsaved changes, the portal warns before leaving. Confirming the warning discards only the changes in the browser; cancelling keeps the editor and its values open.',
     'unsaved_p3' => 'A validation or concurrent-editing error does not make the form saved. Password and file contents are never copied into the comparison state. With JavaScript disabled, the normal server-rendered forms continue to work, but the browser cannot provide this early warning.',
     'copy_heading' => 'Copy displayed values',
-    'copy_p1' => 'Copy buttons are available beside displayed VM names, Windows hostnames, active rollout names, configured IP addresses, MAC addresses and job IDs. For an IP or MAC, the button names its network adapter.',
-    'copy_p2' => 'In an editor, clicking copies the field\'s current content. Empty values and an IP field disabled by DHCP have no copy action. “Configured IP address" means the desired value in the portal, not an observed address of the running system.',
-    'copy_p3' => 'On an HTTP portal or when browser permission is denied, the clipboard may be unavailable. The button then reports the failure without claiming success; the displayed value remains selectable for manual copying.',
+    'copy_p1' => 'Copy buttons are available beside job IDs and correlation IDs, and in a package report beside the link to an attempt, the client log paths and the support copy.',
+    'copy_p2' => 'On an HTTP portal or when browser permission is denied, the clipboard may be unavailable. The button then reports the failure without claiming success; the displayed value remains selectable for manual copying.',
 ];

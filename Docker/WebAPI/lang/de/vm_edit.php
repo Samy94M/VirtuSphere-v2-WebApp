@@ -138,8 +138,6 @@ return [
     'label_mode' => 'Modus',
     'label_type' => 'Typ',
     'label_mac' => 'MAC',
-    'copy_configured_ip' => 'konfigurierte IP-Adresse von Netzwerkkarte :number',
-    'copy_mac' => 'MAC-Adresse von Netzwerkkarte :number',
     'gateway_hint' => 'Das Gateway darf leer bleiben; die Karte bekommt dann Adresse und Maske, aber keine Standardroute. Das ist der Normalfall für ein Segment ohne Router und für jede weitere statische Karte: pro VM setzt nur die erste Karte mit Gateway die Standardroute, bei allen anderen wird der Wert verworfen.',
     'label_size_gb' => 'Größe GB',
     // Die Auswahl trug bisher die rohen Ansible-Werte (thin, thick,

@@ -29,6 +29,5 @@ declare(strict_types=1);
             <h2><?php echo h(__t('help_overview.copy_heading')); ?></h2>
             <p><?php echo h(__t('help_overview.copy_p1')); ?></p>
             <p><?php echo h(__t('help_overview.copy_p2')); ?></p>
-            <p><?php echo h(__t('help_overview.copy_p3')); ?></p>
         </section>
     </div>

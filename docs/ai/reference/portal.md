@@ -237,8 +237,9 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 ## R52 Copy controls read the value the operator can currently see
 
-- `portal_copy_value()` emits selectable escaped text and the shared accelerator only for a non-empty static value. `portal_copy_input_button()` emits no cached field value: its `data-copy-source` points to the ID from `form_element_id()`/`form_control_attrs()`, and the delegated handler reads `.value` at activation time. Exact Unicode and punctuation are passed to `navigator.clipboard.writeText()` without trimming or concatenating the visible label.
-- Source-backed buttons are synchronized on input and after change handlers. Empty sources remain hidden; `data-copy-source-enabled` additionally reads the row's declared `data-mode-select` token and the source's disabled state, so DHCP cannot expose an inactive address even in a read-only legacy row. Repeat-row buttons carry a localized `:number` label template which the existing network-row owner updates with the row position.
+- `portal_copy_value()` emits selectable escaped text and the shared accelerator only for a non-empty static value. `portal_copy_input_button()` emits no cached field value: its `data-copy-source` points to the source control's `id`, and the delegated handler reads `.value` at activation time. Exact Unicode and punctuation are passed to `navigator.clipboard.writeText()` without trimming or concatenating the visible label.
+- Source-backed buttons are synchronized on input; an empty source stays hidden.
+- Callers are `portal/deploy_log.php` (job id), `lib/correlation_display.php` (correlation id) and `lib/package_report_page.php` (attempt link, client log paths, support copy). `portal/vms.php`, `portal/vm_edit.php` and the `lib/vm*.php` renderers carry none, which `PortalCopyControlContractTest` holds.
 - The button is an optional accelerator. It neither submits a surrounding form nor moves focus, and failure is an explicit localized status rather than a caught success. With no JavaScript or Clipboard API, the static text/input remains selectable. `help-copying-values` in the Overview help owns this fallback explanation once.
 
 ## R53 Package reports are received evidence, not live installation state

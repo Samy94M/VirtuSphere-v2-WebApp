@@ -16,7 +16,6 @@ return [
     'unsaved_p2' => 'Beim Folgen eines Links, bei Browser-Zurück, Neuladen oder Schließen des Tabs warnt das Portal vor dem Verlassen mit ungespeicherten Änderungen. Bestätigen verwirft nur die Änderungen im Browser; Abbrechen lässt den Editor mit seinen Werten geöffnet.',
     'unsaved_p3' => 'Ein Validierungs- oder Bearbeitungskonflikt macht das Formular nicht gespeichert. Inhalte von Passwort- und Dateifeldern werden nie in den Vergleichszustand kopiert. Ohne JavaScript funktionieren die serverseitigen Formulare weiter, eine solche frühe Warnung kann der Browser dann aber nicht geben.',
     'copy_heading' => 'Angezeigte Werte kopieren',
-    'copy_p1' => 'Kopierbuttons stehen bei angezeigten VM-Namen, Windows-Hostnamen, aktiven Rolloutnamen, konfigurierten IP-Adressen, MAC-Adressen und Auftrags-IDs. Bei IP und MAC nennt der Button die zugehörige Netzwerkkarte.',
-    'copy_p2' => 'In einem Editor wird beim Klick der aktuelle Feldinhalt kopiert. Leere Werte und eine bei DHCP inaktive IP-Adresse erhalten keine Kopieraktion. „Konfigurierte IP-Adresse" bezeichnet den Sollwert im Portal und nicht eine beobachtete Adresse des laufenden Systems.',
-    'copy_p3' => 'Auf einem HTTP-Portal oder bei verweigerten Browserrechten kann die Zwischenablage nicht verfügbar sein. Dann meldet der Button den Fehler, ohne Erfolg vorzutäuschen; der angezeigte Wert bleibt markierbar und kann von Hand kopiert werden.',
+    'copy_p1' => 'Kopierbuttons stehen bei Auftrags-IDs und Korrelations-IDs sowie im Paketbericht beim Link zu einem Versuch, bei den Logpfaden am Client und bei der Supportkopie.',
+    'copy_p2' => 'Auf einem HTTP-Portal oder bei verweigerten Browserrechten kann die Zwischenablage nicht verfügbar sein. Dann meldet der Button den Fehler, ohne Erfolg vorzutäuschen; der angezeigte Wert bleibt markierbar und kann von Hand kopiert werden.',
 ];

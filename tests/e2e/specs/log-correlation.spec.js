@@ -131,6 +131,20 @@ test('the audit table shows the correlation id and copies it on demand', async (
   // And the id stays selectable text regardless, which is the fallback the
   // help promises for a browser without clipboard access.
   await expect(row.locator('.correlation-id code')).toHaveText(TRACE);
+
+  // A refused write is a normal branch, not a caught success: the same button
+  // reports it, keeps focus and leaves the id as it was.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('fixture refusal')) },
+    });
+  });
+  await copy.press('Enter');
+  await expect(copy).toBeFocused();
+  await expect(row.locator('[data-copy-status]')).toHaveClass(/is-error/);
+  await expect(row.locator('[data-copy-status]')).toContainText('not available');
+  await expect(row.locator('.correlation-id code')).toHaveText(TRACE);
 });
 
 test('an exact correlation filter shows one request and the jobs it enqueued', async ({ page }) => {

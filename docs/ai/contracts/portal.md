@@ -82,8 +82,9 @@ Read the sections relevant to the current change. Paths below are relative to Do
 ## A44 Copy controls accelerate visible values and never become their owner
 
 - `lib/copy_control.php` renders the one accessible copy button and bounded status region. Static displays keep the exact value as selectable text and pass that same value through `data-copy-value`; editor buttons carry only `data-copy-source` and `assets/core.js` reads the control's current value when activated. Buttons are `type="button"`, retain focus and announce success only after the Clipboard promise resolves.
-- Empty values and a configured-IP field disabled by DHCP expose no copy action. Clipboard absence, a synchronous refusal or a rejected promise produces the localized manual-selection message while the visible value remains intact. Multiple IP/MAC controls name their network-adapter position and update that accessible name when repeat rows change.
-- A caller may offer only a value already rendered to the current authorized reader. It must not add hidden secrets or a second value snapshot merely to make copying possible. “Configured IP address” is intended portal configuration, never an observed runtime address.
+- Empty values expose no copy action. Clipboard absence, a synchronous refusal or a rejected promise produces the localized manual-selection message while the visible value remains intact.
+- A caller may offer only a value already rendered to the current authorized reader. It must not add hidden secrets or a second value snapshot merely to make copying possible.
+- The VM list and the VM editor offer no copy action (operator decision 2026-10-17); their names and network values stay plain text and inputs. The control serves the job id, the correlation id and the package report.
 
 ## A45 Deploy skip diagnostics are additive to the result and permission-check their Create link
 
