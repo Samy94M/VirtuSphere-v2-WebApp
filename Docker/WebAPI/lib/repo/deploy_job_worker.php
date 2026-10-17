@@ -41,8 +41,32 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
     $stmt->bind_param('s', $queued);
     $stmt->execute();
     $candidates = repo_fetch_all($stmt->get_result());
+    // WK-09: a paused or blocked service refuses every candidate below, and each
+    // refusal would otherwise cost its own transaction. The authoritative check
+    // stays inside the claim transaction; this one only ends the loop early.
+    if ($candidates !== [] && !deploy_claim_state_allows_new_work(repo_deploy_claim_state($db)['state'])) {
+        return null;
+    }
     foreach ($candidates as $candidate) {
         $claimed = repo_transaction($db, static function () use ($db, $workerId, $candidate): ?array {
+            $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
+            $jobId = (int) $candidate['id'];
+            $missionId = (int) ($candidate['mission_id'] ?? 0);
+            $scope = [];
+            $explicitEmptyScope = false;
+            if ($missionId > 0) {
+                repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$missionId]);
+                // WK-05: a mission runs one job at a time. Enqueue checks this once per
+                // group; the claim checks it per job. This is a plain read on purpose: a
+                // locking read would wait on the row lock of an older job of the same
+                // mission (the historical parent of a Create fence). It is also the
+                // first consistent read of this transaction, so its snapshot starts
+                // after the mission lock, which every earlier claim of this mission
+                // held until its commit.
+                if (repo_fetch_one($db, 'SELECT id FROM deploy_jobs WHERE mission_id = ? AND status IN (?, ?) LIMIT 1', 'iss', [$missionId, VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING]) !== null) {
+                    return null;
+                }
+            }
             // The claim gate (Etappe 13R). It sits INSIDE the claim transaction, not
             // in the worker loop, because a check in the caller is a check some
             // future second caller will not make; a paused service that still takes
@@ -53,15 +77,6 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
             // may finish, not so that it is abandoned half-applied on ESXi.
             if (!deploy_claim_state_allows_new_work(repo_deploy_claim_state($db)['state'])) {
                 return null;
-            }
-
-            $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
-            $jobId = (int) $candidate['id'];
-            $missionId = (int) ($candidate['mission_id'] ?? 0);
-            $scope = [];
-            $explicitEmptyScope = false;
-            if ($missionId > 0) {
-                repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$missionId]);
             }
             $stmt = $db->prepare('SELECT id, mission_id, credential_esxi_id, payload_json FROM deploy_jobs WHERE id = ? AND status = ? AND cancelled_at IS NULL AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP()) FOR UPDATE');
             $stmt->bind_param('is', $jobId, $queued);

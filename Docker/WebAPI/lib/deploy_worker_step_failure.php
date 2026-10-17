@@ -110,7 +110,8 @@ final class DeployWorkerStepTrace
 /** A failed playbook step that carries its failure line for the terminal reason. */
 final class DeployWorkerStepFailed extends RuntimeException
 {
-    public function __construct(string $message, public readonly ?string $detail)
+    /** The step's exit code, known only here; a cancel confirmation names it (WK-01). */
+    public function __construct(string $message, public readonly ?string $detail, public readonly ?int $exitCode = null)
     {
         parent::__construct($message);
     }
@@ -137,5 +138,5 @@ function deploy_worker_step_failed(DeployWorkerDbChannel $channel, int $exitCode
         $detail = $channel->redact(deploy_job_output_normalize_line($detail));
     }
 
-    return new DeployWorkerStepFailed($message, $detail);
+    return new DeployWorkerStepFailed($message, $detail, $exitCode);
 }

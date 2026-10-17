@@ -155,6 +155,9 @@ function repo_confirm_deploy_job_cancelled(mysqli $db, int $jobId, string $worke
         if ($stmt->affected_rows !== 1) {
             throw new RuntimeException('Cancel confirmation lost its prelocked job row.');
         }
+        // WK-03: the job this pause waited for has ended, exactly as in
+        // repo_finish_deploy_job(). Same CAS, same transaction (Job -> Runtime).
+        repo_deploy_confirm_claim_pause($db);
 
         return true;
     });

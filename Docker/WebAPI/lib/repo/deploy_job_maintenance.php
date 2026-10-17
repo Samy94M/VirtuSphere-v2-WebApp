@@ -9,6 +9,7 @@ require_once __DIR__ . '/status_events.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/deploy_job_worker.php';
 require_once __DIR__ . '/../deploy_worker_vm_state.php';
+require_once __DIR__ . '/../deploy_worker_finish.php';
 require_once __DIR__ . '/deploy_create_identity.php';
 
 /**
@@ -166,7 +167,7 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
             }
             $job = repo_fetch_one(
                 $db,
-                'SELECT id, mission_id, status, payload_json, result_json, LOWER(HEX(execution_generation_id)) AS execution_generation_id, credential_esxi_id, locked_by, heartbeat_at, TIMESTAMPDIFF(SECOND, heartbeat_at, NOW()) AS heartbeat_age_seconds FROM deploy_jobs WHERE id = ? AND status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) FOR UPDATE SKIP LOCKED',
+                'SELECT id, mission_id, user_id, status, payload_json, result_json, LOWER(HEX(execution_generation_id)) AS execution_generation_id, credential_esxi_id, locked_by, heartbeat_at, TIMESTAMPDIFF(SECOND, heartbeat_at, NOW()) AS heartbeat_age_seconds FROM deploy_jobs WHERE id = ? AND status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) FOR UPDATE SKIP LOCKED',
                 'issi',
                 [(int) $candidate['id'], $running, $cancelling, $staleAfterSeconds]
             );
@@ -236,6 +237,14 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
             }
             $stmt->execute();
             if ($stmt->affected_rows === 1) {
+                // WK-03: a requested pause becomes real once the job it waited
+                // for has ended, whichever way it ended (repo_finish_deploy_job()).
+                repo_deploy_confirm_claim_pause($db);
+                // LG-07: the conclusion's outcome row, written in this transaction
+                // like the job's other writes: a reaped job never commits without it.
+                if (!deploy_worker_write_outcome_audit($db, $job, (string) $job['reaped_to'], 'stale_heartbeat')) {
+                    throw new RuntimeException('Deploy outcome audit could not be stored; the reaper change was rolled back.');
+                }
                 if (!$wasCancelling
                     && ($job['mission_id'] ?? null) === null
                     && (int) ($job['credential_esxi_id'] ?? 0) > 0

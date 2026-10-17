@@ -295,7 +295,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]),
             deploy_terminal_reason_for_exception($exception),
             $vmsMarked,
-            $exception instanceof DeployWorkerStepFailed ? $exception->detail : null
+            $exception instanceof DeployWorkerStepFailed ? $exception->detail : null,
+            $exception instanceof DeployWorkerStepFailed ? $exception->exitCode : null
         );
     } finally {
         // Through the channel: a final heartbeat is a side channel too, and a

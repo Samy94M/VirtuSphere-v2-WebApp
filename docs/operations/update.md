@@ -282,7 +282,14 @@ Schritt 3.5 und vor Schritt 3.6: `docker compose build --no-cache`.
 ### 3.5 Worker und Webserver stoppen, Quellen umstellen
 
 Erst die Worker stoppen, dann den Code tauschen. Der Webserver bleibt bis nach
-der Migration aus, damit niemand das Portal mit halb neuem Stand benutzt:
+der Migration aus, damit niemand das Portal mit halb neuem Stand benutzt.
+
+Vorher die Prüfung aus Schritt 3.1 wiederholen: Im Portal unter **Systemstatus >
+Bereitstellungsdienst** steht die Auftragsannahme auf „pausiert“, und kein Auftrag
+ist mehr laufend oder abbrechend. Läuft noch einer, den Stopp nicht ausführen. Ein Stopp
+beendet einen laufenden Auftrag nicht: der Worker führt ihn weiter, und erst nach
+der Frist von 600 Sekunden (`stop_grace_period` in `docker-compose.yml`) beendet
+Docker den Worker hart, mitten in einem Playbook.
 
 ```bash
 cd /opt/VirtuSphere-v2-WebApp

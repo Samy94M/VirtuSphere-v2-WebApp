@@ -50,6 +50,11 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_finish_job',
         'deploy_terminal_reason_for_exception',
         'deploy_worker_audit_outcome',
+        // LG-07/LG-08: the one writer of a mission job's deploy.outcome row, used
+        // by the worker's cancel confirmation and the reaper as well.
+        'deploy_worker_write_outcome_audit',
+        // WK-08: the log line that replaces a write this worker no longer owns.
+        'deploy_worker_log_discarded_write',
         // Etappe 10C: the terminal status maps to a closed audit result here
         // rather than inside the audit call, so the mapping is testable without
         // a database and a new status cannot silently become "success".

@@ -89,7 +89,7 @@ function Invoke-WithPausedQaWorkers {
     $restoreFailure = $null
     try {
         if ($running.Count -gt 0) {
-            $stopped = Invoke-QaCompose (@('stop') + $running)
+            $stopped = Invoke-QaCompose (@('stop', '--timeout', '30') + $running)
             if ($stopped.ExitCode -ne 0) {
                 $outcome = New-InfraResult 'isolierte QA-Worker nicht pausierbar' $stopped.Output
             }

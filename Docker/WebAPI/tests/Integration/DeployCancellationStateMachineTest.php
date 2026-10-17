@@ -228,6 +228,8 @@ final class DeployCancellationStateMachineTest extends TestCase
         self::assertSame(1, $this->cancelLogCount($jobId));
         self::assertStringContainsString('ran to its end', (string) $job['terminal_reason_detail']);
         self::assertStringContainsString('no further step was started', (string) $job['terminal_reason_detail']);
+        // LG-08: the confirmed cancel wrote its outcome row, and the success path that lost the race wrote none.
+        self::assertSame(1, $this->outcomeRows($jobId));
     }
 
     /**
@@ -333,6 +335,11 @@ final class DeployCancellationStateMachineTest extends TestCase
         // ...while a stale plain running job keeps its failed verdict.
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $this->job($runningId)['status']);
         self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT, (string) $this->job($runningId)['terminal_reason_code']);
+        // LG-07: each reaped job writes exactly one outcome row, and it names the reaper's reason.
+        self::assertSame(1, $this->outcomeRows($cancellingId));
+        self::assertSame(1, $this->outcomeRows($runningId));
+        self::assertSame('stale_heartbeat', $this->outcomeContext($runningId)['reason'] ?? null);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->outcomeContext($runningId)['status'] ?? null);
     }
 
     // --- protective effects stay while cancelling ----------------------------
@@ -360,7 +367,194 @@ final class DeployCancellationStateMachineTest extends TestCase
         );
     }
 
+    // --- outcome row, pause and failure under a cancel ----------------------
+
+    /** LG-08: the confirmed cancel writes its outcome row once, and a repeated confirmation writes none. */
+    public function testAConfirmedCancelWritesExactlyOneOutcomeRow(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        self::assertTrue(deploy_worker_confirm_owned_cancel($this->db, $this->job($jobId)));
+        self::assertFalse(deploy_worker_confirm_owned_cancel($this->db, $this->job($jobId)), 'a second confirmation finds no cancelling job');
+
+        self::assertSame(1, $this->outcomeRows($jobId));
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->outcomeContext($jobId)['status'] ?? null);
+    }
+
+    /**
+     * WK-01: a step that fails while a cancel is pending writes its error line
+     * into the job log, and the confirmation names the exit code. Before the fix
+     * the job ended cancelled with no trace of the failed step.
+     */
+    public function testAFailedStepUnderACancelIsLoggedAndNamesItsExitCode(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_handle_failure(
+            $this->db,
+            $this->job($jobId),
+            self::WORKER,
+            [],
+            'Ansible command failed with exit code 2 (playbook step: start).',
+            VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
+            true,
+            'TASK [Start the VMs] fatal: Module failed on VM-01',
+            2
+        );
+
+        $job = $this->job($jobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $job['status']);
+        self::assertStringContainsString('the step ended with exit code 2', (string) $job['terminal_reason_detail']);
+        $log = $this->logText($jobId);
+        self::assertStringContainsString('Ansible command failed with exit code 2 (playbook step: start).', $log);
+        self::assertStringContainsString('TASK [Start the VMs] fatal: Module failed on VM-01', $log);
+        self::assertSame(1, $this->outcomeRows($jobId));
+    }
+
+    /**
+     * WK-08: a worker whose job a successor took over drops its failure, and says
+     * so once in its error log. The job log and the job row are not written.
+     */
+    public function testAWorkerThatLostItsJobLogsTheDiscardedFailureAndWritesNothing(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+        $claim = $this->job($jobId);
+        $stmt = $this->db->prepare("UPDATE deploy_jobs SET locked_by = 'phpunit:successor', lock_token = REPEAT(CHAR(98), 32) WHERE id = ?");
+        $stmt->bind_param('i', $jobId);
+        $stmt->execute();
+        $logBefore = $this->logText($jobId);
+
+        $errorLog = (string) tempnam(sys_get_temp_dir(), 'vs-wk08-');
+        $previous = (string) ini_get('error_log');
+        ini_set('error_log', $errorLog);
+        try {
+            deploy_worker_handle_failure($this->db, $claim, self::WORKER, [], 'late failure of the old worker');
+        } finally {
+            ini_set('error_log', $previous);
+        }
+        $written = (string) file_get_contents($errorLog);
+        @unlink($errorLog);
+
+        self::assertStringContainsString('job ' . $jobId . ' is no longer owned by this worker; discarded failure: late failure of the old worker', $written);
+        self::assertSame($logBefore, $this->logText($jobId), 'a job this worker does not own is not written to');
+        self::assertSame('phpunit:successor', (string) $this->job($jobId)['locked_by']);
+    }
+
+    /**
+     * WK-03: a pause requested while the job runs becomes a pause when the cancel
+     * that ends the job is confirmed, exactly as it does for a successful job.
+     */
+    public function testAConfirmedCancelTurnsARequestedPauseIntoAPause(): void
+    {
+        $previous = $this->claimRow();
+        $userId = $this->insertUser();
+        try {
+            repo_deploy_resume_claims($this->db, $userId);
+            $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER);
+            self::assertSame(VIRTUSPHERE_DEPLOY_CLAIM_PAUSE_AFTER_CURRENT, repo_deploy_request_claim_pause($this->db, $userId)['state']);
+
+            repo_cancel_deploy_job($this->db, $jobId, 42);
+            self::assertTrue(repo_confirm_deploy_job_cancelled($this->db, $jobId, self::WORKER));
+
+            self::assertSame(VIRTUSPHERE_DEPLOY_CLAIM_PAUSED, $this->claimRow()['claim_state']);
+        } finally {
+            $this->restoreClaimRow($previous);
+            $this->deleteUser($userId);
+        }
+    }
+
+    /** WK-03 (reaper): a stale job that is reaped also turns a requested pause into a pause. */
+    public function testAReapedJobTurnsARequestedPauseIntoAPause(): void
+    {
+        $previous = $this->claimRow();
+        $userId = $this->insertUser();
+        try {
+            repo_deploy_resume_claims($this->db, $userId);
+            $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER, staleHeartbeat: true);
+            repo_deploy_request_claim_pause($this->db, $userId);
+            deploy_reap_observer_since(time() - VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1);
+
+            deploy_worker_reap_stale_jobs($this->db);
+
+            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $this->job($jobId)['status']);
+            self::assertSame(VIRTUSPHERE_DEPLOY_CLAIM_PAUSED, $this->claimRow()['claim_state']);
+        } finally {
+            $this->restoreClaimRow($previous);
+            $this->deleteUser($userId);
+        }
+    }
+
     // --- helpers ------------------------------------------------------------
+
+    private function outcomeRows(int $jobId): int
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = ? AND object_type = ? AND object_id = ?');
+        $event = VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME;
+        $type = 'deploy_job';
+        $id = (string) $jobId;
+        $stmt->bind_param('sss', $event, $type, $id);
+        $stmt->execute();
+
+        return (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
+    }
+
+    /** @return array<string, mixed> The context of the newest outcome row of the job. */
+    private function outcomeContext(int $jobId): array
+    {
+        $stmt = $this->db->prepare('SELECT context_json FROM deploy_logs WHERE event_code = ? AND object_type = ? AND object_id = ? ORDER BY id DESC LIMIT 1');
+        $event = VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME;
+        $type = 'deploy_job';
+        $id = (string) $jobId;
+        $stmt->bind_param('sss', $event, $type, $id);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc() ?? [];
+        $context = json_decode((string) ($row['context_json'] ?? '[]'), true);
+
+        return is_array($context) ? $context : [];
+    }
+
+    /** @return array{claim_state:string,claim_changed_at:?string,claim_changed_by:?string} */
+    private function claimRow(): array
+    {
+        $row = repo_fetch_one($this->db, 'SELECT claim_state, claim_changed_at, claim_changed_by FROM deploy_runtime_identity WHERE id = 1');
+        self::assertNotNull($row);
+
+        return [
+            'claim_state' => (string) $row['claim_state'],
+            'claim_changed_at' => $row['claim_changed_at'] === null ? null : (string) $row['claim_changed_at'],
+            'claim_changed_by' => $row['claim_changed_by'] === null ? null : (string) $row['claim_changed_by'],
+        ];
+    }
+
+    /** A real account for the claim writes: claim_changed_by is a foreign key to deploy_users. */
+    private function insertUser(): int
+    {
+        $name = $this->prefix . '_user';
+        $password = password_hash('irrelevant', PASSWORD_DEFAULT);
+        $email = $this->prefix . '@example.invalid';
+        $stmt = $this->db->prepare("INSERT INTO deploy_users (name, password, email, role) VALUES (?, ?, ?, 'user')");
+        $stmt->bind_param('sss', $name, $password, $email);
+        $stmt->execute();
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function deleteUser(int $userId): void
+    {
+        $stmt = $this->db->prepare('DELETE FROM deploy_users WHERE id = ?');
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+    }
+
+    /** @param array{claim_state:string,claim_changed_at:?string,claim_changed_by:?string} $row */
+    private function restoreClaimRow(array $row): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_runtime_identity SET claim_state = ?, claim_changed_at = ?, claim_changed_by = ? WHERE id = 1');
+        $stmt->bind_param('sss', $row['claim_state'], $row['claim_changed_at'], $row['claim_changed_by']);
+        $stmt->execute();
+    }
 
     private function insertMission(): int
     {

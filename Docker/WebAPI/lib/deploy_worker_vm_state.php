@@ -95,10 +95,17 @@ function deploy_worker_locked_imported_vm_ids(array $job): array
     return $result !== null ? $result['successful_vm_ids'] : [];
 }
 
-/** VM convergence and cancellation terminality share one ownership transaction. */
+/**
+ * VM convergence and cancellation terminality share one ownership transaction.
+ *
+ * Every confirmed cancel passes here (step boundary, failure, conclusion, create
+ * section), so this is also where its outcome row is written (LG-08). It lives in
+ * the same transaction as the cancelled status: a cancel never exists without its
+ * row, and a row never exists for a cancel that did not happen.
+ */
 function deploy_worker_confirm_owned_cancel(mysqli $db, array $claim, ?string $message = null): bool
 {
-    return deploy_worker_owned_transaction($db, $claim, static function (array $job) use ($db, $message): bool {
+    return deploy_worker_owned_transaction($db, $claim, static function (array $job) use ($db, $claim, $message): bool {
         if ((string) $job['status'] !== VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
             return false;
         }
@@ -106,7 +113,15 @@ function deploy_worker_confirm_owned_cancel(mysqli $db, array $claim, ?string $m
         $payload = json_decode((string) $job['payload_json'], true);
         $vmIds = is_array($payload) && is_array($payload['vm_ids'] ?? null) ? $payload['vm_ids'] : [];
         deploy_worker_fail_locked_job_vms($db, $job, 'deploy job ' . $jobId . ' cancelled', $vmIds);
-        return repo_confirm_deploy_job_cancelled($db, $jobId, (string) $job['locked_by'], $message);
+        if (!repo_confirm_deploy_job_cancelled($db, $jobId, (string) $job['locked_by'], $message)) {
+            return false;
+        }
+        // The owned row lacks user_id; the claim row carries it (the operator who queued the job).
+        if (!deploy_worker_write_outcome_audit($db, $job + ['user_id' => $claim['user_id'] ?? null], VIRTUSPHERE_DEPLOY_STATUS_CANCELLED)) {
+            throw new RuntimeException('Deploy outcome audit could not be stored; the cancellation was rolled back.');
+        }
+
+        return true;
     }) ?? false;
 }
 

@@ -39,8 +39,11 @@ require_once __DIR__ . '/deploy_worker_vm_state.php';
 function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerId, array $vmIds, array $priorLifecycles = []): void
 {
     $summary = null;
-    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $priorLifecycles, &$summary): ?string {
+    $reached = false;
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $priorLifecycles, &$summary, &$reached): ?string {
+        $reached = true;
         if ((string) $locked['locked_by'] !== $workerId) {
+            deploy_worker_log_discarded_write((int) $job['id'], 'conclusion', 'the playbook sequence finished');
             return null;
         }
         if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
@@ -75,6 +78,9 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
             return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
         }
     });
+    if (!$reached) {
+        deploy_worker_log_discarded_write((int) $job['id'], 'conclusion', 'the playbook sequence finished');
+    }
     // A create/full deploy changed ESXi resource usage (new VMs, datastore
     // allocation): refresh after any durable Create launch, regardless of the
     // terminal verdict. Fail-soft after publication; system-job deduplication
@@ -155,19 +161,33 @@ function deploy_worker_handle_failure(
     string $message,
     string $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
     bool $vmsMarked = true,
-    ?string $reasonDetail = null
+    ?string $reasonDetail = null,
+    ?int $exitCode = null
 ): void
 {
     $reasonDetail ??= $message;
-    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked, $reasonDetail): ?string {
+    $reached = false;
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked, $reasonDetail, $exitCode, &$reached): ?string {
+        $reached = true;
+        $jobId = (int) $job['id'];
         if ((string) $locked['locked_by'] !== $workerId) {
+            deploy_worker_log_discarded_write($jobId, 'failure', $message);
             return null;
         }
-        if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
-            return deploy_worker_confirm_owned_cancel($db, $job) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
-        }
-        $jobId = (int) $job['id'];
+        // The failure is written before the cancel branch (WK-01): a cancel
+        // requested while the step ran must not hide what the step reported.
         repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $message);
+        if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+            if ($reasonDetail !== $message) {
+                repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $reasonDetail);
+            }
+            // A known exit code is named; without one the failure line is the account.
+            $cancelMessage = $exitCode === null ? null
+                : 'Cancelled after operator request; the step ended with exit code ' . $exitCode
+                    . ', so its changes on ESXi may be partly in place; no further step was started.';
+
+            return deploy_worker_confirm_owned_cancel($db, $job, $cancelMessage) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
+        }
         if (!$vmsMarked) {
             // K2 / MR-02: the job failed before it marked any VM `deploying`
             // (network or host preflight, credentials). Nothing ran on ESXi, so
@@ -185,6 +205,9 @@ function deploy_worker_handle_failure(
         }
         return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $reasonDetail);
     });
+    if (!$reached) {
+        deploy_worker_log_discarded_write((int) $job['id'], 'failure', $message);
+    }
     if ($terminalStatus !== null) {
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $message);
         deploy_worker_refresh_inventory_after_deploy($db, $job);
@@ -210,8 +233,11 @@ function deploy_worker_finish_job(
 ): ?string
 {
     $jobId = (int) $job['id'];
-    return deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult, $remoteStepStarted): ?string {
+    $reached = false;
+    $published = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult, $remoteStepStarted, &$reached): ?string {
+        $reached = true;
         if ((string) $locked['locked_by'] !== $workerId) {
+            deploy_worker_log_discarded_write($jobId, 'terminal status ' . $status, $lastError);
             return null;
         }
         if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
@@ -226,6 +252,22 @@ function deploy_worker_finish_job(
         return repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult)
             ? $status : null;
     });
+    if (!$reached) {
+        deploy_worker_log_discarded_write($jobId, 'terminal status ' . $status, $lastError);
+    }
+
+    return $published;
+}
+
+/**
+ * WK-08: a write this worker no longer owns is dropped by design, but its message
+ * is the only account of what the worker saw. One bounded, redacted line to the
+ * error log; never a database write, because the row belongs to another claim.
+ */
+function deploy_worker_log_discarded_write(int $jobId, string $what, ?string $message): void
+{
+    $text = mb_substr(trim((string) preg_replace('/\s+/', ' ', virtusphere_redact_log_text((string) $message))), 0, 500, 'UTF-8');
+    error_log('[deploy-worker] job ' . $jobId . ' is no longer owned by this worker; discarded ' . $what . ($text === '' ? '' : ': ' . $text));
 }
 
 function deploy_terminal_reason_for_exception(Throwable $exception): string
@@ -249,36 +291,54 @@ function deploy_terminal_reason_for_exception(Throwable $exception): string
  */
 function deploy_worker_audit_outcome(mysqli $db, array $job, string $status, ?string $error = null): void
 {
-    if (($job['mission_id'] ?? null) === null) {
+    // A confirmed cancel wrote its row inside its own transaction (LG-08).
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED) {
         return;
     }
     try {
-        $userId = isset($job['user_id']) ? (int) $job['user_id'] : null;
-        $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
-        $context = [
-            'mission_id' => (int) $job['mission_id'],
-            'mode' => audit_snippet($mode, 24),
-            'status' => $status,
-        ];
-        if (in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL], true) && $error !== null && $error !== '') {
-            $reason = audit_snippet($error, 120);
-            if ($reason !== '') {
-                $context['reason'] = $reason;
-            }
-        }
-        audit_event(
-            $db,
-            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME,
-            'deploy_job',
-            (int) $job['id'],
-            deploy_worker_outcome_audit_result($status),
-            $context,
-            $userId,
-            'cli'
-        );
+        $reason = in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL], true) ? $error : null;
+        deploy_worker_write_outcome_audit($db, $job, $status, $reason);
     } catch (Throwable $exception) {
         error_log('[deploy-worker] outcome audit failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }
+}
+
+/**
+ * The one writer of a mission job's deploy.outcome row (LG-07, LG-08). Conclusions
+ * call it fail-soft after publication; a confirmed cancel and the reaper call it
+ * inside their own transaction, so the row exists exactly when the state does.
+ * Inventory jobs have no mission and no row. Returns false only when the row
+ * was not stored.
+ */
+function deploy_worker_write_outcome_audit(mysqli $db, array $job, string $status, ?string $reason = null): bool
+{
+    if (($job['mission_id'] ?? null) === null) {
+        return true;
+    }
+    $userId = isset($job['user_id']) ? (int) $job['user_id'] : null;
+    $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
+    $context = [
+        'mission_id' => (int) $job['mission_id'],
+        'mode' => audit_snippet($mode, 24),
+        'status' => $status,
+    ];
+    if ($reason !== null && $reason !== '') {
+        $snippet = audit_snippet($reason, 120);
+        if ($snippet !== '') {
+            $context['reason'] = $snippet;
+        }
+    }
+
+    return audit_event(
+        $db,
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME,
+        'deploy_job',
+        (int) $job['id'],
+        deploy_worker_outcome_audit_result($status),
+        $context,
+        $userId,
+        'cli'
+    );
 }
 
 /**

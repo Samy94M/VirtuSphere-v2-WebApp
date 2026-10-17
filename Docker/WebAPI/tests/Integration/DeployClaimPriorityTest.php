@@ -132,16 +132,92 @@ final class DeployClaimPriorityTest extends TestCase
         self::assertSame($validJobId, (int) $second['id']);
     }
 
-    private function insertMissionJob(string $payloadJson): int
+    /**
+     * WK-05: a mission runs one job at a time. A running job of mission M keeps a
+     * second queued job of M unclaimed, and a cancelling job holds it the same
+     * way. A queued job of another mission is still claimed in the meantime.
+     */
+    public function testARunningOrCancellingJobHoldsItsMissionButNotOtherMissions(): void
+    {
+        $this->skipWhenAnotherJobIsQueued();
+        $otherMissionId = repo_create_mission($this->db, [
+            'mission_name' => self::PREFIX . 'n',
+            'hypervisor_datastorage' => 'ds1',
+            'hypervisor_datacenter' => 'DC1',
+            'domain' => 'dc.example.com',
+        ], true);
+        $runningJobId = $this->insertRunningMissionJob($this->missionId);
+        $blockedJobId = $this->insertMissionJob('{"vm_ids":[]}');
+        $freeJobId = $this->insertMissionJob('{"vm_ids":[]}', $otherMissionId);
+
+        $claimed = repo_claim_next_deploy_job($this->db, 'phpunit-one-per-mission');
+        if ($claimed === null || (int) $claimed['id'] !== $freeJobId) {
+            $this->skipWhenRaced($freeJobId);
+        }
+        self::assertNotNull($claimed, 'a queued job of another mission must still be claimable');
+        self::assertSame($freeJobId, (int) $claimed['id']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, $this->statusOf($blockedJobId), 'the second job of a running mission stays queued');
+
+        $this->setStatusOf($runningJobId, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING);
+        self::assertNull(repo_claim_next_deploy_job($this->db, 'phpunit-one-per-mission'), 'a cancelling job holds its mission too');
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, $this->statusOf($blockedJobId));
+    }
+
+    /**
+     * WK-09: a paused service claims nothing. The early exit must not change the
+     * outcome the in-transaction gate has always produced.
+     */
+    public function testAPausedServiceClaimsNothingAndLeavesTheQueuedJobQueued(): void
+    {
+        $this->skipWhenAnotherJobIsQueued();
+        $jobId = $this->insertMissionJob('{"vm_ids":[]}');
+        $previous = repo_fetch_one($this->db, 'SELECT claim_state, claim_changed_at, claim_changed_by FROM deploy_runtime_identity WHERE id = 1');
+        self::assertNotNull($previous);
+        try {
+            $paused = VIRTUSPHERE_DEPLOY_CLAIM_PAUSED;
+            $this->db->query("UPDATE deploy_runtime_identity SET claim_state = '" . $paused . "' WHERE id = 1");
+
+            self::assertNull(repo_claim_next_deploy_job($this->db, 'phpunit-paused'));
+            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, $this->statusOf($jobId));
+        } finally {
+            $stmt = $this->db->prepare('UPDATE deploy_runtime_identity SET claim_state = ?, claim_changed_at = ?, claim_changed_by = ? WHERE id = 1');
+            $stmt->bind_param('sss', $previous['claim_state'], $previous['claim_changed_at'], $previous['claim_changed_by']);
+            $stmt->execute();
+        }
+    }
+
+    private function insertMissionJob(string $payloadJson, ?int $missionId = null): int
     {
         repo_execute(
             $this->db,
             "INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id, credential_ansible_id) VALUES (?, 'queued', ?, ?, ?)",
             'isii',
-            [$this->missionId, $payloadJson, $this->esxiId, $this->ansibleId]
+            [$missionId ?? $this->missionId, $payloadJson, $this->esxiId, $this->ansibleId]
         );
 
         return (int) $this->db->insert_id;
+    }
+
+    private function insertRunningMissionJob(int $missionId): int
+    {
+        repo_execute(
+            $this->db,
+            'INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id, credential_ansible_id, locked_at, locked_by, heartbeat_at) VALUES (?, ?, ?, ?, ?, NOW(), ?, NOW())',
+            'issiis',
+            [$missionId, VIRTUSPHERE_DEPLOY_STATUS_RUNNING, '{"vm_ids":[]}', $this->esxiId, $this->ansibleId, 'phpunit-running']
+        );
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function statusOf(int $jobId): string
+    {
+        return (string) repo_scalar($this->db, 'SELECT status FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+    }
+
+    private function setStatusOf(int $jobId, string $status): void
+    {
+        repo_execute($this->db, 'UPDATE deploy_jobs SET status = ? WHERE id = ?', 'si', [$status, $jobId]);
     }
 
     private function skipWhenAnotherJobIsQueued(): void
