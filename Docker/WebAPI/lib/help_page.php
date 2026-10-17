@@ -40,6 +40,15 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // sit inside a card that a reader opens to count VMs.
     'help-create-progress' => 'deploy',
     'help-action-outcomes' => 'deploy',
+    // The APP_KEY error texts of the directory page link here (R11). The
+    // rotation steps themselves live in the operations document.
+    'help-app-key' => 'stack',
+    // How to read the audit log text column: the stored sentences are English
+    // with technical codes, and nothing rewrites them.
+    'help-log-texts' => 'system-status',
+    // The VLAN catalog and why it is read-only. Its section sits in the System
+    // status panel because the catalog reads what the inventory reads.
+    'help-vlans' => 'system-status',
 ];
 
 function help_panel_visible(string $panel, array $user): bool

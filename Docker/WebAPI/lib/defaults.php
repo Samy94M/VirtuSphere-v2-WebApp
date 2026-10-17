@@ -24,8 +24,10 @@ const VIRTUSPHERE_VM_DEFAULTS = [
     'disk_type' => 'eagerzeroedthick',
     'interface_mode' => 'dhcp',
     'interface_type' => 'vmxnet3',
-    // CPU/RAM hot-add, enabled by default; written by the create playbook, whose
-    // launch also aligns an existing bound ESXi VM with it (Paket F, FC2-15).
+    // CPU/RAM hot-add, enabled by default; written by the create playbook. The
+    // launch also sends the flags to an existing bound ESXi VM (Paket F, FC2-15),
+    // but the portal does not read back whether ESXi applied them, so only
+    // creation is promised.
     'cpu_hotplug' => true,
     'ram_hotplug' => true,
 ];
@@ -65,6 +67,7 @@ const VIRTUSPHERE_VM_LIMITS = [
     'cpu_count_max' => 256,
     'disk_size_gb_min' => 1,
     'disk_size_gb_max' => 65536,
+    'vm_name_max_length' => 16,
 ];
 
 const VIRTUSPHERE_DISK_TYPES = ['thin', 'thick', 'eagerzeroedthick'];

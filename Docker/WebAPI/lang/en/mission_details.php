@@ -20,7 +20,7 @@ return [
     'label_datacenter' => 'Datacenter',
     'datastore_select' => 'Select datastore',
     'datacenter_from_host' => 'Take from the target host',
-    'datacenter_optional_hint' => 'Leave empty: at deploy time the datacenter of the chosen ESXi credential is used when it reports exactly one. With several datacenters (vCenter) a value is required here.',
+    'datacenter_optional_hint' => 'Leave empty: at deploy time the datacenter of the chosen ESXi credential is used when it reports exactly one and that evidence is current. Otherwise the portal rejects the job. With several datacenters (vCenter) a value is required here.',
     'location_not_in_inventory' => 'not in the current inventory',
     'location_host_choice_hint' => 'The target host is only chosen at deploy time. The list shows the values of all ESXi credentials, and a value may be missing on the host chosen later.',
     'location_bucket_hint' => 'The groups say on how many credentials a value exists: "Present on every ESXi credential" survives any host choice, "Only on ..." fixes it.',

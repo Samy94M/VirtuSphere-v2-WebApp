@@ -85,6 +85,7 @@ return [
     'source_local' => 'Local',
     'err_bind_upn' => 'Enter the AD search account as a complete UPN.',
     'err_bind_password_required' => 'Enter the AD search account password.',
+    'app_key_help_link' => 'Help: changing the APP_KEY',
     'err_bind_secret_unreadable' => 'The stored search account secret cannot be read with the current APP_KEY. Enter the password again.',
     'err_ca_private_key' => 'The CA field must not contain a private key.',
     'err_ca_invalid' => 'Enter at least one valid CA certificate in PEM format.',

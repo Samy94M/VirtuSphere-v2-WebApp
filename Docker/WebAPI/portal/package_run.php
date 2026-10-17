@@ -38,7 +38,7 @@ if ($fromList && $dateFilter['errors'] === []) {
     $returnUrl = 'package_reports.php' . ($listQuery === '' ? '' : '?' . $listQuery);
 }
 
-layout_header(__t('package_report.detail_heading'), $user, 'missions', 'missions');
+layout_header(__t('package_report.detail_heading'), $user, 'missions', 'packages');
 if ($run === null) {
     ?>
     <section class="panel">

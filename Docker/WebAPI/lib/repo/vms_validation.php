@@ -180,8 +180,8 @@ function repo_validate_disks(mixed $disks): array
 function repo_validate_vm_payload(mysqli $db, int $missionId, array $vmData, int $excludeVmId = 0): array
 {
     $validator = new Validator();
-    $name = $validator->requireString('vm_name', $vmData['vm_name'] ?? '', validator_label('vm_name', 'VM name'), 16);
-    if ($name !== '' && preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,14}[A-Za-z0-9])?$/', $name) !== 1) {
+    $name = $validator->requireString('vm_name', $vmData['vm_name'] ?? '', validator_label('vm_name', 'VM name'), (int) VIRTUSPHERE_VM_LIMITS['vm_name_max_length']);
+    if ($name !== '' && preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/', $name) !== 1) {
         $validator->add('vm_name', validator_text('validate.vm_name_charset', 'VM name may use only letters, numbers and internal hyphens.'));
     }
 

@@ -26,6 +26,11 @@ $passwordMinLength = password_policy_min_length(db());
                         <td><?php echo portal_badge('success', __t('common.yes')); ?></td>
                         <td><?php echo portal_badge('success', __t('common.yes')); ?></td>
                     </tr>
+                    <tr>
+                        <td><?php echo h(__t('help_users.roles_matrix_export')); ?></td>
+                        <td><?php echo portal_badge('success', __t('common.yes')); ?></td>
+                        <td><?php echo portal_badge('success', __t('common.yes')); ?></td>
+                    </tr>
                     <?php foreach (VIRTUSPHERE_PERMISSIONS as $permission): ?>
                         <tr>
                             <td><?php echo h(__t('help_users.perm_' . str_replace('.', '_', $permission))); ?></td>
@@ -76,6 +81,7 @@ $passwordMinLength = password_policy_min_length(db());
             <p><?php echo h(__t('help_users.usersmgmt_audit_filter')); ?></p>
             <p><?php echo h(__t('help_users.usersmgmt_audit_correlation', [
                 'audit_days' => VIRTUSPHERE_LOG_RETENTION_DAYS,
+                'security_days' => VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS,
                 'job_days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
             ])); ?></p>
         </section>
@@ -89,6 +95,7 @@ $passwordMinLength = password_policy_min_length(db());
                 <li><?php echo h(__t('help_users.directory_step_import')); ?></li>
                 <li><?php echo h(__t('help_users.directory_step_enable')); ?></li>
             </ol>
+            <p><?php echo h(__t('help_users.directory_controller_change')); ?></p>
             <p><?php echo h(__t('help_users.directory_breakglass')); ?></p>
         </section>
 

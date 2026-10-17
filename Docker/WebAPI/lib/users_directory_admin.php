@@ -7,6 +7,21 @@ require_once __DIR__ . '/directory_service.php';
 require_once __DIR__ . '/repo/directory.php';
 require_once __DIR__ . '/users_page.php';
 
+/**
+ * The flash action an APP_KEY outcome gets: its next step is the rotation help,
+ * which the sentence cannot carry itself (R11). Every other outcome gets none.
+ *
+ * @return array{url:string,label:string}|null
+ */
+function users_directory_app_key_action(string $outcome): ?array
+{
+    if ($outcome !== VIRTUSPHERE_DIRECTORY_OUTCOME_SECRET_UNREADABLE) {
+        return null;
+    }
+
+    return ['url' => help_url('stack', 'help-app-key'), 'label' => __t('directory.app_key_help_link')];
+}
+
 function users_directory_handle_action(mysqli $db, array $actor, string $action): bool
 {
     if (str_starts_with($action, 'directory_') && !directory_schema_available($db)) {
@@ -87,7 +102,7 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         $result = directory_test_saved_controller($db, $controllerId, $actorId);
         flash_set($result['ok'] ? 'success' : 'error', $result['ok']
             ? __t('directory.flash_test_ok')
-            : directory_outcome_message($result['outcome']));
+            : directory_outcome_message($result['outcome']), '', users_directory_app_key_action($result['outcome']));
 
         return true;
     }

@@ -30,7 +30,7 @@ return [
     'progress_no_auto_failure' => 'Diese Zeitwarnung ändert oder löscht die VM nicht. Nach der Prüfung kann die Beobachtung bewusst neu gestartet werden.',
     'progress_start_button' => 'PXE jetzt beobachten',
     'progress_restart_button' => 'Beobachtung neu starten',
-    'progress_confirm_start' => 'Bestätigen, dass PXE für diese VM jetzt ausgelöst wurde, und die 6-Stunden-Beobachtung starten?',
+    'progress_confirm_start' => 'Bestätigen, dass PXE für diese VM jetzt ausgelöst wurde, und die Beobachtung starten?',
     'progress_confirm_restart' => 'Beobachtungszeit nach abgeschlossener Prüfung jetzt neu starten?',
     'mecm_id_none' => 'Keine',
     'heading_client_phases' => 'Client-Phasen (Deploy-Fortschritt)',
@@ -46,7 +46,7 @@ return [
     'hostname_legacy_warning' => 'Achtung: Dieser Hostname erfüllt die Windows-Regeln nicht (max. 15 Zeichen, keine Punkte). Der Client würde ihn beim Deploy zu ":preview" ändern. Bitte beim nächsten Speichern korrigieren.',
     'package_retired_suffix' => '(zurückgezogen)',
     'package_update_available' => 'Update verfügbar: Diese VM ist mit „:old“ verknüpft, im Katalog ist „:new“ aktiv.',
-    'package_retired_selected' => '„:name“ ist zurückgezogen und in MECM nicht mehr vorhanden. Wird die VM mit diesem Haken an MECM übertragen, bleibt sie mit collection_missing in der Warteschlange. Haken entfernen oder durch die aktuelle Version ersetzen.',
+    'package_retired_selected' => '„:name“ ist zurückgezogen und in MECM nicht mehr vorhanden. Wird die VM mit diesem Haken an MECM übertragen, bleibt sie in der Warteschlange, weil ihre Collection in MECM fehlt. Haken entfernen oder durch die aktuelle Version ersetzen.',
     'package_versions_duplicate' => 'Mehrere Versionen von „:basename“ angehakt: :names. MECM installiert jede angehakte Version. Nicht mehr gebrauchte Versionen abwählen.',
     'client_events_summary' => 'Letzte Client-Ereignisse anzeigen',
     'client_events_empty' => 'Noch keine Client-Meldungen für diese VM.',
@@ -110,7 +110,7 @@ return [
     // Diese VM kennt MECM schon, und der Device-Sync schaut nur auf VMs, die es
     // nicht kennt. Die Änderung ist also gespeichert und wirkt erst nach der
     // Übertragung; vorher hat das niemand gesagt.
-    'flash_mecm_transfer_pending' => 'Gespeichert, aber noch nicht in MECM: Diese VM ist dort bereits registriert, deshalb erreichen geänderte Betriebssystem- oder Paketzuweisungen MECM erst, wenn du sie überträgst.',
+    'flash_mecm_transfer_pending' => 'Gespeichert, aber noch nicht in MECM: Diese VM ist dort bereits registriert, deshalb erreichen geänderte Betriebssystem- oder Paketzuweisungen MECM erst, wenn Sie sie übertragen.',
     'err_invalid_disk_type' => 'Ungültiger Datenträgertyp.',
     // Die letzte Netzwerkkarte entfernt: früher setzte das Formular still eine
     // leere Standardkarte ein und überschrieb damit die importierte MAC-Adresse,
@@ -152,7 +152,7 @@ return [
     'hotplug_heading' => 'Hot-Add (CPU/RAM)',
     'cpu_hotplug' => 'CPU-Hot-Add',
     'ram_hotplug' => 'RAM-Hot-Add',
-    'hotplug_hint' => 'Erlaubt das Hinzufügen von CPU/RAM im laufenden Betrieb. Wirkt nur bei der Erzeugung der VM; das Gast-Betriebssystem muss Hot-Add unterstützen. Für bestehende VMs ist ein erneuter Create-Lauf kein verlässlicher Weg, die Einstellung zu ändern.',
+    'hotplug_hint' => 'Erlaubt das Hinzufügen von CPU und RAM im laufenden Betrieb. Wirkt nur bei der Erzeugung der VM. Ein erneuter Create-Lauf schickt die Einstellung zwar auch an eine vorhandene VM, ob ESXi sie dort übernimmt, liest das Portal aber nicht zurück. Deshalb ist das kein verlässlicher Weg, die Einstellung zu ändern. Das Gast-Betriebssystem muss Hot-Add unterstützen.',
     'autostart_heading' => 'Autostart',
     'autostart_enabled' => 'Diese VM beim Hochfahren des Hosts starten',
     'autostart_hint' => 'Bleiben die Verzögerungen leer, gelten die Standardwerte der Mission; eine spätere Änderung dort wirkt dann automatisch mit. Eine 0 bedeutet „ohne Wartezeit" und ist nicht dasselbe wie leer. Die Reihenfolge der VMs ergibt sich aus den Startverzögerungen.',

@@ -85,6 +85,7 @@ return [
     'source_local' => 'Lokal',
     'err_bind_upn' => 'Geben Sie das AD-Suchkonto als vollständigen UPN ein.',
     'err_bind_password_required' => 'Geben Sie das Passwort des AD-Suchkontos ein.',
+    'app_key_help_link' => 'Hilfe: APP_KEY wechseln',
     'err_bind_secret_unreadable' => 'Das gespeicherte Suchkonto-Secret kann mit dem aktuellen APP_KEY nicht gelesen werden. Geben Sie das Passwort erneut ein.',
     'err_ca_private_key' => 'Das CA-Feld darf keinen privaten Schlüssel enthalten.',
     'err_ca_invalid' => 'Geben Sie mindestens ein gültiges CA-Zertifikat im PEM-Format ein.',

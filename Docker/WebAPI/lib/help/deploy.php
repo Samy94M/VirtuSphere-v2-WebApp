@@ -3,6 +3,9 @@
 // (nginx denies /lib/).
 declare(strict_types=1);
 require_once __DIR__ . '/../deploy_late_start.php';
+// The hardware versions shown in the create text come from their owner, not from a typed number (R9).
+require_once __DIR__ . '/../esxi_create_compatibility.php';
+require_once __DIR__ . '/../settings_page.php';
 ?>
     <div class="stack" id="panel-deploy" role="tabpanel" aria-labelledby="tab-deploy" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -143,7 +146,13 @@ require_once __DIR__ . '/../deploy_late_start.php';
             <p><?php echo h(__t('help_deploy.create_progress_p4')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p5')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p6')); ?></p>
-            <p><?php echo h(__t('help_deploy.create_progress_p7')); ?></p>
+            <p><?php echo h(__t('help_deploy.create_progress_p7', [
+                'hw_70_ga' => (string) esxi_create_hardware_version_for('7.0.0'),
+                'hw_70_u1' => (string) esxi_create_hardware_version_for('7.0.1'),
+                'hw_70_u2' => (string) esxi_create_hardware_version_for('7.0.2'),
+                'hw_80_ga' => (string) esxi_create_hardware_version_for('8.0.0'),
+                'hw_80_u2' => (string) esxi_create_hardware_version_for('8.0.2'),
+            ])); ?></p>
         </section>
 
         <section class="panel" id="help-action-outcomes">
@@ -192,6 +201,6 @@ require_once __DIR__ . '/../deploy_late_start.php';
 
         <section class="panel">
             <h2><?php echo h(__t('help_deploy.credentials_heading')); ?></h2>
-            <p><?php echo h(__t('help_deploy.credentials_p1')); ?></p>
+            <p><?php echo h(__t('help_deploy.credentials_p1')); ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_DEPLOY)); ?>"><?php echo h(__t('help_deploy.link_settings')); ?></a></p>
         </section>
     </div>

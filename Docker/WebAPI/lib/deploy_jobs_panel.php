@@ -81,6 +81,8 @@ require_once __DIR__ . '/deploy_late_start.php';
                             <a class="button button-secondary" href="<?php echo h(vm_edit_url((int) $job['mission_id'], (int) $retryEvaluation['repair_vm_id'], 'interfaces')); ?>"><?php echo h(__t('deploy.retry_fix_configuration')); ?></a>
                         <?php } else { ?>
                             <span class="muted"><?php echo h(__t('deploy.retry_blocked_short')); ?></span>
+                            <span class="muted"><?php echo h(__t('deploy.retry_blocked')); ?></span>
+                            <a href="<?php echo h(deploy_job_log_url((int) $job['id'])); ?>"><?php echo h(__t('deploy.flash_open_job_log')); ?></a>
                         <?php } ?>
                     <?php } ?>
                     <?php if (($job['group_id'] ?? '') !== '' && isset($groupPositions[(int) $job['id']]) && $groupPositions[(int) $job['id']][0] === 1) { ?>

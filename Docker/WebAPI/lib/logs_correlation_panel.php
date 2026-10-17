@@ -45,6 +45,7 @@ function logs_render_correlation_jobs(mysqli $connection, array $filter, array $
         <h2><?php echo h(__t('logs.jobs_heading')); ?></h2>
         <p class="muted"><?php echo h(__t('logs.jobs_retention_note', [
             'audit_days' => VIRTUSPHERE_LOG_RETENTION_DAYS,
+            'security_days' => VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS,
             'job_days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
         ])); ?></p>
         <?php if ($result['truncated']) { ?>

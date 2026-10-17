@@ -3,6 +3,9 @@
 // (nginx denies /lib/).
 declare(strict_types=1);
 
+// The page size of the audit table is the one constant the logs text states.
+require_once __DIR__ . '/../log_filter.php';
+
 // Uses $user from the page scope: the cross reference to the deploy help is
 // gated on the panel that reader may actually open, so a link never leads to a
 // tab that is not rendered for them.
@@ -74,6 +77,13 @@ declare(strict_types=1);
             <?php // Directly after the field explanation, because the cause line sits
                   // in the same card and is the only place a counter names a VM. ?>
             <p><?php echo h(__t('help_system_status.system_status_status_p3')); ?></p>
+            <?php // One entry per cause code the autoimporter writes into the cause line. ?>
+            <ul>
+                <?php foreach (['membership_operation_uncertain', 'package_content_in_progress', 'package_content_unknown', 'package_content_failed', 'package_definition_drift', 'package_cleanup_failed'] as $statusCode) { ?>
+                    <li><code><?php echo h($statusCode); ?></code>: <?php echo h(__t('help_system_status.system_status_status_code_' . $statusCode)); ?></li>
+                <?php } ?>
+            </ul>
+            <p><?php echo h(__t('help_system_status.system_status_status_counters')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_cleanup_p4')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_package_p5')); ?></p>
             <?php // Etappe 14D: Die sieben Identitaetscodes bekommen je eine
@@ -152,7 +162,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help_system_status.logs_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.logs_p1')); ?></p>
-            <p><?php echo h(__t('help_system_status.logs_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.logs_p2', ['page_size' => VIRTUSPHERE_LOG_PAGE_SIZE])); ?></p>
             <p><?php echo h(__t('help_system_status.logs_p2b')); ?></p>
             <?php // The export cap is a constant, so the sentence interpolates it. ?>
             <p><?php echo h(__t('help_system_status.logs_export', [
@@ -170,6 +180,17 @@ declare(strict_types=1);
                 'log_days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
                 'system_days' => VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS,
             ])); ?></p>
+            <?php // What the free-text sentences of the log table mean. They are stored in English
+                  // with codes and never rewritten (the logs are not translated on read). ?>
+            <h3 id="help-log-texts" tabindex="-1"><?php echo h(__t('help_system_status.logs_texts_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.logs_texts_p1')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_system_status.logs_texts_mac')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_catalog')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_recovery')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_refused')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_settings')); ?></li>
+            </ul>
         </section>
 
         <section class="panel">
@@ -252,5 +273,12 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_system_status.esxi_inv_catalog_presence')); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_catalog_vlanid')); ?></p>
             <p><?php echo h(__t('help_system_status.esxi_inv_templates')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2 id="help-vlans" tabindex="-1"><?php echo h(__t('help_system_status.vlans_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.vlans_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.vlans_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.vlans_p3')); ?></p>
         </section>
     </div>

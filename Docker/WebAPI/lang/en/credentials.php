@@ -84,6 +84,7 @@ return [
     'test_esxi_strict_queued' => 'Strict certificate test queued. After a successful run, strict mode can be activated.',
     'test_esxi_failed' => 'The inventory pull could not be queued.',
     'test_esxi_action' => 'Open result or configuration',
+    'test_esxi_action_settings' => 'Open Settings, catalog and inventory',
     'test_action_allowlist' => 'Open IP allowlist',
     'test_action_api_base_url' => 'Open deploy settings',
     'test_action_system_status' => 'Show Ansible status',
@@ -105,7 +106,7 @@ return [
     'cadence_esxi' => 'automatic, every :hours hours',
     'cadence_esxi_one' => 'automatic, every hour',
     'cadence_esxi_off' => 'no automatic pull (interval 0)',
-    'cadence_esxi_paused' => 'paused, no automatic pull',
+    'cadence_esxi_paused' => 'sign-in paused, no automatic pull',
     'cadence_esxi_no_ansible' => 'no automatic pull, no Ansible credential selected',
     // The pull is a deploy job: without a running deploy service it is queued and
     // never executed.

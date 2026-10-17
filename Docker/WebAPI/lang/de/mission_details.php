@@ -20,7 +20,7 @@ return [
     'label_datacenter' => 'Datacenter',
     'datastore_select' => 'Datastore auswählen',
     'datacenter_from_host' => 'Vom Zielhost übernehmen',
-    'datacenter_optional_hint' => 'Leer lassen: Beim Bereitstellen wird das Datacenter des gewählten ESXi-Zugangs verwendet, wenn dieser genau eines meldet. Meldet der Zugang mehrere Datacenter (vCenter), muss hier ein Wert stehen.',
+    'datacenter_optional_hint' => 'Leer lassen: Beim Bereitstellen wird das Datacenter des gewählten ESXi-Zugangs verwendet, wenn dieser genau eines meldet und der Nachweis aktuell ist. Sonst lehnt das Portal den Auftrag ab. Meldet der Zugang mehrere Datacenter (vCenter), muss hier ein Wert stehen.',
     'location_not_in_inventory' => 'nicht im aktuellen Inventar',
     'location_host_choice_hint' => 'Der Zielhost wird erst beim Bereitstellen gewählt. Die Liste zeigt die Werte aller ESXi-Zugänge, und ein Wert kann auf dem später gewählten Host fehlen.',
     'location_bucket_hint' => 'Die Gruppen sagen, auf wie vielen Zugängen ein Wert vorhanden ist: „Auf allen ESXi-Zugängen vorhanden" übersteht jede Host-Wahl, „Nur auf …" legt sie fest.',

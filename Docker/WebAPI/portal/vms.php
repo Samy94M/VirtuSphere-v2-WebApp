@@ -323,8 +323,8 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                                     && empty($vm['os_install_watch_started_at']);
                                 if (is_array($attention)) {
                                     $label = $attention['kind'] === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
-                                        ? __t('vms.progress_badge_pending')
-                                        : __t('vms.progress_badge_installing');
+                                        ? __t('vms.progress_badge_pending', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)])
+                                        : __t('vms.progress_badge_installing', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)]);
                                     ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo portal_badge('warning', $label); ?></a><?php
                                 } elseif ($watchMissing) {
                                     ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo portal_badge('info', __t('vms.progress_badge_unwatched')); ?></a><?php

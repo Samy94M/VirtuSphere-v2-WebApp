@@ -84,6 +84,7 @@ return [
     'test_esxi_strict_queued' => 'Strikter Zertifikatstest eingereiht. Nach einem erfolgreichen Lauf kann der strikte Modus aktiviert werden.',
     'test_esxi_failed' => 'Der Inventar-Abruf konnte nicht eingereiht werden.',
     'test_esxi_action' => 'Ergebnis oder Konfiguration öffnen',
+    'test_esxi_action_settings' => 'Einstellungen, Kataloge und Inventar öffnen',
     'test_action_allowlist' => 'IP-Freigaben öffnen',
     'test_action_api_base_url' => 'Deploy-Einstellungen öffnen',
     'test_action_system_status' => 'Ansible-Status anzeigen',
@@ -105,7 +106,7 @@ return [
     'cadence_esxi' => 'automatisch alle :hours Stunden',
     'cadence_esxi_one' => 'automatisch jede Stunde',
     'cadence_esxi_off' => 'kein automatischer Abruf (Intervall 0)',
-    'cadence_esxi_paused' => 'pausiert, kein automatischer Abruf',
+    'cadence_esxi_paused' => 'Anmeldung pausiert, kein automatischer Abruf',
     'cadence_esxi_no_ansible' => 'kein automatischer Abruf, kein Ansible-Zugang gewählt',
     // Der Abruf ist ein Bereitstellungsauftrag: ohne laufenden Deploy-Dienst wird
     // er eingereiht und nie ausgeführt.

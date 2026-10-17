@@ -201,7 +201,7 @@ function layout_app_scripts(string $nonce, ?string $page = null): void
     }
 }
 
-function layout_header(string $title, array $user, string $active = 'dashboard', ?string $helpAnchor = null): void
+function layout_header(string $title, array $user, string $active = 'dashboard', ?string $helpAnchor = null, ?string $helpSection = null): void
 {
     $nonce = h(virtusphere_csp_nonce());
     $assetPage = layout_asset_page();
@@ -291,7 +291,7 @@ function layout_header(string $title, array $user, string $active = 'dashboard',
                 <div class="page-title-row">
                     <h1><?php echo h($title); ?></h1>
                     <?php if ($helpAnchor !== null && help_panel_visible($helpAnchor, $user)) { ?>
-                        <a class="page-help-link" href="<?php echo h(help_url($helpAnchor)); ?>" title="<?php echo h(__t('layout.help_page_title')); ?>">
+                        <a class="page-help-link" href="<?php echo h(help_url($helpAnchor, $helpSection)); ?>" title="<?php echo h(__t('layout.help_page_title')); ?>">
                             <span class="page-help-mark" aria-hidden="true">?</span><span><?php echo h(__t('layout.help_page_link')); ?></span>
                         </a>
                     <?php } ?>

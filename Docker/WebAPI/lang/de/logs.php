@@ -61,7 +61,7 @@ return [
     'copy_done' => 'Kopiert',
     'copy_failed' => 'Kopieren nicht möglich; ID von Hand markieren.',
     'jobs_heading' => 'Bereitstellungsaufträge dieser Anfrage',
-    'jobs_retention_note' => 'Protokolleinträge werden :audit_days Tage aufbewahrt, Auftragsprotokolle nur :job_days Tage. Zu einer älteren Anfrage können deshalb Einträge ohne zugehörigen Auftrag stehen.',
+    'jobs_retention_note' => 'Protokolleinträge werden :audit_days Tage aufbewahrt, Sicherheitseinträge :security_days Tage, Auftragsprotokolle nur :job_days Tage. Zu einer älteren Anfrage können deshalb Einträge ohne zugehörigen Auftrag stehen.',
     'jobs_none' => 'Zu dieser Korrelations-ID gibt es keine Bereitstellungsaufträge mehr.',
     'jobs_truncated' => 'Es werden die neuesten :limit Aufträge angezeigt.',
     'jobs_th_id' => 'Auftrag',

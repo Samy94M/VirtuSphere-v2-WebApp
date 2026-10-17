@@ -14,6 +14,20 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_missions.edit_conflict_p1')); ?></p>
         </section>
 
+        <section class="panel">
+            <h2><?php echo h(__t('help_missions.vm_steps_heading')); ?></h2>
+            <p><?php echo h(__t('help_missions.vm_steps_intro')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_1')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_2')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_3', ['max' => (int) VIRTUSPHERE_VM_LIMITS['vm_name_max_length']])); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_4')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_5')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_6')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_7')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_8')); ?></p>
+            <p class="muted"><?php echo h(__t('help_missions.vm_steps_note')); ?></p>
+        </section>
+
         <section class="panel" id="help-work-context">
             <h2><?php echo h(__t('help_missions.work_context_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.work_context_p1')); ?></p>
@@ -38,6 +52,7 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help_missions.naming_p3')); ?></li>
                 <li><?php echo h(__t('help_missions.naming_p4')); ?></li>
             </ul>
+            <p><?php echo h(__t('help_missions.domain_p1')); ?></p>
         </section>
 
         <?php // Etappe 14D: Ein eigener Abschnitt, weil die beiden Namen und der
@@ -66,11 +81,35 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help_missions.status_4')); ?></li>
                 <li><?php echo h(__t('help_missions.status_5')); ?></li>
             </ul>
+            <h3><?php echo h(__t('help_missions.status_axes_heading')); ?></h3>
+            <p><?php echo h(__t('help_missions.status_axes_p1')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_missions.status_axes_mecm_not_ready')); ?></li>
+                <li><?php echo h(__t('help_missions.status_axes_mecm_pending')); ?></li>
+                <li><?php echo h(__t('help_missions.status_axes_mecm_registered')); ?></li>
+                <li><?php echo h(__t('help_missions.status_axes_mecm_failed')); ?></li>
+                <li><?php echo h(__t('help_missions.status_axes_lifecycle')); ?></li>
+            </ul>
             <h3><?php echo h(__t('help_missions.status_stuck_heading')); ?></h3>
             <ul>
-                <li><?php echo h(__t('help_missions.status_stuck_1')); ?></li>
-                <li><?php echo h(__t('help_missions.status_stuck_2', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)])); ?></li>
+                <li><?php echo h(__t('help_missions.status_stuck_1')); ?> <a href="<?php echo h('deploy.php'); ?>"><?php echo h(__t('help_missions.link_deploy')); ?></a></li>
+                <li><?php echo h(__t('help_missions.status_stuck_2', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)])); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('help_missions.link_system_status')); ?></a></li>
                 <li><?php echo h(__t('help_missions.status_stuck_3', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)])); ?></li>
+            </ul>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_missions.badges_heading')); ?></h2>
+            <p><?php echo h(__t('help_missions.badges_p1')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_missions.badge_mission_attention')); ?></li>
+                <li><?php echo h(__t('help_missions.badge_vm_attention', [
+                    'mecm_hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
+                    'install_hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
+                ])); ?></li>
+                <li><?php echo h(__t('help_missions.badge_vm_editor')); ?></li>
+                <li><?php echo h(__t('help_missions.badge_network')); ?></li>
+                <li><?php echo h(__t('help_missions.badge_rollout')); ?></li>
             </ul>
         </section>
 
@@ -81,12 +120,12 @@ declare(strict_types=1);
             <ul>
                 <li><?php echo h(__t('help_missions.location_datacenter_optional', [
                     'hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
-                ])); ?></li>
+                ])); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('help_missions.link_system_status')); ?></a></li>
                 <li><?php echo h(__t('help_missions.location_datastore_scope')); ?></li>
                 <li><?php echo h(__t('help_missions.location_per_disk')); ?></li>
                 <li><?php echo h(__t('help_missions.location_single_host')); ?></li>
             </ul>
-            <p><?php echo h(__t('help_missions.location_p3')); ?></p>
+            <p><?php echo h(__t('help_missions.location_p3')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('help_missions.link_system_status')); ?></a></p>
         </section>
 
         <section class="panel">

@@ -353,8 +353,8 @@ layout_header($title, $user, $active, 'missions');
                             <?php } ?>
                         </td>
                         <td><?php echo h((string) ($mission['vm_count'] ?? 0)); ?></td>
-                        <td><?php echo (int) ($mission['progress_attention_count'] ?? 0) > 0
-                            ? portal_badge('warning', __t('missions.attention_badge', ['count' => (int) $mission['progress_attention_count']]))
+                        <td><?php $attentionCount = (int) ($mission['progress_attention_count'] ?? 0); echo $attentionCount > 0
+                            ? portal_badge('warning', __t($attentionCount === 1 ? 'missions.attention_badge_one' : 'missions.attention_badge_many', ['count' => $attentionCount]))
                             : '&mdash;'; ?></td>
                         <td><?php echo h(portal_format_timestamp($mission['updated_at'] ?? '')); ?></td>
                         <td class="actions">

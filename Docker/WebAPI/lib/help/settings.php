@@ -21,6 +21,7 @@ require_once __DIR__ . '/../ansible_test_config.php';
             <p><?php echo h(__t('help_settings.settings_api_p3')); ?></p>
             <h3><?php echo h(__t('help_settings.settings_runtime_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_runtime_p1')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_deploy_test_stale', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
         </section>
 
         <section class="panel">
@@ -54,7 +55,7 @@ require_once __DIR__ . '/../ansible_test_config.php';
                 'max' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX,
                 'evidence_hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
             ])); ?></p>
-            <p><?php echo h(__t('help_settings.settings_esxi_p2_interval_zero')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_esxi_p2_interval_zero', ['days' => VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS])); ?></p>
             <h3><?php echo h(__t('ansible_test.title')); ?></h3>
             <p><?php echo h(__t('ansible_test.hint', ['default' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX])); ?></p>
             <p><?php echo h(__t('ansible_test.behaviour')); ?></p>
@@ -70,7 +71,7 @@ require_once __DIR__ . '/../ansible_test_config.php';
                 'port' => envboot_optional('WEB_HTTPS_PORT', '8443'),
                 'days' => intdiv(VIRTUSPHERE_HTTPS_HSTS_MAX_AGE_SECONDS, 86400),
             ])); ?></p>
-            <p><?php echo h(__t('help_settings.settings_https_p4')); ?></p><p><?php echo h(__t('settings.https_pin_consumers')); ?></p><p><?php echo h(__t('help_settings.k13_status', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
+            <p><?php echo h(__t('help_settings.settings_https_p4')); ?></p><p><?php echo h(__t('settings.https_pin_consumers')); ?></p><p><?php echo h(__t('help_settings.settings_https_plaintext')); ?></p>
         </section>
 
         <section class="panel">

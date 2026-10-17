@@ -313,10 +313,17 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 $actionUrl = in_array(($enqueue['reason'] ?? ''), ['ambiguous_ansible_credential', 'invalid_ansible_credential', 'no_ansible_credential'], true)
                     ? settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)
                     : system_status_url('credential-' . $id, ['inventory' => $id]);
-                flash_set($flashType, $flashMessage, '', [
-                    'url' => $actionUrl,
-                    'label' => __t('credentials.test_esxi_action'),
-                ]);
+                // The settings target is offered to readers of system.config only (R11):
+                // the sentence stays for everyone, and the link names the place the way
+                // the portal names it.
+                $settingsTarget = $actionUrl === settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG);
+                $flashAction = null;
+                if (!$settingsTarget) {
+                    $flashAction = ['url' => $actionUrl, 'label' => __t('credentials.test_esxi_action')];
+                } elseif (can('system.config')) {
+                    $flashAction = ['url' => $actionUrl, 'label' => __t('credentials.test_esxi_action_settings')];
+                }
+                flash_set($flashType, $flashMessage, '', $flashAction);
             } else {
                 // The System-status card reuses this exact handler rather than
                 // growing a second preflight implementation. The return token is

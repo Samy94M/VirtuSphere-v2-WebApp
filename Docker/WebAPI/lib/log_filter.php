@@ -10,6 +10,11 @@ require_once __DIR__ . '/portal_time.php';
 require_once __DIR__ . '/log_filter_vocabulary.php';
 require_once __DIR__ . '/log_cursor.php';
 
+// Rows per window of the audit table and of its older/newer paging. The page
+// reads it, and the system status help states it as a placeholder, so the
+// sentence cannot keep a stale window size.
+const VIRTUSPHERE_LOG_PAGE_SIZE = 50;
+
 /**
  * The one validated description of "which audit rows".
  *

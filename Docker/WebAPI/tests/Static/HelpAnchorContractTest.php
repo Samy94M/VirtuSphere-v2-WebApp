@@ -27,13 +27,19 @@ final class HelpAnchorContractTest extends TestCase
                 $withoutAnchor[] = basename($page);
                 continue;
             }
-            preg_match_all("/layout_header\\([^;]+,\\s*'([a-z-]+)'\\s*\\);/", $source, $matches);
-            if ($matches[1] === []) {
+            // Optional fifth argument: a section id that must belong to the panel (4th argument).
+            // The lazy quantifier keeps the panel on the 4th quoted argument; a greedy match would take the section as the panel.
+            preg_match_all("/layout_header\\([^;]+?,\\s*'([a-z-]+)'(?:\\s*,\\s*'(help-[a-z-]+)')?\\s*\\);/", $source, $matches, PREG_SET_ORDER);
+            if ($matches === []) {
                 $withoutAnchor[] = basename($page);
             }
-            foreach ($matches[1] as $anchor) {
+            foreach ($matches as $match) {
+                $anchor = $match[1];
                 $anchors[] = $anchor;
                 self::assertArrayHasKey($anchor, VIRTUSPHERE_HELP_PANELS, basename($page));
+                if (($match[2] ?? '') !== '') {
+                    self::assertSame($anchor, VIRTUSPHERE_HELP_SECTIONS[$match[2]] ?? null, basename($page) . ' section ' . $match[2] . ' must belong to panel ' . $anchor);
+                }
             }
         }
         self::assertNotSame([], $anchors);

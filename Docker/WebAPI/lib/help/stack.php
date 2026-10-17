@@ -21,10 +21,10 @@ declare(strict_types=1);
                 8 => ['pre' => 3],
                 9 => ['pre' => 1, 'list' => ['ul', 7], 'post' => 1],
                 10 => ['pre' => 3],
-                13 => ['pre' => 2],
-                14 => ['pre' => 2],
                 11 => ['pre' => 1, 'list' => ['ul', 6], 'post' => 1],
                 12 => ['pre' => 2],
+                13 => ['pre' => 2],
+                14 => ['pre' => 2],
             ];
             ?>
             <?php foreach ($stackFaq as $faqIndex => $faqShape): $faqParagraph = 0; ?>
@@ -95,5 +95,14 @@ declare(strict_types=1);
                 <li><?php echo h(__t('help_stack.ops_backup_unencrypted')); ?></li>
             </ul>
             <p class="muted"><?php echo h(__t('help_stack.ops_backup_more')); ?></p>
+        </section>
+
+        <?php // Target of the APP_KEY links from the directory error texts (R11). ?>
+        <section class="panel">
+            <h2 id="help-app-key" tabindex="-1"><?php echo h(__t('help_stack.app_key_heading')); ?></h2>
+            <p><?php echo h(__t('help_stack.app_key_p1')); ?></p>
+            <p><?php echo h(__t('help_stack.app_key_p2')); ?></p>
+            <p><?php echo h(__t('help_stack.app_key_p3')); ?></p>
+            <p><?php echo h(__t('help_stack.app_key_p4')); ?></p>
         </section>
     </div>

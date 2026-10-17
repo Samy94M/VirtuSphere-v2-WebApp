@@ -19,8 +19,6 @@ if (!can('users.manage', $user)) {
     portal_forbid($connection, $user, 'users.manage');
 }
 
-const LOGS_PER_PAGE = 50;
-
 $tabKeys = array_keys(VIRTUSPHERE_LOG_TABS);
 // One validated struct for this request. The table below and the CSV export
 // both read it, so the download always answers the same question as the screen
@@ -47,7 +45,7 @@ $cursor = log_cursor_from_query($_GET);
 $total = $usable ? repo_count_logs($connection, $filter) : 0;
 $exportBounds = log_filter_export_bounds($total);
 $logPage = $usable && !$cursor['invalid']
-    ? repo_log_page($connection, $filter, LOGS_PER_PAGE, $cursor['before'], $cursor['after'])
+    ? repo_log_page($connection, $filter, VIRTUSPHERE_LOG_PAGE_SIZE, $cursor['before'], $cursor['after'])
     : ['rows' => [], 'has_older' => false, 'has_newer' => false, 'stale' => $cursor['supplied']];
 $rows = $logPage['rows'];
 $cursorStale = $usable && ($cursor['invalid'] || $logPage['stale']);

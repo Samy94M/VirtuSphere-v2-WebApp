@@ -52,11 +52,12 @@ $presenceReport = repo_esxi_vlan_presence_report($connection);
 $eligibleHosts = $presenceReport['eligible'];
 $hostTotal = count($eligibleHosts);
 
-layout_header(__t('vlans.title'), $user, 'vlans', 'system-status');
+layout_header(__t('vlans.title'), $user, 'vlans', 'system-status', 'help-vlans');
 ?>
 <div class="stack">
     <section class="panel">
         <p class="muted"><?php echo h(__t('vlans.catalog_hint')); ?></p>
+        <?php if (can('credentials.manage', $user)) { ?><p><a href="credentials.php"><?php echo h(__t('vlans.link_credentials')); ?></a></p><?php } ?>
         <?php // The shared catalog filter, like os.php and packages.php. The row
               // of buttons this replaces was a third implementation of one
               // control: same tokens, a different shape, and the only one of the

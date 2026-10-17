@@ -185,7 +185,6 @@ const BOUNDS_EXEMPT = [
     'settings.allowlist_description_too_long' => '255 is the VARCHAR column width, fixed by the schema',
     'validate.mission_name_invalid' => '255 is the VARCHAR column width, fixed by the schema',
     'system_status.reassign_too_long' => '255 is the VARCHAR column width, fixed by the schema',
-    'help_packages.packages_os_p2' => 'the 60-second MECM sync cadence is set in the PowerShell task on the MECM server, not here',
     'help_settings.settings_time_p1' => 'the "plus 1 to 2 hours" is the Europe/Berlin UTC offset, a fact about the timezone, not a bound we set; it collides with the backup grace window only by value',
 ];
 

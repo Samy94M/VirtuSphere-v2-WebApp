@@ -54,7 +54,7 @@ function vm_edit_identity_fields(array $vm, int $vmId, bool $isTemplate, bool $c
     <?php if ($vmId > 0 && !$isTemplate) { ?>
         <label><?php echo h(__t('vm_edit.diagnostics_mecm_id')); ?><input value="<?php echo h($mecmIdValue !== '' ? $mecmIdValue : __t('vm_edit.mecm_id_none')); ?>" readonly></label>
     <?php } ?>
-    <label><?php echo h(__t('vm_edit.label_vm_name')); ?><input name="vm_name"<?php echo form_control_attrs('vm_edit', 'vm_name', null, false, (string) ($fieldErrors['vm_name'] ?? '')); ?> maxlength="16" value="<?php echo h($vm['vm_name'] ?? ''); ?>" required <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_name'); ?></label>
+    <label><?php echo h(__t('vm_edit.label_vm_name')); ?><input name="vm_name"<?php echo form_control_attrs('vm_edit', 'vm_name', null, false, (string) ($fieldErrors['vm_name'] ?? '')); ?> maxlength="<?php echo h((string) VIRTUSPHERE_VM_LIMITS['vm_name_max_length']); ?>" value="<?php echo h($vm['vm_name'] ?? ''); ?>" required <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_name'); ?></label>
     <?php // The group exists only in the divergence case. It is the established
           // way to put an explanation under ITS field (a full grid row would
           // start at the far left, columns away from the hostname), and

@@ -128,9 +128,9 @@ final class AutoimporterStatusPresentationTest extends TestCase
             self::assertStringContainsString($locale === 'de' ? 'Collection und Deployments' : 'collections and deployments', $failed);
             self::assertStringContainsString($locale === 'de' ? 'Projektion' : 'projection', $unknown);
             self::assertNotSame($failed, $unknown);
-            self::assertStringContainsString('package_content_failed', (string) $help['system_status_status_p3']);
-            self::assertStringContainsString($locale === 'de' ? 'grober Code' : 'coarse code', (string) $help['system_status_status_p3']);
-            self::assertStringContainsString($locale === 'de' ? 'noch kein DP erfolgreich' : 'no DP is successful yet', (string) $help['system_status_status_p3']);
+            self::assertArrayHasKey('system_status_status_code_package_content_failed', $help);
+            self::assertStringContainsString($locale === 'de' ? 'grober Code' : 'coarse code', (string) $help['system_status_status_code_package_content_failed']);
+            self::assertStringContainsString($locale === 'de' ? 'noch kein DP erfolgreich' : 'no DP is successful yet', (string) $help['system_status_status_counters']);
             $cleanup = (string) $catalog['finding_package_cleanup_failed'];
             self::assertStringContainsString($locale === 'de' ? 'nicht alle DPs erfolgreich' : 'Not every DP has to be successful', $cleanup);
             self::assertStringContainsString('removeOldVersion', $cleanup);

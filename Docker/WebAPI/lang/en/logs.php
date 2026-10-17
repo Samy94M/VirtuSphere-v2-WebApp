@@ -60,7 +60,7 @@ return [
     'copy_done' => 'Copied',
     'copy_failed' => 'Copying is not available; select the ID by hand.',
     'jobs_heading' => 'Deploy jobs of this request',
-    'jobs_retention_note' => 'Log entries are kept for :audit_days days, job logs only for :job_days days. An older request can therefore show entries with no matching job left.',
+    'jobs_retention_note' => 'Log entries are kept for :audit_days days, security entries for :security_days days, job logs only for :job_days days. An older request can therefore show entries with no matching job left.',
     'jobs_none' => 'No deploy jobs remain for this correlation ID.',
     'jobs_truncated' => 'Showing the newest :limit jobs.',
     'jobs_th_id' => 'Job',
