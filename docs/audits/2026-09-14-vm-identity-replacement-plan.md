@@ -310,6 +310,7 @@ Anlass: gemeinsamer Review dieses Plans mit dem [Powercycle-Plan](2026-09-14-pow
 ### 16.2 Gemeinsame Identitätsprüfung und P02-Weg
 
 Heute gibt es zwei Verfahren: `Ansible/create_identity_check_tasks.yml` liest das ganze Inventar per `vmware_vm_info` und filtert nach Namen; Start, Autostart, Export und Powercycle lesen per `vmware_guest_info` über den Namen und vergleichen danach die UUID. `vmware_guest_info` wählt bei Namensdubletten still den ersten Treffer (`name_match` Standard `first`), unterstützt aber `uuid` mit `use_instance_uuid: true`. Ziel ist eine Auflösung für alle Playbooks; bei bekannter UUID wird über sie gesucht.
+**Stand 17.10.2026 (Audit AN-01 bis AN-03 vom 16.10.):** Start, Autostart, Export und Powercycle lesen den Ist-Zustand jetzt per `uuid` mit `use_instance_uuid: true` statt über den Namen; die Identitätsprüfung danach bleibt. `createVMStatus` stand irrtümlich in der Liste der Namenssuchen: es liest per MOID. Damit ist die UUID-Suche aus IDR-P06 (reduziert) für die Leseorte erledigt.
 
 P02 braucht keinen zusätzlichen API-Aufruf: Die Create-Prüfung hat das vollständige Inventar bereits geladen. Ein zweiter Filter auf `instance_uuid` erkennt IDR-S04 (alte UUID unter anderem Namen) und IDR-S05 (alte Bindung, weder UUID noch Name vorhanden) vor jeder Mutation. Ein UUID-Fehltreffer ist nur dann Abwesenheit, wenn die Abfrage selbst erfolgreich war; eingeschränkte Sicht bleibt IDR-S09 und wird nie als Löschung gedeutet (IDR-E11).
 

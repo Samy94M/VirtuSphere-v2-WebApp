@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_stored_mode.php';
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/errors.php';
 require_once __DIR__ . '/ansible_command_shell.php';
 // K21: the remote-directory assertion of the file-only removal below.
 require_once __DIR__ . '/ansible_command_create.php';
+require_once __DIR__ . '/ansible_command_steps.php';
 
 /**
  * Deploy-mode planning and the remote command the worker runs for a mission:
@@ -21,7 +23,33 @@ require_once __DIR__ . '/ansible_command_create.php';
  */
 
 /**
+ * The mission mode a stored payload names, or null when it names none. A
+ * missing, non-string or unknown value is null and never a default: there is no
+ * fallback sequence (AN-04). System modes are not mission modes and are refused
+ * here too.
+ */
+function ansible_payload_mode(array $payload): ?string
+{
+    $mode = deploy_job_stored_mode($payload);
+    if ($mode === null) {
+        return null;
+    }
+
+    return in_array($mode, virtusphere_user_deploy_modes(), true) ? $mode : null;
+}
+
+/**
+ * The stored mission mode that ansible_remote_steps() refused: the job ends with
+ * this reason and no playbook of an unrelated mode is derived.
+ */
+final class AnsibleDeployModeInvalid extends RuntimeException
+{
+}
+
+/**
  * Decode a deploy job payload with safe defaults for the fields this module needs.
+ * The mode is '' when the stored payload names no mission mode (see
+ * ansible_payload_mode()); callers must not derive a sequence from it.
  *
  * @return array{mode: string, vm_ids: int[], powercycle_wait: int, start_wait: int}
  */
@@ -49,12 +77,11 @@ function ansible_job_payload(array $job): array
     $startWait = max(VIRTUSPHERE_START_WAIT_SECONDS_MIN, min(VIRTUSPHERE_START_WAIT_SECONDS_MAX, $startWait));
 
     // The mode decides which gates apply (a location-less mode needs no
-    // datastore) and which playbooks run. An unreadable payload falls back to
-    // the full pipeline, the strictest of them.
-    $mode = strtolower(trim((string) ($payload['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL)));
-    if (!in_array($mode, virtusphere_deploy_modes(), true)) {
-        $mode = VIRTUSPHERE_DEPLOY_MODE_FULL;
-    }
+    // datastore) and which playbooks run. A missing or unknown mode is NOT
+    // repaired with the full pipeline: that would run create, power-cycle and
+    // start for a job whose mode nobody can read (AN-04). The decoder reports ''
+    // instead, and the consumers that would derive a sequence refuse it.
+    $mode = ansible_payload_mode($payload) ?? '';
 
     return [
         'mode' => $mode,
@@ -194,63 +221,6 @@ function ansible_mode_requires_bound_instance_uuid(string $mode): bool
     return false;
 }
 
-// Step markers (AP6): every per-playbook remote command is bracketed by a begin
-// and an end line on stdout. The worker controls and names the step from its
-// descriptor; the persisted markers are the technical display evidence. The
-// short chain inside one command still omits the end marker when its playbook
-// fails, so the later presenter can identify an incomplete phase honestly.
-const VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX = '::virtusphere-step::';
-
-const VIRTUSPHERE_ANSIBLE_STEP_BEGIN = 'begin';
-const VIRTUSPHERE_ANSIBLE_STEP_END = 'end';
-
-function ansible_step_marker_line(string $event, string $playbook): string
-{
-    return VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX . ' ' . $event . ' ' . $playbook;
-}
-
-/**
- * Reads one step marker back out of the stored output.
- *
- * Deliberately kept although the worker no longer calls it: since Etappe 8 the
- * worker knows which step it is in from the descriptor it just started, which
- * is strictly better evidence than a marker that may not have arrived yet. The
- * markers stay the technical SSoT for the DISPLAY - phase headings and "current
- * phase" are derived from them rather than from a second hand-kept playbook
- * order. That reader belongs to Etappe 13, together with the 10A cursor/drain
- * contract and the 10B terminal presenter. Removing this as dead code would
- * force that stage to write the parser again, differently.
- *
- * @return array{event: string, playbook: string}|null Null for any line that
- *         is not a well-formed step marker.
- */
-function ansible_step_marker_parse(string $line): ?array
-{
-    $line = trim($line);
-    if (!str_starts_with($line, VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX . ' ')) {
-        return null;
-    }
-
-    $parts = explode(' ', substr($line, strlen(VIRTUSPHERE_ANSIBLE_STEP_MARKER_PREFIX) + 1), 2);
-    $event = $parts[0];
-    $playbook = trim($parts[1] ?? '');
-    if (!in_array($event, [VIRTUSPHERE_ANSIBLE_STEP_BEGIN, VIRTUSPHERE_ANSIBLE_STEP_END], true) || $playbook === '') {
-        return null;
-    }
-
-    return ['event' => $event, 'playbook' => $playbook];
-}
-
-/**
- * Suffix naming the failed playbook step for a job error message. Empty when
- * no step was open (the failure happened outside the playbook sequence, e.g.
- * during cd/chmod or before the first marker arrived).
- */
-function ansible_step_failure_suffix(?string $playbook): string
-{
-    return $playbook === null || $playbook === '' ? '' : ' (playbook step: ' . $playbook . ')';
-}
-
 /**
  * The ordered remote steps of a deploy sequence, one per playbook.
  *
@@ -274,10 +244,16 @@ function ansible_step_failure_suffix(?string $playbook): string
  *
  * @param array<string, mixed> $payload
  * @return array<int, array{playbook: string, command: string}> In execution order.
+ * @throws AnsibleDeployModeInvalid when the payload names no mission mode (AN-04).
  */
 function ansible_remote_steps(string $remoteDir, array $payload, bool $autostartEnabled = false): array
 {
-    $mode = (string) ($payload['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL);
+    // AN-04: a payload without a readable mission mode derives no sequence at
+    // all. The former fallback ran the full pipeline for it.
+    $mode = ansible_payload_mode($payload);
+    if ($mode === null) {
+        throw new AnsibleDeployModeInvalid('The deploy mode of this job is missing or unknown; no playbook sequence was derived.');
+    }
     $verbose = !empty($payload['verbose']);
     $preamble = [
         // The traps fire only when the shell is TERMINATED, never on a normal

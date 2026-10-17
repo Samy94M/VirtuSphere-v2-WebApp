@@ -23,6 +23,8 @@ final class AnsibleCommandModuleContractTest extends TestCase
 {
     private const SURFACE = [
         'ansible_job_payload',
+        // AN-04: the strict mission-mode reader; no fallback sequence behind it.
+        'ansible_payload_mode',
         'ansible_filter_vms',
         'ansible_playbooks_for_mode',
         'ansible_modes_using_powercycle',
@@ -171,7 +173,7 @@ final class AnsibleCommandModuleContractTest extends TestCase
         self::assertSame(
             [
                 // The definition itself.
-                'lib/ansible_command_modes.php' => 1,
+                'lib/ansible_command_steps.php' => 1,
                 // The one reader: deploy_log_phase_timeline() calls it once per
                 // stored line and decides from the event which way the phase
                 // goes. One call site is one opinion about what a phase is.

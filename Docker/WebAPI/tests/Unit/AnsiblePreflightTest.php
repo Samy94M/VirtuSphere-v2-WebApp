@@ -121,6 +121,26 @@ final class AnsiblePreflightTest extends TestCase
         );
     }
 
+    /**
+     * AN-11: a failed `ansible-galaxy collection list` used to read as an empty
+     * listing and was reported as "is not installed", which hid the real cause.
+     * The probe checks the exit code and names the failure with a bounded part
+     * of the tool's stderr; "is not installed" stays for a readable listing that
+     * really lacks the collection.
+     */
+    public function testAFailedCollectionListingIsReportedAsItsOwnFailure(): void
+    {
+        $probe = ansible_preflight_checks()['runtime-versions'];
+
+        self::assertStringContainsString('if listing.returncode != 0:', $probe);
+        self::assertStringContainsString('ansible-galaxy collection list exited', $probe);
+        self::assertStringContainsString('printed no readable JSON', $probe);
+        self::assertStringContainsString('bounded(listing.stderr)', $probe);
+        self::assertStringContainsString('is not installed for this ansible-galaxy', $probe);
+        // The one-line bound must stay small enough for a job-log line.
+        self::assertMatchesRegularExpression('/\[:300\]/', $probe);
+    }
+
     public function testTheCompleteCollectionLockPinsTheDirectAndTransitiveCollections(): void
     {
         self::assertSame([

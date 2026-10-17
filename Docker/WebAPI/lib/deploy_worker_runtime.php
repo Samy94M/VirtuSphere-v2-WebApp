@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_stored_mode.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/deploy_job_output.php';
 require_once __DIR__ . '/integration_health.php';
@@ -330,11 +331,20 @@ function deploy_worker_job_fence(mysqli $db, int $jobId, string $workerId, ?arra
     ];
 }
 
+/**
+ * The payload the worker reads back from a stored job. A job whose mode is
+ * missing, not a string or unknown reads as mode '' and never as the full
+ * pipeline (AN-04): the worker refuses such a job as configuration_blocked
+ * before it derives any playbook sequence. The other keys are only the empty
+ * defaults; no caller may act on them for a '' mode.
+ *
+ * @return array<string, mixed>
+ */
 function deploy_worker_payload(array $job): array
 {
     $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);
-    if (!is_array($payload)) {
-        return ['mode' => VIRTUSPHERE_DEPLOY_MODE_FULL, 'verbose' => false];
+    if (!is_array($payload) || deploy_job_stored_mode($payload) === null) {
+        return ['mode' => '', 'verbose' => false, 'vm_ids' => [], 'skipped_vm_ids' => []];
     }
 
     return deploy_job_payload($payload);

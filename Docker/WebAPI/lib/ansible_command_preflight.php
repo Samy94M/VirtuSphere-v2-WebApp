@@ -13,7 +13,8 @@ require_once __DIR__ . '/ansible_command_probes.php';
  * failed component or an allowlist verdict.
  *
  * Split out of ansible_command.php by domain (Etappe 8 structural hunk); mode
- * planning and step markers live in ansible_command_modes.php.
+ * planning lives in ansible_command_modes.php, the step markers in
+ * ansible_command_steps.php.
  */
 
 const VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER = '::virtusphere-preflight::';

@@ -331,7 +331,7 @@ Erzeugt MAC-Adressen: ESXi vergibt einer Netzwerkkarte ihre MAC erst beim ersten
 
 ```mermaid
 flowchart TD
-  A["Ziele: nur VMs mit needs_mac true (PXE-Karte im Portal ohne MAC)"] --> B["Genau diese VM mit report_vm_touch.py beim Portal zulassen"]
+  A["Ziele: nur VMs mit needs_mac true (PXE-Karte im Portal ohne MAC; ohne erkennbare WDS-Karte gilt needs_mac als true)"] --> B["Genau diese VM mit report_vm_touch.py beim Portal zulassen"]
   B -->|exakte Bestätigung| C["Erste Zustandsabfrage dieser VM per vmware_guest_info"]
   B -->|abgelehnt oder keine Bestätigung| BR["Globaler Abbruch vor der ESXi-Abfrage dieser VM"]
   C -->|Abfrage fehlgeschlagen| CQ["fail-Zeile, dann Abbruch vor der nächsten VM mit der Modulmeldung"]
@@ -361,7 +361,7 @@ Liest die MACs und schickt sie an das Portal. Ein Abfragefehler oder eine Identi
 
 ```mermaid
 flowchart TD
-  A["Für genau diese VM report_vm_touch.py beim Portal bestätigen lassen"] -->|exakte Antwort| B["Je VM Informationen per Namen lesen (vmware_guest_info)"]
+  A["Für genau diese VM report_vm_touch.py beim Portal bestätigen lassen"] -->|exakte Antwort| B["Je VM Informationen per gebundener Instance-UUID lesen (vmware_guest_info)"]
   A -->|Refusal oder fehlende Antwort| AX["Globaler Abbruch vor dieser VM-Abfrage"]
   B -->|Abfragefehler| QX["Fehler im vm_info.results Einzelergebnis sammeln"]
   B -->|Abfrage erfolgreich| C{"Name gleich und Instance-UUID gleich der gebundenen?"}
@@ -381,7 +381,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["Je VM Zustand per Name lesen"] --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  A["Je VM Zustand per gebundener Instance-UUID lesen"] --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
   B -->|nein, bei einer VM| BX["Abbruch: keine VM wird gestartet"]
   B -->|ja, bei allen| C["StartWaitSeconds warten, damit MECM die Geräte übernimmt"]
   C --> D["Alle VMs per UUID einschalten; laufende bleiben unverändert"]
@@ -393,7 +393,7 @@ Schreibt die Autostart-Richtlinie des Hosts für die VMs einer Mission.
 
 ```mermaid
 flowchart TD
-  A["Je VM Zustand per Name lesen"] --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  A["Je VM Zustand per gebundener Instance-UUID lesen"] --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
   B -->|nein| BX["Abbruch vor jeder Änderung am Host"]
   B -->|ja| C{"Autostart der Mission aktiv?"}
   C -->|ja| D["Host-Standardwerte setzen: Autostart ein, Verzögerungen, Stoppaktion, Heartbeat"]

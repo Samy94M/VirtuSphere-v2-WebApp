@@ -13,6 +13,7 @@ declare(strict_types=1);
 const VIRTUSPHERE_ANSIBLE_COMMAND_MODULES = [
     'lib/ansible_command.php',
     'lib/ansible_command_shell.php',
+    'lib/ansible_command_steps.php',
     'lib/ansible_command_modes.php',
     'lib/ansible_command_probes.php',
     'lib/ansible_command_preflight.php',

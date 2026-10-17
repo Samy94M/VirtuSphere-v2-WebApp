@@ -202,10 +202,28 @@ listing = subprocess.run(
     ["ansible-galaxy", "collection", "list", "--format", "json"],
     capture_output=True, text=True,
 )
+
+def bounded(text):
+    # One line and bounded: the reason has to fit into the job log next to the
+    # marker lines, and a long tool trace would bury the verdict.
+    return " ".join((text or "").split())[:300] or "no output"
+
+# AN-11: a failed listing is not an empty one. Without this check the probe read
+# "{}" and reported every collection as missing, which hid the real cause.
+if listing.returncode != 0:
+    sys.stderr.write(
+        "ansible-galaxy collection list exited %d: %s\n"
+        % (listing.returncode, bounded(listing.stderr))
+    )
+    raise SystemExit(1)
 try:
     paths = json.loads(listing.stdout)
 except (TypeError, ValueError):
-    paths = {}
+    sys.stderr.write(
+        "ansible-galaxy collection list printed no readable JSON: %s\n"
+        % bounded(listing.stderr or listing.stdout)
+    )
+    raise SystemExit(1)
 
 def version_tuple(text):
     return tuple(int(part) for part in re.findall(r"\d+", text)[:3])

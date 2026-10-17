@@ -29,7 +29,10 @@
         msg: >-
           Export access marker was refused for portal VM
           {{ export_vm_config['portal_vm_id'] }}; no ESXi query was started.
+          Results already read in this run were NOT uploaded: start the export again.
 
+# AN-01: the bound instance UUID addresses the VM, as every mutation of this run
+# does. The identity check below still compares the name as well.
 - name: Informationen dieser VM abfragen
   community.vmware.vmware_guest_info:
     hostname: "{{ esxi_hostname }}"
@@ -38,7 +41,8 @@
     password: "{{ esxi_password }}"
     validate_certs: "{{ esxi_validate_certs | bool }}"
     datacenter: "{{ export_vm_config['datacenter_name'] }}"
-    name: "{{ export_vm_config['vm_name'] }}"
+    uuid: "{{ export_vm_config['vm_instance_uuid'] }}"
+    use_instance_uuid: true
   delegate_to: localhost
   register: vm_info_current
   # Keep query failures as per-VM callback results; a touch refusal above is a
@@ -87,8 +91,30 @@
         ]
       }}
 
+# AN-07: the reason is part of the per-VM line, so a failed VM says why in the
+# job log itself. Identity fields only; no module argument is ever printed.
+- name: Grund dieser Exportabfrage fuer die Protokollzeile ermitteln
+  ansible.builtin.set_fact:
+    export_result_reason: >-
+      {{
+        ''
+        if not ((vm_info_identity_results | last)['failed'] | default(false) | bool)
+        else (
+          ': query_failed'
+          if (vm_info_current['failed'] | default(false) | bool)
+          else (
+            ': identity mismatch, stored instance UUID '
+            ~ ((export_vm_config['vm_instance_uuid'] | default('', true)) or 'none')
+            ~ ', live instance UUID '
+            ~ (((vm_info_current['instance'] | default({}))['instance_uuid'] | default('', true)) or 'none')
+            ~ ', live VM name '
+            ~ (((vm_info_current['instance'] | default({}))['hw_name'] | default('', true)) or 'none')
+          )
+        )
+      }}
+
 - name: Ergebnis dieser Exportabfrage melden
   ansible.builtin.debug:
     msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}]
       {{ 'fail' if (vm_info_identity_results | last)['failed'] | default(false) | bool else 'pass' }}
-      Export info {{ export_vm_config['vm_name'] }}"
+      Export info {{ export_vm_config['vm_name'] }}{{ export_result_reason }}"

@@ -28,6 +28,32 @@ final class AnsibleMacExportContractTest extends TestCase
         );
     }
 
+    /**
+     * AN-09: the partial-upload exit code exists once as a playbook literal and
+     * once as a constant in the upload script. The playbook must accept exactly
+     * the success and partial codes the script defines; a drift turns a partial
+     * result into a failed step, or a real failure into a success.
+     */
+    public function testThePlaybookAcceptsExactlyTheUploadCodesTheScriptDefines(): void
+    {
+        $script = $this->source('upload_mac_list.py');
+        $playbook = $this->source('exportVMs-Informations-ESXi_playbook.yml');
+
+        self::assertSame(1, preg_match('/^EXIT_SUCCESS = (\d+)\s*$/m', $script, $success), 'the script defines no EXIT_SUCCESS');
+        self::assertSame(1, preg_match('/^EXIT_PARTIAL = (\d+)\s*$/m', $script, $partial), 'the script defines no EXIT_PARTIAL');
+        self::assertSame(
+            1,
+            preg_match('/failed_when:\s*mac_upload\.rc not in \[([\d,\s]+)\]/', $playbook, $accepted),
+            'the export playbook names no accepted upload exit codes'
+        );
+        $codes = array_map('intval', preg_split('/\s*,\s*/', trim($accepted[1])) ?: []);
+        self::assertSame(
+            [(int) $success[1], (int) $partial[1]],
+            $codes,
+            'the export playbook accepts other upload exit codes than upload_mac_list.py defines'
+        );
+    }
+
     public function testWorkerPatchesApiMissionAndJobWhileTemplateStaysDesktopCompatible(): void
     {
         $source = $this->source('upload_mac_list.py');

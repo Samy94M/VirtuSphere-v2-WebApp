@@ -72,6 +72,10 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     };
 
     try {
+        // AN-04: a job whose mode cannot be read derives no playbook sequence and touches no VM.
+        if ($payload['mode'] === '') {
+            throw new DeployWorkerConfigurationBlocked('The deploy mode of this job is missing or unknown; no playbook sequence was derived.');
+        }
         if ($explicitEmptyScope) {
             deploy_worker_finish_all_skipped_job($channel, $job, $workerId, count($payload['skipped_vm_ids']));
             return;

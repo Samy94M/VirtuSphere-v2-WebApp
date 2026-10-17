@@ -40,7 +40,13 @@ class ActionModule(ActionBase):
         args = self._task.args
         scenario = json.loads(Path(os.environ['PC_SCENARIO']).read_text())
         kind = args.pop('qa_kind')
-        identity = args.get('uuid', args.get('name'))
+        # AN-01: the info task is addressed by instance UUID; its events keep the VM name as identity.
+        if kind == 'info':
+            assert args.get('use_instance_uuid') is True
+            assert 'name' not in args
+            identity = args['uuid'][len('uuid-'):]
+        else:
+            identity = args.get('uuid', args.get('name'))
         event = [kind, identity, args.get('state'), time.monotonic()]
         with open(os.environ['PC_EVENTS'], 'a') as stream:
             stream.write(json.dumps(event) + '\\n')

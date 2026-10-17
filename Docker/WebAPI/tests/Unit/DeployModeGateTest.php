@@ -6,6 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
 require_once dirname(__DIR__, 2) . '/lib/ansible.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_worker_runtime.php';
 
 /**
  * Two separate questions about a deploy mode, previously conflated:
@@ -136,13 +137,59 @@ final class DeployModeGateTest extends TestCase
         deploy_parse_schedule(['mode' => VIRTUSPHERE_DEPLOY_MODE_AUTOSTART, 'stagger_minutes' => '10'], 'UTC');
     }
 
-    public function testAnUnreadablePayloadFallsBackToTheStrictestMode(): void
+    public function testAnUnreadableOrUnknownModeIsNeverRepairedIntoAnotherSequence(): void
     {
-        // ansible_job_payload() must never hand a mode nobody validated to the
-        // gates. The full pipeline is the strictest choice.
-        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_FULL, ansible_job_payload(['payload_json' => 'not json'])['mode']);
-        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_FULL, ansible_job_payload(['payload_json' => '{"mode":"nonsense"}'])['mode']);
+        // AN-04: ansible_job_payload() must never hand a mode nobody validated to
+        // the gates, and a missing mode must not become the full pipeline. The
+        // decoder reports '' and the sequence builder refuses it.
+        self::assertSame('', ansible_job_payload(['payload_json' => 'not json'])['mode']);
+        self::assertSame('', ansible_job_payload(['payload_json' => '{"mode":"nonsense"}'])['mode']);
+        self::assertSame('', ansible_job_payload(['payload_json' => '{"vm_ids":[1]}'])['mode'], 'a missing mode is not the full pipeline');
+        self::assertSame('', ansible_job_payload(['payload_json' => '{"mode":"inventory"}'])['mode'], 'a system mode is not a mission mode');
+        self::assertSame('', ansible_job_payload(['payload_json' => '{"mode":42}'])['mode']);
         self::assertSame(VIRTUSPHERE_DEPLOY_MODE_AUTOSTART, ansible_job_payload(['payload_json' => '{"mode":"autostart"}'])['mode']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_FULL, ansible_job_payload(['payload_json' => '{"mode":" FULL "}'])['mode']);
+    }
+
+    public function testTheStoredModePredicateNamesOnlyAReadableMode(): void
+    {
+        // deploy_job_stored_mode() is the one predicate for "does this stored payload name a mode".
+        self::assertNull(deploy_job_stored_mode(['vm_ids' => [1]]), 'a missing mode');
+        self::assertNull(deploy_job_stored_mode(['mode' => null]), 'a null mode');
+        self::assertNull(deploy_job_stored_mode(['mode' => 42]), 'a non-string mode');
+        self::assertNull(deploy_job_stored_mode(['mode' => ['full']]), 'an array mode');
+        self::assertNull(deploy_job_stored_mode(['mode' => 'nonsense']), 'an unknown mode');
+        self::assertNull(deploy_job_stored_mode('full'), 'a payload that is not an array');
+        self::assertNull(deploy_job_stored_mode(null), 'an unreadable payload');
+        self::assertSame('create', deploy_job_stored_mode(['mode' => '  CREATE ']));
+        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_FULL, deploy_job_stored_mode(['mode' => 'full']));
+        // A system mode is still a stored mode: the worker reads back an inventory job.
+        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_INVENTORY, deploy_job_stored_mode(['mode' => VIRTUSPHERE_DEPLOY_MODE_INVENTORY]));
+    }
+
+    public function testTheWorkerReadsAJobWithoutAReadableModeAsNoMode(): void
+    {
+        // AN-04: an unreadable mode is '' and never the full pipeline; the worker refuses such a job.
+        self::assertSame('', deploy_worker_payload(['payload_json' => '{"vm_ids":[1]}'])['mode']);
+        self::assertSame('', deploy_worker_payload(['payload_json' => 'not json'])['mode']);
+        self::assertSame('', deploy_worker_payload(['payload_json' => '{"mode":"nonsense"}'])['mode']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_FULL, deploy_worker_payload(['payload_json' => '{"mode":"full"}'])['mode']);
+    }
+
+    public function testTheSequenceBuilderRefusesAPayloadWithoutAReadableMissionMode(): void
+    {
+        $refused = 0;
+        foreach ([[], ['mode' => 'nonsense'], ['mode' => 'inventory'], ['mode' => null]] as $payload) {
+            try {
+                ansible_remote_steps('/tmp/deploy', $payload);
+                self::fail('A payload without a readable mission mode derived a playbook sequence.');
+            } catch (AnsibleDeployModeInvalid) {
+                $refused++;
+            }
+        }
+        self::assertSame(4, $refused, 'every unreadable mode must be refused, none repaired into the full pipeline');
+        // The valid modes still derive their sequence.
+        self::assertCount(1, ansible_remote_steps('/tmp/deploy', ['mode' => 'export']));
     }
 
     public function testOnlyPowerCycleModesUseTheWaitTime(): void

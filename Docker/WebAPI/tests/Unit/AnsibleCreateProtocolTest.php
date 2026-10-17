@@ -134,6 +134,26 @@ final class AnsibleCreateProtocolTest extends TestCase
         ansible_create_marker_parse($this->marker($missing));
     }
 
+    /** The error limit counts characters, as the emitter does (AN-10). */
+    public function testAFullLengthErrorTextWithUmlautsIsAcceptedAndOneMoreCharacterIsRefused(): void
+    {
+        $marker = ansible_create_marker_parse($this->marker([
+            'event' => VIRTUSPHERE_CREATE_EVENT_FAILED,
+            'portal_vm_id' => 5,
+            'async_jid' => '123456789.4711',
+            'error' => str_repeat('ä', 1024),
+        ]));
+        self::assertSame(str_repeat('ä', 1024), $marker['error']);
+
+        $this->expectException(CreateMarkerProtocolException::class);
+        ansible_create_marker_parse($this->marker([
+            'event' => VIRTUSPHERE_CREATE_EVENT_FAILED,
+            'portal_vm_id' => 5,
+            'async_jid' => '123456789.4711',
+            'error' => str_repeat('ä', 1025),
+        ]));
+    }
+
     public function testAJobIdThatCouldReachAShellIsRefused(): void
     {
         foreach (['123; rm -rf /', '12 34', '../../etc/passwd', '', str_repeat('9', 192)] as $jid) {
@@ -255,5 +275,81 @@ final class AnsibleCreateProtocolTest extends TestCase
             preg_match_all('/"(\w+)"/', $matches[1], $names);
             self::assertSame($fields, $names[1], 'field list drift for event ' . $event);
         }
+    }
+
+    /**
+     * AN-10: the closed error codes are written once in the emitter and once in
+     * PHP. Both sets must be equal, with one explicit exception:
+     * host_identity_rejected is a worker-only code. The worker refuses a host
+     * identity before any create unit has a marker, so the emitter never emits
+     * it and must not know it.
+     */
+    public function testTheClosedErrorCodesMatchThePythonEmitterExceptTheWorkerOnlyCode(): void
+    {
+        $emitter = $this->emitterSource();
+        self::assertSame(
+            1,
+            preg_match('/^ERROR_CODES = \(\R(.*?)^\)/ms', $emitter, $block),
+            'the emitter declares no ERROR_CODES tuple'
+        );
+        preg_match_all('/"(\w+)"/', $block[1], $names);
+        $python = $names[1];
+        self::assertNotSame([], $python, 'the ERROR_CODES tuple names no code');
+        self::assertSame(array_values(array_unique($python)), $python, 'the emitter lists a code twice');
+
+        $workerOnly = [VIRTUSPHERE_CREATE_ERROR_HOST_IDENTITY_REJECTED];
+        self::assertSame(
+            $workerOnly,
+            array_values(array_diff(VIRTUSPHERE_CREATE_ERROR_CODES, $python)),
+            'PHP knows an error code the emitter does not, other than the worker-only host_identity_rejected'
+        );
+        self::assertSame(
+            [],
+            array_values(array_diff($python, VIRTUSPHERE_CREATE_ERROR_CODES)),
+            'the emitter emits an error code PHP refuses'
+        );
+    }
+
+    /**
+     * AN-10: the character classes and the length limits of the marker fields
+     * exist once in the emitter (re.compile and MAX_* constants) and once in PHP.
+     * Every emitter pattern must appear in PHP unchanged, and the two name and
+     * error limits must agree.
+     */
+    public function testTheMarkerCharacterClassesAndLimitsMatchThePythonEmitter(): void
+    {
+        $emitter = $this->emitterSource();
+        preg_match_all('/^(\w+)_PATTERN = re\.compile\(r"([^"]+)"\)\s*$/m', $emitter, $patterns, PREG_SET_ORDER);
+        $python = [];
+        foreach ($patterns as $match) {
+            $python[$match[1]] = $match[2];
+        }
+        self::assertSame(['JID', 'MOID', 'UUID', 'POWER_STATE'], array_keys($python), 'the emitter pattern set changed');
+
+        $php = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/ansible_create_protocol.php')
+            . (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_create_constants.php');
+        foreach ($python as $name => $pattern) {
+            self::assertStringContainsString(
+                "'/" . $pattern . "/'",
+                $php,
+                $name . ' has another character class in PHP than in emit_create_result.py'
+            );
+        }
+
+        self::assertSame(1, preg_match('/^MAX_NAME_LENGTH = (\d+)\s*$/m', $emitter, $nameLimit), 'the emitter declares no MAX_NAME_LENGTH');
+        self::assertSame(1, preg_match('/^MAX_ERROR_LENGTH = (\d+)\s*$/m', $emitter, $errorLimit), 'the emitter declares no MAX_ERROR_LENGTH');
+        $protocol = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/ansible_create_protocol.php');
+        self::assertSame(1, preg_match("/'vm_name' => ansible_create_marker_text\\(\\\$field, \\\$value, (\\d+)\\)/", $protocol, $phpName));
+        self::assertSame(1, preg_match("/'error' => ansible_create_marker_text\\(\\\$field, \\\$value, (\\d+)\\)/", $protocol, $phpError));
+        self::assertSame((int) $nameLimit[1], (int) $phpName[1], 'the vm_name limit differs between PHP and the emitter');
+        self::assertSame((int) $errorLimit[1], (int) $phpError[1], 'the error limit differs between PHP and the emitter');
+    }
+
+    private function emitterSource(): string
+    {
+        $emitter = (string) file_get_contents(dirname(__DIR__, 4) . '/Ansible/emit_create_result.py');
+        self::assertNotSame('', $emitter, 'the emitter must be readable from the repo root');
+
+        return $emitter;
     }
 }

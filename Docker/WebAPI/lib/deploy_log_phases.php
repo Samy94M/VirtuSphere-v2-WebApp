@@ -5,7 +5,7 @@ declare(strict_types=1);
 // The phase view of one job log, derived from the step markers the worker
 // already writes (Etappe 8).
 //
-// There is exactly one parser for this, in lib/ansible_command_modes.php, and
+// There is exactly one parser for this, in lib/ansible_command_steps.php, and
 // this file is its only production consumer. The timeline below is likewise the
 // only thing that turns a stream of markers into phases: a second, hand-kept
 // playbook order would drift from the sequence the worker actually ran the

@@ -79,14 +79,17 @@ function repo_claim_next_deploy_job(mysqli $db, string $workerId): ?array
             }
             if ($missionId > 0) {
                 $payload = json_decode((string) $row['payload_json'], true);
-                if (!is_array($payload)) {
-                    return null;
-                }
-                $normalizedPayload = deploy_job_payload($payload);
-                $scope = $normalizedPayload['vm_ids'];
-                $explicitEmptyScope = deploy_job_payload_has_explicit_empty_scope($normalizedPayload);
-                if (!$explicitEmptyScope && repo_deploy_create_fence_conflicts($db, $missionId, (int) $row['credential_esxi_id'], $scope, $jobId, true) !== []) {
-                    return null;
+                if (!is_array($payload) || deploy_job_stored_mode($payload) === null) {
+                    // AN-04: claimed without VM scope so the worker ends it as configuration_blocked instead of leaving it queued or blocking the queue.
+                    $scope = [];
+                    $explicitEmptyScope = true;
+                } else {
+                    $normalizedPayload = deploy_job_payload($payload);
+                    $scope = $normalizedPayload['vm_ids'];
+                    $explicitEmptyScope = deploy_job_payload_has_explicit_empty_scope($normalizedPayload);
+                    if (!$explicitEmptyScope && repo_deploy_create_fence_conflicts($db, $missionId, (int) $row['credential_esxi_id'], $scope, $jobId, true) !== []) {
+                        return null;
+                    }
                 }
             }
             $generation = (string) ($runtime['generation_id'] ?? '');

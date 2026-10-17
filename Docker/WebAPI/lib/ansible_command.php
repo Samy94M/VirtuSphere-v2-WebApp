@@ -19,8 +19,9 @@ declare(strict_types=1);
  *
  * Ownership map:
  * - ansible_command_shell.php      the one shell-quoting primitive
+ * - ansible_command_steps.php      the step markers around each playbook
  * - ansible_command_modes.php      payload/VM filter, mode-to-playbook SSoT,
- *                                  step markers, mission remote command
+ *                                  mission remote command
  * - ansible_command_probes.php     the shell/Python programs embedded into
  *                                  remote commands, each self-contained
  * - ansible_command_preflight.php  preflight components and command, output

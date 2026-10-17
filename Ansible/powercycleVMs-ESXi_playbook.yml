@@ -60,9 +60,16 @@
               ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
               == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
             )
+        # AN-07: both UUIDs are named, identity fields only (no module argument).
         fail_msg: >-
           VirtuSphere VM identity mismatch before power-cycle for
-          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}.
+          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}:
+          stored instance UUID
+          {{ (item['item'] | default({}))['vm_instance_uuid'] | default('none', true) }},
+          live instance UUID
+          {{ (item['instance'] | default({}))['instance_uuid'] | default('none', true) }},
+          live VM name
+          {{ (item['instance'] | default({}))['hw_name'] | default('none', true) }}.
       loop: "{{ powercycle_initial.results | default([]) }}"
       loop_control:
         label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"

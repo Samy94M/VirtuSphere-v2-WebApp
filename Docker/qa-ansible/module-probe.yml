@@ -83,10 +83,50 @@
         esxi_hostname: virtusphere-probe-host
       ignore_errors: true
 
+    # AN-13: autostartVMs-ESXi_playbook.yml. Erst die Host-Standardwerte
+    # (system_defaults), dann die VM-Form mit Instance-UUID und power_info.
+    # Die Schluessel sind die des Playbooks; die Werte sind gueltige Beispiele.
+    - name: vmware_host_auto_start (system_defaults)
+      community.vmware.vmware_host_auto_start:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+        system_defaults:
+          enabled: true
+          start_delay: 120
+          stop_delay: 120
+          stop_action: guestShutdown
+          wait_for_heartbeat: false
+      ignore_errors: true
+
+    - name: vmware_host_auto_start (power_info, Instance-UUID)
+      community.vmware.vmware_host_auto_start:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        power_info:
+          start_action: powerOn
+          start_order: -1
+          start_delay: 120
+          stop_delay: 120
+          stop_action: systemDefault
+          wait_for_heartbeat: systemDefault
+      ignore_errors: true
+
     - name: vmware_guest_info
       community.vmware.vmware_guest_info:
         <<: *probe
         name: virtusphere-probe-vm
+      ignore_errors: true
+
+    # AN-13: die Form, mit der die Playbooks den Ist-Zustand lesen (gebundene
+    # Instance-UUID statt Name). Dieselbe argument_spec wie oben, andere Schalter.
+    - name: vmware_guest_info (Instance-UUID)
+      community.vmware.vmware_guest_info:
+        <<: *probe
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        datacenter: ha-datacenter
       ignore_errors: true
 
     # Dieselben Schalter wie die Identitaetspruefung und der Inventarabruf: so
@@ -115,9 +155,52 @@
         state: powered-on
       ignore_errors: true
 
+    # AN-13: startVMs und powercycle_vm_tasks schalten per Instance-UUID.
+    - name: vmware_guest_powerstate (Instance-UUID)
+      community.vmware.vmware_guest_powerstate:
+        <<: *probe
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        folder: "/"
+        datacenter: ha-datacenter
+        state: powered-on
+        force: false
+      ignore_errors: true
+
     - name: vmware_guest
       community.vmware.vmware_guest:
         <<: *probe
         name: virtusphere-probe-vm
         datacenter: ha-datacenter
+      ignore_errors: true
+
+    # AN-13: createVMLaunch in der Form fuer eine vorhandene VM (Instance-UUID,
+    # Hardware, Disk, Netz). Die Hardwareversion ist im Playbook nur fuer neue
+    # VMs gesetzt; ihr Schluessel gehoert trotzdem zur argument_spec.
+    - name: vmware_guest (Instance-UUID, createVMLaunch)
+      community.vmware.vmware_guest:
+        <<: *probe
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        state: present
+        folder: "/"
+        guest_id: otherGuest64
+        datacenter: ha-datacenter
+        datastore: datastore1
+        disk:
+          - size_gb: 1
+            type: thin
+        hardware:
+          memory_mb: 1024
+          num_cpus: 1
+          hotadd_cpu: true
+          hotadd_memory: true
+          version: "21"
+          scsi: lsilogicsas
+          secure_boot: true
+          boot_firmware: efi
+          vpmc_enabled: true
+        networks:
+          - name: VM Network
+            device_type: vmxnet3
       ignore_errors: true

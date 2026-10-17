@@ -79,6 +79,89 @@ final class DeployClaimPriorityTest extends TestCase
         self::assertSame((int) $systemJobId, (int) $second['id']);
     }
 
+    public function testAMissionJobWithoutAReadableModeIsClaimedWithoutAVmCapture(): void
+    {
+        // AN-04: the claim takes the job (the worker ends it as configuration_blocked) and captures
+        // no VM prestate for a scope whose mode nobody can read.
+        $this->skipWhenAnotherJobIsQueued();
+        $jobId = $this->insertMissionJob('{"vm_ids":[]}');
+
+        $claimed = repo_claim_next_deploy_job($this->db, 'phpunit-stored-mode');
+
+        if ($claimed === null || (int) $claimed['id'] !== $jobId) {
+            $this->skipWhenRaced($jobId);
+        }
+        self::assertNotNull($claimed, 'a job with an unreadable mode must be claimed, not left queued');
+        self::assertSame($jobId, (int) $claimed['id']);
+        self::assertSame(0, (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_job_vm_states WHERE job_id = ?', 'i', [$jobId]), 'no VM prestate for an unreadable mode');
+    }
+
+    public function testAnUnknownModeDoesNotBlockAValidJobQueuedBehindIt(): void
+    {
+        $this->skipWhenAnotherJobIsQueued();
+        $unknownJobId = $this->insertMissionJob('{"mode":"nonsense"}');
+        // The valid job sits in a second mission: enqueueing refuses a second
+        // active job of one mission, and the point here is the claim loop, which
+        // used to abort at the unknown mode before it reached any later job.
+        $otherMissionId = repo_create_mission($this->db, [
+            'mission_name' => self::PREFIX . 'm2',
+            'hypervisor_datastorage' => 'ds1',
+            'hypervisor_datacenter' => 'DC1',
+            'domain' => 'dc.example.com',
+        ], true);
+        repo_execute(
+            $this->db,
+            "INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id, credential_ansible_id) VALUES (?, 'queued', ?, ?, ?)",
+            'isii',
+            [$otherMissionId, '{"mode":"full","vm_ids":[]}', $this->esxiId, $this->ansibleId]
+        );
+        $validJobId = (int) $this->db->insert_id;
+
+        $first = repo_claim_next_deploy_job($this->db, 'phpunit-stored-mode');
+        if ($first === null || (int) $first['id'] !== $unknownJobId) {
+            $this->skipWhenRaced($unknownJobId);
+        }
+        self::assertNotNull($first, 'the unknown-mode job must be claimed, not refused or aborted');
+        self::assertSame($unknownJobId, (int) $first['id']);
+
+        $second = repo_claim_next_deploy_job($this->db, 'phpunit-stored-mode');
+        if ($second === null || (int) $second['id'] !== $validJobId) {
+            $this->skipWhenRaced($validJobId);
+        }
+        self::assertNotNull($second, 'an unknown mode in front must not abort the claim of the job behind it');
+        self::assertSame($validJobId, (int) $second['id']);
+    }
+
+    private function insertMissionJob(string $payloadJson): int
+    {
+        repo_execute(
+            $this->db,
+            "INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id, credential_ansible_id) VALUES (?, 'queued', ?, ?, ?)",
+            'isii',
+            [$this->missionId, $payloadJson, $this->esxiId, $this->ansibleId]
+        );
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function skipWhenAnotherJobIsQueued(): void
+    {
+        // The production claim is global; skip rather than mutate unrelated jobs.
+        $eligible = (int) $this->db->query("SELECT COUNT(*) AS c FROM deploy_jobs WHERE status = 'queued' AND cancelled_at IS NULL AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP())")->fetch_assoc()['c'];
+        if ($eligible > 0) {
+            self::markTestSkipped('Other eligible queued jobs present; claim is global.');
+        }
+    }
+
+    /** A live worker polls the same global queue: a test job it took says nothing about the claim. */
+    private function skipWhenRaced(int $jobId): void
+    {
+        $status = (string) repo_scalar($this->db, 'SELECT status FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+        if ($status !== VIRTUSPHERE_DEPLOY_STATUS_QUEUED) {
+            self::markTestSkipped('A running deploy worker claimed a test job first.');
+        }
+    }
+
     private function makeVm(string $name, string $ip): void
     {
         repo_save_vm(

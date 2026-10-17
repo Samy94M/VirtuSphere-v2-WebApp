@@ -30,6 +30,8 @@
           Powercycle access marker was refused for portal VM
           {{ powercycle_target['portal_vm_id'] }}; no ESXi query was started.
 
+# AN-01: addressed by the bound instance UUID, never by the name. The identity
+# assertion in powercycleVMs-ESXi_playbook.yml still checks both.
 - name: Ausgangszustand dieser VM erfassen
   community.vmware.vmware_guest_info:
     hostname: "{{ esxi_hostname }}"
@@ -38,7 +40,8 @@
     password: "{{ esxi_password }}"
     validate_certs: "{{ esxi_validate_certs | bool }}"
     datacenter: "{{ powercycle_target['datacenter_name'] }}"
-    name: "{{ powercycle_target['vm_name'] }}"
+    uuid: "{{ powercycle_target['vm_instance_uuid'] }}"
+    use_instance_uuid: true
   delegate_to: localhost
   register: powercycle_current_info
   ignore_errors: true

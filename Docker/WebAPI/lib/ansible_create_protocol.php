@@ -208,7 +208,10 @@ function ansible_create_marker_field(string $field, mixed $value): mixed
 
 function ansible_create_marker_text(string $field, mixed $value, int $max): string
 {
-    if (!is_string($value) || $value === '' || strlen($value) > $max) {
+    // Characters, not bytes: the emitter (emit_create_result.py) and the
+    // producer's Jinja truncate() count code points, so a byte count refused a
+    // full-length error text with umlauts the emitter had accepted.
+    if (!is_string($value) || $value === '' || mb_strlen($value, 'UTF-8') > $max) {
         throw new CreateMarkerProtocolException($field . ' must be a non-empty string within its length limit.');
     }
     // No control characters: the marker is one line, and the value is later

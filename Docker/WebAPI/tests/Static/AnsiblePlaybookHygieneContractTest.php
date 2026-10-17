@@ -261,6 +261,75 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         self::assertGreaterThan(0, $seen, 'No playbook references esxi_password (zero-match must not pass).');
     }
 
+    /**
+     * AN-01/AN-02: every read of a live VM that precedes a mutation or an export
+     * addresses the VM by its bound instance UUID. A name is shared by namesakes,
+     * and a read by name can return the foreign VM before the identity check
+     * compares it. The read is one call per playbook, and it sets
+     * use_instance_uuid so the module treats the value as an instance UUID.
+     */
+    public function testIdentityReadsAddressTheBoundInstanceUuidNotTheName(): void
+    {
+        foreach ([
+            'export_vm_info.yml' => 'export_vm_config',
+            'powercycle_vm_info.yml' => 'powercycle_target',
+            'startVMs-ESXi_playbook.yml' => 'item',
+            'autostartVMs-ESXi_playbook.yml' => 'item',
+        ] as $file => $loopItem) {
+            $calls = $this->moduleArguments($this->playbooks()[$file] ?? '', 'community.vmware.vmware_guest_info');
+            self::assertCount(1, $calls, $file . ' must read its live VM exactly once (zero-match must not pass).');
+            $arguments = $calls[0];
+
+            self::assertArrayNotHasKey('name', $arguments, $file . ' reads the VM by name; a namesake would be the object that is read.');
+            self::assertSame('true', $arguments['use_instance_uuid'] ?? '', $file . ' must set use_instance_uuid.');
+            self::assertMatchesRegularExpression(
+                '/\b' . preg_quote($loopItem, '/') . '(?:\.vm_instance_uuid|\[\'vm_instance_uuid\'\])/',
+                $arguments['uuid'] ?? '',
+                $file . ' must address the VM by its bound vm_instance_uuid.'
+            );
+        }
+    }
+
+    /**
+     * AN-07: the identity assertions name the stored and the live instance UUID,
+     * and the export's per-VM line names its reason. Identity fields only: a
+     * module argument or the ESXi credentials never appear in these messages.
+     */
+    public function testIdentityMessagesNameBothInstanceUuidsWithoutModuleArguments(): void
+    {
+        foreach (['startVMs-ESXi_playbook.yml', 'autostartVMs-ESXi_playbook.yml', 'powercycleVMs-ESXi_playbook.yml'] as $file) {
+            $source = $this->playbooks()[$file] ?? '';
+            self::assertSame(
+                1,
+                preg_match('/VirtuSphere VM identity mismatch before .*?stored instance UUID.*?live instance UUID/s', $source),
+                $file . ' names no stored and live instance UUID in its identity assertion.'
+            );
+        }
+
+        $export = $this->playbooks()['export_vm_info.yml'] ?? '';
+        self::assertStringContainsString('export_result_reason', $export, 'the export line must carry the reason of a failed VM');
+        self::assertStringContainsString("': query_failed'", $export);
+        self::assertStringContainsString('identity mismatch, stored instance UUID', $export);
+        // The query task of this file does carry the password argument; only the
+        // reason block that the line prints is held to "no credentials".
+        self::assertSame(
+            1,
+            preg_match('/export_result_reason: >-(.*?)- name: Ergebnis dieser Exportabfrage melden/s', $export, $reason),
+            'the reason block is not where the export line expects it'
+        );
+        self::assertStringNotContainsString('password', $reason[1], 'the reason must not print credentials');
+    }
+
+    /**
+     * AN-06: a refused touch confirmation stops the export before the upload.
+     * The stop must say that the results already read were NOT uploaded.
+     */
+    public function testARefusedExportConfirmationSaysWhatWasNotUploaded(): void
+    {
+        $export = $this->playbooks()['export_vm_info.yml'] ?? '';
+        self::assertStringContainsString('were NOT uploaded: start the export again.', $export);
+    }
+
     public function testExportedVmInfoFileKeepsPrivateMode(): void
     {
         $playbook = $this->playbooks()['exportVMs-Informations-ESXi_playbook.yml'] ?? '';

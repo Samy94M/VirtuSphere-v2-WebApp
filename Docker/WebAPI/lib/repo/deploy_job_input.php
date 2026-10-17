@@ -6,6 +6,7 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../defaults.php';
 require_once __DIR__ . '/../deploy_constants.php';
 require_once __DIR__ . '/../deploy_mode_labels.php';
+require_once __DIR__ . '/../deploy_stored_mode.php';
 require_once __DIR__ . '/../validate.php';
 
 /**
