@@ -27,8 +27,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $action = request_string($_POST, 'action');
         if ($action === 'delete') {
-            deleteOS(request_int($_POST, 'os_id'), $connection);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED, 'operating_system', request_int($_POST, 'os_id'), VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
+            // HA-24 / LG-13: the delete and its row share one transaction, and the row names the entry.
+            $osId = request_int($_POST, 'os_id');
+            repo_transaction($connection, static function () use ($connection, $osId, $user): void {
+                $name = (string) repo_scalar($connection, 'SELECT os_name FROM deploy_os WHERE id = ? LIMIT 1', 'i', [$osId]);
+                deleteOS($osId, $connection);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED, 'operating_system', $osId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $name === '' ? [] : ['name' => $name], (int) $user['id']);
+            });
             flash_set('success', __t('os.flash_deleted'));
         }
     } catch (Throwable $exception) {

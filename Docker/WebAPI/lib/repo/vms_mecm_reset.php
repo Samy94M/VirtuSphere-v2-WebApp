@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/log.php';
+
 /**
  * The MECM-ID reset: the ONE point at which a new rollout name takes effect
  * (Etappe 14D, ADR-0043).
@@ -66,7 +68,14 @@ function repo_bulk_reset_mecm_ids(mysqli $db, int $missionId, array $vmIds, ?int
             continue;
         }
         try {
-            $outcome = repo_reset_vm_mecm_id($db, $missionId, $vmId, $userId);
+            // HA-25: the reset and its own row share the VM's transaction, exactly as the
+            // single action does. A VM whose row cannot be stored is not reset at all.
+            $outcome = repo_transaction($db, static function () use ($db, $missionId, $vmId, $userId): array {
+                $outcome = repo_reset_vm_mecm_id($db, $missionId, $vmId, $userId);
+                repo_audit_mecm_id_reset($db, $missionId, $vmId, $outcome, $userId);
+
+                return $outcome;
+            });
             if ($outcome['changed']) {
                 $result['done']++;
             } else {
@@ -80,6 +89,35 @@ function repo_bulk_reset_mecm_ids(mysqli $db, int $missionId, array $vmIds, ?int
     }
 
     return $result;
+}
+
+/**
+ * The audit row of one MECM-ID reset (HA-25): the same evidence for the single action and
+ * for every VM of a bulk reset. It is called inside the reset's own transaction, so a row
+ * that cannot be stored undoes the reset (MECM plan decision 32).
+ *
+ * @param array{changed:bool,reason:string,previous_id:?string,previous_hostname:?string,hostname:string,revision:int} $result
+ */
+function repo_audit_mecm_id_reset(mysqli $db, int $missionId, int $vmId, array $result, ?int $userId): void
+{
+    $context = [
+        'action' => $result['changed'] ? 'reset_mecm_id' : 'reset_mecm_id_noop',
+        'mission_id' => $missionId,
+        'rollout_hostname' => $result['hostname'],
+        'rollout_revision' => $result['revision'],
+    ];
+    // An absent value is OMITTED, never sent as an empty string. The registry refuses an
+    // empty context field, and because this audit shares the transaction with the reset,
+    // that refusal rolled the reset back: the operator got a generic error and the MECM ID
+    // was still there. A VM without a previous rollout name or without a bound ResourceID
+    // is a normal first reset, not something to report a blank about.
+    if ((string) ($result['previous_hostname'] ?? '') !== '') {
+        $context['previous_rollout_hostname'] = (string) $result['previous_hostname'];
+    }
+    if ((string) ($result['previous_id'] ?? '') !== '') {
+        $context['previous_resource_id'] = (string) $result['previous_id'];
+    }
+    audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $context, $userId);
 }
 
 function repo_vm_has_imported_mac(mysqli $db, int $vmId): bool

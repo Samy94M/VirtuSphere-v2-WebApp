@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/portal_actionable_error.php';
+require_once __DIR__ . '/errors.php';
 
 // Display-only timestamp formatter (SSoT). DB values are UTC (db() pins the
 // session to +00:00); portal_format_datetime() converts them to the configured
@@ -62,7 +63,19 @@ function portal_error_message(Throwable $exception): string
             return __t('layout.err_entry_exists');
         }
 
-        return __t('layout.err_db_generic');
+        return portal_unexpected_error_message($exception);
+    }
+
+    // A RuntimeException is the repo's operator-side diagnostic (see above), and the
+    // repos also refuse operator input with InvalidArgumentException and
+    // DomainException (equal source and target VLAN, a stagger out of range, a
+    // source job with unresolved create units); those keep showing their reason.
+    // Anything else is a fault nobody anticipated: an Error, or another logic or
+    // type failure.
+    if (!$exception instanceof RuntimeException
+        && !$exception instanceof InvalidArgumentException
+        && !$exception instanceof DomainException) {
+        return portal_unexpected_error_message($exception);
     }
 
     if ($message === '') {
@@ -70,6 +83,25 @@ function portal_error_message(Throwable $exception): string
     }
 
     return $message;
+}
+
+/**
+ * R18: an unexpected caught fault gets an error reference and exactly one safe
+ * server line. The line carries the class name and the reference, never the
+ * message, because the message is the field a payload or an attacker can steer.
+ * The reference is the request's correlation id, so it leads to the same audit
+ * and job-log rows as the request did.
+ */
+function portal_unexpected_error_message(Throwable $exception): string
+{
+    $reference = virtusphere_error_reference();
+    error_log(virtusphere_redact_log_text(sprintf(
+        '[virtusphere:portal-action] ref=%s class=%s',
+        $reference,
+        $exception::class
+    )));
+
+    return __t('layout.err_unexpected', ['ref' => $reference]);
 }
 
 /** @return array{url:string,label:string}|null */

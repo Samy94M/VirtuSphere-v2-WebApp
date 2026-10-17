@@ -67,28 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // One transaction for the state change AND the row that records it.
             // Auditing after the commit is how a reset ends up applied with no
             // trace when the audit insert is the thing that fails.
+            // The row is written by repo_audit_mecm_id_reset(), shared with the bulk path (HA-25).
             $outcome = repo_transaction($connection, static function () use ($connection, $missionId, $vmId, $user): array {
                 $result = repo_reset_vm_mecm_id($connection, $missionId, $vmId, (int) $user['id']);
-                // An absent value is OMITTED, never sent as an empty string.
-                // The registry refuses an empty context field, and because this
-                // audit shares the transaction with the reset, that refusal
-                // rolled the reset back: the operator got a generic error and
-                // the MECM ID was still there. A VM without a previous rollout
-                // name or without a bound ResourceID is a normal first reset,
-                // not something to report a blank about.
-                $context = [
-                    'action' => $result['changed'] ? 'reset_mecm_id' : 'reset_mecm_id_noop',
-                    'mission_id' => $missionId,
-                    'rollout_hostname' => $result['hostname'],
-                    'rollout_revision' => $result['revision'],
-                ];
-                if ((string) ($result['previous_hostname'] ?? '') !== '') {
-                    $context['previous_rollout_hostname'] = (string) $result['previous_hostname'];
-                }
-                if ((string) ($result['previous_id'] ?? '') !== '') {
-                    $context['previous_resource_id'] = (string) $result['previous_id'];
-                }
-                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $context, (int) $user['id']);
+                repo_audit_mecm_id_reset($connection, $missionId, $vmId, $result, (int) $user['id']);
 
                 return $result;
             });
@@ -128,12 +110,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? 'vms.progress_flash_pending'
                 : 'vms.progress_flash_installing'));
         } elseif ($action === 'delete') {
+            // HA-24: the row names the VM, read before the delete removes it.
             repo_transaction($connection, static function () use ($connection, $missionId, $vmId, $user): void {
+                $vmName = (string) ((repo_get_vm_bundle($connection, $vmId) ?? [])['vm_name'] ?? '');
                 repo_delete_vm_by_id($connection, $missionId, $vmId);
-                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, array_filter([
                     'action' => 'deleted',
                     'mission_id' => $missionId,
-                ], (int) $user['id']);
+                    'name' => $vmName,
+                ], static fn (mixed $value): bool => $value !== ''), (int) $user['id']);
             });
             flash_set('success', __t('vms.flash_deleted'));
             $redirectPath = portal_work_context_vm_list_url($missionId, $workContext);
@@ -151,24 +136,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
             }
 
-            if ($action === 'bulk_delete') {
-                $result = repo_bulk_delete_vms($connection, $missionId, $ids);
-                $done = (int) $result['deleted'];
-                $verb = 'bulk_deleted';
-            } else {
-                $result = repo_bulk_reset_mecm_ids($connection, $missionId, $ids, (int) $user['id']);
-                $done = (int) $result['done'];
-                $verb = 'bulk_reset_mecm_id';
-            }
-
             // The selection, not the outcome: VIRTUSPHERE_VM_BULK_CAP already
             // bounds it well below the context list limit, and the id list is
             // what makes a partially skipped bulk reconstructable afterwards.
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => $verb,
-                'affected_count' => $done,
-                'vm_ids' => array_slice($ids, 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
-            ], (int) $user['id']);
+            // HA-13: the summary row is required, as on the single path. A delete shares
+            // the batch transaction with its rows; a reset runs one transaction per VM
+            // (R19), so its summary is a transaction of its own after those commits.
+            if ($action === 'bulk_delete') {
+                $result = repo_transaction($connection, static function () use ($connection, $missionId, $ids, $user): array {
+                    $deleted = repo_bulk_delete_vms($connection, $missionId, $ids);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'bulk_deleted',
+                        'affected_count' => (int) $deleted['deleted'],
+                        'vm_ids' => array_slice($ids, 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
+                    ], (int) $user['id']);
+
+                    return $deleted;
+                });
+                $done = (int) $result['deleted'];
+            } else {
+                $result = repo_bulk_reset_mecm_ids($connection, $missionId, $ids, (int) $user['id']);
+                $done = (int) $result['done'];
+                repo_transaction($connection, static function () use ($connection, $missionId, $ids, $done, $user): void {
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'bulk_reset_mecm_id',
+                        'affected_count' => $done,
+                        'vm_ids' => array_slice($ids, 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
+                    ], (int) $user['id']);
+                });
+            }
 
             $skippedReasons = [];
             foreach ($result['skipped'] as $skip) {

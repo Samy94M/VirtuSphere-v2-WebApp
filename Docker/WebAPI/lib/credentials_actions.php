@@ -189,7 +189,11 @@ function credentials_handle_post(mysqli $connection, array $user): string
             $createdId = repo_create_credential($connection, $payload, $secret, (int) $user['id']);
             // The stored mode, read back: a verifying choice and 'none' end up in different modes.
             $createdRow = repo_credential($connection, $createdId) ?? [];
-            $createdContext = ['action' => 'created'];
+            // HA-24: the name and the host, so the row says which credential it is (never a secret).
+            $createdContext = array_filter(
+                ['action' => 'created', 'name' => (string) ($createdRow['name'] ?? ''), 'host' => (string) ($createdRow['host'] ?? '')],
+                static fn (string $value): bool => $value !== ''
+            );
             if ((string) ($createdRow['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
                 $createdContext['trust_mode'] = credential_esxi_trust_mode($createdRow);
             }
@@ -291,10 +295,13 @@ function credentials_handle_post(mysqli $connection, array $user): string
             repo_delete_credential($connection, $id);
             $selectionCleared = (string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
                 && esxi_inventory_clear_ansible_selection_if_matches($connection, $id);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            // HA-24: the name and the host of the deleted credential, read before the delete (never a secret).
+            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, array_filter([
                 'action' => 'deleted',
+                'name' => (string) ($before['name'] ?? ''),
+                'host' => (string) ($before['host'] ?? ''),
                 'selection_cleared' => $selectionCleared,
-            ], (int) $user['id']);
+            ], static fn (mixed $value): bool => $value !== ''), (int) $user['id']);
             flash_set('success', __t('credentials.flash_deleted'));
         } elseif ($action === 'test') {
             $credential = repo_credential($connection, $id, true);

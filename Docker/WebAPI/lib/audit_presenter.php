@@ -37,7 +37,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_STATE => 'directory controller ' . $id . ' state changed to ' . ($context['outcome'] ?? 'unknown'),
         VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED => 'tested directory controller ' . $id . ': ' . ($context['outcome'] ?? $result),
         VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_BIND_REJECTED => 'directory search account bind rejected; automatic attempts paused',
-        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED => $action . ' credential id ' . $id . audit_description_changes($context)
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED => $action . ' credential id ' . $id . audit_description_named($context) . (isset($context['host']) ? ' on host ' . $context['host'] : '') . audit_description_changes($context)
             . (!empty($context['selection_cleared']) ? '; inventory ansible selection cleared' : ''),
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED => (!empty($context['scheduled']) ? 'scheduled full test for credential id ' : 'tested credential id ') . $id . ': ' . ($context['outcome'] ?? $result) . audit_description_component($context),
         VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION => 'esxi inventory auto-pull ' . $action . ' for credential id ' . $id . audit_description_reason($context),
@@ -47,7 +47,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
             . (isset($context['vm_count']) ? ' (' . $context['vm_count'] . ' vms)' : '') . audit_description_changes($context),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED => audit_mission_transfer_description($id, $context),
         VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED => 'exported ' . $id . ' list as CSV (' . ($context['row_count'] ?? 0) . ' row(s))',
-        VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED => $action . ' vm id ' . $id . ' in mission id ' . ($context['mission_id'] ?? 0) . audit_description_changes($context),
+        VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED => $action . ' vm id ' . $id . audit_description_named($context) . ' in mission id ' . ($context['mission_id'] ?? 0) . audit_description_changes($context),
         VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED => $action . ' for vm id ' . $id . ' in mission id ' . ($context['mission_id'] ?? 0) . (isset($context['progress_kind']) ? ' (' . $context['progress_kind'] . ')' : ''),
         VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED => $action . ' ' . ($context['affected_count'] ?? 0) . ' vm(s) in mission id ' . $id . audit_description_ids($context['vm_ids'] ?? []),
         VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED => 'exported vm list of mission id ' . $id . ' as CSV (' . ($context['row_count'] ?? 0) . ' row(s))',
@@ -58,13 +58,14 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
         VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME => 'changed windows hostname of vm id ' . $id . ' in mission id ' . ($context['mission_id'] ?? 0)
             . ' from ' . ($context['old_value'] ?? '') . ' to ' . ($context['new_value'] ?? '')
             . ' (effect ' . ($context['effect'] ?? '') . ', rollout name ' . ($context['rollout_hostname'] ?? '') . ', revision ' . ($context['rollout_revision'] ?? 0) . ')',
-        VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED => 'deleted retired ' . $objectType . ' id ' . $id,
+        VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED => 'deleted retired ' . $objectType . ' id ' . $id . audit_description_named($context),
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED => audit_setting_description($id, $context),
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED => 'installed https certificate (CN=' . ($context['subject'] ?? '') . ', expires ' . ($context['valid_to'] ?? '') . ' UTC)',
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN => ($action === 'generated' ? 'generated' : 'cleared') . ' machine report token',
         VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP => $action . ' machine API ip ' . $id . (isset($context['role']) ? ' as ' . $context['role'] . (($context['previous_role'] ?? '') !== '' ? ' (was ' . $context['previous_role'] . ')' : '') : ''),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED => 'queued ' . audit_deploy_object_label($objectType, $id) . (isset($context['job_count']) ? ' (' . $context['job_count'] . ' jobs)' : '') . (!empty($context['scheduled']) ? ' (scheduled)' : ''),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED => 'requested cancel of deploy job id ' . $id,
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_LOG_EXPORTED => 'downloaded the raw log of deploy job id ' . $id,
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED => $action . ' ' . audit_deploy_object_label($objectType, $id) . (isset($context['job_count']) ? ' (' . $context['job_count'] . ' jobs)' : ''),
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED => 'queued deploy job id ' . $id . ' (retry of job id ' . ($context['retry_of_job_id'] ?? 0) . ')',
         VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME => 'deploy job id ' . $id . ' (mission id ' . ($context['mission_id'] ?? 0) . ', mode ' . ($context['mode'] ?? '') . ') ' . ($context['status'] ?? $result) . audit_description_reason($context),
@@ -110,6 +111,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
             . ' stale job(s): ' . ($context['requested_count'] ?? 0) . ' requested, ' . ($context['manual_count'] ?? 0) . ' left for manual review',
         VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE => '[maintenance-worker] integration ' . $id . ' state ' . ($context['old_state'] ?? 'unknown') . ' -> ' . ($context['new_state'] ?? 'unknown'),
         VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR => 'error [' . $id . '] ' . ($context['error_class'] ?? 'Throwable'),
+        VIRTUSPHERE_AUDIT_EVENT_SYSTEM_RETENTION_PURGED => 'retention purge: ' . audit_description_items($context),
         VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED => audit_logs_export_description($id, $context),
         VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED => 'Refused ' . $id . (isset($context['action']) ? '?action=' . $context['action'] : '')
             . (($context['reason'] ?? '') === 'ip_role_not_permitted'
@@ -126,6 +128,7 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
             . ' (reported rollout revision ' . ($context['reported_revision'] ?? 0) . ', current ' . ($context['rollout_revision'] ?? 0) . ')',
         VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => 'Catalog sync rejected for ' . $id . ': payload would retire ' . ($context['retire_count'] ?? 0) . ' of ' . ($context['active_count'] ?? 0) . ' active entries (threshold ' . ($context['threshold_percent'] ?? 0) . '%).',
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => '[mecm_packages] package relink: ' . audit_description_items($context),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED => '[mecm_packages] catalog ' . $id . ': ' . ($context['created_count'] ?? 0) . ' created, ' . ($context['retired_count'] ?? 0) . ' retired',
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => '[mecm_packages] retired without relink (no newer version in this payload): ' . audit_description_items($context),
         VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED => '[mecm_packages] retired version still assigned, nothing moved: ' . audit_description_items($context),
         VIRTUSPHERE_AUDIT_EVENT_MECM_REPORT_TOKEN_REJECTED => 'Rejected ' . ($context['action'] ?? 'report') . ' with invalid token',

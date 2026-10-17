@@ -22,8 +22,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         if (request_string($_POST, 'action') === 'delete') {
-            deleteVLAN(request_int($_POST, 'vlan_id'), $connection);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED, 'vlan', request_int($_POST, 'vlan_id'), VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
+            // HA-24 / LG-13: the delete and its row share one transaction, and the row names the entry.
+            $vlanId = request_int($_POST, 'vlan_id');
+            repo_transaction($connection, static function () use ($connection, $vlanId, $user): void {
+                $name = (string) repo_scalar($connection, 'SELECT vlan_name FROM deploy_vlan WHERE id = ? LIMIT 1', 'i', [$vlanId]);
+                deleteVLAN($vlanId, $connection);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED, 'vlan', $vlanId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $name === '' ? [] : ['name' => $name], (int) $user['id']);
+            });
             flash_set('success', __t('vlans.flash_deleted'));
         }
     } catch (Throwable $exception) {

@@ -75,11 +75,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($missionId <= 0) {
                 throw new RuntimeException(__t('missions.err_mission_id_required'));
             }
-            repo_transaction($connection, static function () use ($connection, $missionId, $user): void {
+            // HA-24: the row names the mission, read before the delete removes it.
+            $missionName = (string) (repo_get_mission($connection, $missionId)['mission_name'] ?? '');
+            repo_transaction($connection, static function () use ($connection, $missionId, $missionName, $user): void {
                 deleteMission($missionId, $connection);
-                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'deleted',
-                ], (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'deleted', 'name' => $missionName], (int) $user['id']);
             });
             flash_set('success', $isTemplateView ? __t('missions.flash_deleted_template') : __t('missions.flash_deleted_mission'));
         } elseif ($action === 'import_preview') {

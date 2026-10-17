@@ -81,35 +81,7 @@ function maintenance_worker_run_once(mysqli $db, array &$state, bool $force = fa
 function maintenance_worker_run_jobs(mysqli $db, array &$state, bool $force, array &$failures): void
 {
     if (maintenance_worker_due($state, 'retention', VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS, $force)) {
-        maintenance_worker_job('retention', $failures, static function () use ($db): void {
-            $purged = repo_purge_client_events($db);
-            // Portal audit log, pruned per category (ADR-0026): security categories
-            // keep a year, everything else a quarter.
-            $purgedLogs = removeLog($db);
-            // The login-attempt table is a 15-minute lockout counter, not an archive;
-            // every attempt is also on the auth audit channel. Left unpruned it grew
-            // without bound (it had no purge before). Its own short window (ADR-0026),
-            // deliberately shorter than the audit windows.
-            $purgedAttempts = repo_purge_login_attempts($db);
-            $purgedPackages = repo_purge_retired_packages($db);
-            $purgedOs = repo_purge_retired_os($db);
-            // Streamed playbook output of FINISHED jobs, and the finished inventory
-            // jobs themselves. Both grew without bound: the interval pull writes one
-            // job per credential every few hours, each with its own output. The
-            // system-job delete cascades the log rows it owns.
-            $purgedJobLogs = repo_purge_deploy_job_logs($db);
-            $purgedSystemJobs = repo_purge_finished_system_jobs($db);
-            // The VM transition history (B11 rest): it gained its reader in the
-            // VM editor and, with it, this retention - before Etappe 8 the
-            // table only ever shrank through a VM delete.
-            $purgedStatusEvents = repo_purge_vm_status_events($db);
-            // Package diagnostics expire from their immutable first-acceptance
-            // deadline. Their minimal replay markers deliberately never do.
-            $purgedPackageRuns = repo_purge_expired_package_runs($db);
-            if ($purged + $purgedLogs + $purgedPackages + $purgedOs + $purgedAttempts + $purgedJobLogs + $purgedSystemJobs + $purgedStatusEvents + $purgedPackageRuns > 0) {
-                fwrite(STDOUT, '[maintenance-worker] purged ' . $purged . ' client events, ' . $purgedLogs . ' portal log rows, ' . $purgedAttempts . ' login attempts, ' . $purgedPackages . ' retired packages, ' . $purgedOs . ' retired os rows, ' . $purgedJobLogs . ' job log lines, ' . $purgedSystemJobs . ' finished system jobs, ' . $purgedStatusEvents . ' status events, ' . $purgedPackageRuns . " package report runs\n");
-            }
-        });
+        maintenance_worker_retention($db, $failures);
     }
 
     if (maintenance_worker_due($state, 'log-rotation', VIRTUSPHERE_MAINTENANCE_LOG_ROTATION_INTERVAL_SECONDS, $force)) {
@@ -168,6 +140,69 @@ function maintenance_worker_job(string $name, array &$failures, callable $work):
     }
 }
 
+/**
+ * LG-18 / LG-19: the retention purges. Each purge is a job of its own, so a failing
+ * one is named and the others still run, as the docblock of this module promises.
+ * Their counts go into ONE `system` audit row per run, written only when something
+ * was deleted, so the purge of the security window is on the record and not only
+ * on STDOUT.
+ *
+ * @param list<string> $failures
+ */
+function maintenance_worker_retention(mysqli $db, array &$failures): void
+{
+    $purged = [];
+    // Portal audit log, pruned per category (ADR-0026): security categories keep a
+    // year, everything else a quarter. The two windows are counted apart.
+    maintenance_worker_job('retention:portal_logs', $failures, static function () use ($db, &$purged): void {
+        $windows = [];
+        removeLog($db, VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS, VIRTUSPHERE_LOG_RETENTION_DAYS, $windows);
+        $purged['portal_logs_security'] = $windows['security'];
+        $purged['portal_logs_general'] = $windows['general'];
+    });
+
+    // Independent of each other and of the audit log above. The login attempts are a
+    // 15-minute lockout counter, not an archive (ADR-0026); the job log and system job
+    // purges cascade what they own; the VM status history and package diagnostics
+    // expire on their own windows.
+    $purges = [
+        'client_events' => static fn (): int => (int) repo_purge_client_events($db),
+        'login_attempts' => static fn (): int => (int) repo_purge_login_attempts($db),
+        'retired_packages' => static fn (): int => (int) repo_purge_retired_packages($db),
+        'retired_os' => static fn (): int => (int) repo_purge_retired_os($db),
+        'job_log_lines' => static fn (): int => (int) repo_purge_deploy_job_logs($db),
+        'finished_system_jobs' => static fn (): int => (int) repo_purge_finished_system_jobs($db),
+        'status_events' => static fn (): int => (int) repo_purge_vm_status_events($db),
+        'package_report_runs' => static fn (): int => (int) repo_purge_expired_package_runs($db),
+    ];
+    foreach ($purges as $name => $purge) {
+        maintenance_worker_job('retention:' . $name, $failures, static function () use ($name, $purge, &$purged): void {
+            $purged[$name] = $purge();
+        });
+    }
+
+    $items = [];
+    foreach ($purged as $name => $count) {
+        if ($count > 0) {
+            $items[] = $name . ': ' . $count;
+        }
+    }
+    if ($items === []) {
+        return;
+    }
+    fwrite(STDOUT, '[maintenance-worker] retention purged ' . implode(', ', $items) . "\n");
+    // The deletes are committed already, so an audit row that cannot be stored cannot
+    // undo them. It is reported as a failed job instead, which the traffic light shows.
+    maintenance_worker_job('retention:audit', $failures, static function () use ($db, $items): void {
+        if (!audit_event($db, VIRTUSPHERE_AUDIT_EVENT_SYSTEM_RETENTION_PURGED, 'maintenance', 'retention', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'items' => audit_fit_string_list($items),
+            'item_count' => count($items),
+        ], null, 'cli')) {
+            throw new RuntimeException('retention audit row was not stored');
+        }
+    });
+}
+
 // Second reaper (AP6): the deploy worker reaps only at its own loop start, so
 // a worker that dies or hangs inside a job leaves its `running` row unreaped
 // until ANOTHER deploy-worker iteration comes along - with a single worker
@@ -223,29 +258,47 @@ function maintenance_worker_sweep_deploying_vms(mysqli $db): void
 // the one-time legacy->V2 switch is logged once at report time by mecm_report.php.
 function maintenance_worker_audit_transitions(mysqli $db, array &$state): void
 {
-    foreach (repo_integration_status_rows($db) as $entry) {
+    maintenance_worker_record_transitions($db, $state, repo_integration_status_rows($db));
+}
+
+/**
+ * The transition decision of one pass, over the rows it was given. Split from the
+ * repo read so a test can drive the failure branch with a row it chooses.
+ *
+ * LG-06: a state is remembered only after its transition row is stored. The old
+ * order remembered it first, so a failed insert left a STDERR line and the next
+ * pass compared against the new state, and the transition was never logged. A row
+ * that is not stored keeps the old state, so the next pass sees the same transition
+ * again, and the pass counts as failed until then.
+ *
+ * @param list<array<string,mixed>> $rows
+ */
+function maintenance_worker_record_transitions(mysqli $db, array &$state, array $rows): void
+{
+    $benign = ['ok', 'legacy'];
+    $unrecorded = [];
+    foreach ($rows as $entry) {
         $source = (string) $entry['source'];
         $newState = (string) $entry['state'];
         $oldState = $state['states'][$source] ?? null;
-        $state['states'][$source] = $newState;
-
-        if ($oldState === null || $oldState === $newState) {
-            continue;
-        }
 
         // Both benign (ok/legacy) means a script-rollout wobble, not a health
         // change; a problem state on either side is a real transition to log.
-        $benign = ['ok', 'legacy'];
-        if (in_array($oldState, $benign, true) && in_array($newState, $benign, true)) {
+        $logged = $oldState !== null
+            && $oldState !== $newState
+            && !(in_array($oldState, $benign, true) && in_array($newState, $benign, true));
+        if (!$logged) {
+            $state['states'][$source] = $newState;
             continue;
         }
 
+        $stored = false;
         try {
             // The category comes from the registry's closed source map, not
             // from "maintenance or else MECM". That fallback filed every future
             // non-MECM source under `mecm`, so a deploy-worker outage would
             // have arrived in the tab an operator opens to read MECM sync.
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE, 'integration_source', $source, in_array($newState, $benign, true)
+            $stored = audit_event($db, VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE, 'integration_source', $source, in_array($newState, $benign, true)
                 ? VIRTUSPHERE_AUDIT_RESULT_RECOVERED
                 : VIRTUSPHERE_AUDIT_RESULT_WARNING, [
                     'old_state' => $oldState,
@@ -254,5 +307,14 @@ function maintenance_worker_audit_transitions(mysqli $db, array &$state): void
         } catch (Throwable $exception) {
             fwrite(STDERR, '[maintenance-worker] transition audit failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
         }
+        if ($stored) {
+            $state['states'][$source] = $newState;
+        } else {
+            $unrecorded[] = $source;
+        }
+    }
+
+    if ($unrecorded !== []) {
+        throw new RuntimeException('transition not recorded for ' . implode(', ', $unrecorded) . '; it is retried on the next pass');
     }
 }

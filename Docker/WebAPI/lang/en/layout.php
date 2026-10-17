@@ -62,10 +62,8 @@ return [
     // Create verdict from the reported ESXi release (ADR-0023 amendment 7).
     'err_esxi_create_host' => 'VMs cannot be created on the selected ESXi host: it reports ESXi :release, and VirtuSphere creates VMs from ESXi :floor. After a host update, refresh the ESXi inventory.',
     'err_esxi_create_guest' => 'VM :name: the guest OS :os needs at least ESXi :floor, but the selected host reports ESXi :release. Choose another guest OS in the VM or use a newer host.',
-    // The retry button in the job list re-runs the same enqueue gate, but it has
-    // no form and therefore no field message. Without this entry the portal
-    // renders the raw English exception there. The sentence names both causes,
-    // because the retry path does not know which of the two applies.
-    'err_db_generic' => 'The database could not save the action. Please check your input.',
+    // An unexpected fault of a portal action (R18). :ref is the same reference
+    // that the server log line carries, so the failure can be found there.
+    'err_unexpected' => 'The action could not be completed. Please give the administrator the reference :ref so the error can be found in the server log.',
     'err_action_failed' => 'The action could not be completed.',
 ];

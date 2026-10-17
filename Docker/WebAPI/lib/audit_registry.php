@@ -17,6 +17,9 @@ const VIRTUSPHERE_AUDIT_OBJECT_ID_MAX_BYTES = 191;
  */
 const VIRTUSPHERE_AUDIT_ID_LIST_MAX = 200;
 
+/** Bytes one `items` list may take of a context; the other keys of the row take the rest. */
+const VIRTUSPHERE_AUDIT_ITEMS_BYTE_BUDGET = 3072;
+
 const VIRTUSPHERE_AUDIT_RESULT_SUCCESS = 'success';
 const VIRTUSPHERE_AUDIT_RESULT_DENIED = 'denied';
 const VIRTUSPHERE_AUDIT_RESULT_WARNING = 'warning';
@@ -102,6 +105,7 @@ function audit_context_field_registry(): array
         'rows_exported' => $int, 'total_rows' => $int, 'limit' => $int,
         'retire_count' => $int, 'active_count' => $int, 'threshold_percent' => $int,
         'item_count' => $int, 'report_version' => $int, 'suppressed_count' => $int,
+        'created_count' => $int, 'retired_count' => $int,
         'throttle_seconds' => $int,
         'enabled' => $bool, 'selection_cleared' => $bool, 'scheduled' => $bool,
         // Manual credential tests can finish after their configuration or test
@@ -358,4 +362,33 @@ function audit_context_string_list(string $key, mixed $value, int $countMax, int
         $result[] = audit_context_string($key, $item, $itemMax);
     }
     return $result;
+}
+
+/**
+ * LG-05: the entries that fit a string list, then one "+n weitere" entry for the
+ * rest. A row over the cap is refused whole and a refused row is a lost trail, so
+ * a long list is cut here. The caller's item_count stays the COMPLETE count.
+ *
+ * @param list<string> $items
+ * @return list<string>
+ */
+function audit_fit_string_list(array $items, int $byteBudget = VIRTUSPHERE_AUDIT_ITEMS_BYTE_BUDGET): array
+{
+    $field = audit_context_field_registry()['items'];
+    $countMax = (int) $field['count_max'];
+    $kept = [];
+    $bytes = 0;
+    foreach ($items as $item) {
+        // One slot stays free for the marker; 32 bytes cover "+n weitere" for any count.
+        $text = audit_context_string('items', $item, (int) $field['item_max']);
+        $cost = strlen((string) json_encode($text, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) + 1;
+        if (count($kept) >= $countMax - 1 || $bytes + $cost > $byteBudget - 32) {
+            break;
+        }
+        $kept[] = $text;
+        $bytes += $cost;
+    }
+    $omitted = count($items) - count($kept);
+
+    return $omitted > 0 ? [...$kept, '+' . $omitted . ' weitere'] : $kept;
 }

@@ -71,12 +71,12 @@ function audit_event(
  *
  * @param array<string,mixed> $context
  */
-function audit_event_required(mysqli $connection, string $eventCode, string $objectType, string|int|null $objectId, string $result, array $context = [], ?int $userId = null): void
+function audit_event_required(mysqli $connection, string $eventCode, string $objectType, string|int|null $objectId, string $result, array $context = [], ?int $userId = null, ?string $ip = null): void
 {
     if (repo_transaction_depth($connection) === 0) {
         throw new LogicException('audit_event_required() must run inside the transaction of the write it records.');
     }
-    if (!audit_event($connection, $eventCode, $objectType, $objectId, $result, $context, $userId)) {
+    if (!audit_event($connection, $eventCode, $objectType, $objectId, $result, $context, $userId, $ip)) {
         throw new RuntimeException('Audit event ' . $eventCode . ' could not be stored; the change was rolled back.');
     }
 }
@@ -184,7 +184,7 @@ function log_category_url(string $category): string
  *
  * @return int Total rows purged across both windows.
  */
-function removeLog(mysqli $db, int $securityDays = VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS, int $generalDays = VIRTUSPHERE_LOG_RETENTION_DAYS): int
+function removeLog(mysqli $db, int $securityDays = VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS, int $generalDays = VIRTUSPHERE_LOG_RETENTION_DAYS, array &$windows = []): int
 {
     $security = VIRTUSPHERE_LOG_TABS[VIRTUSPHERE_LOG_TAB_SECURITY];
     $placeholders = implode(', ', array_fill(0, count($security), '?'));
@@ -198,8 +198,10 @@ function removeLog(mysqli $db, int $securityDays = VIRTUSPHERE_LOG_RETENTION_SEC
     $stmt = $db->prepare('DELETE FROM deploy_logs WHERE category NOT IN (' . $placeholders . ') AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)');
     $stmt->bind_param($types, ...[...$security, $generalDays]);
     $stmt->execute();
+    // Both windows, for the retention audit row (LG-19).
+    $windows = ['security' => $purged, 'general' => max(0, $stmt->affected_rows)];
 
-    return $purged + max(0, $stmt->affected_rows);
+    return $purged + $windows['general'];
 }
 
 /**

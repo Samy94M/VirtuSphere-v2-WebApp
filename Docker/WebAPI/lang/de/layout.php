@@ -62,11 +62,8 @@ return [
     // Create-Urteil aus der gemeldeten ESXi-Version (ADR-0023 Nachtrag 7).
     'err_esxi_create_host' => 'Auf dem gewählten ESXi-Host lassen sich keine VMs erstellen: Er meldet ESXi :release, VirtuSphere erstellt VMs ab ESXi :floor. Nach einem Host-Update das ESXi-Inventar aktualisieren.',
     'err_esxi_create_guest' => 'VM :name: Das Guest OS :os braucht mindestens ESXi :floor, der gewählte Host meldet ESXi :release. In der VM ein anderes Guest OS wählen oder einen neueren Host verwenden.',
-    // Der Wiederholen-Knopf der Auftragsliste faehrt dasselbe Einreih-Gatter noch
-    // einmal, hat aber kein Formular und damit keine Feldmeldung. Ohne diesen
-    // Eintrag rendert das Portal an dieser Stelle die rohe englische
-    // Exception-Meldung. Der Satz nennt beide Ursachen, weil der Wiederholen-Weg
-    // nicht weiss, welche der beiden vorliegt.
-    'err_db_generic' => 'Die Datenbank konnte die Aktion nicht speichern. Bitte prüfe die Eingaben.',
+    // Unerwarteter Fehler einer Portal-Aktion (R18). :ref ist dieselbe Referenz,
+    // die in der Serverprotokoll-Zeile steht, damit der Fehler dort gefunden wird.
+    'err_unexpected' => 'Die Aktion konnte nicht abgeschlossen werden. Bitte nennen Sie dem Administrator die Referenz :ref, damit der Fehler im Serverprotokoll gefunden wird.',
     'err_action_failed' => 'Die Aktion konnte nicht abgeschlossen werden.',
 ];

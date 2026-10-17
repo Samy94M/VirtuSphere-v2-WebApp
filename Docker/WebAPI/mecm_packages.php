@@ -172,15 +172,13 @@ function packages_follow_first_versions_in_templates(mysqli $db, array $template
     foreach ($moves as $key => $count) {
         $items[] = $key . ' (' . $count . ' Vorlagen-VM(s))';
     }
+    // LG-04: inside the sync transaction. A failed row rolls the sync back, so a
+    // move nobody can see is never committed. The list is cut to fit (LG-05).
     if ($items !== []) {
-        try {
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED, 'catalog', 'packages', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'items' => $items,
-                'item_count' => count($items),
-            ], null, $clientIp);
-        } catch (Throwable $exception) {
-            machine_api_log_warning('mecm_packages', 'Template relink audit failed (' . $exception::class . ').');
-        }
+        audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED, 'catalog', 'packages', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'items' => audit_fit_string_list($items),
+            'item_count' => count($items),
+        ], null, $clientIp);
     }
 
     return array_sum($moves);
@@ -243,14 +241,28 @@ function packages_audit_retired_assignments(mysqli $db, array $retiredRows, stri
     if ($items === []) {
         return;
     }
-    try {
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED, 'catalog', 'packages', VIRTUSPHERE_AUDIT_RESULT_WARNING, [
-            'items' => $items,
-            'item_count' => count($items),
-        ], null, $clientIp);
-    } catch (Throwable $exception) {
-        machine_api_log_warning('mecm_packages', 'Retired assignment audit failed (' . $exception::class . ').');
+    // LG-04 / LG-05: as the relink row above, inside the sync transaction and cut to fit.
+    audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED, 'catalog', 'packages', VIRTUSPHERE_AUDIT_RESULT_WARNING, [
+        'items' => audit_fit_string_list($items),
+        'item_count' => count($items),
+    ], null, $clientIp);
+}
+
+/**
+ * LG-28: a sync that created or retired catalog entries says so in one row per
+ * catalog, with both counters. A run that changed neither writes nothing. The
+ * row is written inside the sync transaction, so a failed insert rolls the sync
+ * back instead of committing a change nobody can see.
+ */
+function packages_audit_catalog_changes(mysqli $db, string $catalog, int $created, int $retired, string $clientIp): void
+{
+    if ($created === 0 && $retired === 0) {
+        return;
     }
+    audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED, 'catalog', $catalog, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+        'created_count' => $created,
+        'retired_count' => $retired,
+    ], null, $clientIp);
 }
 
 $clientIp = machine_api_client_ip();
@@ -311,74 +323,87 @@ try {
         packages_retire_guard($connection, 'deploy_os', 'os_name', 'os_status', $osNames, $clientIp);
     }
 
-    $connection->begin_transaction();
+    // LG-04: the write runs in repo_transaction(). The former raw begin_transaction()
+    // was invisible to the depth tracker, and audit_event_required() refuses to run
+    // outside a tracked transaction. So every required audit row of the sync shares
+    // the fate of the catalog write: a row that cannot be stored rolls the sync back.
+    repo_transaction($connection, static function () use ($connection, $hasPackagePayload, $hasTaskSequencePayload, $packageNames, $osNames, $clientIp): void {
+        $retiredPackageRows = [];
+        $templateFollowScope = [];
+        $retiredPackages = 0;
+        $retiredOs = 0;
+        if ($hasPackagePayload) {
+            // Capture the soon-retired rows first so the retirement of a version
+            // that VMs still hold can be logged after the upsert (AV-R08).
+            $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
+            if ($packageNames === []) {
+                $stmt = $connection->prepare('SELECT id, package_name, package_basename, package_version FROM deploy_packages WHERE package_status <> ?');
+                $stmt->bind_param('s', $retired);
+            } else {
+                $placeholders = implode(',', array_fill(0, count($packageNames), '?'));
+                $types = 's' . str_repeat('s', count($packageNames));
+                $params = array_merge([$retired], $packageNames);
+                $stmt = $connection->prepare("SELECT id, package_name, package_basename, package_version FROM deploy_packages WHERE package_status <> ? AND package_name NOT IN ({$placeholders})");
+                $stmt->bind_param($types, ...$params);
+            }
+            $stmt->execute();
+            $retiredPackageRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            // Template VMs only; real VM assignments are never part of a sync.
+            $templateFollowScope = packages_lock_template_follow_scope($connection, $packageNames);
 
-    $retiredPackageRows = [];
-    $templateFollowScope = [];
-    if ($hasPackagePayload) {
-        // Capture the soon-retired rows first so the retirement of a version
-        // that VMs still hold can be logged after the upsert (AV-R08).
-        $retired = VIRTUSPHERE_CATALOG_STATUS_RETIRED;
-        if ($packageNames === []) {
-            $stmt = $connection->prepare('SELECT id, package_name, package_basename, package_version FROM deploy_packages WHERE package_status <> ?');
-            $stmt->bind_param('s', $retired);
+            $retiredPackages = catalog_retire_missing($connection, 'deploy_packages', 'package_name', 'package_status', $packageNames);
         } else {
-            $placeholders = implode(',', array_fill(0, count($packageNames), '?'));
-            $types = 's' . str_repeat('s', count($packageNames));
-            $params = array_merge([$retired], $packageNames);
-            $stmt = $connection->prepare("SELECT id, package_name, package_basename, package_version FROM deploy_packages WHERE package_status <> ? AND package_name NOT IN ({$placeholders})");
-            $stmt->bind_param($types, ...$params);
+            machine_api_log_warning('mecm_packages', 'Package payload absent; leaving deploy_packages untouched.');
         }
-        $stmt->execute();
-        $retiredPackageRows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        // Template VMs only; real VM assignments are never part of a sync.
-        $templateFollowScope = packages_lock_template_follow_scope($connection, $packageNames);
-
-        catalog_retire_missing($connection, 'deploy_packages', 'package_name', 'package_status', $packageNames);
-    } else {
-        machine_api_log_warning('mecm_packages', 'Package payload absent; leaving deploy_packages untouched.');
-    }
-    if ($hasTaskSequencePayload) {
-        catalog_retire_missing($connection, 'deploy_os', 'os_name', 'os_status', $osNames);
-    } else {
-        machine_api_log_warning('mecm_packages', 'TaskSequence payload absent; leaving deploy_os untouched.');
-    }
-
-    $packageStatus = VIRTUSPHERE_CATALOG_STATUS_DEFAULT;
-    // The ids this payload CREATED, as opposed to re-confirmed. Only they are a
-    // first appearance that template VMs follow: a re-appearing or re-confirmed
-    // row is not new, and a transient MECM gap must not move anything.
-    //
-    // affected_rows after INSERT ... ON DUPLICATE KEY UPDATE is 1 for an insert
-    // and 2 (or 0) for an update, so it distinguishes the two exactly. insert_id
-    // is only meaningful in the insert case.
-    $newPackageIds = [];
-    foreach ($packageNames as $name) {
-        $split = repo_package_split_name($name);
-        // Re-appearing names automatically un-retire (retired_at = NULL).
-        $stmt = $connection->prepare('INSERT INTO deploy_packages (package_name, package_basename, package_version, package_status, retired_at) VALUES (?, ?, ?, ?, NULL) ON DUPLICATE KEY UPDATE package_basename = VALUES(package_basename), package_version = VALUES(package_version), package_status = VALUES(package_status), retired_at = NULL');
-        $stmt->bind_param('ssss', $name, $split['basename'], $split['version'], $packageStatus);
-        $stmt->execute();
-        if ($stmt->affected_rows === 1) {
-            $newPackageIds[(int) $connection->insert_id] = true;
+        if ($hasTaskSequencePayload) {
+            $retiredOs = catalog_retire_missing($connection, 'deploy_os', 'os_name', 'os_status', $osNames);
+        } else {
+            machine_api_log_warning('mecm_packages', 'TaskSequence payload absent; leaving deploy_os untouched.');
         }
-    }
 
-    foreach ($osNames as $name) {
-        $stmt = $connection->prepare('INSERT INTO deploy_os (os_name, os_status, retired_at) VALUES (?, ?, NULL) ON DUPLICATE KEY UPDATE os_status = VALUES(os_status), retired_at = NULL');
-        $stmt->bind_param('ss', $name, $packageStatus);
-        $stmt->execute();
-    }
+        $packageStatus = VIRTUSPHERE_CATALOG_STATUS_DEFAULT;
+        // The ids this payload CREATED, as opposed to re-confirmed. Only they are a
+        // first appearance that template VMs follow: a re-appearing or re-confirmed
+        // row is not new, and a transient MECM gap must not move anything.
+        //
+        // affected_rows after INSERT ... ON DUPLICATE KEY UPDATE is 1 for an insert
+        // and 2 (or 0) for an update, so it distinguishes the two exactly. insert_id
+        // is only meaningful in the insert case.
+        $newPackageIds = [];
+        $createdPackages = 0;
+        foreach ($packageNames as $name) {
+            $split = repo_package_split_name($name);
+            // Re-appearing names automatically un-retire (retired_at = NULL).
+            $stmt = $connection->prepare('INSERT INTO deploy_packages (package_name, package_basename, package_version, package_status, retired_at) VALUES (?, ?, ?, ?, NULL) ON DUPLICATE KEY UPDATE package_basename = VALUES(package_basename), package_version = VALUES(package_version), package_status = VALUES(package_status), retired_at = NULL');
+            $stmt->bind_param('ssss', $name, $split['basename'], $split['version'], $packageStatus);
+            $stmt->execute();
+            if ($stmt->affected_rows === 1) {
+                $newPackageIds[(int) $connection->insert_id] = true;
+                $createdPackages++;
+            }
+        }
 
-    if ($templateFollowScope !== []) {
-        packages_follow_first_versions_in_templates($connection, $templateFollowScope, $newPackageIds, $clientIp);
-    }
-    // After the template step, so the counts name what is really left to do.
-    if ($retiredPackageRows !== []) {
-        packages_audit_retired_assignments($connection, $retiredPackageRows, $clientIp);
-    }
+        $createdOs = 0;
+        foreach ($osNames as $name) {
+            $stmt = $connection->prepare('INSERT INTO deploy_os (os_name, os_status, retired_at) VALUES (?, ?, NULL) ON DUPLICATE KEY UPDATE os_status = VALUES(os_status), retired_at = NULL');
+            $stmt->bind_param('ss', $name, $packageStatus);
+            $stmt->execute();
+            if ($stmt->affected_rows === 1) {
+                $createdOs++;
+            }
+        }
 
-    $connection->commit();
+        if ($templateFollowScope !== []) {
+            packages_follow_first_versions_in_templates($connection, $templateFollowScope, $newPackageIds, $clientIp);
+        }
+        // After the template step, so the counts name what is really left to do.
+        if ($retiredPackageRows !== []) {
+            packages_audit_retired_assignments($connection, $retiredPackageRows, $clientIp);
+        }
+        // LG-28: one summary row per catalog that changed; none for a run without change.
+        packages_audit_catalog_changes($connection, 'packages', $createdPackages, $retiredPackages, $clientIp);
+        packages_audit_catalog_changes($connection, 'task_sequences', $createdOs, $retiredOs, $clientIp);
+    });
     machine_api_json(['success' => 'Daten erfolgreich empfangen', 'packages' => count($packageNames), 'task_sequences' => count($osNames)]);
 } catch (JsonException) {
     machine_api_json(['error' => 'Ungueltiger JSON-Body'], 400);

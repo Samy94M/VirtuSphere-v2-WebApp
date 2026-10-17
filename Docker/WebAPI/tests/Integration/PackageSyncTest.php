@@ -478,6 +478,64 @@ final class PackageSyncTest extends TestCase
     }
 
     /**
+     * LG-28: a run that adds a version writes exactly one summary row for the
+     * packages catalog, and its counters say what changed. The same payload again
+     * changes nothing and writes no row; a run that retires the version writes one
+     * more row with the retirement counted.
+     */
+    public function testACatalogRunWritesOneSummaryRowOnlyWhenSomethingChanged(): void
+    {
+        $name = self::PREFIX . 'Summary-1.0';
+        $start = $this->maxAuditId(VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED);
+        $before = $start;
+        try {
+            [$status, $body] = $this->post($this->payload([$name]));
+            self::assertSame(200, $status, $body);
+            $rows = $this->catalogRowsAfter($before);
+            self::assertCount(1, $rows, 'a run that added a version writes exactly one summary row');
+            self::assertSame('packages', $rows[0]['object_id']);
+            self::assertSame(['created_count' => 1, 'retired_count' => 0], json_decode((string) $rows[0]['context_json'], true));
+
+            $before = $this->maxAuditId(VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED);
+            [$status, $body] = $this->post($this->payload([$name]));
+            self::assertSame(200, $status, $body);
+            self::assertSame([], $this->catalogRowsAfter($before), 'the same payload again changes nothing and writes nothing');
+
+            // A version bump retires the old version without tripping the retire
+            // guard (AV-R14); an empty catalog would be refused as an empty payload.
+            $before = $this->maxAuditId(VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED);
+            [$status, $body] = $this->post($this->payload([self::PREFIX . 'Summary-2.0']));
+            self::assertSame(200, $status, $body);
+            $rows = $this->catalogRowsAfter($before);
+            self::assertCount(1, $rows, 'a run that adds and retires a version writes exactly one summary row');
+            self::assertSame(['created_count' => 1, 'retired_count' => 1], json_decode((string) $rows[0]['context_json'], true));
+        } finally {
+            $this->forgetCatalogRowsAfter($start);
+        }
+    }
+
+    private function maxAuditId(string $event): int
+    {
+        return (int) repo_scalar($this->db, 'SELECT COALESCE(MAX(id), 0) FROM deploy_logs WHERE event_code = ?', 's', [$event]);
+    }
+
+    /** @return list<array{object_id: string, context_json: string}> */
+    private function catalogRowsAfter(int $afterId): array
+    {
+        $event = VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED;
+        $stmt = $this->db->prepare('SELECT object_id, context_json FROM deploy_logs WHERE event_code = ? AND id > ? ORDER BY id');
+        $stmt->bind_param('si', $event, $afterId);
+        $stmt->execute();
+
+        return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+
+    private function forgetCatalogRowsAfter(int $afterId): void
+    {
+        repo_execute($this->db, 'DELETE FROM deploy_logs WHERE event_code = ? AND id > ?', 'si', [VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED, $afterId]);
+    }
+
+    /**
      * Payload always includes all pre-existing active names so this test can
      * never retire real catalog data.
      */

@@ -60,6 +60,11 @@ function vm_save_with_audit(
                 $auditContext['changes'] = $changes;
             }
         }
+        // HA-24: the row names the VM as well. Read from the saved row, so it is the stored name.
+        $savedName = trim((string) ($savedVm['vm_name'] ?? $vmData['vm_name'] ?? ''));
+        if ($savedName !== '') {
+            $auditContext['name'] = $savedName;
+        }
         audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', $savedVmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $auditContext, $userId);
 
         // Etappe 14D: a moved desired Windows name gets its own event, because

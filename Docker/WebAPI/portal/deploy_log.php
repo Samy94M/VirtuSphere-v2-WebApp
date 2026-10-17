@@ -143,6 +143,9 @@ if ($format === 'raw') {
         http_response_code(404);
         exit(__t('portal.deploy_not_found'));
     }
+    // HA-14: a copy of the job's log left the portal, so it is recorded like the other
+    // exports. Written before the stream starts (pure event, no write: audit_event()).
+    audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_LOG_EXPORTED, 'deploy_job', (int) $job['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], (int) $user['id']);
     $filename = 'virtusphere-deploy-job-' . (int) $job['id'] . '.ndjson';
     header('Content-Type: application/x-ndjson; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');

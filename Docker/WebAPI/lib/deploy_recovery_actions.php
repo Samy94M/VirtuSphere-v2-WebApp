@@ -42,21 +42,27 @@ function deploy_handle_recovery_action(mysqli $connection, array $user, string $
     $actorId = (int) ($user['id'] ?? 0);
     $target = deploy_job_log_url($jobId);
 
+    // LG-09 / HA-23: each state change below and its audit row are one transaction. A row
+    // that cannot be stored rolls the change back, so nothing is changed without a trail.
     if ($action === 'remote_cleanup_retry') {
         // The hash the operator's decision was made against travels with the
         // form. A cleanup whose evidence changed in between is a different case
         // and must not be restarted on the strength of a look at the old one.
         $expected = request_string($_POST, 'result_hash');
-        $retried = repo_deploy_retry_remote_cleanup($connection, $executionId, $expected === '' ? null : $expected);
-        audit_event(
-            $connection,
-            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED,
-            'deploy_job',
-            $jobId,
-            $retried ? VIRTUSPHERE_AUDIT_RESULT_SUCCESS : VIRTUSPHERE_AUDIT_RESULT_FAILURE,
-            ['execution_id' => $executionId],
-            $actorId
-        );
+        $retried = repo_transaction($connection, static function () use ($connection, $jobId, $executionId, $expected, $actorId): bool {
+            $retried = repo_deploy_retry_remote_cleanup($connection, $executionId, $expected === '' ? null : $expected);
+            audit_event_required(
+                $connection,
+                VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED,
+                'deploy_job',
+                $jobId,
+                $retried ? VIRTUSPHERE_AUDIT_RESULT_SUCCESS : VIRTUSPHERE_AUDIT_RESULT_FAILURE,
+                ['execution_id' => $executionId],
+                $actorId
+            );
+
+            return $retried;
+        });
         // A refusal is reported as one. Saying "queued" for a request the
         // database declined would leave somebody waiting for a retry that is
         // not going to happen.
@@ -71,28 +77,32 @@ function deploy_handle_recovery_action(mysqli $connection, array $user, string $
         deploy_handle_create_unit_release($connection, $user, $jobId, $target);
     }
 
-    $resolutionId = repo_deploy_record_external_review(
-        $connection,
-        $jobId,
-        $executionId > 0 ? $executionId : null,
-        $actorId,
-        request_string($_POST, 'resolution_code'),
-        request_string($_POST, 'reason'),
-        request_trimmed($_POST, 'reference') === '' ? null : mb_substr(request_trimmed($_POST, 'reference'), 0, 255)
-    );
-    audit_event(
-        $connection,
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED,
-        'deploy_job',
-        $jobId,
-        VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-        // The verdict is in the trail; the operator's own words are NOT. They
-        // are free text about a production incident and belong in the append
-        // only evidence table, behind the same permission, not in a row every
-        // `users.manage` holder reads.
-        ['resolution_code' => request_string($_POST, 'resolution_code'), 'resolution_id' => $resolutionId],
-        $actorId
-    );
+    $resolutionId = repo_transaction($connection, static function () use ($connection, $jobId, $executionId, $actorId): int {
+        $resolutionId = repo_deploy_record_external_review(
+            $connection,
+            $jobId,
+            $executionId > 0 ? $executionId : null,
+            $actorId,
+            request_string($_POST, 'resolution_code'),
+            request_string($_POST, 'reason'),
+            request_trimmed($_POST, 'reference') === '' ? null : mb_substr(request_trimmed($_POST, 'reference'), 0, 255)
+        );
+        audit_event_required(
+            $connection,
+            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED,
+            'deploy_job',
+            $jobId,
+            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+            // The verdict is in the trail; the operator's own words are NOT. They
+            // are free text about a production incident and belong in the append
+            // only evidence table, behind the same permission, not in a row every
+            // `users.manage` holder reads.
+            ['resolution_code' => request_string($_POST, 'resolution_code'), 'resolution_id' => $resolutionId],
+            $actorId
+        );
+
+        return $resolutionId;
+    });
     flash_set('success', __t('deploy.recovery_flash_documented'));
     redirect_to($target);
 }
@@ -126,31 +136,37 @@ function deploy_handle_create_unit_release(mysqli $connection, array $user, int 
         throw new ValidationException(['recent_tasks_checked' => __t('validate.required')]);
     }
 
-    $outcome = repo_deploy_create_release_unit(
-        $connection,
-        $jobId,
-        $position,
-        $actorId,
-        request_string($_POST, 'reason'),
-        request_trimmed($_POST, 'reference') === '' ? null : mb_substr(request_trimmed($_POST, 'reference'), 0, 255)
-    );
-    $context = ['position' => $position];
-    if ($outcome['released']) {
-        $context['resolution_id'] = (int) $outcome['resolution_id'];
-    } else {
-        // The first blocker, not all of them: the audit row says why the
-        // request was refused, and the page shows the operator the full list.
-        $context['blocker'] = (string) ($outcome['blockers'][0] ?? 'release_unit_not_uncertain');
-    }
-    audit_event(
-        $connection,
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED,
-        'deploy_job',
-        $jobId,
-        $outcome['released'] ? VIRTUSPHERE_AUDIT_RESULT_SUCCESS : VIRTUSPHERE_AUDIT_RESULT_FAILURE,
-        $context,
-        $actorId
-    );
+    // LG-09 / HA-23: the release and the row that records it are one transaction. Before, a
+    // committed release could leave without its row when the insert failed.
+    $outcome = repo_transaction($connection, static function () use ($connection, $jobId, $position, $actorId): array {
+        $outcome = repo_deploy_create_release_unit(
+            $connection,
+            $jobId,
+            $position,
+            $actorId,
+            request_string($_POST, 'reason'),
+            request_trimmed($_POST, 'reference') === '' ? null : mb_substr(request_trimmed($_POST, 'reference'), 0, 255)
+        );
+        $context = ['position' => $position];
+        if ($outcome['released']) {
+            $context['resolution_id'] = (int) $outcome['resolution_id'];
+        } else {
+            // The first blocker, not all of them: the audit row says why the
+            // request was refused, and the page shows the operator the full list.
+            $context['blocker'] = (string) ($outcome['blockers'][0] ?? 'release_unit_not_uncertain');
+        }
+        audit_event_required(
+            $connection,
+            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED,
+            'deploy_job',
+            $jobId,
+            $outcome['released'] ? VIRTUSPHERE_AUDIT_RESULT_SUCCESS : VIRTUSPHERE_AUDIT_RESULT_FAILURE,
+            $context,
+            $actorId
+        );
+
+        return $outcome;
+    });
     // A refusal is reported as one. Saying "released" for a request the
     // evidence declined would send somebody straight into a retry that is
     // still - correctly - blocked.

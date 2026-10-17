@@ -39,28 +39,34 @@ function system_status_handle_service_action(mysqli $connection, array $user, st
     $target = system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE);
 
     if ($action === 'deploy_claim_pause') {
-        $transition = repo_deploy_request_claim_pause($connection, $actorId);
-        $state = (string) $transition['state'];
+        // LG-09 / HA-23: the state change and its audit row are one transaction, so a row
+        // that cannot be stored rolls the pause back instead of leaving it unattributed.
         // Exactly one audit line per real change. A second click lands on the
         // same state, writes nothing and says so: an idempotent action that
         // logs every attempt turns the trail into a click counter.
         // The registry's own vocabulary: this is a state machine transition, so
         // it is a `new_state`, not a field invented for one event.
-        $context = ['new_state' => $state];
-        if (count($transition['job_ids']) === 1) {
-            $context['job_id'] = $transition['job_ids'][0];
-        }
-        if ($transition['changed']) {
-            audit_event(
-                $connection,
-                VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED,
-                'system',
-                null,
-                VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-                $context,
-                $actorId
-            );
-        }
+        $transition = repo_transaction($connection, static function () use ($connection, $actorId): array {
+            $transition = repo_deploy_request_claim_pause($connection, $actorId);
+            if ($transition['changed']) {
+                $context = ['new_state' => (string) $transition['state']];
+                if (count($transition['job_ids']) === 1) {
+                    $context['job_id'] = $transition['job_ids'][0];
+                }
+                audit_event_required(
+                    $connection,
+                    VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED,
+                    'system',
+                    null,
+                    VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+                    $context,
+                    $actorId
+                );
+            }
+
+            return $transition;
+        });
+        $state = (string) $transition['state'];
         flash_set($transition['changed'] ? 'success' : 'info', __t(
             !$transition['changed']
                 ? 'system_status.service_flash_pause_unchanged'
@@ -75,20 +81,25 @@ function system_status_handle_service_action(mysqli $connection, array $user, st
         // Asking the policy to run NOW instead of waiting out a reaper interval.
         // It requests recovery; it does not perform one, because performing it
         // needs the remote host and an HTTP request cannot promise that.
-        $counts = repo_deploy_review_recovery($connection);
-        audit_event(
-            $connection,
-            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED,
-            'system',
-            null,
-            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-            [
-                'reviewed_count' => $counts['reviewed'],
-                'requested_count' => $counts['requested'],
-                'manual_count' => $counts['manual'],
-            ],
-            $actorId
-        );
+        // LG-09 / HA-23: the requests and the row that says what the review found are one transaction.
+        $counts = repo_transaction($connection, static function () use ($connection, $actorId): array {
+            $counts = repo_deploy_review_recovery($connection);
+            audit_event_required(
+                $connection,
+                VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED,
+                'system',
+                null,
+                VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+                [
+                    'reviewed_count' => $counts['reviewed'],
+                    'requested_count' => $counts['requested'],
+                    'manual_count' => $counts['manual'],
+                ],
+                $actorId
+            );
+
+            return $counts;
+        });
         // The flash reports what was FOUND. "Review started" would be a
         // sentence about the button; an operator needs to know whether anything
         // moved and whether anything is still theirs to do.
@@ -100,17 +111,20 @@ function system_status_handle_service_action(mysqli $connection, array $user, st
         redirect_to($target);
     }
 
-    if (repo_deploy_resume_claims($connection, $actorId)) {
-        audit_event(
-            $connection,
-            VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED,
-            'system',
-            null,
-            VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-            ['new_state' => VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING],
-            $actorId
-        );
-    }
+    // LG-09 / HA-23: the resume and its audit row are one transaction.
+    repo_transaction($connection, static function () use ($connection, $actorId): void {
+        if (repo_deploy_resume_claims($connection, $actorId)) {
+            audit_event_required(
+                $connection,
+                VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED,
+                'system',
+                null,
+                VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
+                ['new_state' => VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING],
+                $actorId
+            );
+        }
+    });
     flash_set('success', __t('system_status.service_flash_resumed'));
     redirect_to($target);
 }
