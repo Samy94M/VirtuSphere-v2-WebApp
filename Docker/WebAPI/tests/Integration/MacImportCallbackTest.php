@@ -150,6 +150,36 @@ final class MacImportCallbackTest extends TestCase
     }
 
     /**
+     * MA-14: an ESXi MAC with appended text is not a MAC. The row ends as the
+     * existing invalid_mac result and nothing is written. Before the fix the
+     * normaliser dropped the text and the suffixed value imported as a clean MAC.
+     */
+    public function testAnEsxiMacWithAppendedTextIsAnInvalidMacNotAnImport(): void
+    {
+        $missionId = $this->insertMission('suffixmac');
+        $vmId = $this->insertVm($missionId, 'SUFFIXMAC');
+        $this->insertInterface($vmId, 'WDS');
+        $jobId = $this->insertJob($missionId, [$vmId]);
+
+        [$status, $body] = $this->post([
+            'mission_id' => $missionId,
+            'job_id' => $jobId,
+            'results' => [
+                ['instance' => ['hw_name' => $this->vmName('SUFFIXMAC'), 'hw_eth0' => ['macaddress' => '00:50:56:AB:CD:EF xyz', 'summary' => 'WDS']]],
+            ],
+        ]);
+
+        self::assertSame(200, $status, $body);
+        $response = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertFalse($response['success']);
+        self::assertSame('failed', $response['outcome']);
+        self::assertSame(0, $response['updated_interfaces']);
+        self::assertContains('invalid_mac', $response['vm_results'][0]['error_codes']);
+        self::assertSame('', $this->interfaceMac($vmId, 'WDS'), 'an appended suffix must never be written as a MAC');
+        self::assertSame(['ready', 'not_ready', 0], $this->vmState($vmId));
+    }
+
+    /**
      * Matrix 3 + 5: when no VM succeeds the outcome is `failed`, and every
      * rejection class carries its fixed error code - no input row disappears
      * silently and no write leaks through.

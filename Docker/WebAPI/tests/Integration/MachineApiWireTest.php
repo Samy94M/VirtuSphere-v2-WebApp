@@ -5,6 +5,8 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/ClientIpAllowlist.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/mecm_provenance.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/package_sync.php';
 
 final class MachineApiWireTest extends TestCase
 {
@@ -465,6 +467,130 @@ final class MachineApiWireTest extends TestCase
             [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', $payload);
             self::assertSame(400, $status, $body);
             self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    /**
+     * MA-02 and MA-10 on the ACK: an array MAC answers the existing invalid-MAC
+     * 400 instead of a 500, and the body is bounded at the 8 KiB limit.
+     */
+    public function testAckRefusesAnArrayMacAndBoundsItsBody(): void
+    {
+        [$status, , $body] = $this->post('/mecm_client_ack.php', ['mac' => ['00:50:56:AA:BB:CC']]);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid MAC address'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->postRepeated('/mecm_client_ack.php', 'x', VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES + 1);
+        self::assertSame(413, $status, $body);
+        self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // Exactly at the limit the body is read in full and judged by its content.
+        [$status, , $body] = $this->postRepeated('/mecm_client_ack.php', 'x', VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid JSON body'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-03 and MA-05 on updateDevice: the ResourceID is a non-empty string of at
+     * most 255 characters and the VM id a JSON integer. Every other shape gets the
+     * existing 400 before anything is written. Nothing here reaches a VM row.
+     */
+    public function testUpdateDeviceRefusesCoercedAndArrayFieldsBeforeAnyWrite(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $unknownVm = 999000111;
+        $refused = [
+            'deviceid as true' => ['deviceResourceID' => '16777999', 'deviceid' => true],
+            'deviceid as "12abc"' => ['deviceResourceID' => '16777999', 'deviceid' => '12abc'],
+            'deviceid as array' => ['deviceResourceID' => '16777999', 'deviceid' => [$unknownVm]],
+            'deviceResourceID as array' => ['deviceResourceID' => ['16777999'], 'deviceid' => $unknownVm],
+            'deviceResourceID as true' => ['deviceResourceID' => true, 'deviceid' => $unknownVm],
+            'deviceResourceID as number' => ['deviceResourceID' => 16777999, 'deviceid' => $unknownVm],
+            'deviceResourceID of 256 characters' => ['deviceResourceID' => str_repeat('1', 256), 'deviceid' => $unknownVm],
+        ];
+        foreach ($refused as $case => $payload) {
+            [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', $payload);
+            self::assertSame(400, $status, $case . ': ' . $body);
+            self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $case);
+        }
+
+        // Boundary: 255 characters are a storable ResourceID, so the request gets
+        // past the shape check and the unknown VM answers 404 exactly as before.
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', [
+            'deviceResourceID' => str_repeat('1', 255),
+            'deviceid' => $unknownVm,
+        ]);
+        self::assertSame(404, $status, $body);
+        self::assertSame(['error' => 'Unknown VM id'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-10 on mecm_updateid.php: both actions read a bounded body. One byte past
+     * VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES is 413; at the limit the body is
+     * read and fails on its content.
+     */
+    public function testUpdateIdBodyIsBoundedForBothActions(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        foreach (['updateDevice', 'reportMembership'] as $action) {
+            [$status, , $body] = $this->postRepeated('/mecm_updateid.php?action=' . $action, 'x', VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES + 1);
+            self::assertSame(413, $status, $action . ': ' . $body);
+            self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $action);
+
+            [$status, , $body] = $this->postRepeated('/mecm_updateid.php?action=' . $action, 'x', VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES);
+            self::assertSame(400, $status, $action . ': ' . $body);
+            self::assertSame(['error' => 'Invalid JSON body'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $action);
+        }
+    }
+
+    /**
+     * MA-10 on mecm_packages.php: the whole catalog is one body, bounded by
+     * VIRTUSPHERE_MECM_PACKAGES_MAX_BODY_BYTES (lib/repo/package_sync.php).
+     */
+    public function testPackageCatalogBodyIsBoundedAt8MiB(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $limit = VIRTUSPHERE_MECM_PACKAGES_MAX_BODY_BYTES;
+
+        [$status, , $body] = $this->postRepeated('/mecm_packages.php', 'x', $limit + 1);
+        self::assertSame(413, $status, $body);
+        self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->postRepeated('/mecm_packages.php', 'x', $limit);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Ungueltiger JSON-Body'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-02 on reportPhase: a detail that is not a string is refused with 400 on a
+     * known device. A string detail on the same device is still recorded.
+     */
+    public function testReportPhaseDetailMustBeAStringOnAKnownDevice(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'phase-detail');
+
+        try {
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', [
+                'mac' => $fixture['mac'],
+                'phase' => 'getinfo',
+                'event' => 'started',
+                'detail' => ['not', 'a', 'string'],
+            ]);
+            self::assertSame(400, $status, $body);
+            self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', [
+                'mac' => $fixture['mac'],
+                'phase' => 'getinfo',
+                'event' => 'started',
+                'detail' => 'phpunit phase detail',
+            ]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(['success' => true, 'vm_id' => $fixture['vm_id']], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
         }
     }
 

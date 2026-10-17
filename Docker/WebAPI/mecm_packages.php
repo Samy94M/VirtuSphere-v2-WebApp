@@ -263,7 +263,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
-    $data = json_decode((string) file_get_contents('php://input'), true, 512, JSON_THROW_ON_ERROR);
+    $raw = (string) file_get_contents('php://input', false, null, 0, VIRTUSPHERE_MECM_PACKAGES_MAX_BODY_BYTES + 1);
+    if (strlen($raw) > VIRTUSPHERE_MECM_PACKAGES_MAX_BODY_BYTES) {
+        machine_api_json(['error' => 'Payload too large'], 413);
+    }
+    $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
     if (!is_array($data)) {
         machine_api_json(['error' => 'Keine Daten empfangen'], 400);
     }
@@ -276,7 +280,13 @@ try {
     $hasPackagePayload = false;
     $hasTaskSequencePayload = false;
     foreach ($data as $entry) {
-        if (!is_array($entry) || !isset($entry['type'], $entry['name']) || trim((string) $entry['name']) === '') {
+        // A name is a string of 1 to 255 characters (MA-04). An array made the
+        // (string) cast throw into a 500; a longer name failed the INSERT. The
+        // type needs no cast: it is compared strictly and an array falls through
+        // to the existing 'Unbekannter Daten Typ' answer.
+        if (!is_array($entry) || !isset($entry['type'], $entry['name'])
+            || !is_string($entry['name']) || trim($entry['name']) === ''
+            || mb_strlen($entry['name']) > VIRTUSPHERE_CATALOG_NAME_MAX_CHARS) {
             machine_api_json(['error' => 'Ungueltiger Eintrag'], 400);
         }
         if ($entry['type'] === 'Package') {

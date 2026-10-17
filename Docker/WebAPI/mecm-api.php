@@ -10,6 +10,7 @@ virtusphere_error_response_mode('json');
 
 require_once __DIR__ . '/mysql.php';
 require_once __DIR__ . '/lib/machine_api.php';
+require_once __DIR__ . '/lib/defaults.php'; // mission_name_is_template(), the one template predicate (MA-13)
 require_once __DIR__ . '/lib/status.php';
 require_once __DIR__ . '/lib/repo/mecm_provenance.php';
 
@@ -171,7 +172,7 @@ try {
             }
 
             $mission = machine_vm_mission($connection, (int) $vm['mission_id']);
-            if (!$mission || str_starts_with((string) $mission['mission_name'], VIRTUSPHERE_TEMPLATE_PREFIX)) {
+            if (!$mission || mission_name_is_template((string) $mission['mission_name'])) {
                 continue;
             }
 

@@ -6,6 +6,14 @@ require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/../defaults.php';
 require_once __DIR__ . '/catalog.php';
 
+// MA-10: the whole catalog arrives in one body. A pretty-printed entry takes
+// about 120 bytes for a realistic name, so 8 MiB holds some 70,000 of them; even
+// 255-character names, escaped by JSON, leave room for several thousand entries.
+const VIRTUSPHERE_MECM_PACKAGES_MAX_BODY_BYTES = 8388608;
+// deploy_packages.package_name and deploy_os.os_name are VARCHAR(255) (struktur.sql).
+// A longer name cannot be stored and used to fail the INSERT (MA-04).
+const VIRTUSPHERE_CATALOG_NAME_MAX_CHARS = 255;
+
 /**
  * AV-R08 (15.10.2026): the package sync never moves a real VM's assignment.
  * A newer version would run its install.ps1 again on an installed system and

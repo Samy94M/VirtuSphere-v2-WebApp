@@ -50,6 +50,12 @@ const VIRTUSPHERE_MECM_RULE_CHANGES = [
 // one mission and a package list, so a legitimate report is small.
 const VIRTUSPHERE_MECM_RULE_REPORT_MAX_ENTRIES = 200;
 
+// Bound of the request body that mecm_updateid.php reads for both actions (MA-10).
+// A worst-case membership report is 200 entries, each with a 255-character name
+// that JSON may escape to six bytes a character (about 1.6 KB), so 512 KiB holds
+// the largest legitimate body with room to spare. updateDevice is a few hundred bytes.
+const VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES = 524288;
+
 /**
  * The owned rules of one VM, oldest first (stable for the wire and the plan).
  *
@@ -77,6 +83,14 @@ function mecm_rule_report_entry(mixed $entry): ?array
 {
     if (!is_array($entry)) {
         return null;
+    }
+    // Every field is a string on the wire. A present value of another type makes
+    // the entry malformed: an array would throw in the casts below (MA-03), and a
+    // number or boolean would be coerced into a value the script never sent.
+    foreach (['collection_id', 'collection_name', 'type', 'change'] as $field) {
+        if (isset($entry[$field]) && !is_string($entry[$field])) {
+            return null;
+        }
     }
     $collectionId = trim((string) ($entry['collection_id'] ?? ''));
     $collectionName = trim((string) ($entry['collection_name'] ?? ''));

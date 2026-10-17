@@ -137,6 +137,17 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('virtusphere_normalize_mac', $this->source('mecm_client_ack.php'));
     }
 
+    public function testDeviceListUsesTheSharedTemplatePredicate(): void
+    {
+        // GROK 1.1 and MA-13: the template rule has one predicate (lib/defaults.php).
+        // The device list must not classify a mission with its own prefix check, or
+        // it can drift from the rest of the portal on whitespace or future rules.
+        $read = $this->source('mecm-api.php');
+        self::assertStringContainsString('mission_name_is_template(', $read);
+        self::assertStringNotContainsString('VIRTUSPHERE_TEMPLATE_PREFIX', $read);
+        self::assertStringContainsString("require_once __DIR__ . '/lib/defaults.php';", $read);
+    }
+
     public function testPackageSyncRetiresInsteadOfDeleting(): void
     {
         // E3: the destructive DELETE (which cascaded into deploy_vm_packages)

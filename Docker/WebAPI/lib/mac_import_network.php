@@ -25,6 +25,21 @@ function mac_import_interfaces_by_vlan(array $interfaces): array
     return $groups;
 }
 
+/**
+ * MA-14: whether a value is one whole MAC address in a form the normaliser
+ * documents: colon or hyphen pairs, Cisco dotted, or raw hex. FILTER_VALIDATE_MAC
+ * is not used because it expects separators, and raw hex that
+ * virtusphere_normalize_mac() accepts today is imported by
+ * tests/Support/DeployVmOwnershipFixture.php. It refuses any text around the
+ * address, which is the defect of the normaliser's strip-then-measure rule.
+ */
+function mac_import_is_whole_mac(string $mac): bool
+{
+    return preg_match('/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\z/', $mac) === 1
+        || preg_match('/^[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\z/', $mac) === 1
+        || preg_match('/^[0-9A-Fa-f]{12}\z/', $mac) === 1;
+}
+
 /** @return list<array{vlan:string,mac:string,normalized_mac:?string}> */
 function mac_import_instance_nics(array $instance): array
 {
@@ -43,7 +58,10 @@ function mac_import_instance_nics(array $instance): array
             // boundary-whitespace difference can never become a match here.
             'vlan' => (string) ($value['summary'] ?? ''),
             'mac' => $mac,
-            'normalized_mac' => virtusphere_normalize_mac($mac),
+            // MA-14: normalising strips every non-hex character before it checks the
+            // length, so "00:50:56:AB:CD:EF xyz" would pass as a MAC. Only a whole
+            // address is accepted here; anything else takes the invalid-MAC path (null).
+            'normalized_mac' => mac_import_is_whole_mac($mac) ? virtusphere_normalize_mac($mac) : null,
         ];
     }
     return $nics;

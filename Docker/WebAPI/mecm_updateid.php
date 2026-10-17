@@ -13,6 +13,9 @@ require_once __DIR__ . '/lib/repo/status_events.php';
 require_once __DIR__ . '/lib/repo/mecm_provenance.php';
 require_once __DIR__ . '/lib/mecm_rollout_fence.php';
 
+// mecm_id is VARCHAR(255) (struktur.sql): a longer ResourceID cannot be stored (MA-03).
+const VIRTUSPHERE_MECM_RESOURCE_ID_MAX_CHARS = 255;
+
 header('Content-Type: application/json; charset=utf-8');
 
 $clientIp = machine_api_client_ip();
@@ -35,8 +38,15 @@ if ($action === 'reportMembership') {
     // family as updateDevice: 400 for a malformed report, 404 for an unknown
     // VM (the sync keeps the device queued and says so), 200 on success.
     try {
-        $data = json_decode((string) file_get_contents('php://input'), true, 512, JSON_THROW_ON_ERROR);
-        $vmId = (int) ($data['deviceid'] ?? 0);
+        $raw = (string) file_get_contents('php://input', false, null, 0, VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES + 1);
+        if (strlen($raw) > VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES) {
+            machine_api_json(['error' => 'Payload too large'], 413);
+        }
+        $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        // The VM id is a JSON integer, as the device list sends it (MA-05). A cast
+        // turned true, an array and "12abc" into a VM id, so a membership could be
+        // written to the wrong VM. Anything that is not an integer is refused.
+        $vmId = is_int($data['deviceid'] ?? null) ? $data['deviceid'] : 0;
         $rawMemberships = $data['memberships'] ?? null;
         if ($vmId <= 0 || !is_array($rawMemberships) || $rawMemberships === []
             || count($rawMemberships) > VIRTUSPHERE_MECM_RULE_REPORT_MAX_ENTRIES) {
@@ -128,11 +138,18 @@ if ($action === 'reportMembership') {
 }
 
 try {
-    $data = json_decode((string) file_get_contents('php://input'), true, 512, JSON_THROW_ON_ERROR);
-    $mecmId = (string) ($data['deviceResourceID'] ?? '');
-    $vmId = (int) ($data['deviceid'] ?? 0);
+    $raw = (string) file_get_contents('php://input', false, null, 0, VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES + 1);
+    if (strlen($raw) > VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES) {
+        machine_api_json(['error' => 'Payload too large'], 413);
+    }
+    $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+    // Only a non-empty string is a ResourceID and only a JSON integer is a VM id
+    // (MA-03, MA-05). An array used to throw into a 500, and true, numbers and
+    // "12abc" were coerced silently. All of them now get the existing 400.
+    $mecmId = is_string($data['deviceResourceID'] ?? null) ? (string) $data['deviceResourceID'] : '';
+    $vmId = is_int($data['deviceid'] ?? null) ? $data['deviceid'] : 0;
 
-    if ($mecmId === '' || $vmId <= 0) {
+    if ($mecmId === '' || mb_strlen($mecmId) > VIRTUSPHERE_MECM_RESOURCE_ID_MAX_CHARS || $vmId <= 0) {
         machine_api_json(['error' => 'Invalid data format'], 400);
     }
 

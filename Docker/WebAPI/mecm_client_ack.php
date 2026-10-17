@@ -30,7 +30,9 @@ if (virtusphere_correlation_id_is_valid($headerCorrelation)) {
 }
 
 try {
-    $raw = (string) file_get_contents('php://input');
+    // Bounded read (MA-10, the pattern of mecm_report.php): one byte past the limit
+    // tells an oversized body from one that is exactly at it.
+    $raw = (string) file_get_contents('php://input', false, null, 0, VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES + 1);
     if (strlen($raw) > VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES) {
         machine_api_json(['error' => 'Payload too large'], 413);
     }
@@ -40,7 +42,8 @@ try {
         machine_api_json(['error' => 'Invalid JSON body'], 400);
     }
 
-    $mac = (string) ($data['mac'] ?? '');
+    // A non-string MAC is an invalid MAC. An array would throw in a cast (MA-02).
+    $mac = is_string($data['mac'] ?? null) ? (string) $data['mac'] : '';
     if ($mac === '' || !filter_var($mac, FILTER_VALIDATE_MAC)) {
         machine_api_json(['error' => 'Invalid MAC address'], 400);
     }

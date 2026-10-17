@@ -193,6 +193,38 @@ final class MecmReportWireTest extends TestCase
         self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
     }
 
+    /**
+     * MA-02: an array in mac, phase, event or source answers the endpoint's
+     * existing 400 body. Before the fix each one was a cast that threw into a 500.
+     */
+    public function testArrayFieldsAnswerTheirExistingEnvelopes(): void
+    {
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => ['00:50:56:AA:BB:CC'], 'phase' => 'getinfo', 'event' => 'started']);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid MAC address'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => '00:50:56:AA:BB:CC', 'phase' => ['getinfo'], 'event' => 'started']);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid phase'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => '00:50:56:AA:BB:CC', 'phase' => 'getinfo', 'event' => ['started']]);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid event'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // The heartbeat is IP-gated, so the own container IP is allowlisted first.
+        $this->ensureClientIpAllowlisted(db(true));
+        [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => ['device-sync'], 'interval_seconds' => 10]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'device-sync', 'interval_seconds' => 10, 'detail' => ['x']]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
     public function testReportTokenGuardsHeartbeatOnly(): void
     {
         require_once dirname(__DIR__, 2) . '/lib/db.php';

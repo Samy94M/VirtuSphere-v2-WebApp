@@ -362,6 +362,40 @@ final class PackageSyncTest extends TestCase
         return $row === null ? null : (string) $row[0];
     }
 
+    /**
+     * MA-04: a name that is not a string, or that is longer than the VARCHAR(255)
+     * column, gets the existing 'Ungueltiger Eintrag' before anything is written.
+     * Both refusals happen during entry validation, before any catalog row is
+     * touched, so no real catalog entry is at risk here.
+     */
+    public function testMalformedCatalogNamesAreRefusedBeforeAnyWrite(): void
+    {
+        $tooLong = str_pad(self::PREFIX, 256, 'L');
+        $cases = [
+            'name as array' => [['type' => 'Package', 'name' => [self::PREFIX . 'Array']]],
+            'package name of 256 characters' => [['type' => 'Package', 'name' => $tooLong]],
+            'task sequence name of 256 characters' => [['type' => 'TaskSequence', 'name' => $tooLong]],
+        ];
+        foreach ($cases as $case => $payload) {
+            [$status, $body] = $this->post($payload);
+            self::assertSame(400, $status, $case . ': ' . $body);
+            self::assertSame(['error' => 'Ungueltiger Eintrag'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $case);
+        }
+        self::assertNull($this->packageRow($tooLong), 'a refused name writes no catalog row');
+    }
+
+    /**
+     * MA-04 boundary: exactly 255 characters is a storable name and is accepted.
+     * payload() keeps the existing catalog in the sync, as every test here does.
+     */
+    public function testAPackageNameOfExactly255CharactersIsAccepted(): void
+    {
+        $name = str_pad(self::PREFIX, 255, 'L');
+        [$status, $body] = $this->post($this->payload([$name]));
+        self::assertSame(200, $status, $body);
+        self::assertNotNull($this->packageRow($name));
+    }
+
     public function testMassRetireIsRejectedWith409(): void
     {
         // Seed enough packages to clear the min-active floor.

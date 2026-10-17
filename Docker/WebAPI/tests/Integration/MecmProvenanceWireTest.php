@@ -87,12 +87,24 @@ final class MecmProvenanceWireTest extends TestCase
 
     public function testMalformedMembershipReportsKeepTheInvalidDataEnvelope(): void
     {
+        // A well-formed entry; each case below changes exactly one thing about it.
+        $valid = ['collection_id' => 'VS1', 'collection_name' => 'X', 'type' => 'package', 'change' => 'added'];
         $payloads = [
             ['deviceid' => $this->vmId],
             ['deviceid' => $this->vmId, 'memberships' => 'not-a-list'],
             ['deviceid' => $this->vmId, 'memberships' => [['collection_id' => '', 'collection_name' => 'X', 'type' => 'package', 'change' => 'added']]],
             ['deviceid' => $this->vmId, 'memberships' => [['collection_id' => 'VS1', 'collection_name' => 'X', 'type' => 'surprise', 'change' => 'added']]],
             ['deviceid' => $this->vmId, 'memberships' => [['collection_id' => 'VS1', 'collection_name' => 'X', 'type' => 'package', 'change' => 'adopted']]],
+            // MA-05: the VM id is a JSON integer; a string, a bool or an array is refused, not cast.
+            ['deviceid' => (string) $this->vmId, 'memberships' => [$valid]],
+            ['deviceid' => true, 'memberships' => [$valid]],
+            ['deviceid' => [$this->vmId], 'memberships' => [$valid]],
+            // MA-03: every entry field is a string; an array or a number is a malformed entry.
+            ['deviceid' => $this->vmId, 'memberships' => [array_merge($valid, ['collection_id' => ['VS1']])]],
+            ['deviceid' => $this->vmId, 'memberships' => [array_merge($valid, ['collection_id' => 100001])]],
+            ['deviceid' => $this->vmId, 'memberships' => [array_merge($valid, ['collection_name' => ['X']])]],
+            ['deviceid' => $this->vmId, 'memberships' => [array_merge($valid, ['type' => ['package']])]],
+            ['deviceid' => $this->vmId, 'memberships' => [array_merge($valid, ['change' => ['added']])]],
         ];
         foreach ($payloads as $payload) {
             [$status, , $body] = $this->post('/mecm_updateid.php?action=reportMembership', $payload);

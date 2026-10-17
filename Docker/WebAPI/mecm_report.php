@@ -107,18 +107,21 @@ try {
     }
 
     if ($action === 'reportPhase') {
-        $mac = (string) ($data['mac'] ?? '');
+        // Every field below is read only when it is a string (MA-02): an array
+        // made the cast throw into a 500, and a number was coerced silently. The
+        // existing 400 body of each field answers the refusal.
+        $mac = is_string($data['mac'] ?? null) ? (string) $data['mac'] : '';
         if ($mac === '' || !filter_var($mac, FILTER_VALIDATE_MAC)) {
             machine_api_json(['error' => 'Invalid MAC address'], 400);
         }
         $mac = virtusphere_normalize_mac($mac) ?? $mac;
 
-        $phase = (string) ($data['phase'] ?? '');
+        $phase = is_string($data['phase'] ?? null) ? (string) $data['phase'] : '';
         if (!in_array($phase, VIRTUSPHERE_CLIENT_PHASES, true)) {
             machine_api_json(['error' => 'Invalid phase'], 400);
         }
 
-        $event = (string) ($data['event'] ?? '');
+        $event = is_string($data['event'] ?? null) ? (string) $data['event'] : '';
         if (!in_array($event, VIRTUSPHERE_CLIENT_EVENTS, true)) {
             machine_api_json(['error' => 'Invalid event'], 400);
         }
@@ -136,7 +139,13 @@ try {
         }
         $vmId = (int) $row['vm_id'];
 
-        $detail = repo_client_event_sanitize_detail(isset($data['detail']) ? (string) $data['detail'] : null);
+        // The detail is free text: absent (null) or a string. Checked after the
+        // MAC lookup on purpose, so an unknown MAC keeps answering 404 (MA-02).
+        $rawDetail = $data['detail'] ?? null;
+        if ($rawDetail !== null && !is_string($rawDetail)) {
+            machine_api_json(['error' => 'Invalid data format'], 400);
+        }
+        $detail = repo_client_event_sanitize_detail($rawDetail);
 
         if (repo_client_event_is_duplicate($connection, $vmId, $phase, $event, $detail)) {
             machine_api_json(['success' => true, 'vm_id' => $vmId, 'deduplicated' => true]);
@@ -170,7 +179,7 @@ try {
             machine_api_forbidden($clientIp, $connection);
         }
 
-        $source = (string) ($data['source'] ?? '');
+        $source = is_string($data['source'] ?? null) ? (string) $data['source'] : '';
         if (!in_array($source, VIRTUSPHERE_INTEGRATION_WIRE_SOURCES, true)) {
             machine_api_json(['error' => 'Invalid source'], 400);
         }
@@ -180,7 +189,11 @@ try {
             machine_api_json(['error' => 'Invalid interval_seconds'], 400);
         }
 
-        $detail = repo_client_event_sanitize_detail(isset($data['detail']) ? (string) $data['detail'] : null);
+        $rawDetail = $data['detail'] ?? null;
+        if ($rawDetail !== null && !is_string($rawDetail)) {
+            machine_api_json(['error' => 'Invalid data format'], 400);
+        }
+        $detail = repo_client_event_sanitize_detail($rawDetail);
         if ($detail !== null) {
             $detail = mb_substr($detail, 0, 255);
         }
