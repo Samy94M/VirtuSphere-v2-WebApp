@@ -23,7 +23,7 @@ halten. Die Auflösung ist eine Staffelung, keine Einheitsfrist.
 
 Drei Fenster statt einer Frist:
 
-- **Sicherheits-Kategorien** (auth, users, credentials) → **365 Tage**
+- **Sicherheits-Kategorien** (Reiter „Sicherheit“, `VIRTUSPHERE_LOG_TABS[VIRTUSPHERE_LOG_TAB_SECURITY]`; bei der Entscheidung auth, users, credentials, seither auch directory und machine_api) → **365 Tage**
   (`VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS`).
 - **Alle übrigen `deploy_logs`-Kategorien** → **90 Tage**
   (`VIRTUSPHERE_LOG_RETENTION_DAYS`, Name beibehalten, Wert von 7 auf 90).
