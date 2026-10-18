@@ -19,8 +19,6 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_validate_vm_payload',
         'getVMs',
         'repo_fetch_related',
-        'deleteVM',
-        'vmListToDelete',
         'repo_bulk_delete_vms',
         'repo_bulk_reset_mecm_ids',
         'repo_audit_mecm_id_reset',

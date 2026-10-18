@@ -236,7 +236,9 @@ function deploy_remote_secret_side_channel(?callable $seam, string ...$arguments
     }
     try {
         $seam(...$arguments);
-    } catch (Throwable) {
-        // The job log and the heartbeat are side channels of the sweep, not part of it.
+    } catch (Throwable $exception) {
+        // The job log and the heartbeat are side channels of the sweep, not part of it, and a
+        // side channel never ends the work it describes: no rethrow, but one line says it failed.
+        error_log('[deploy-remote-secret] side channel failed: ' . $exception::class);
     }
 }

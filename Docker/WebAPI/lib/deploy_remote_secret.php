@@ -230,8 +230,11 @@ function deploy_remote_secret_record_attempt(callable $connection, string $where
 {
     try {
         repo_execute($connection(), 'UPDATE deploy_remote_secret_files SET last_attempt_at = NOW(6), lease_until = NULL WHERE ' . $where, $types, $params);
-    } catch (Throwable) {
+    } catch (Throwable $exception) {
         // Only the order of the next sweep depends on it; the row itself stays either way.
+        // The UPDATE is a standalone statement (no enclosing transaction), so a deadlock
+        // rolls back only this statement and the release must still finish its diagnosis.
+        error_log('[deploy-remote-secret] attempt time not recorded: ' . $exception::class);
     }
 }
 

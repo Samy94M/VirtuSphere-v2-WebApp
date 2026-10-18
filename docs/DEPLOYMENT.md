@@ -226,7 +226,6 @@ VirtuSphere writes runtime logs into host-mounted directories so troubleshooting
 
 - Application error handler log: `Docker/WebAPI/logs/error.log` maps to `/var/www/html/logs/error.log`.
 - PHP engine log: `Docker/WebAPI/logs/php-error.log` maps to `/var/www/html/logs/php-error.log` through `Docker/php/conf.d/zz-virtusphere.ini`.
-- Legacy repository failure log: `Docker/WebAPI/logs/fail.log`.
 - nginx access/error logs: stdout/stderr of the webserver container, retained by Docker as five files of at most 10 MiB each (`docker compose logs webserver`).
 
 The global handler in `Docker/WebAPI/lib/errors.php` is installed before EnvBoot completes. Web errors render a full internal error page with a short reference ID, while CLI errors print the same reference to STDERR and exit non-zero. The handler also appends the full context and stack trace to `error.log`; when the database boot path is healthy it records an `error [ref] ...` row in `deploy_logs` for the portal log view.

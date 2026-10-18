@@ -6,6 +6,7 @@ require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/auth_rate_limit.php';
 require_once __DIR__ . '/directory_auth.php';
 require_once __DIR__ . '/headers.php';
+require_once __DIR__ . '/log_redaction.php';
 
 function auth_login_directory(mysqli $db, string $username, string $password, int $attemptId = 0): array
 {
@@ -66,7 +67,7 @@ function auth_login_directory(mysqli $db, string $username, string $password, in
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY,
             'reason' => 'invalid credentials',
-            'username' => audit_snippet($username, 191),
+            'username' => virtusphere_log_login_name($username),
         ]);
 
         return ['ok' => false, 'reason' => 'invalid'];

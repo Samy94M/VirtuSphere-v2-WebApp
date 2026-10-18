@@ -30,7 +30,15 @@ const VIRTUSPHERE_REDACTED_MARK = '[redacted]';
  */
 const VIRTUSPHERE_REDACTED_KEYS =
     'access_token|refresh_token|auth_token|api_key|apikey|client_secret|private_key|' .
-    'password|passwd|pwd|secret|token';
+    'password|passwd|passphrase|pass|pwd|secret|token|app_key|ssh_key';
+
+/**
+ * Keys that name a credential only in a few spellings. `credential=<id>` and
+ * `credentials=<count>` are how the project's own progress lines report an id or
+ * a count, so these keys redact a value only when it is not a plain number (see
+ * the pattern in virtusphere_redact_log_text()).
+ */
+const VIRTUSPHERE_REDACTED_CREDENTIAL_KEYS = 'credentials?';
 
 /**
  * Credential-bearing HEADER names, in both the wire spelling and the `HTTP_*`
@@ -45,6 +53,18 @@ function virtusphere_redact_log_text(string $text): string
     if ($text === '') {
         return '';
     }
+
+    // A PEM block spans lines, so it is taken as a whole before the line-oriented
+    // patterns. A block that was cut off before its END line is taken to the end
+    // of the text, because the key body is what must not survive.
+    $withoutKeys = preg_replace(
+        '/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)/',
+        VIRTUSPHERE_REDACTED_MARK,
+        $text
+    );
+    $text = is_string($withoutKeys)
+        ? $withoutKeys
+        : (str_contains($text, 'PRIVATE KEY-----') ? VIRTUSPHERE_REDACTED_MARK : $text);
 
     // Headers first, and through a callback, because the auth scheme is worth
     // keeping and a plain replacement cannot decide whether one is present.
@@ -80,6 +100,9 @@ function virtusphere_redact_log_text(string $text): string
         // and consuming the `>` as the value, so a second pass over an already
         // redacted PHP array produced `"api_key" =[redacted] [redacted]`.
         '/(["\']?(?:' . $keys . ')["\']?\s*(?:=>|:|=(?!>))\s*)' . $skip . '(?:"[^"]*"|\'[^\']*\'|[^,;)}\]\s]+)/i',
+        // A credential key takes its value only when the value is not a plain
+        // number: `credential=5` names an id and `credentials=2` a count.
+        '/(["\']?(?:' . VIRTUSPHERE_REDACTED_CREDENTIAL_KEYS . ')["\']?\s*(?:=>|:|=(?!>))\s*)(?!\d+(?![\w.]))' . $skip . '(?:"[^"]*"|\'[^\']*\'|[^,;)}\]\s]+)/i',
     ];
 
     foreach ($patterns as $pattern) {
@@ -107,4 +130,20 @@ function virtusphere_log_text_bytes(string $text, int $maxBytes): string
     }
 
     return mb_strcut($text, 0, $maxBytes, 'UTF-8');
+}
+
+/**
+ * The audit value for a typed login name (LG-11). The name field takes whatever
+ * was typed, and a password pasted into it would otherwise stay in the trail for
+ * a year, readable by every users.manage holder. A value that does not look like
+ * a user name is replaced by its length; the failed attempt itself is still logged.
+ */
+function virtusphere_log_login_name(string $typed): string
+{
+    $length = mb_strlen($typed, 'UTF-8');
+    if ($length > 64 || preg_match('/^[\p{L}\p{Nd}._@\\\\-]+$/u', $typed) !== 1) {
+        return '<unusual input, ' . $length . ' characters>';
+    }
+
+    return $typed;
 }

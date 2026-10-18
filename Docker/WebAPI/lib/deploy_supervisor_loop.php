@@ -59,8 +59,7 @@ function deploy_supervisor_main(array $argv): int
     try {
         $store->acquire();
     } catch (DeploySupervisorLockException $exception) {
-        deploy_supervisor_say('cannot acquire the lifetime lock: '
-            . virtusphere_redact_log_text($exception->getMessage()));
+        deploy_supervisor_say('cannot acquire the lifetime lock: ' . $exception->getMessage());
 
         return 1;
     }
@@ -78,8 +77,7 @@ function deploy_supervisor_main(array $argv): int
         $stateReadable = false;
         $state = deploy_supervisor_initial_state();
         $state['phase'] = VIRTUSPHERE_SUPERVISOR_PHASE_MANUAL;
-        deploy_supervisor_say('durable state is unavailable; replacement starts are blocked: '
-            . virtusphere_redact_log_text($exception->getMessage()));
+        deploy_supervisor_say('durable state is unavailable; replacement starts are blocked: ' . $exception->getMessage());
     }
 
     while (true) {
@@ -107,8 +105,7 @@ function deploy_supervisor_main(array $argv): int
                 $stateDirty = false;
             } catch (DeploySupervisorStateException $exception) {
                 $persisted = false;
-                deploy_supervisor_say('durable state write failed; replacement starts are blocked: '
-                    . virtusphere_redact_log_text($exception->getMessage()));
+                deploy_supervisor_say('durable state write failed; replacement starts are blocked: ' . $exception->getMessage());
             }
         }
 
@@ -202,9 +199,13 @@ function deploy_supervisor_apply(DeploySupervisorProcess $process, array $decisi
     return false;
 }
 
+/**
+ * Every line of the supervisor goes through here, so the redaction is here too (LG-24):
+ * a caller that forgot it would otherwise write an exception message unredacted.
+ */
 function deploy_supervisor_say(string $message): void
 {
-    fwrite(STDERR, '[deploy-supervisor] ' . $message . "\n");
+    fwrite(STDERR, '[deploy-supervisor] ' . virtusphere_redact_log_text($message) . "\n");
 }
 
 /** @return array{once:bool,sleep:int} */

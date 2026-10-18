@@ -159,26 +159,6 @@ function repo_allowed_columns(object|array $source, array $allowed): array
     return $values;
 }
 
-function repo_log_failure(string $message): void
-{
-    $message = virtusphere_redact_log_text($message);
-    $log = dirname(__DIR__, 2) . '/logs/fail.log';
-    $dir = dirname($log);
-    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-        error_log('[repo_log_failure] Cannot create log directory: ' . $dir);
-        return;
-    }
-    if (!is_writable($dir)) {
-        error_log('[repo_log_failure] Log directory is not writable: ' . $dir);
-        return;
-    }
-
-    $written = file_put_contents($log, $message . PHP_EOL, FILE_APPEND | LOCK_EX);
-    if ($written === false) {
-        error_log('[repo_log_failure] Cannot write log file: ' . $log);
-    }
-}
-
 function repo_insert_from_values(mysqli $db, string $table, array $values): int
 {
     if ($values === []) {

@@ -139,3 +139,98 @@ function virtusphere_rotate_one_log(string $path, string $logDir, int $maxBytes,
 
     return true;
 }
+
+/**
+ * Admits an unhandled error to error.log and the audit trail once per error class
+ * and hour (LG-16). One bug hit by every request would otherwise write the full
+ * block and the audit row thousands of times and exceed the rotation cap within
+ * its cycle. The first occurrence of a class in an hour is admitted; later ones in
+ * that hour are counted in logs/error-storm.json and write nothing. The caller
+ * still shows the reference to the user for every occurrence.
+ *
+ * It fails open: when the state cannot be opened, locked or read, the occurrence
+ * is admitted, because losing the diagnosis is worse than a longer log.
+ */
+function virtusphere_error_storm_admits(string $errorClass, ?string $statePath = null, ?string $hour = null): bool
+{
+    $statePath ??= virtusphere_log_dir() . DIRECTORY_SEPARATOR . 'error-storm.json';
+    $hour ??= date('YmdH');
+
+    $handle = @fopen($statePath, 'c+');
+    if ($handle === false) {
+        return true;
+    }
+    // The php, deploy-worker and maintenance-worker containers share logs/; a file one of
+    // them created must stay writable for the others, or the throttle silently fails open.
+    virtusphere_try_chmod($statePath, 0666, 0006);
+
+    try {
+        if (!flock($handle, LOCK_EX)) {
+            return true;
+        }
+        $raw = stream_get_contents($handle);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+
+        // Only the current hour is kept, so the file holds one entry per class seen
+        // in this hour and cannot grow with the history of errors.
+        $state = [];
+        if (is_array($decoded)) {
+            foreach ($decoded as $class => $entry) {
+                if (is_array($entry) && ($entry['hour'] ?? null) === $hour) {
+                    $state[(string) $class] = ['hour' => $hour, 'suppressed' => (int) ($entry['suppressed'] ?? 0)];
+                }
+            }
+        }
+
+        $admitted = !isset($state[$errorClass]);
+        if ($admitted) {
+            $state[$errorClass] = ['hour' => $hour, 'suppressed' => 0];
+        } else {
+            $state[$errorClass]['suppressed']++;
+        }
+
+        rewind($handle);
+        ftruncate($handle, 0);
+        fwrite($handle, (string) json_encode($state, JSON_UNESCAPED_SLASHES));
+        fflush($handle);
+
+        return $admitted;
+    } catch (Throwable) {
+        return true;
+    } finally {
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+}
+
+/**
+ * Whether this failed poll starts an outage (LG-15). The health endpoint keeps no
+ * state between requests, so an outage is remembered in a flag file: the first
+ * failed poll creates it and returns true, and the caller writes its one line;
+ * later polls return false until virtusphere_outage_ends() removes the flag on the
+ * first healthy answer. A flag that cannot be created (the directory is not
+ * writable) returns true on every poll, so the diagnosis is kept rather than lost.
+ */
+function virtusphere_outage_begins(string $flagPath): bool
+{
+    if (is_file($flagPath)) {
+        return false;
+    }
+
+    $handle = @fopen($flagPath, 'x');
+    if ($handle === false) {
+        // A concurrent poll may have created the flag between the check and the open.
+        return !is_file($flagPath);
+    }
+    fclose($handle);
+
+    return true;
+}
+
+/** Removes an outage flag set by virtusphere_outage_begins(); a missing flag is nothing to do. */
+function virtusphere_outage_ends(string $flagPath): void
+{
+    if (is_file($flagPath)) {
+        @unlink($flagPath);
+    }
+}

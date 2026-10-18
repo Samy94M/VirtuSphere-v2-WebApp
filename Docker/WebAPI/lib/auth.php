@@ -153,7 +153,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
             'reason' => 'account is locked',
-            'username' => audit_snippet($username, 191),
+            'username' => virtusphere_log_login_name($username),
         ], (int) $user['id']);
         return ['ok' => false, 'reason' => 'locked'];
     }
@@ -194,7 +194,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', $user ? (int) $user['id'] : null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
             'reason' => $reason,
-            'username' => audit_snippet($username, 191),
+            'username' => virtusphere_log_login_name($username),
         ], $user ? (int) $user['id'] : null);
 
         return ['ok' => false, 'reason' => 'invalid'];

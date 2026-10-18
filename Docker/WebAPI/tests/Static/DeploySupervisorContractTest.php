@@ -287,4 +287,19 @@ final class DeploySupervisorContractTest extends TestCase
             }
         }
     }
+
+    /**
+     * LG-24: every supervisor line is redacted in the one function that writes it,
+     * so no caller can forget it. The callers no longer redact themselves.
+     */
+    public function testEverySupervisorLineIsRedactedWhereItIsWritten(): void
+    {
+        $loop = $this->repoSource('Docker/WebAPI/lib/deploy_supervisor_loop.php');
+
+        self::assertStringContainsString(
+            "fwrite(STDERR, '[deploy-supervisor] ' . virtusphere_redact_log_text(\$message) . \"\\n\");",
+            $loop
+        );
+        self::assertStringNotContainsString('virtusphere_redact_log_text($exception', $loop, 'a caller redacts again: the sink owns it');
+    }
 }

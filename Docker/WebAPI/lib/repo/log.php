@@ -177,10 +177,10 @@ function log_category_url(string $category): string
 /**
  * Prunes deploy_logs on two windows (ADR-0026). Rows of the security categories
  * (derived from the security tab, never restated here) keep $securityDays;
- * every other row keeps $generalDays. The general delete matches by NOT IN, so
- * a category outside today's taxonomy (pre-taxonomy rows, a category later
- * removed from the enum) decays on the general window instead of surviving
- * forever; deploy_logs.category is NOT NULL, so NOT IN never sees NULL.
+ * every other row keeps $generalDays. Each window is one DELETE with no LIMIT and
+ * no batching, so the time window is its only bound (LG-17). The general delete
+ * matches by NOT IN, so a category outside today's taxonomy (pre-taxonomy rows, a
+ * category later removed) decays on the general window (the column is NOT NULL).
  *
  * @return int Total rows purged across both windows.
  */

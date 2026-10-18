@@ -82,37 +82,3 @@ function repo_fetch_related(mysqli $connection, string $sql, int $vmId): array
 
     return repo_fetch_all($stmt->get_result());
 }
-
-function deleteVM($vmList, $connection)
-{
-    return vmListToDelete($vmList, $connection);
-}
-
-function vmListToDelete($vmList, $connection)
-{
-    if (empty($vmList) || !is_iterable($vmList)) {
-        return false;
-    }
-
-    // Legacy wire contract: batch-or-nothing, failures answer false (see create).
-    try {
-        return repo_transaction($connection, static function () use ($connection, $vmList): bool {
-            foreach ($vmList as $vm) {
-                $id = repo_id(repo_object_get($vm, 'Id', repo_object_get($vm, 'id')));
-                if ($id > 0) {
-                    $missionId = (int) (repo_scalar($connection, 'SELECT mission_id FROM deploy_vms WHERE id = ? LIMIT 1', 'i', [$id]) ?? 0);
-                    if ($missionId <= 0 || repo_deploy_lock_mission($connection, $missionId) === null) {
-                        throw new RuntimeException('VM delete skipped: VM or mission not found.');
-                    }
-                    repo_vm_network_assert_scope_idle($connection, $missionId, [$id]);
-                    repo_execute($connection, 'DELETE FROM deploy_vms WHERE id = ? AND mission_id = ?', 'ii', [$id, $missionId]);
-                }
-            }
-
-            return true;
-        });
-    } catch (Throwable $exception) {
-        repo_log_failure('vmListToDelete rollback: ' . $exception->getMessage());
-        return false;
-    }
-}

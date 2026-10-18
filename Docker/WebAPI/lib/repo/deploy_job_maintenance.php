@@ -16,9 +16,12 @@ require_once __DIR__ . '/deploy_create_identity.php';
  * Unattended maintenance: log and system-job retention, the stale-job reaper and
  * the orphaned-VM convergence sweep.
  *
- * These run from the maintenance worker without an operator, so each one is
- * bounded, uses SKIP LOCKED where it competes with live work, and states in the
- * row it writes what was observed rather than a cause it did not establish.
+ * These run from the maintenance worker without an operator. The retention purges
+ * are bounded by their time window and by nothing else: each is one DELETE with no
+ * LIMIT and no batching (LG-17), so the first purge after a long gap is one long
+ * statement. The reaper and the convergence sweep use SKIP LOCKED where they
+ * compete with live work, and the row each one writes states what was observed
+ * rather than a cause it did not establish.
  */
 
 /**

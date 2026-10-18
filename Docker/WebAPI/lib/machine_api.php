@@ -208,10 +208,11 @@ function machine_api_report_token_ok(mysqli $db, ?string $presented): bool
 }
 
 /**
- * Writes to error_log always, and to the portal audit log at most once per
- * throttle window per (category, event code, scope), so a misbehaving sync loop cannot
- * flood the log while another client's first occurrence still gets through.
- * Never throws into the wire path.
+ * Writes to the portal audit log and to error_log together, at most once per
+ * throttle window per (category, event code, scope), so a misbehaving sync loop
+ * cannot flood the log while another client's first occurrence still gets through.
+ * A throttled occurrence writes nothing; an admitted one writes both the container
+ * line and the deploy_logs row. Never throws into the wire path.
  *
  * The predecessor had five defects, each one blocking before a second channel
  * could be put on it, and all five are what this signature and

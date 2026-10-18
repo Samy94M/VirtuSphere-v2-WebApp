@@ -8,6 +8,7 @@ require_once __DIR__ . '/../lib/db.php';
 require_once __DIR__ . '/../lib/deploy_constants.php';
 require_once __DIR__ . '/../lib/deploy_service_health.php';
 require_once __DIR__ . '/../lib/log_redaction.php';
+require_once __DIR__ . '/../lib/log_rotation.php';
 
 virtusphere_send_security_headers();
 header('Content-Type: application/json; charset=utf-8');
@@ -41,6 +42,24 @@ function health_logs_ok(): bool
         && $phpLogDir !== '' && is_dir($phpLogDir) && is_writable($phpLogDir);
 }
 
+/** The flag that marks an outage of one kind; it lives with the other logs. */
+function health_flag_path(string $kind): string
+{
+    return dirname(__DIR__) . '/logs/health-' . $kind . '.flag';
+}
+
+/**
+ * One line per outage, not per poll (LG-15): a monitor that polls every few seconds
+ * would otherwise fill the log during a single outage. The line is written by the
+ * first failed poll only; the flag is cleared by the first healthy answer.
+ */
+function health_outage_line(string $kind, string $line): void
+{
+    if (virtusphere_outage_begins(health_flag_path($kind))) {
+        error_log($line);
+    }
+}
+
 /**
  * Whether the deploy service is healthy, read from the ONE snapshot every
  * other surface reads (Etappe 13R).
@@ -61,10 +80,12 @@ function health_workers_ok(mysqli $db): bool
     try {
         $availability = deploy_service_health_snapshot($db)['availability'];
     } catch (Throwable $exception) {
-        error_log('[health] deploy snapshot unavailable: ' . $exception::class);
+        health_outage_line('snapshot', '[health] deploy snapshot unavailable: ' . $exception::class . ': '
+            . virtusphere_redact_log_text($exception->getMessage()));
 
         return false;
     }
+    virtusphere_outage_ends(health_flag_path('snapshot'));
 
     return !in_array(
         $availability,
@@ -76,6 +97,7 @@ function health_workers_ok(mysqli $db): bool
 try {
     $db = db();
     health_statement_row($db, 'SELECT 1 AS ok');
+    virtusphere_outage_ends(health_flag_path('db'));
 
     // 200, including for `degraded`. This endpoint is an ADDRESS PROBE before it
     // is a health report: the MECM installer, every client script's
@@ -97,7 +119,7 @@ try {
         'php' => HEALTH_PHP_VERSION,
     ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $exception) {
-    error_log('[health] ' . $exception::class . ': ' . virtusphere_redact_log_text($exception->getMessage()));
+    health_outage_line('db', '[health] ' . $exception::class . ': ' . virtusphere_redact_log_text($exception->getMessage()));
     http_response_code(503);
     echo json_encode([
         'status' => 'error',

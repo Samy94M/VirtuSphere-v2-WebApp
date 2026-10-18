@@ -17,7 +17,14 @@ function auth_rehash_password_if_needed(mysqli $db, int $userId, string $plainte
         $stmt = $db->prepare('UPDATE deploy_users SET password = ? WHERE id = ?');
         $stmt->bind_param('si', $hash, $userId);
         $stmt->execute();
-    } catch (Throwable) {
-        // Deliberately silent: the user is signed in either way.
+    } catch (Throwable $exception) {
+        // This write runs inside the login's repo_transaction(). A deadlock (1213) or a
+        // lock wait timeout (1205) has discarded or left in doubt that transaction, so
+        // the caller must see it rather than commit the rest of the login without this step.
+        if ($exception instanceof mysqli_sql_exception && in_array($exception->getCode(), [1213, 1205], true)) {
+            throw $exception;
+        }
+        // Anything else leaves the old hash in place, which stays valid; one line says so.
+        error_log('[auth] password rehash skipped: ' . $exception::class);
     }
 }

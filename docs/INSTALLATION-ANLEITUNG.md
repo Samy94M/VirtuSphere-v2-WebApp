@@ -163,7 +163,6 @@ Persistente Logs liegen hier:
 ```text
 Docker/WebAPI/logs/error.log
 Docker/WebAPI/logs/php-error.log
-Docker/WebAPI/logs/fail.log
 nginx access/error: docker compose logs webserver
 MECM-Server: %ProgramFiles%\VirtuSphere\Logs\yyyy-MM-dd_<komponente>.log
 Windows-Client: C:\Program Files\VirtuSphere\Logs\yyyy-MM-dd_<phase>.log

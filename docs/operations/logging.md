@@ -31,7 +31,20 @@ Persistente Anwendungsdiagnose bleibt davon getrennt:
 
 - `Docker/WebAPI/logs/error.log`: globaler PHP-Fehlerhandler mit Referenz-ID
 - `Docker/WebAPI/logs/php-error.log`: PHP-Engine-Fehler
-- `Docker/WebAPI/logs/fail.log`: Legacy-Repositoryfehler
+- `Docker/WebAPI/logs/error-storm.json`: Zähler des Stau-Schutzes für `error.log` (LG-16)
+- `Docker/WebAPI/logs/health-*.flag`: Ausfallmarker des Health-Endpunkts (LG-15)
+
+Ein fataler Fehler landet bewusst in zwei Kanälen. `php-error.log` ist die Zeile
+der PHP-Engine und entsteht auch dann, wenn der Fehlerhandler nicht mehr läuft; sie
+ist die Rückfallebene. `error.log` enthält den Block mit der Referenz-ID, die der
+Operator auf der Fehlerseite sieht, und die Audit-Zeile. Für eine gemeldete
+Referenz ist also `error.log` die richtige Datei.
+
+Unbehandelte Fehler werden je Fehlerklasse und Stunde einmal vollständig geschrieben
+und auditiert. Spätere Vorkommen derselben Klasse in derselben Stunde schreiben
+nichts; sie werden nur in `error-storm.json` gezählt. Die Referenz sieht der
+Benutzer trotzdem bei jedem Vorkommen. Der Health-Endpunkt schreibt pro Ausfall eine
+Zeile und entfernt seinen Marker bei der ersten gesunden Antwort.
 
 Diese Dateien sind Hostzustand, werden nicht in das Config-/DB-Backup aufgenommen
 und benötigen auf einem Linux-Host die in der Go-live-Anleitung dokumentierten

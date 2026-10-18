@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/log_redaction.php';
+require_once __DIR__ . '/log_rotation.php';
 
 function virtusphere_install_error_handlers(): void
 {
@@ -26,19 +27,16 @@ function virtusphere_install_error_handlers(): void
         virtusphere_handle_uncaught_error($exception);
     });
 
+    // Two channels for a fatal, on purpose (LG-27): the engine's own line lands in
+    // logs/php-error.log (zz-virtusphere.ini) even when this handler never runs; this
+    // block adds the reference, error.log and the audit row. docs/operations/logging.md.
     register_shutdown_function(static function (): void {
         $error = error_get_last();
         if ($error === null || !in_array((int) $error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
             return;
         }
-
-        virtusphere_handle_uncaught_error(new ErrorException(
-            (string) $error['message'],
-            0,
-            (int) $error['type'],
-            (string) $error['file'],
-            (int) $error['line']
-        ), true);
+        virtusphere_handle_uncaught_error(new ErrorException((string) $error['message'], 0,
+            (int) $error['type'], (string) $error['file'], (int) $error['line']), true);
     });
 }
 
@@ -204,14 +202,16 @@ function virtusphere_handle_uncaught_error(Throwable $exception, bool $fromShutd
     $refId = virtusphere_error_reference();
     $context = virtusphere_error_context($exception, $refId, $fromShutdown);
 
-    try {
-        virtusphere_write_error_log($context);
-    } catch (Throwable $logException) {
-        virtusphere_fallback_error_log('Error log write failed: ' . $logException->getMessage());
-        virtusphere_fallback_error_log($context);
-    }
+    if (virtusphere_error_storm_admits($exception::class)) {
+        try {
+            virtusphere_write_error_log($context);
+        } catch (Throwable $logException) {
+            virtusphere_fallback_error_log('Error log write failed: ' . $logException->getMessage());
+            virtusphere_fallback_error_log($context);
+        }
 
-    virtusphere_audit_uncaught_error($exception, $refId);
+        virtusphere_audit_uncaught_error($exception, $refId);
+    }
 
     if (PHP_SAPI === 'cli') {
         fwrite(STDERR, virtusphere_cli_error_text($exception, $refId));

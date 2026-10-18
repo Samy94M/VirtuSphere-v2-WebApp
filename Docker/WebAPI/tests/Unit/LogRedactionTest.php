@@ -50,6 +50,16 @@ final class LogRedactionTest extends TestCase
             'private key field' => ['private_key=' . $s],
             'dsn in an exception' => ['PDOException: SQLSTATE[28000] mysql:host=db;password=' . $s . ';db=v'],
             'refresh token' => ['refresh_token=' . $s . '&grant_type=refresh'],
+            // LG-12: the spellings the key list did not catch before.
+            'ansible ssh pass' => ['ansible_ssh_pass: ' . $s],
+            'bare pass key' => ['pass=' . $s . ' host=esxi1'],
+            'passphrase' => ['passphrase=' . $s],
+            'app key' => ['APP_KEY=' . $s],
+            'ssh key' => ['ssh_key: ' . $s],
+            'credential with a name value' => ['credential: ' . $s],
+            'credentials quoted' => ['credentials="' . $s . '"'],
+            'pem private key block' => ["-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA" . $s . "\nmore\n-----END RSA PRIVATE KEY-----"],
+            'pem block cut off' => ["ssh failed\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk" . $s],
         ];
     }
 
@@ -154,5 +164,64 @@ final class LogRedactionTest extends TestCase
     {
         $repaired = virtusphere_log_text_bytes("valid\xB1\x31invalid", 64);
         self::assertTrue(mb_check_encoding($repaired, 'UTF-8'));
+    }
+
+    /**
+     * LG-12 false positives, checked against the project's own log lines: a
+     * credential id or count is a number, and words that only contain a key
+     * name ("passed", "password_min_length") are not key-value pairs.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function linesThatMustStayReadable(): array
+    {
+        return [
+            'progress line with a credential id' => ['[1/1] RUN ansible-full-test credential=5'],
+            'cli count of credentials' => ['[2/2] PASS re-encrypt (applied): credentials=2 directory=1 already=0'],
+            'pass verdict word' => ['[2/2] PASS re-encrypt (dry run)'],
+            'a password policy setting' => ['password_min_length=8 passed=yes'],
+            'a plain sentence with the word password' => ['the password policy is configured for the portal'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('linesThatMustStayReadable')]
+    public function testTheProjectsOwnLogLinesAreNotMangled(string $line): void
+    {
+        self::assertSame($line, virtusphere_redact_log_text($line));
+    }
+
+    /** A PEM block is removed whole, and the lines around it are kept. */
+    public function testAPrivateKeyBlockIsRemovedWhole(): void
+    {
+        $redacted = virtusphere_redact_log_text(
+            "before the key\n-----BEGIN OPENSSH PRIVATE KEY-----\n" . self::SENTINEL . "\nbody2\n-----END OPENSSH PRIVATE KEY-----\nafter the key"
+        );
+
+        self::assertStringNotContainsString(self::SENTINEL, $redacted);
+        self::assertStringNotContainsString('body2', $redacted);
+        self::assertStringContainsString('before the key', $redacted);
+        self::assertStringContainsString('after the key', $redacted);
+    }
+
+    /** LG-11: a name that looks like a user name is kept as typed. */
+    public function testAUserNameIsLoggedAsTyped(): void
+    {
+        foreach (['alice', 'anna.mueller@example.lan', 'Jürgen_01', 'svc-backup', 'a\\b', str_repeat('a', 64)] as $name) {
+            self::assertSame($name, virtusphere_log_login_name($name), 'a plausible name was replaced: ' . $name);
+        }
+    }
+
+    /**
+     * LG-11: anything else is replaced by its length, so a password typed into
+     * the name field never reaches the trail. The length is in characters.
+     */
+    public function testAnythingElseIsReplacedByItsLength(): void
+    {
+        self::assertSame('<unusual input, 9 characters>', virtusphere_log_login_name('bob smith'));
+        self::assertSame('<unusual input, 9 characters>', virtusphere_log_login_name('Passw0rd!'));
+        self::assertSame('<unusual input, 65 characters>', virtusphere_log_login_name(str_repeat('a', 65)));
+        self::assertSame('<unusual input, 0 characters>', virtusphere_log_login_name(''));
+        self::assertSame('<unusual input, 3 characters>', virtusphere_log_login_name("a\nb"));
+        self::assertStringNotContainsString(self::SENTINEL, virtusphere_log_login_name('x' . self::SENTINEL . ' y'));
     }
 }

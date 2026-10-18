@@ -234,7 +234,7 @@ function mission_import_read_upload(mixed $file): array
  * property of the signature rather than of caller discipline.
  *
  * One line, through error_log(), so it lands in the configured PHP error log.
- * Not repo_log_failure() and not an audit row: deploy_logs answers successful
+ * Not an audit row: deploy_logs answers successful
  * functional changes and security events, and a second diagnostic channel for
  * the same fault means neither of them is complete.
  */
