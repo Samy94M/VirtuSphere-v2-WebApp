@@ -253,10 +253,9 @@ und den Verteilhinweisen dieses Abschlusses. Dauer und Zähler bleiben dem
 abgeschlossenen Scan zugeordnet. Ohne vollständige DP-Zahlen pro Paket zeigt
 das Portal keine DP-Quote; fehlende oder gekürzte Hinweise bestätigen keinen
 Verteilerfolg. Details erklärt die Hilfe auf der Systemstatus-Seite.
-Ein Alt-Skript, das nur `Send-VsHeartbeat` sendet, liefert keinen belegten
-Laufzustand oder Abschluss. `Send-VsHeartbeat`
-bleibt für Rückwärtskompatibilität erhalten, wird von den aktuellen Skripten aber
-nicht mehr genutzt.
+Ein Alt-Skript, das nur Heartbeats sendet, liefert keinen belegten Laufzustand
+oder Abschluss. Die Funktion `Send-VsHeartbeat` ist aus `VirtuSphere-Common.ps1`
+entfernt; die aktuellen Skripte senden ausschließlich `reportRun`.
 Ein späterer Legacy-Heartbeat verwirft die Zuordnung eines früheren Abschlusses:
 sein Empfang setzt weder Ergebnis, Zeitpunkt, Zähler noch Detail dieses
 Abschlusses fort.
@@ -322,7 +321,6 @@ Common stellt bereit:
 | `Resolve-VsInterval` | löst das konfigurierte Intervall **einmal** auf, für den Sleep und den Report: Untergrenze je Aufgabe aus `$script:VsIntervalBounds`, Obergrenze aus dem Wire-Contract, und eine WARN-Zeile, wenn geklemmt wurde. Die Statusseite färbt die Zeile nach dem *gemeldeten* Takt, also darf keine Aufgabe in einem anderen laufen |
 | `New-VsRunId` / `Send-VsRunReport` | Ergebnisbericht an `mecm_report.php?action=reportRun`: eigene `run_id` je Lauf, `started`/`completed`, Ergebnis, Fehlerkategorie, quellenspezifisches Summary; zentrale Detail-Redaction und Byte-Kürzung vor dem Versand. Ein fehlgeschlagener Bericht bricht den eigentlichen Lauf nie ab; Zustellfehler werden lokal gedrosselt protokolliert |
 | `Get-VsProviderMachine` / `Get-VsMecmSiteHealth` | SMS-Provider ermitteln (Installerparameter → Registry `MECM_ProviderMachine` → lokale WMI-Erkennung → CMSite-PSDrive → Computername) und `SMS_SummarizerSiteStatus` per CIM für exakt den konfigurierten Site-Code abfragen; fehlende, mehrdeutige oder unlesbare Zeilen sind `unknown`, die reine Statusabbildung bleibt `0→ok`, `1→warning`, `2→fail`, sonst `unknown` (ohne MECM per Pester testbar) |
-| `Send-VsHeartbeat` | Fire-and-forget-POST an `mecm_report.php?action=heartbeat` (5 s Timeout, Fehler bewusst still); nur noch für Rückwärtskompatibilität, die aktuellen Skripte senden `reportRun` (ADR-0018) |
 | `ConvertTo-VsNormalizedMac` | MAC kanonisch: Großbuchstaben, Doppelpunkte; verhindert falsche Konfliktmeldungen zwischen ESXi- und MECM-Schreibweisen. **Existiert dreimal** (hier, im Client-Common, als `virtusphere_normalize_mac()` in PHP) — die drei laufen auf drei Maschinen und teilen sich keine Datei, aber `Docker/WebAPI/tests/fixtures/mac-vectors.json` als gemeinsame Wahrheit: wer eine ändert, ohne die anderen nachzuziehen, bricht den Build (ADR-0029) |
 | `Read-VsPackageConfig` / `Get-VsSupersededNamePattern` | `config.json` eines Paketordners lesen und validieren; Muster zum Erkennen namensähnlicher Alt-Versionen (`^Name-<version>$`, exakt). Das Muster ist kein Eigentumsnachweis und autorisiert keine Löschung. Liegen hier und nicht im Autoimporter, weil der eine Endlosschleife ist und dort kein Test hinkommt |
 | `Get-VsSiteCode` / `Initialize-VsCmSite` | Site-Code dreistufig ermitteln (WMI-Namespace → CMSite-PSDrive → Registry-Fallback), ConfigurationManager-Modul laden, ins Site-Drive wechseln |
@@ -574,14 +572,20 @@ ist entfernt, ADR-0018 Amendment 2026-07-23):
 
 - `MECM_ProviderMachine`: SMS-Provider-Rechner (Installerparameter
   `-ProviderMachine`). Leer lassen, wenn der Provider lokal auf dem Site-Server
-  liegt; die Aufgabe ermittelt ihn dann selbst.
+  liegt; die Aufgabe ermittelt ihn dann selbst. Die geplanten Aufgaben arbeiten
+  über den Provider auf dem Site-Server (gemessen: lokaler Provider); dieser Wert
+  wird nur für die Site-Health-Abfrage und die Prüfung der Verteilungskopien
+  gelesen.
 - `SiteHealthIntervalSeconds`: Berichtsintervall (Installerparameter
   `-SiteHealthIntervalSeconds`), Standard 300, erlaubt 60–3600.
 
-**Berechtigungen (Remote-Provider):** Das Computerkonto des Site-Servers ist
-standardmäßig Mitglied der SMS-Admins-Gruppe auf jedem Provider; liegt der Provider
-lokal und läuft die Aufgabe als SYSTEM, ist keine Zusatzkonfiguration nötig. Liegt
-der Provider entfernt, braucht das Computerkonto die Provider-Berechtigung, und der
+**Berechtigungen (Remote-Provider):** Die Aufgaben sprechen den Provider auf dem
+Site-Server an. Nur wenn `MECM_ProviderMachine` auf einen anderen Rechner zeigt,
+gilt Folgendes für die Site-Health-Abfrage und die Prüfung der Verteilungskopien.
+Das Computerkonto des Site-Servers ist standardmäßig Mitglied der SMS-Admins-Gruppe
+auf jedem Provider; liegt der Provider lokal und läuft die Aufgabe als SYSTEM, ist
+keine Zusatzkonfiguration nötig. Liegt der Provider entfernt, braucht das
+Computerkonto die Provider-Berechtigung, und der
 Transport muss erreichbar sein: `Get-CimInstance -ComputerName` nutzt WinRM/WSMan,
 klassisches WMI braucht DCOM (RPC 135 plus dynamische Ports, Remote Activation). Ein
 fehlendes Recht wird als `provider_access_denied` (grau) gemeldet, nicht als „MECM
@@ -819,4 +823,7 @@ setzbaren Namen gibt.
   genutzte Geräte werden **in der MECM-Konsole** gelöscht (siehe
   `docs/operations/mecm-integration.md`).
 - **Sync hängt?** Im Portal den *Systemstatus* öffnen; dort steht je
-  Quelle eine Klartext-Handlungsanweisung.
+  Quelle eine Klartext-Handlungsanweisung. Hängt der Task, zuerst die laufende
+  Instanz beenden (Aufgabenplanung: *Beenden*, oder `Stop-ScheduledTask`) und
+  dann starten. Ein Start, solange die Instanz noch läuft, verwirft die Einstellung
+  `IgnoreNew` still.

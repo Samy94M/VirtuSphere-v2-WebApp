@@ -708,29 +708,3 @@ Describe 'Client-Reportkorrelation bleibt additiv zum unveraenderten JSON' {
     }
 }
 
-Describe 'Server-Heartbeat bleibt unveraendert und erzeugt keinen Zusatzverkehr' {
-    It 'sendet genau einen Legacy-Heartbeat mit unveraendertem Body und Korrelationsheader' {
-        $captured = Invoke-InLoggingScope -Path $script:ServerCommon -Body {
-            $script:calls = @()
-            function Invoke-RestMethod {
-                param($Uri, $Method, $ContentType, $Body, $Headers, $TimeoutSec)
-                $script:calls += [pscustomobject]@{
-                    Uri = $Uri; Method = $Method; Body = $Body; Headers = $Headers; TimeoutSec = $TimeoutSec
-                }
-            }
-            $config = [pscustomobject]@{ Scheme = 'http'; WebApi = 'virtusphere.lan:8021'; ReportToken = '' }
-            Send-VsHeartbeat -Config $config -Source 'device-sync' -IntervalSeconds 60 -Detail 'still-compatible'
-            , @($script:calls)
-        }
-        $captured.Count | Should -Be 1
-        $captured[0].Uri | Should -Be 'http://virtusphere.lan:8021/mecm_report.php?action=heartbeat'
-        $captured[0].Method | Should -Be 'POST'
-        $captured[0].TimeoutSec | Should -Be 5
-        $body = [Text.Encoding]::UTF8.GetString([byte[]]$captured[0].Body) | ConvertFrom-Json
-        ($body.PSObject.Properties.Name | Sort-Object) | Should -Be @('detail', 'interval_seconds', 'source')
-        $body.source | Should -Be 'device-sync'
-        $body.interval_seconds | Should -Be 60
-        $body.detail | Should -Be 'still-compatible'
-        $captured[0].Headers['X-VirtuSphere-Correlation'] | Should -Match '^[0-9a-f]{16}$'
-    }
-}

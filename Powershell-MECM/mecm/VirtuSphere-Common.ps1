@@ -420,34 +420,12 @@ function Invoke-VsApi {
     Invoke-RestMethod @params
 }
 
-# Fire-and-forget Heartbeat (ADR-0018): darf den Sync nie ausbremsen.
-function Send-VsHeartbeat {
-    param(
-        [Parameter(Mandatory)]$Config,
-        # ValidateSet spiegelt den Wire-Contract von mecm_report.php
-        # (gueltige source-Werte) - die PHP-Seite ist die SSoT.
-        [Parameter(Mandatory)][ValidateSet('device-sync', 'packages-sync', 'autoimporter')][string]$Source,
-        [Parameter(Mandatory)][int]$IntervalSeconds,
-        [string]$Detail = ''
-    )
-
-    try {
-        $body = @{ source = $Source; interval_seconds = $IntervalSeconds }
-        if ($Detail) { $body['detail'] = $Detail }
-        Invoke-VsApi -Config $Config -Path '/mecm_report.php?action=heartbeat' -Method POST -Body $body -TimeoutSec 5 | Out-Null
-    } catch {
-        # Bewusst still - Sichtbarkeit entsteht serverseitig durch das Ausbleiben
-        # (die Ampel im Systemstatus wird rot). Der Grund bleibt aber
-        # per -Debug abrufbar: ein Heartbeat, der wegen eines falschen Tokens
-        # abgelehnt wird, sieht von aussen genauso aus wie ein Netzausfall.
-        Write-Debug ('Heartbeat nicht zugestellt: {0}' -f (Get-VsErrorDetail -ErrorRecord $_))
-    }
-}
-
 # ===========================================================================
 # Run-Report-Kanal (ADR-0018): mecm_report.php?action=reportRun
 # ----------------------------------------------------------------------------
-# Loest die Legacy-Heartbeats ab. Die drei Sync-Tasks melden Start UND Ergebnis
+# Loest die frueheren Heartbeats ab (Send-VsHeartbeat ist entfernt: kein Aufrufer
+# mehr, und die Serverseite nimmt action=heartbeat nur noch fuer Alt-Skripte an).
+# Die drei Sync-Tasks melden Start UND Ergebnis
 # jedes Laufs, der neue Site-Health-Task nur das Ergebnis. Die PHP-Seite
 # (lib/run_report.php, lib/constants.php) ist die SSoT des Wire-Contracts; die
 # Tabellen und Muster hier sind order-exakte Spiegel und duerfen nicht driften.
@@ -464,11 +442,17 @@ $script:VsRunIntervalMinSeconds = 5       # VIRTUSPHERE_HEARTBEAT_INTERVAL_MIN_S
 $script:VsRunIntervalMaxSeconds = 3600    # VIRTUSPHERE_HEARTBEAT_INTERVAL_MAX_SECONDS
 $script:VsRunDurationMsMax       = 86400000 # VIRTUSPHERE_RUN_DURATION_MS_MAX
 $script:VsRunScriptVersionMaxChars = 32   # VIRTUSPHERE_RUN_SCRIPT_VERSION_MAX_CHARS
-# Detail wird VOR dem Senden in BYTES gekuerzt, damit das 8-KB-Body-Limit
-# (VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES = 8192) nie bricht. 2048 Bytes lassen
-# auch bei \uXXXX-Expansion (PS 5.1 escaped Nicht-ASCII) reichlich Luft; der
-# Server kappt zusaetzlich bei 1024 Zeichen.
+# Das Detail wird in zwei Schritten gekuerzt. Erst auf 2048 UTF-8-Klartextbytes
+# (gewoehnlicher Text bleibt damit vollstaendig). Dann beim Senden anhand der
+# SERIALISIERTEN Laenge des ganzen Bodys, damit VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES
+# (= 8192, Spiegel lib/constants.php) nie ueberschritten wird: sonst antwortet der
+# Server 413 und der Bericht geht verloren. Windows PowerShell 5.1 escaped <, >, &
+# und ' als \u00XX (je 6 Bytes) sowie " und \ mit Backslash; Nicht-ASCII (z.B.
+# Umlaute, Euro) bleibt unescaped und geht 1:1 als UTF-8 durch. 2048 Bytes lauter Hochzeichen
+# wuerden daher rund 12 KB, deshalb kappt Limit-VsReportDetailToBody. Der Server
+# kappt zusaetzlich bei 1024 Zeichen.
 $script:VsReportDetailMaxBytes = 2048
+$script:VsClientEventBodyMaxBytes = 8192  # VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES
 
 # ---------------------------------------------------------------------------
 # Build-Kennung und Installationsmanifest
@@ -1884,6 +1868,42 @@ function Get-VsReportDetail {
     return (Get-VsTruncatedUtf8 -Text $clean -MaxBytes $script:VsReportDetailMaxBytes)
 }
 
+# Die Bytes, die der Body mit diesem Detail tatsaechlich auf die Leitung bringt:
+# dieselbe Serialisierung wie Invoke-VsApi (ConvertTo-VsUtf8JsonBytes, Depth 6).
+function Get-VsRunReportBodyBytes {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Body, [string]$Detail)
+    $probe = [ordered]@{}
+    foreach ($key in @($Body.Keys)) { $probe[$key] = $Body[$key] }
+    $probe['detail'] = $Detail
+    return (ConvertTo-VsUtf8JsonBytes -Value $probe -Depth 6).Length
+}
+
+# Kuerzt das Detail so, dass der GESENDETE Body VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES
+# nicht ueberschreitet. Gemessen wird die serialisierte Form (' & Co. zaehlen
+# sechs Bytes), nicht der Klartext. Gesucht wird der laengste Praefix per binaerer
+# Suche; die Serialisierung waechst mit jedem Zeichen, daher ist das Verfahren
+# eindeutig. Ein Surrogatpaar wird nicht halbiert. Liefert $null, wenn nichts passt.
+function Limit-VsReportDetailToBody {
+    param([string]$Detail, [Parameter(Mandatory)][System.Collections.IDictionary]$Body)
+    if ([string]::IsNullOrEmpty($Detail)) { return $null }
+    $max = $script:VsClientEventBodyMaxBytes
+    if ((Get-VsRunReportBodyBytes -Body $Body -Detail $Detail) -le $max) { return $Detail }
+
+    $lo = 0
+    $hi = $Detail.Length
+    while ($lo -lt $hi) {
+        $mid = [int][Math]::Floor(($lo + $hi + 1) / 2)
+        if ((Get-VsRunReportBodyBytes -Body $Body -Detail $Detail.Substring(0, $mid)) -le $max) {
+            $lo = $mid
+        } else {
+            $hi = $mid - 1
+        }
+    }
+    if ($lo -gt 0 -and [char]::IsHighSurrogate($Detail[$lo - 1])) { $lo-- }
+    if ($lo -le 0) { return $null }
+    return $Detail.Substring(0, $lo)
+}
+
 # Baut das Summary-Objekt einer Quelle aus einer Hashtable: nur Whitelist-
 # Schluessel, Zaehler als nicht-negative Ganzzahl, die zwei String-Felder als
 # String. Liefert $null, wenn nichts uebrig bleibt (ein leeres Objekt lehnt der
@@ -2008,13 +2028,15 @@ function Send-VsRunReport {
             $body['duration_ms'] = $d
         }
 
-        $detailClean = Get-VsReportDetail -Text $Detail -Token $Config.ReportToken
-        if ($null -ne $detailClean) { $body['detail'] = $detailClean }
-
         if ($Summary) {
             $summaryClean = New-VsRunSummary -Source $Source -Values $Summary
             if ($null -ne $summaryClean) { $body['summary'] = $summaryClean }
         }
+
+        # Zuletzt, weil die Laenge des Detail-Anteils vom uebrigen Body abhaengt.
+        $detailClean = Get-VsReportDetail -Text $Detail -Token $Config.ReportToken
+        $detailClean = Limit-VsReportDetailToBody -Detail $detailClean -Body $body
+        if ($null -ne $detailClean) { $body['detail'] = $detailClean }
     }
 
     try {
@@ -2137,7 +2159,12 @@ function Get-VsMecmSiteHealth {
         ErrorCategory = 'query_failed'
     }
 
+    # Jeder Fehlerpfad schreibt EINE WARN-Zeile mit seiner Ursache. Der Report
+    # traegt nur die Kategorie; ohne diese Zeile stand nirgends, warum "unknown".
+    # Die Ausnahme-Meldung bleibt lokal (Get-VsErrorDetail, gekuerzt) und geht nie
+    # an das Portal.
     if ([string]::IsNullOrWhiteSpace($siteCode)) {
+        Write-VsLog -Level WARN -Message 'Site-Health: kein Site-Code konfiguriert (SiteCodeFallback fehlt); ohne Abfrage unknown.'
         return $result
     }
 
@@ -2155,14 +2182,21 @@ function Get-VsMecmSiteHealth {
         $all = @(Get-CimInstance @cimParams)
         $matching = @($all | Where-Object { [string]$_.SiteCode -eq $siteCode })
         if ($matching.Count -ne 1) {
+            Write-VsLog -Level WARN -Message ('Site-Health: SMS_SummarizerSiteStatus lieferte {0} Zeilen fuer Site {1} (erwartet genau 1); unknown.' -f $matching.Count, $siteCode)
             $result.ErrorCategory = 'query_failed'
             return $result
         }
         $status = $matching[0]
-        if (-not $status.PSObject.Properties['Status']) { return $result }
+        if (-not $status.PSObject.Properties['Status']) {
+            Write-VsLog -Level WARN -Message ('Site-Health: Spalte Status fehlt in der Antwort fuer Site {0}; unknown.' -f $siteCode)
+            return $result
+        }
 
         $raw = 0
-        if (-not [int]::TryParse([string]$status.Status, [ref]$raw)) { return $result }
+        if (-not [int]::TryParse([string]$status.Status, [ref]$raw)) {
+            Write-VsLog -Level WARN -Message ('Site-Health: Status fuer Site {0} ist keine ganze Zahl und nicht lesbar; unknown.' -f $siteCode)
+            return $result
+        }
         $mapped = Get-VsSiteHealthOutcome -RawStatus $raw
         $result.RawStatus     = $raw
         $result.Outcome       = $mapped.Outcome
@@ -2171,6 +2205,7 @@ function Get-VsMecmSiteHealth {
     } catch {
         $result.Outcome       = 'unknown'
         $result.ErrorCategory = Get-VsProviderFaultCategory -ErrorRecord $_
+        Write-VsLog -Level WARN -Message ('Site-Health: Abfrage fuer Site {0} fehlgeschlagen ({1}): {2}' -f $siteCode, $result.ErrorCategory, (Get-VsErrorDetail -ErrorRecord $_))
         return $result
     }
 }
@@ -2212,7 +2247,11 @@ function Read-VsPackageConfig {
 
     $context = Split-Path $Folder -Leaf
     try {
-        $cfg = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+        # Ohne -Encoding liest Windows PowerShell 5.1 eine BOM-lose UTF-8-Datei als
+        # ANSI: aus einem Umlaut werden zwei Zeichen (Mojibake), und der Fehler landet
+        # in DeployTo und ProjectName. -Encoding UTF8 liest auch eine Datei mit BOM
+        # korrekt (das BOM wird entfernt).
+        $cfg = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
         Write-VsLog -Level WARN -Context $context -Message 'config.json ist kein gueltiges JSON - uebersprungen.'
         return $null

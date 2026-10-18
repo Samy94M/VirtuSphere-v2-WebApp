@@ -16,7 +16,7 @@
 #  - Change-Detection ueber SHA-256-Manifest des files-Verzeichnisses -
 #    Voll-Scan nur bei Inhaltsaenderung, sonst Millisekunden-Leerlauf
 #  - LogonRequirementType korrigiert (WhetherOrNotUserLoggedOn)
-#  - kein Clear-Host (laeuft ohne Konsole), Heartbeat je Durchlauf
+#  - kein Clear-Host (laeuft ohne Konsole), Ergebnisbericht (reportRun) je Durchlauf
 #
 # Hinweis: Der verwaltete Satz aus <PackagesRoot>\Package_Vorlage (install.ps1
 # plus versioniertes reporting-Buendel) heilt sich bei jedem Scan selbst. Die
@@ -281,9 +281,22 @@ while ($true) {
                         # Scan wuerde sie ueber den else-Zweig faelschlich als "vorhanden"
                         # behandeln und den Teilzustand nie heilen. Daher die unvollstaendige
                         # Application entfernen, damit sie beim naechsten Lauf neu entsteht.
-                        Write-VsLog -Level WARN -Context $fullName -Message ('Deployment-Type-Erstellung fehlgeschlagen, entferne unvollstaendige Application fuer erneuten Versuch: {0}' -f $_.Exception.Message)
-                        Remove-CMApplication -Name $fullName -Force -ErrorAction SilentlyContinue | Out-Null
-                        throw
+                        # Der Originalfehler wird festgehalten: die Entfernung kann ihren
+                        # eigenen Fehler werfen, und der Lauf meldet weiter den ersten.
+                        $originalError = $_
+                        Write-VsLog -Level WARN -Context $fullName -Message ('Deployment-Type-Erstellung fehlgeschlagen, entferne unvollstaendige Application fuer erneuten Versuch: {0}' -f $originalError.Exception.Message)
+                        try {
+                            Remove-CMApplication -Name $fullName -Force -ErrorAction Stop | Out-Null
+                        } catch {
+                            # Die unvollstaendige Application bleibt dann bestehen. Der
+                            # Originalfehler wird unten unveraendert weitergereicht und
+                            # beendet den Scan; der Zaehler haelt den Befund fest, falls
+                            # der Abbruch spaeter nicht mehr den ganzen Lauf beendet.
+                            Write-VsLog -Level WARN -Context $fullName -Message ('Entfernen der unvollstaendigen Application fehlgeschlagen - sie bleibt bestehen: {0}' -f $_.Exception.Message)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_cleanup_failed' -Target $fullName
+                        }
+                        throw $originalError
                     }
 
                     # New-CMApplication/DT can return before the provider's
@@ -580,21 +593,34 @@ while ($true) {
                 # Laeuft auch fuer bestehende Apps und heilt damit fruehere
                 # Teilfehler (App vorhanden, aber Collection/Deployment fehlt).
                 if ("$($cfg.generateOwnDeviceColletion)" -eq 'true') {
-                    $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
+                    # Die Abfrage laeuft mit -ErrorAction Stop und ohne lokalen Catch. Ein
+                    # Providerfehler ist kein "keine Collection": frueher wurde nach dem
+                    # stillen Fehler trotzdem angelegt, und der Lauf meldete
+                    # collection_missing. Jetzt geht der Fehler in den Scan-Catch und wird
+                    # dort als mecm_unavailable gemeldet (Phase scan; der Rohtext bleibt
+                    # lokal im Log). Die Anlage hat einen eigenen Catch, dessen MECM-Text
+                    # in der bestehenden WARN-Zeile steht.
+                    $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction Stop
                     if (-not $collection) {
-                        New-CMDeviceCollection -Name $fullName -LimitingCollectionName 'All Systems' -Comment $script:VsManagedPackageCollectionMarker -ErrorAction SilentlyContinue | Out-Null
-                        Start-Sleep -Seconds 2
-                        $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction SilentlyContinue
-                    }
-                    # New-CMDeviceCollection scheitert unter SilentlyContinue lautlos.
-                    # Ohne diese Pruefung lief der Block weiter, das Deployment
-                    # scheiterte an der fehlenden Collection, und der offene Punkt
-                    # hiess package_deploy_failed: die Ursache stand unter dem
-                    # falschen Namen, und der Operator suchte am falschen Ende.
-                    if (-not $collection) {
-                        Write-VsLog -Level WARN -Context $fullName -Message ("Device-Collection '{0}' konnte nicht angelegt werden - Deployment uebersprungen, Wiederholung im naechsten Durchlauf." -f $fullName)
-                        $scanWarnings++
-                        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $fullName -Collection $fullName
+                        # Jeder Fehlschlag zaehlt im Catch selbst: dort steht der MECM-Text,
+                        # und der offene Punkt ist collection_missing. Ohne Collection gibt
+                        # es nichts zu deployen.
+                        $createFailed = $false
+                        try {
+                            New-CMDeviceCollection -Name $fullName -LimitingCollectionName 'All Systems' -Comment $script:VsManagedPackageCollectionMarker -ErrorAction Stop | Out-Null
+                            Start-Sleep -Seconds 2
+                            $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction Stop
+                        } catch {
+                            $createFailed = $true
+                            Write-VsLog -Level WARN -Context $fullName -Message ("Device-Collection '{0}' konnte nicht angelegt werden - Deployment uebersprungen, Wiederholung im naechsten Durchlauf: {1}" -f $fullName, $_.Exception.Message)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $fullName -Collection $fullName
+                        }
+                        if (-not $collection -and -not $createFailed) {
+                            Write-VsLog -Level WARN -Context $fullName -Message ("Device-Collection '{0}' ist nach dem Anlegen nicht lesbar - Deployment uebersprungen, Wiederholung im naechsten Durchlauf." -f $fullName)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target $fullName -Collection $fullName
+                        }
                     }
                     # Das Verschieben wird WIEDERHOLT, nicht nur beim Anlegen versucht.
                     # Es lief unter SilentlyContinue genau einmal; scheiterte es, lag

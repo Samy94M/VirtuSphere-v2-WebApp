@@ -622,6 +622,35 @@ Describe 'Read-VsPackageConfig' {
         (Read-Config -Folder $dir).ProjectName | Should -Be 'Firefox-ESR'
     }
 
+    It 'liest eine BOM-lose UTF-8-config.json mit Umlauten unverfaelscht (PS 5.1 ohne -Encoding: Mojibake)' {
+        # Die Datei wird ohne BOM geschrieben. Ohne -Encoding wuerde PS 5.1 sie als
+        # ANSI lesen und aus dem Umlaut zwei Zeichen machen; DeployTo und
+        # ProjectName tragen den Fehler dann in die Collection und den Anwendungsnamen.
+        # Der Umlaut wird ueber [char] gebaut, damit diese Datei ASCII bleibt.
+        $ue = [char]0x00FC
+        $name = 'B' + $ue + 'ro-Paket'
+        $collection = 'B' + $ue + 'ro Sammlung'
+        $json = '{"ProjectName":"' + $name + '","version":"1.0","DeployTo":"' + $collection + '"}'
+        $dir = Join-Path $script:PkgRoot 'buero-utf8-ohne-bom'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir 'config.json'), $json, (New-Object System.Text.UTF8Encoding($false)))
+        $cfg = Read-Config -Folder $dir
+        $cfg.ProjectName | Should -BeExactly $name
+        $cfg.DeployTo | Should -BeExactly $collection
+    }
+
+    It 'liest dieselbe Datei mit UTF-8-BOM weiterhin korrekt (das BOM bleibt nicht im Wert)' {
+        $ue = [char]0x00FC
+        $name = 'B' + $ue + 'ro-Paket'
+        $json = '{"ProjectName":"' + $name + '","version":"1.0"}'
+        $dir = Join-Path $script:PkgRoot 'buero-utf8-mit-bom'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir 'config.json'), $json, (New-Object System.Text.UTF8Encoding($true)))
+        $cfg = Read-Config -Folder $dir
+        $cfg.ProjectName | Should -BeExactly $name
+        $cfg.ProjectName.Length | Should -Be $name.Length
+    }
+
     It 'rejects invalid JSON types or ambiguous names: <why>' -ForEach @(
         @{ why = 'numeric version'; json = '{"ProjectName":"Agent","version":0.2}' },
         @{ why = 'array version'; json = '{"ProjectName":"Agent","version":["0.2"]}' },
@@ -1102,5 +1131,82 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
                 param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
             }).Count | Should -Be 0
         }
+    }
+}
+
+Describe 'Duplizierte Helfer bleiben gleich (SD-08, SD-09)' {
+    BeforeAll {
+        # Kein Loader laedt beide Kopien in einen Scope, also vergleicht der Test den
+        # Quelltext des Funktionsrumpfs per AST. Eine Aenderung an einer Kopie laesst
+        # den Test rot werden, bis auch die andere nachgezogen ist.
+        function Get-FunctionBodyText {
+            param([string]$Path, [string]$Name)
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+            $found = @($ast.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Name
+            }, $true))
+            if ($found.Count -ne 1) { throw "$Name in $Path nicht eindeutig ($($found.Count))." }
+            ($found[0].Body.Extent.Text -replace "`r", '')
+        }
+        $script:PackagingFile = Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientPackaging.ps1'
+        $script:InstallerFile = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'install-VirtuSphere-MECM.ps1'
+    }
+
+    It 'Get-VsDangerousFileSystemAclEntries: Common und ClientPackaging haben denselben Rumpf' {
+        Get-FunctionBodyText -Path $script:MecmCommon -Name 'Get-VsDangerousFileSystemAclEntries' |
+            Should -Be (Get-FunctionBodyText -Path $script:PackagingFile -Name 'Get-VsDangerousFileSystemAclEntries') -Because 'ein Fix an nur einer Kopie darf nicht unbemerkt bleiben'
+    }
+
+    It 'Get-VsDeclaredScriptInteger: Installer und ClientPackaging haben denselben Rumpf' {
+        Get-FunctionBodyText -Path $script:InstallerFile -Name 'Get-VsDeclaredScriptInteger' |
+            Should -Be (Get-FunctionBodyText -Path $script:PackagingFile -Name 'Get-VsDeclaredScriptInteger') -Because 'ein Fix an nur einer Kopie darf nicht unbemerkt bleiben'
+    }
+}
+
+Describe 'Grenzen der Fehlerdetails und der Reporter-IPC sind auf beiden Seiten gleich (SD-10, SD-11)' {
+    BeforeAll {
+        # Die Grenzen stehen als Literale im Quelltext. Der Test liest sie aus beiden
+        # Seiten und vergleicht sie, statt eine Zahl festzuschreiben.
+        function Get-IntegerLiteralsAbove {
+            param([string]$Path, [string]$FunctionName, [int]$Above)
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+            $found = @($ast.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $FunctionName
+            }, $true))
+            if ($found.Count -ne 1) { throw "$FunctionName in $Path nicht eindeutig ($($found.Count))." }
+            # Bit-Masken (-band 0xC0, -eq 0x80) sind keine Grenzen und fallen heraus.
+            $literals = @($found[0].Body.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.ConstantExpressionAst] -and
+                $n.Value -is [int] -and $n.Value -gt $Above -and
+                -not ($n.Parent -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                      $n.Parent.Operator -in @([System.Management.Automation.Language.TokenKind]::Band, [System.Management.Automation.Language.TokenKind]::Ieq))
+            }, $true) | ForEach-Object { [int]$_.Value } | Sort-Object -Unique)
+            ,$literals
+        }
+        $script:ClientsDir = Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'clients'
+        $script:ReporterHostFile = Join-Path $script:ClientsDir 'VirtuSphere-Package-ReporterHost.ps1'
+        $script:PackageInstallerFile = Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage') 'install.ps1'
+    }
+
+    It 'Get-VsErrorDetail kappt die Fehlerdetails auf denselben Wert in Server- und Client-Common (512 Bytes)' {
+        $server = Get-IntegerLiteralsAbove -Path $script:MecmCommon -FunctionName 'Get-VsErrorDetail' -Above 1
+        $client = Get-IntegerLiteralsAbove -Path $script:ClientCommon -FunctionName 'Get-VsErrorDetail' -Above 1
+        @($server).Count | Should -BeGreaterThan 0 -Because 'sonst prueft der Test nichts'
+        # 512 Bytes fuer die JSON-Meldung, 200 Zeichen fuer die Nicht-JSON-Antwort.
+        ($server -join ',') | Should -Be '200,512'
+        ($client -join ',') | Should -Be ($server -join ',') -Because 'Server und Client kuerzen die Fehlerdetails gleich'
+    }
+
+    It 'die Reporter-IPC-Grenze ist auf Sender (Package_Vorlage) und Empfaenger (ReporterHost) gleich' {
+        $receiverText = Get-Content -LiteralPath $script:ReporterHostFile -Raw
+        $senderText = Get-Content -LiteralPath $script:PackageInstallerFile -Raw
+        $receiverLimit = [regex]::Match($receiverText, 'GetByteCount\(\$line\)\s*-gt\s*(\d+)').Groups[1].Value
+        $senderLimit = [regex]::Match($senderText, 'GetByteCount\(\$json\)\s*-gt\s*(\d+)').Groups[1].Value
+        $receiverLimit | Should -Not -BeNullOrEmpty -Because 'der Empfaenger muss seine Grenze pruefen'
+        $senderLimit | Should -Not -BeNullOrEmpty -Because 'der Sender muss seine Grenze pruefen'
+        $receiverLimit | Should -Be $senderLimit
+        $receiverLimit | Should -Be '16384'
     }
 }

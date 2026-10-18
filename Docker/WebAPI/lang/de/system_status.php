@@ -164,8 +164,8 @@ return [
     'source_mecm_site_health' => 'MECM Site-Health',
     'source_maintenance_worker' => 'Wartungsdienst (Portal)',
     'source_deploy_worker' => 'Bereitstellungsdienst (Portal)',
-    'action_device_sync' => 'Auf dem MECM-Server die Aufgabenplanung prüfen: Task „VirtuSphere MECM Devices Sync" muss laufen (ggf. neu starten).',
-    'action_packages_sync' => 'Auf dem MECM-Server die Aufgabenplanung prüfen: Task „VirtuSphere MECM Packages Sync" muss laufen (ggf. neu starten).',
+    'action_device_sync' => 'Prüfen Sie auf dem MECM-Server die Aufgabenplanung: Der Task „VirtuSphere MECM Devices Sync" muss laufen. Hängt er, beenden Sie ihn zuerst und starten ihn danach erneut.',
+    'action_packages_sync' => 'Prüfen Sie auf dem MECM-Server die Aufgabenplanung: Der Task „VirtuSphere MECM Packages Sync" muss laufen. Hängt er, beenden Sie ihn zuerst und starten ihn danach erneut.',
     'action_autoimporter' => 'Letzten Abschluss und Autoimporter-Tageslog prüfen. Eine offene DP-Verteilung kann trotz laufender Aufgabe bestehen; ein Neustart behebt sie nicht. Fehlen neue Logeinträge, die Aufgabe „VirtuSphere MECM Package Import" auf dem MECM-Server prüfen.',
     'action_maintenance_worker' => 'Interner Wartungsdienst läuft nicht: auf dem Portal-Server „docker compose ps" prüfen und den Dienst maintenance-worker neu starten.',
     // Ohne diesen Dienst bleibt jeder Auftrag auf „Wartend" stehen, auch der

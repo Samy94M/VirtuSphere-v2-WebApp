@@ -164,8 +164,8 @@ return [
     'source_mecm_site_health' => 'MECM site health',
     'source_maintenance_worker' => 'Maintenance service (portal)',
     'source_deploy_worker' => 'Deploy service (portal)',
-    'action_device_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Devices Sync" must be running (restart if needed).',
-    'action_packages_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Packages Sync" must be running (restart if needed).',
+    'action_device_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Devices Sync" must be running. If it hangs, end it first, then start it again.',
+    'action_packages_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Packages Sync" must be running. If it hangs, end it first, then start it again.',
     'action_autoimporter' => 'Check the last completion and the daily autoimporter log. DP distribution can remain open while the task is running; restarting does not resolve it. If no new log entries appear, check the "VirtuSphere MECM Package Import" task on the MECM server.',
     'action_maintenance_worker' => 'Internal maintenance service is not running: check "docker compose ps" on the portal host and restart the maintenance-worker service.',
     // Without this service every job stays "waiting", including the ESXi

@@ -85,8 +85,11 @@ while ($true) {
         if (-not [string]::IsNullOrWhiteSpace($health.Provider)) { $summary['provider'] = [string]$health.Provider }
         if ($null -ne $health.RawStatus) { $summary['raw_status'] = [int]$health.RawStatus }
 
+        # Bei unknown steht die Kategorie dahinter; die Ursache steht in der
+        # WARN-Zeile von Get-VsMecmSiteHealth (Common).
+        $outcomeText = if ($outcome -eq 'ok') { 'ok' } else { '{0} ({1})' -f $outcome, $category }
         Write-VsLog -Message ("Site {0} (Provider {1}): Status {2} -> {3}." -f `
-            $health.SiteCode, $health.Provider, $health.RawStatus, $outcome)
+            $health.SiteCode, $health.Provider, $health.RawStatus, $outcomeText)
     } catch {
         # Get-VsMecmSiteHealth faengt selbst; dieser Catch ist der Notnagel,
         # damit eine unerwartete Ausnahme die Schleife nie beendet.

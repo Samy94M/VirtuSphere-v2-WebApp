@@ -14,7 +14,7 @@
 #    gesendet (frueher leerte ein leerer Payload den Katalog serverseitig)
 #  - Change-Detection: gesendet wird nur bei geaendertem Katalog-Hash,
 #    zusaetzlich ein erzwungener Voll-Sync pro Stunde
-#  - Heartbeat je Durchlauf (Statusseite im Portal)
+#  - Ergebnisbericht (reportRun) je Durchlauf (Statusseite im Portal)
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Common.ps1"

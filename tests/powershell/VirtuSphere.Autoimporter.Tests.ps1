@@ -1608,3 +1608,173 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
         }
     }
 }
+
+Describe 'Autoimporter PS-22: Collection-Abfrage und -Anlage melden den MECM-Fehler' {
+    BeforeAll {
+        # Der Collection-Block des Scans, ohne die Endlosschleife. Er endet vor dem
+        # Zusatz-Deployment, und die Stubs ersetzen nur MECM und Logging.
+        $controller = Get-Content -LiteralPath $script:Importer -Raw
+        $blockStart = $controller.IndexOf('if ("$($cfg.generateOwnDeviceColletion)" -eq ''true'') {')
+        $blockEnd = $controller.IndexOf('# --- Zusatz-Deployment (Available)', [Math]::Max($blockStart, 0))
+        if ($blockStart -lt 0 -or $blockEnd -le $blockStart) { throw 'Collection-Block konnte nicht aus dem Autoimporter extrahiert werden.' }
+        $script:CollectionBlock = [scriptblock]::Create($controller.Substring($blockStart, $blockEnd - $blockStart))
+
+        function Invoke-CollectionBlockFixture {
+            param([Parameter(Mandatory)][ValidateSet('query-throws', 'create-throws', 'created')][string]$Scenario)
+            $fullName = 'Agent-1'
+            $cfg = [pscustomobject]@{ generateOwnDeviceColletion = 'true' }
+            $collectionOrgFolder = 'VirtuSphere_Collections'
+            $scanWarnings = 0
+            $causes = New-Object System.Collections.Generic.List[object]
+            $logs = New-Object System.Collections.Generic.List[string]
+            $calls = New-Object System.Collections.Generic.List[string]
+            $state = [pscustomobject]@{ Created = $false }
+
+            function Write-VsLog { param($Level, $Context, $Message) [void]$logs.Add([string]$Message) }
+            function Add-VsRunCause { param($Causes, $Cause, $Target, $Collection) [void]$Causes.Add([string]$Cause) }
+            function Start-Sleep { param($Seconds) }
+            function Get-CMDeviceCollection {
+                param($Name,$ErrorAction)
+                [void]$calls.Add('get|' + [string]$ErrorAction)
+                if ($Scenario -eq 'query-throws') { throw 'SMS Provider: Zugriff verweigert' }
+                if ($state.Created) { return [pscustomobject]@{ Name = $Name } }
+                return $null
+            }
+            function New-CMDeviceCollection {
+                param($Name,$LimitingCollectionName, $Comment, $ErrorAction)
+                [void]$calls.Add('new|' + [string]$ErrorAction)
+                if ($Scenario -eq 'create-throws') { throw 'SMS Provider: Collection-Name ist bereits reserviert' }
+                $state.Created = $true
+            }
+            function Test-VsInOrgFolder { param($Collection, $FolderPath) return $true }
+            function Move-CMObject { param($FolderPath, $ErrorAction) }
+            function Get-CMApplicationDeployment {
+                param($Name,$CollectionName, $ErrorAction)
+                [void]$calls.Add('deployment-get')
+                return @()
+            }
+            function New-CMApplicationDeployment {
+                param($Name,$CollectionName, $DeployAction, $DeployPurpose, $UserNotification, $ErrorAction)
+                [void]$calls.Add('deployment-new')
+            }
+
+            $thrown = $null
+            try {
+                & $script:CollectionBlock
+            } catch {
+                $thrown = $_
+            }
+            [pscustomobject]@{ Thrown = $thrown; Causes = $causes.ToArray(); Logs = $logs.ToArray(); Calls = $calls.ToArray() }
+        }
+    }
+
+    It 'eine fehlgeschlagene Abfrage legt nichts an und geht als Fehler in den Scan-Catch' {
+        $r = Invoke-CollectionBlockFixture -Scenario 'query-throws'
+        $r.Thrown | Should -Not -BeNullOrEmpty -Because 'ein Providerfehler darf nicht als "keine Collection" durchrutschen'
+        $r.Thrown.Exception.Message | Should -Match 'Zugriff verweigert'
+        $r.Calls | Should -Contain 'get|Stop'
+        $r.Calls | Should -Not -Contain 'new|Stop' -Because 'nach einem Abfragefehler darf keine Anlage versucht werden'
+        $r.Causes.Count | Should -Be 0 -Because 'die Ursache ist mecm_unavailable, keine collection_missing'
+        # Der Scan-Catch klassifiziert den Fehler als mecm_unavailable.
+        $category = Invoke-InFileScope -Path $script:MecmCommon -Arguments @(, $r.Thrown) -Body {
+            param($e) Get-VsSyncFailureCategory -Phase 'scan' -ErrorRecord $e
+        }
+        $category | Should -Be 'mecm_unavailable'
+    }
+
+    It 'eine fehlgeschlagene Anlage nennt den MECM-Fehlertext in der WARN-Zeile und die Ursache collection_missing' {
+        $r = Invoke-CollectionBlockFixture -Scenario 'create-throws'
+        $r.Thrown | Should -BeNullOrEmpty
+        $r.Calls | Should -Contain 'new|Stop'
+        ($r.Logs -join "`n") | Should -Match 'Collection-Name ist bereits reserviert'
+        ($r.Causes -join ',') | Should -Be 'collection_missing'
+        $r.Calls | Should -Not -Contain 'deployment-new' -Because 'ohne Collection gibt es kein Deployment'
+    }
+
+    It 'eine gelungene Anlage bleibt ohne Ursache und deployt mit -ErrorAction Stop' {
+        $r = Invoke-CollectionBlockFixture -Scenario 'created'
+        $r.Thrown | Should -BeNullOrEmpty
+        $r.Calls | Should -Contain 'new|Stop'
+        $r.Calls | Should -Contain 'deployment-new'
+        $r.Causes.Count | Should -Be 0
+    }
+
+    It 'Abfrage und Anlage der Collection laufen ohne SilentlyContinue' {
+        # Nur diese beiden Aufrufe. Die Existenzpruefung des Deployments bleibt
+        # bewusst tolerant und ist nicht Gegenstand dieses Punkts.
+        $script:CollectionBlock.ToString() | Should -Not -Match 'CMDeviceCollection[^\r\n]*SilentlyContinue' -Because 'SilentlyContinue hat die Ursache verschluckt'
+        $script:CollectionBlock.ToString() | Should -Match 'Get-CMDeviceCollection -Name \$fullName -ErrorAction Stop'
+    }
+}
+
+Describe 'Autoimporter PS-33: das Entfernen einer unvollstaendigen Application meldet seinen Fehlschlag' {
+    BeforeAll {
+        # Der try/catch um Add-CMScriptDeploymentType, ueber den AST gesucht.
+        # Der innerste try: sein Rumpf ist genau der eine Aufruf. Der aeussere Scan-try
+        # enthaelt denselben Aufruf, aber auch den ganzen Lauf.
+        $tryAst = (Get-Ast -Path $script:Importer).FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.TryStatementAst] -and
+            $n.Body.Statements.Count -eq 1 -and
+            $n.Body.Extent.Text -match 'Add-CMScriptDeploymentType @dtParams'
+        }, $true) | Select-Object -First 1
+        if ($null -eq $tryAst) { throw 'Deployment-Type-try konnte nicht gefunden werden.' }
+        $script:DtTryText = $tryAst.Extent.Text
+        $script:DtTryBlock = [scriptblock]::Create($script:DtTryText)
+
+        function Invoke-DtTryFixture {
+            param([Parameter(Mandatory)][ValidateSet('remove-fails', 'remove-ok')][string]$Mode)
+            $fullName = 'Agent-1'
+            $dtParams = @{}
+            $logs = New-Object System.Collections.Generic.List[string]
+            $state = [pscustomobject]@{ Removed = $false }
+            $scanWarnings = 0
+            $causes = New-Object System.Collections.Generic.List[object]
+
+            function Write-VsLog { param($Level, $Context, $Message) [void]$logs.Add([string]$Message) }
+            function Add-VsRunCause { param($Causes, $Cause, $Target, $Collection) [void]$Causes.Add([string]$Cause) }
+            function Add-CMScriptDeploymentType {
+                [CmdletBinding()] param()
+                throw 'Deployment-Type-Fehler: Name bereits vergeben'
+            }
+            function Remove-CMApplication {
+                [CmdletBinding()] param([string]$Name, [switch]$Force)
+                if ($Mode -eq 'remove-fails') { throw 'Remove-Fehler: Zugriff verweigert' }
+                $state.Removed = $true
+            }
+
+            $thrown = $null
+            # Dot-Source: der Block zaehlt in den Scope des Fixtures, nicht in eine Kopie.
+            try {
+                . $script:DtTryBlock
+            } catch {
+                $thrown = $_
+            }
+            [pscustomobject]@{ Thrown = $thrown; Logs = $logs.ToArray(); Removed = $state.Removed; Causes = $causes.ToArray(); Warnings = $scanWarnings }
+        }
+    }
+
+    It 'das Entfernen laeuft mit -ErrorAction Stop und ohne SilentlyContinue' {
+        $script:DtTryText | Should -Match 'Remove-CMApplication -Name \$fullName -Force -ErrorAction Stop'
+        $script:DtTryText | Should -Not -Match 'Remove-CMApplication[^\r\n]*SilentlyContinue'
+    }
+
+    It 'ein fehlgeschlagenes Entfernen steht als eigene WARN-Zeile mit dem MECM-Text' {
+        $r = Invoke-DtTryFixture -Mode 'remove-fails'
+        $r.Thrown | Should -Not -BeNullOrEmpty
+        $r.Thrown.Exception.Message | Should -Match 'Name bereits vergeben' -Because 'der Originalfehler darf nicht vom Entfernen ueberschrieben werden'
+        @($r.Logs | Where-Object { $_ -match 'Entfernen der unvollstaendigen Application fehlgeschlagen' -and $_ -match 'Zugriff verweigert' }).Count | Should -Be 1
+        $r.Removed | Should -BeFalse
+        # Der Fehlschlag zaehlt und hat eine Ursache, damit er nicht nur im Log steht.
+        $r.Warnings | Should -Be 1
+        ($r.Causes -join ',') | Should -Be 'package_cleanup_failed'
+    }
+
+    It 'ein gelungenes Entfernen schreibt keine zweite WARN-Zeile und reicht den Originalfehler durch' {
+        $r = Invoke-DtTryFixture -Mode 'remove-ok'
+        $r.Thrown.Exception.Message | Should -Match 'Name bereits vergeben'
+        $r.Removed | Should -BeTrue
+        @($r.Logs | Where-Object { $_ -match 'Entfernen der unvollstaendigen' }).Count | Should -Be 0
+        $r.Warnings | Should -Be 0
+        $r.Causes.Count | Should -Be 0
+    }
+}

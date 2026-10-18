@@ -196,8 +196,10 @@ Beispiel ohne DNS:
     -DpGroupName 'DP Group - VirtuSphere-Applications'
 ```
 
-Liegt der SMS Provider auf einem anderen Rechner, zusätzlich
-`-ProviderMachine '<PROVIDER-HOST>'` angeben. Den Installer ohne
+Die geplanten Aufgaben arbeiten über den SMS Provider auf dem Site-Server selbst
+(gemessen: lokaler Provider). `-ProviderMachine '<PROVIDER-HOST>'` wird nur für
+die Site-Health-Abfrage und die Prüfung der Verteilungskopien verwendet; liegt der
+Provider auf einem anderen Rechner, dafür angeben. Den Installer ohne
 `-ReportToken` starten und den vorbereiteten Token ausschließlich in der
 verdeckten Eingabe einfügen. Ein leerer Wert ist erlaubt. Der Installer ist
 idempotent und darf nach Korrekturen erneut ausgeführt werden; ein vorhandener
@@ -490,6 +492,8 @@ Machine-API → Zugriff auf das Portal (eingehend)), `401` bei falschem Token.
 
 Die aktuellen Skripte senden statt eines Heartbeats einen **Ergebnisbericht**
 (`action=reportRun`, additiv; siehe „MECM-Server: Installation & Aufgabenplanung").
+Die Common-Funktion `Send-VsHeartbeat` ist entfernt, weil kein Skript sie mehr
+aufruft; es gibt keinen Heartbeat je Scan mehr, nur noch den Ergebnisbericht.
 `heartbeat` bleibt für Alt-Skripte kompatibel, erscheint im Portal dann aber gelb
 als „Legacy: Ergebnis nicht bestätigt".
 
@@ -569,7 +573,7 @@ rein anzeigend und best effort bleiben.
 | `DeviceSyncIntervalSeconds` | Intervall Device-Sync (DWord, Standard 10, erlaubt 5–3600) |
 | `PackagesSyncIntervalSeconds` | Intervall Packages-Sync (DWord, Standard 60, erlaubt 10–3600) |
 | `ImporterIntervalSeconds` | Intervall Autoimporter (DWord, Standard 60, erlaubt 30–3600) |
-| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health (neu; leer = lokale Ermittlung) |
+| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health und die Prüfung der Verteilungskopien (neu; leer = lokale Ermittlung) |
 | `SiteHealthIntervalSeconds` | Intervall Site Health (DWord, neu, Standard 300, erlaubt 60–3600) |
 | `MECM_SiteCode` | erkannter Site-Code (nur wenn automatisch ermittelbar) |
 | `SetupCompleted` | Zeitstempel der erfolgreichen Erstinstallation |
@@ -953,8 +957,12 @@ Wichtige Härtungen gegenüber den Altskripten:
   Das lokale Tageslog zeigt den Fortschritt. Ein Alt-Skript, das nur Heartbeats
   sendet, erscheint gelb als „Legacy: Ergebnis nicht bestätigt".
 
-**Task neu starten** (MECM-Server): Aufgabenplanung öffnen → Task unter
-`\` auswählen → *Ausführen*. Oder per PowerShell:
+**Task neu starten** (MECM-Server): Zuerst den Task beenden, dann starten. Ein
+Neustart ohne vorheriges Beenden funktioniert bei einem hängenden Task nicht:
+Die Einstellung `IgnoreNew` verwirft den Start, solange die Instanz noch läuft.
+In der Aufgabenplanung den Task unter `\` auswählen, *Beenden* wählen und danach
+*Ausführen*. Oder per PowerShell:
+`Stop-ScheduledTask -TaskName 'VirtuSphere MECM Devices Sync'`, danach
 `Start-ScheduledTask -TaskName 'VirtuSphere MECM Devices Sync'`.
 
 Vor einem manuellen Start zuerst das Setup-Tageslog unter
@@ -982,14 +990,19 @@ keine Portal-Settings:
 
 - `MECM_ProviderMachine`: SMS-Provider-Rechner. Leer lassen, wenn der Provider
   lokal auf dem Site-Server liegt (der Normalfall); die Aufgabe ermittelt ihn dann
-  selbst.
+  selbst. Die geplanten Aufgaben arbeiten über den Provider auf dem Site-Server;
+  dieser Wert wird nur für die Site-Health-Abfrage und die Prüfung der
+  Verteilungskopien gelesen.
 - `SiteHealthIntervalSeconds`: Berichtsintervall, Standard 300, erlaubt 60–3600.
   Wie die drei Sync-Intervalle: außerhalb der Spanne lehnt der Installer ab, ein
   Registry-Wert von Hand wird beim Start geklemmt und protokolliert.
 
-**Remote-Provider.** Das Computerkonto des Site-Servers ist standardmäßig Mitglied
-der SMS-Admins-Gruppe auf jedem Provider; liegt der Provider lokal und läuft die
-Aufgabe als SYSTEM, ist keine Zusatzkonfiguration nötig. Liegt der Provider auf
+**Remote-Provider.** Die Aufgaben sprechen den Provider auf dem Site-Server an.
+Nur wenn `MECM_ProviderMachine` auf einen anderen Rechner zeigt, gilt das Folgende
+für die Site-Health-Abfrage und die Prüfung der Verteilungskopien. Das
+Computerkonto des Site-Servers ist standardmäßig Mitglied der SMS-Admins-Gruppe auf
+jedem Provider; liegt der Provider lokal und läuft die Aufgabe als SYSTEM, ist keine
+Zusatzkonfiguration nötig. Liegt der Provider auf
 einem anderen Rechner, braucht dieses Computerkonto die Provider-Berechtigung, und
 der Transport muss erreichbar sein: `Get-CimInstance -ComputerName` nutzt
 WinRM/WSMan; klassisches WMI braucht DCOM mit RPC 135 plus dynamischen Ports und

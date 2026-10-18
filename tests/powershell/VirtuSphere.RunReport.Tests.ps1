@@ -408,6 +408,35 @@ Describe 'Get-VsMecmSiteHealth (Providerfehler -> unknown)' {
         $values[0] | Should -Be 86400000
         $values[1] | Should -Be 0
     }
+
+    It 'schreibt je Fehlerpfad eine WARN-Zeile mit der Ursache (<name>)' -ForEach @(
+        @{ name = 'Site-Code fehlt'; site = $null; rows = $null; fault = $null; expect = 'kein Site-Code konfiguriert' }
+        @{ name = 'Zeilenzahl ungleich 1'; site = 'P01'; rows = @([pscustomobject]@{ SiteCode = 'P01'; Status = 0 }, [pscustomobject]@{ SiteCode = 'P01'; Status = 1 }); fault = $null; expect = 'lieferte 2 Zeilen' }
+        @{ name = 'Status-Spalte fehlt'; site = 'P01'; rows = @([pscustomobject]@{ SiteCode = 'P01' }); fault = $null; expect = 'Spalte Status fehlt' }
+        @{ name = 'Status nicht lesbar'; site = 'P01'; rows = @([pscustomobject]@{ SiteCode = 'P01'; Status = 'green' }); fault = $null; expect = 'keine ganze Zahl' }
+        @{ name = 'Abfrage wirft'; site = 'P01'; rows = $null; fault = 'Access is denied'; expect = 'fehlgeschlagen (provider_access_denied)' }
+    ) {
+        $logRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('vs-sitehealth-' + [guid]::NewGuid().ToString('N'))
+        $h = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($logRoot, $site, $rows, $fault) -Body {
+            param($root, $siteCode, $items, $failure)
+            Initialize-VsLog -Component 'pester-sitehealth' -LogRoot $root
+            function Get-CimInstance {
+                param($Namespace, $ClassName, $Query, $ComputerName, $ErrorAction)
+                if ($failure) { throw $failure }
+                $items
+            }
+            Get-VsMecmSiteHealth -Config ([pscustomobject]@{ ProviderMachine = 'CM01'; SiteCodeFallback = $siteCode }) -ProviderMachine 'CM01'
+        }
+        $h.Outcome | Should -Be 'unknown'
+        $logLines = @(Get-ChildItem -Path $logRoot -Filter '*.log' -File | Get-Content | Where-Object { $_ -match 'WARN' -and $_ -match [regex]::Escape($expect) })
+        $logLines.Count | Should -Be 1
+        # Die Ausnahme-Meldung bleibt lokal: sie steht im Log, nie im Ergebnisobjekt.
+        if ($fault) {
+            $logLines[0] | Should -Match 'Access is denied'
+            ($h | ConvertTo-Json -Depth 3) | Should -Not -Match 'Access is denied'
+        }
+        Remove-Item -Path $logRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Describe 'Send-VsRunReport (Payload-Form und Byte-Kuerzung vor dem Senden)' {
@@ -455,6 +484,44 @@ Describe 'Send-VsRunReport (Payload-Form und Byte-Kuerzung vor dem Senden)' {
         [System.Text.Encoding]::UTF8.GetByteCount([string]$body['detail']) | Should -BeLessOrEqual 2048
         # Der vollstaendige serialisierte Body bleibt unter dem 8-KB-Limit.
         [System.Text.Encoding]::UTF8.GetByteCount(($body | ConvertTo-Json -Depth 6)) | Should -BeLessThan 8192
+    }
+
+    It 'die Body-Grenze in Common spiegelt VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES aus lib/constants.php' {
+        $constants = Get-Content -Raw -Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'lib/constants.php')
+        $php = [int]([regex]::Match($constants, 'VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES\s*=\s*(\d+)').Groups[1].Value)
+        $php | Should -BeGreaterThan 0
+        Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsClientEventBodyMaxBytes } | Should -Be $php
+    }
+
+    It 'haelt den gesendeten Body (serialisiert) im Portallimit, auch bei <name>' -ForEach @(
+        @{ name = 'lauter Apostrophen (Worst Case)'; text = ("'" * 2048) }
+        @{ name = 'Spitzklammern und Ampersand'; text = ('<a href="x">&amp;</a> ' * 200) }
+        @{ name = 'gemischtem Text mit Umlauten'; text = ("Büro 'Süd' & <Rest> Ö€ " * 120) }
+    ) {
+        $limit = Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsClientEventBodyMaxBytes }
+        $body = Get-SentBody -Params @{
+            Config = [pscustomobject]@{ ReportToken = 'T' }; Source = 'device-sync'; RunEvent = 'completed'
+            RunId = '0123456789abcdef0123456789abcdef'; IntervalSeconds = 10; Outcome = 'fail'
+            ErrorCategory = 'portal_unreachable'; Detail = $text
+        }
+        $wireLength = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($body) -Body {
+            param($b) (ConvertTo-VsUtf8JsonBytes -Value $b -Depth 6).Length
+        }
+        $wireLength | Should -BeLessOrEqual $limit
+        $detail = [string]$body['detail']
+        # Gekuerzt wird nur am Ende: der gesendete Text ist ein Praefix des Klartexts.
+        $text.StartsWith($detail, [System.StringComparison]::Ordinal) | Should -BeTrue
+        # Die Kuerzung ist nicht zu grob: der Hochzeichen-Fall behaelt gut 1000 Zeichen.
+        $detail.Length | Should -BeGreaterThan 1000
+    }
+
+    It 'laesst gewoehnlichen Text bei den vollen 2048 Klartextbytes (keine Serialisierungskuerzung)' {
+        $body = Get-SentBody -Params @{
+            Config = [pscustomobject]@{ ReportToken = 'T' }; Source = 'device-sync'; RunEvent = 'completed'
+            RunId = '0123456789abcdef0123456789abcdef'; IntervalSeconds = 10; Outcome = 'fail'
+            ErrorCategory = 'portal_unreachable'; Detail = ('a' * 3000)
+        }
+        [System.Text.Encoding]::UTF8.GetByteCount([string]$body['detail']) | Should -Be 2048
     }
 
     It 'redigiert den Token, falls er je in den Detailtext geraet' {
@@ -1189,5 +1256,60 @@ Describe 'Intervall-Aufloesung (Resolve-VsInterval und ihre Spiegel)' {
         foreach ($entry in (Get-Bounds).Values) {
             Get-InstallerParameter -Name $entry.Setting | Should -Not -BeNullOrEmpty
         }
+    }
+}
+
+Describe 'Get-VsConfig-Notnagel und Installer-Default sind dieselbe Angabe (PS-28)' {
+    BeforeAll {
+        # Beide Seiten per AST lesen, ohne Registry: der Notnagel steht im ELSE-Zweig
+        # der Hashtable-Zuweisung in Get-VsConfig, der Default im Parameter des Installers.
+        function Get-CommonFallbackConstant {
+            param([string]$Property)
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:MecmCommon, [ref]$tokens, [ref]$errors)
+            $fn = @($ast.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-VsConfig'
+            }, $true))
+            if ($fn.Count -ne 1) { throw 'Get-VsConfig nicht eindeutig gefunden.' }
+            $table = @($fn[0].Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true))
+            if ($table.Count -ne 1) { throw 'Rueckgabe-Hashtable von Get-VsConfig nicht eindeutig.' }
+            $pair = @($table[0].KeyValuePairs | Where-Object { $_.Item1.Extent.Text -eq $Property })
+            if ($pair.Count -ne 1) { throw "Schluessel $Property in Get-VsConfig nicht eindeutig." }
+            $if = @($pair[0].Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] }, $true))
+            if ($if.Count -ne 1 -or $null -eq $if[0].ElseClause) { throw "$Property hat keinen Notnagel im else-Zweig." }
+            $element = $if[0].ElseClause.Statements[0].PipelineElements[0]
+            # Ein nacktes Literal steht im Block als CommandExpressionAst.
+            if ($element -is [System.Management.Automation.Language.CommandExpressionAst]) { $element = $element.Expression }
+            if ($element -isnot [System.Management.Automation.Language.ConstantExpressionAst]) {
+                throw "Notnagel von $Property ist keine Konstante."
+            }
+            $element.Value
+        }
+
+        function Get-InstallerDefaultConstant {
+            param([string]$Name)
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$tokens, [ref]$errors)
+            $param = @($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq $Name })
+            if ($param.Count -ne 1 -or $null -eq $param[0].DefaultValue) { throw "Installer-Default fuer $Name fehlt." }
+            if ($param[0].DefaultValue -isnot [System.Management.Automation.Language.ConstantExpressionAst]) {
+                throw "Installer-Default von $Name ist keine Konstante."
+            }
+            $param[0].DefaultValue.Value
+        }
+    }
+
+    It 'Get-VsConfig und der Installer nennen fuer <setting> denselben Standardwert' -ForEach @(
+        @{ setting = 'PackagesRoot';                property = 'PackagesRoot' }
+        @{ setting = 'DpGroupName';                 property = 'DpGroupName' }
+        @{ setting = 'DeviceSyncIntervalSeconds';   property = 'DeviceSyncInterval' }
+        @{ setting = 'PackagesSyncIntervalSeconds'; property = 'PackagesSyncInterval' }
+        @{ setting = 'ImporterIntervalSeconds';     property = 'ImporterInterval' }
+        @{ setting = 'SiteHealthIntervalSeconds';   property = 'SiteHealthInterval' }
+    ) {
+        $installerValue = Get-InstallerDefaultConstant -Name $setting
+        $fallbackValue = Get-CommonFallbackConstant -Property $property
+        $fallbackValue | Should -Not -BeNullOrEmpty
+        $fallbackValue | Should -Be $installerValue -Because "Notnagel und Default fuer $setting duerfen nicht auseinanderlaufen"
     }
 }

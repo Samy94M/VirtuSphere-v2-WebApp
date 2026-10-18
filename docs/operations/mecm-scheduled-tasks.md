@@ -74,7 +74,7 @@ flowchart TD
     UD -.->|abgelehnt| UD1["Warnung resource_update_failed, bei überholter Rollout-Revision stale_rollout_revision; VM bleibt in der Warteschlange"]
   end
   UD --> CU["Aktualisierung geänderter Collections anstoßen"]
-  CU --> R["„completed“ melden (empfangen, importiert, Fehler, Warnungen); Pause 10 s"]
+  CU --> R["„completed“ melden (empfangen, importiert, Fehler, Warnungen); Pause = Takt (Standard 10 s)"]
   R -.->|nächster Lauf| S
 ```
 
@@ -98,7 +98,7 @@ flowchart TD
   T -->|nein| RT["Portal: fehlende Einträge „zurückgezogen“, neue und wieder aufgetauchte aktiv"]
   RT --> RL["Portal: echte VMs nie umhängen; Vorlagen-VMs folgen einer höheren Version einmal, wenn sie in diesem Katalog zum ersten Mal erscheint; Rückzug einer noch zugewiesenen Version protokollieren; der VM-Editor zeigt „Update verfügbar“"]
   RL --> H["Gesendeten Katalogstand für den nächsten Vergleich merken"]
-  H --> R["„completed“ melden (Pakete, Task Sequences, gesendet); Pause 60 s"]
+  H --> R["„completed“ melden (Pakete, Task Sequences, gesendet); Pause = Takt (Standard 60 s)"]
   R -.->|nächster Lauf| S
 ```
 
@@ -141,7 +141,7 @@ flowchart TD
   RO -->|nein| OP
   RO1 --> OP{"Lauf ohne offene Punkte?"}
   OP -->|ja| OP1["Dateistand merken: der nächste Lauf ohne Änderung bleibt ruhig"] --> R
-  OP -->|nein| R["„completed“ melden (Ordner, angelegt, entfernt, offene Punkte; mit offenen Punkten „warning“); Pause 60 s"]
+  OP -->|nein| R["„completed“ melden (Ordner, angelegt, entfernt, offene Punkte; mit offenen Punkten „warning“); Pause = Takt (Standard 60 s)"]
   R -.->|nächster Lauf| S
 ```
 
@@ -160,6 +160,6 @@ flowchart TD
   QA -->|ja| E{"Genau ein Eintrag mit Status?"}
   E -->|nein| U3["„unknown“ (query_failed)"] --> R
   E -->|ja| M["Status 0 „ok“, 1 „warning“ (site_warning), 2 „fail“ (site_critical), sonst „unknown“"]
-  M --> R["„completed“ melden mit Site-Code, Provider und Rohstatus; Pause 300 s"]
+  M --> R["„completed“ melden mit Site-Code, Provider und Rohstatus; Pause = Takt (Standard 300 s)"]
   R -.->|nächster Lauf| S
 ```

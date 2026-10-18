@@ -13,7 +13,7 @@
 #  - Task-Sequence-Collections werden EINMAL pro Scan geprueft, nicht je Device
 #  - MAC-Vergleich normalisiert (keine False-Positive-Konfliktwarnungen mehr)
 #  - eingebettetes mission-Objekt aus getDeviceList statt N+1 getMissionName
-#  - Heartbeat je Scan; Site-Drive-Recovery nach wiederholten Fehlern
+#  - Ergebnisbericht (reportRun) je Scan; Site-Drive-Recovery nach wiederholten Fehlern
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Common.ps1"
