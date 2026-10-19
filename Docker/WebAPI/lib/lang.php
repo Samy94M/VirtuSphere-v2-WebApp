@@ -91,11 +91,24 @@ final class Lang
      */
     public static function get(string $key, array $replace = []): string
     {
-        $text = self::$strings[$key] ?? $key;
+        return self::replace(self::$strings[$key] ?? $key, $replace);
+    }
+
+    /**
+     * Fills :placeholders in one pass. strtr() tries the longest key first, so
+     * :page cannot eat the start of :pages, and a filled-in value is never
+     * searched again for a later placeholder.
+     *
+     * @param array<string, string|int> $replace
+     */
+    public static function replace(string $text, array $replace): string
+    {
+        $pairs = [];
         foreach ($replace as $placeholder => $value) {
-            $text = str_replace(':' . $placeholder, (string) $value, $text);
+            $pairs[':' . $placeholder] = (string) $value;
         }
-        return $text;
+
+        return $pairs === [] ? $text : strtr($text, $pairs);
     }
 
     /** Active locale, e.g. "de". */

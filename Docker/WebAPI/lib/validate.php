@@ -27,10 +27,7 @@ function validator_text(string $key, string $fallback, array $replace = []): str
 {
     $text = function_exists('__t') ? __t($key, $replace) : $key;
     if ($text === $key) {
-        $text = $fallback;
-        foreach ($replace as $placeholder => $value) {
-            $text = str_replace(':' . $placeholder, (string) $value, $text);
-        }
+        $text = Lang::replace($fallback, $replace);
     }
 
     return $text;
