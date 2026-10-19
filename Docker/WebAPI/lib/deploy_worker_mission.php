@@ -154,6 +154,10 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // playbooks only when every create unit ended successfully, because a
         // power-cycle over a selection that is missing a VM would report a
         // pipeline result about VMs that do not exist.
+        // The remote steps (the create playbook is not one of them) are derived
+        // first, so the boundary after the create section knows whether any step
+        // is still to start (WK-02).
+        $steps = ansible_remote_steps($remoteDir, $payload, $autostartEnabled);
         if (ansible_mode_creates_vms((string) $payload['mode'])) {
             $createOutcome = deploy_worker_run_create_section(
                 $channel,
@@ -169,16 +173,16 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
                 ]
             );
             // Honours a cancel that was accepted while the last create VM ran,
-            // and a lease this worker lost in the meantime.
-            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
+            // and a lease this worker lost in the meantime. Without a remote step
+            // left, a cancel here is decided by the conclusion, which converges a
+            // completed run like a success (WK-02); otherwise it stops at once.
+            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, $steps !== [], $job);
             if (!$createOutcome['all_successful']) {
                 deploy_worker_conclude_create_section($channel->connection(), $job, $workerId, $vmIds, $priorLifecycles, $createOutcome);
 
                 return;
             }
         }
-
-        $steps = ansible_remote_steps($remoteDir, $payload, $autostartEnabled);
 
         // IDR-R2: a full pipeline's serverlist.yml predates its create section.
         // It is rewritten from the bindings the section just committed before
@@ -257,9 +261,12 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             }
         }
 
-        // The last boundary. A cancel committed while the final playbook ran is
-        // honoured here rather than being overtaken by a success.
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
+        // The last boundary. Every step has ended with exit code 0 by now, so a
+        // cancel committed while the final playbook ran is confirmed by the
+        // conclusion, which converges it like a success (WK-02). The claim and the
+        // lock are still checked here. A cancel accepted before a step that did not
+        // run is confirmed at that step's own boundary with the conservative journal.
+        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, false, $job);
 
         deploy_worker_conclude_sequence($channel->connection(), $job, $workerId, $vmIds, $priorLifecycles);
     } catch (DeployWorkerCancelled $cancelled) {
@@ -287,17 +294,29 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // Same redaction as the inventory path: a transport error can echo the
         // command line it ran, and accounts.yml values have no business in a
         // job error an operator copies into a ticket.
-        deploy_worker_handle_failure(
-            $channel->connection(),
-            $job,
-            $workerId,
-            $vmIds,
-            deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]),
-            deploy_terminal_reason_for_exception($exception),
-            $vmsMarked,
-            $exception instanceof DeployWorkerStepFailed ? $exception->detail : null,
-            $exception instanceof DeployWorkerStepFailed ? $exception->exitCode : null
-        );
+        $failureMessage = deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret]);
+        // WK-04: the failure is written through a live connection or not at all.
+        // The channel's handle is dead after an outage, and a write through it
+        // throws again and leaves the job without its reason.
+        $failureDb = deploy_worker_failure_connection($channel, $options, $exception);
+        if ($failureDb === null) {
+            deploy_worker_log_unpersisted_failure($jobId, $failureMessage);
+            // Thrown on purpose: `--once` must still exit non-zero, and the loop
+            // worker reconnects through its database handler, as for any outage.
+            throw new DeployWorkerOutcomeUnpersisted('Database unreachable while persisting the failure of deploy job ' . $jobId . '.');
+        } else {
+            deploy_worker_handle_failure(
+                $failureDb,
+                $job,
+                $workerId,
+                $vmIds,
+                $failureMessage,
+                deploy_terminal_reason_for_exception($exception),
+                $vmsMarked,
+                $exception instanceof DeployWorkerStepFailed ? $exception->detail : null,
+                $exception instanceof DeployWorkerStepFailed ? $exception->exitCode : null
+            );
+        }
     } finally {
         // Through the channel: a final heartbeat is a side channel too, and a
         // database that is still gone must not turn a handled outcome into an

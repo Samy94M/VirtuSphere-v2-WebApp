@@ -57,7 +57,7 @@ function deploy_worker_classify_inventory_failure(string $phase, Throwable|strin
     // host, and its phase says nothing about its origin: before this branch a
     // mysqli failure handed through a transport phase came out as
     // `ansible_transport` and actively blamed the Ansible host for it.
-    if ($failure instanceof mysqli_sql_exception) {
+    if ($failure instanceof mysqli_sql_exception || $failure instanceof DeployWorkerOutcomeUnpersisted) {
         return VIRTUSPHERE_INVENTORY_ERROR_WORKER;
     }
     // Section 3, rule 2. Missing phpseclib, empty mandatory fields or an

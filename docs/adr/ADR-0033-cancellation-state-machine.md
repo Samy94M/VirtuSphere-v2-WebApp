@@ -191,3 +191,26 @@ atomic rollback. `DeployWorkerVmOwnershipRaceTest` exercises two MySQL sessions
 at callback, reaper and successor-claim boundaries, including lock-wait refusal
 and an earlier transaction snapshot. Callback HTTP behavior remains covered
 separately by `MacImportCallbackTest`.
+
+## Amendment (2026-10-19): a completed run outranks a late cancel
+
+A cancel accepted while the last playbook ran used to be confirmed at the last
+boundary with the stop journal, so the VMs of a run that had ended with exit
+code 0 everywhere were marked failed. The last boundary now checks only claim
+and lock. The conclusion confirms the pending cancel and converges the VMs as
+the success path would (`deploy_worker_conclude_cancel_after_sequence()`): a
+sequence without an export step restores its lifecycle bracket, a complete MAC
+result keeps the imported VMs, a partial one fails only the VMs it missed.
+Without a usable MAC result the run is no verified success, and the stop journal
+applies unchanged. The terminal state stays `cancelled`, the state the operator
+asked for, and its detail records that the run completed. The boundary after a
+create section stops at once only while a remote step is still to start.
+
+The loop worker's database wait after a finished remote command is sized
+against the stale deadline: `deploy_worker_db_recover_wait_seconds()` of the
+loop budget must exceed `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS`, because no
+heartbeat reaches a dead database. A failure is written only through a live
+connection, and an outcome the wait gave up on is never written afterwards as a
+guess; the reaper records the remote outcome as unknown instead.
+`DeployWorkerOutcomeTest`, `DeployCancellationStateMachineTest`,
+`DeployJobReaperTest` and `DeployWorkerDbChannelTest` cover these rules.

@@ -125,15 +125,15 @@ const VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS = 120;
 // inside a stream callback would stop reading the SSH channel, which is how a
 // database outage turns into a lost playbook.
 // Once the remote command has ENDED, the exit code exists only in this process,
-// so waiting for the database is worth more than failing fast - but only in the
-// loop worker, which is a service. `--once` is tooling and stays bounded by the
-// same three attempts its initial connect uses, then says out loud that the
-// outcome could not be persisted rather than pretending to have concluded.
+// so waiting for the database is worth more than failing fast, but only in the loop
+// worker. Its LOOP budget must outlast VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS: no job
+// heartbeat reaches a dead database, so only a worker still waiting when it returns keeps
+// the outcome. --once stays bounded (ONCE) and says so instead of pretending to conclude.
 const VIRTUSPHERE_DEPLOY_DB_CHANNEL_SPOOL_MAX_LINES = 2000;
 const VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MIN_SECONDS = 2;
 const VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MAX_SECONDS = 30;
 const VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_ONCE = 3;
-const VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP = 20;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP = 23;
 
 // SSH transport hardening (AP6). A remote command used to run with an
 // unbounded timeout, and a timed-out exec came back as exit 0. These four

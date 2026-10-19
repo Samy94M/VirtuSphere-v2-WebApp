@@ -43,4 +43,5 @@ const VIRTUSPHERE_DEPLOY_WORKER_MODULES = [
     'lib/deploy_worker_vm_journal.php',
     'lib/deploy_worker_reaper.php',
     'lib/deploy_worker_finish.php',
+    'lib/deploy_worker_outcome_audit.php',
 ];

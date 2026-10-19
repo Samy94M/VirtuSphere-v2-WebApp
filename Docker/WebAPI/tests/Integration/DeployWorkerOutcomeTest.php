@@ -247,6 +247,129 @@ final class DeployWorkerOutcomeTest extends TestCase
         self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($stuck));
     }
 
+    /**
+     * WK-02 (ADR-0033): a cancel confirmed after the last step ended with exit
+     * code 0 converges like the success path. A create-only run restores its
+     * bracket, where the stop path would have failed the VM its ESXi work touched.
+     * The terminal detail records that every step ended with exit code 0.
+     */
+    public function testCancelAfterACompleteCreateSequenceRestoresLikeSuccess(): void
+    {
+        $missionId = $this->insertMission('wk02a');
+        $vm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'create', [$vm], null);
+        $prior = deploy_worker_mark_vms_deploying($this->db, $this->job($jobId), 'deploy job ' . $jobId . ' started', [$vm]);
+        $this->touchEsxi($jobId, $vm);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$vm], $prior);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vm), 'restored as the success path restores it');
+        self::assertStringContainsString('every playbook step ended with exit code 0', (string) $this->job($jobId)['terminal_reason_detail']);
+        self::assertSame(1, $this->outcomeRows($jobId));
+    }
+
+    /**
+     * The control for WK-02: the same touched VM, but the cancel is confirmed at
+     * a step boundary, so not every step completed. The conservative journal
+     * decision stands and the VM fails, with no finding in the detail.
+     */
+    public function testCancelWithoutACompletedSequenceKeepsTheJournalDecision(): void
+    {
+        $missionId = $this->insertMission('wk02b');
+        $vm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'create', [$vm], null);
+        deploy_worker_mark_vms_deploying($this->db, $this->job($jobId), 'deploy job ' . $jobId . ' started', [$vm]);
+        $this->touchEsxi($jobId, $vm);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        self::assertTrue(deploy_worker_confirm_owned_cancel($this->db, $this->job($jobId)));
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vm));
+        self::assertStringNotContainsString('every playbook step', (string) $this->job($jobId)['terminal_reason_detail']);
+    }
+
+    /**
+     * WK-02 for a MAC-exporting sequence: the success path's MAC verdict stands.
+     * A complete import keeps its VM deployed/pending, and the finding is recorded.
+     */
+    public function testCancelAfterACompleteExportSequenceKeepsTheImportedVm(): void
+    {
+        $missionId = $this->insertMission('wk02c');
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $jobId = $this->insertJob($missionId, 'export', [$imported], $this->resultJson('success', [$imported], []));
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$imported]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
+        self::assertStringContainsString('every playbook step ended with exit code 0', (string) $this->job($jobId)['terminal_reason_detail']);
+        self::assertSame(1, $this->outcomeRows($jobId));
+    }
+
+    /**
+     * WK-02 for a partial import: as on success, only the VM the import did not
+     * cover fails; the imported one keeps its state.
+     */
+    public function testCancelAfterACompletePartialExportFailsOnlyTheMissedVm(): void
+    {
+        $missionId = $this->insertMission('wk02d');
+        $ok = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $bad = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$ok, $bad], $this->resultJson('partial', [$ok], [$bad]));
+        $this->markAndTouch($jobId, [$ok, $bad], [$bad]);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$ok, $bad]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($ok));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($bad));
+        self::assertStringContainsString('every playbook step ended with exit code 0', (string) $this->job($jobId)['terminal_reason_detail']);
+    }
+
+    /**
+     * WK-02 without a usable MAC result: the run is no verified success, so the
+     * stop path's journal decision applies and the touched VM fails.
+     */
+    public function testCancelAfterACompleteExportWithoutItsResultKeepsTheJournalDecision(): void
+    {
+        $missionId = $this->insertMission('wk02e');
+        $vm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$vm], null);
+        $this->markAndTouch($jobId, [$vm], [$vm]);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$vm]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vm));
+        self::assertStringNotContainsString('every playbook step', (string) $this->job($jobId)['terminal_reason_detail']);
+    }
+
+    private function touchEsxi(int $jobId, int $vmId): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_job_vm_states SET esxi_touched = 1 WHERE job_id = ? AND vm_id = ?');
+        $stmt->bind_param('ii', $jobId, $vmId);
+        $stmt->execute();
+        self::assertSame(1, $stmt->affected_rows, 'fixture must mark the VM as touched by ESXi');
+    }
+
+    private function outcomeRows(int $jobId): int
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = ? AND object_type = ? AND object_id = ?');
+        $event = VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME;
+        $type = 'deploy_job';
+        $id = (string) $jobId;
+        $stmt->bind_param('sss', $event, $type, $id);
+        $stmt->execute();
+
+        return (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
+    }
+
     private function insertMission(string $suffix): int
     {
         $name = $this->prefix . '_' . $suffix;

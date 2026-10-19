@@ -87,7 +87,7 @@ function deploy_worker_main(array $argv): int
                     fwrite(STDERR, '[deploy-worker] Ansible full test: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
                 }
             }
-        } catch (mysqli_sql_exception $exception) {
+        } catch (mysqli_sql_exception|DeployWorkerOutcomeUnpersisted $exception) {
             if ($options['once']) {
                 throw $exception;
             }

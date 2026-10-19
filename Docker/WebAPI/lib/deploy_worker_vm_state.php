@@ -102,17 +102,23 @@ function deploy_worker_locked_imported_vm_ids(array $job): array
  * section), so this is also where its outcome row is written (LG-08). It lives in
  * the same transaction as the cancelled status: a cancel never exists without its
  * row, and a row never exists for a cancel that did not happen.
+ *
+ * $vmsConverged is true only when the caller has already converged the VMs the
+ * way the success path does (WK-02); the journal's fail rule then must not run
+ * again over the restored brackets.
  */
-function deploy_worker_confirm_owned_cancel(mysqli $db, array $claim, ?string $message = null): bool
+function deploy_worker_confirm_owned_cancel(mysqli $db, array $claim, ?string $message = null, bool $vmsConverged = false): bool
 {
-    return deploy_worker_owned_transaction($db, $claim, static function (array $job) use ($db, $claim, $message): bool {
+    return deploy_worker_owned_transaction($db, $claim, static function (array $job) use ($db, $claim, $message, $vmsConverged): bool {
         if ((string) $job['status'] !== VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
             return false;
         }
         $jobId = (int) $job['id'];
         $payload = json_decode((string) $job['payload_json'], true);
         $vmIds = is_array($payload) && is_array($payload['vm_ids'] ?? null) ? $payload['vm_ids'] : [];
-        deploy_worker_fail_locked_job_vms($db, $job, 'deploy job ' . $jobId . ' cancelled', $vmIds);
+        if (!$vmsConverged) {
+            deploy_worker_fail_locked_job_vms($db, $job, 'deploy job ' . $jobId . ' cancelled', $vmIds);
+        }
         if (!repo_confirm_deploy_job_cancelled($db, $jobId, (string) $job['locked_by'], $message)) {
             return false;
         }

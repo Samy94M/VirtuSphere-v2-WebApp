@@ -375,6 +375,169 @@ final class DeployWorkerDbChannelTest extends TestCase
         }
     }
 
+    /**
+     * WK-04: the loop worker's wait for the database must outlast the reaper's
+     * deadline, or an outage the reaper would tolerate costs a finished run its
+     * outcome. The budget is the smallest one that does: one attempt fewer falls
+     * short of the deadline.
+     */
+    public function testTheLoopBudgetOutlastsTheReaperDeadlineByTheSmallestMargin(): void
+    {
+        self::assertGreaterThanOrEqual(
+            VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+            deploy_worker_db_recover_wait_seconds(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP)
+        );
+        self::assertLessThan(
+            VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS,
+            deploy_worker_db_recover_wait_seconds(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP - 1)
+        );
+        self::assertSame(628, deploy_worker_db_recover_wait_seconds(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP));
+    }
+
+    /** The formula is exactly the sleep a real recovery takes: one backoff per failed attempt. */
+    public function testTheWaitFormulaIsTheSleepThatARecoveryTakes(): void
+    {
+        $channel = $this->channel();
+        $this->ops->writesFail = true;
+        $channel->log('stdout', 'x');
+
+        $slept = [];
+        self::assertFalse($channel->recover(
+            VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP,
+            static function (int $seconds) use (&$slept): void {
+                $slept[] = $seconds;
+            }
+        ));
+        self::assertSame(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP, $this->connectAttempts);
+        self::assertSame([4, 8, 16, 30], array_slice($slept, 0, 4), 'the backoff doubles and is capped');
+        self::assertSame(
+            deploy_worker_db_recover_wait_seconds(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP),
+            array_sum($slept)
+        );
+    }
+
+    /**
+     * settle() spends the whole budget before it gives up, and gives up with the
+     * typed exception that tells the failure path the budget is gone.
+     */
+    public function testSettleGivesUpOnlyAfterTheWholeLoopBudget(): void
+    {
+        $channel = $this->channel();
+        $this->ops->writesFail = true;
+        $channel->log('stdout', 'x');
+
+        $slept = [];
+        try {
+            deploy_worker_settle_db_channel($channel, [], 0, static function (int $seconds) use (&$slept): void {
+                $slept[] = $seconds;
+            });
+            self::fail('an outcome that cannot be persisted must not settle quietly');
+        } catch (DeployWorkerOutcomeUnpersisted $exception) {
+            self::assertStringStartsWith('Database unreachable while persisting the outcome of deploy job', $exception->getMessage());
+        }
+        self::assertSame(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP, $this->connectAttempts);
+        self::assertSame(deploy_worker_db_recover_wait_seconds(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP), array_sum($slept));
+        self::assertGreaterThanOrEqual(VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, array_sum($slept));
+    }
+
+    /** `--once` keeps its bounded budget, and says so when it gives up. */
+    public function testTheOnceBudgetStaysBoundedWhenSettleGivesUp(): void
+    {
+        $channel = $this->channel();
+        $this->ops->writesFail = true;
+        $channel->log('stdout', 'x');
+
+        $slept = [];
+        try {
+            deploy_worker_settle_db_channel($channel, ['once' => true], 0, static function (int $seconds) use (&$slept): void {
+                $slept[] = $seconds;
+            });
+            self::fail('--once must report the unpersisted outcome');
+        } catch (DeployWorkerOutcomeUnpersisted) {
+            // expected
+        }
+        self::assertSame(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_ONCE, $this->connectAttempts);
+        self::assertSame(deploy_worker_db_recover_wait_seconds(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_ONCE), array_sum($slept));
+        self::assertLessThan(VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, array_sum($slept));
+    }
+
+    /**
+     * WK-04: an outcome settle() gave up on is never written as a verdict, even
+     * when the database answers again. Its exit code is gone, and a failure written
+     * now would read a run that exited 0 as failed. The reaper records it as unknown.
+     */
+    public function testAnUnpersistedOutcomeIsNeverWrittenAsAGuess(): void
+    {
+        $channel = $this->channel();
+        $this->ops->writesFail = true;
+        $channel->log('stdout', 'x');
+
+        $this->ops->writesFail = false;
+        $this->connectSucceeds = true;
+        $slept = [];
+        self::assertNull(deploy_worker_failure_connection(
+            $channel,
+            [],
+            new DeployWorkerOutcomeUnpersisted('gone'),
+            static function (int $seconds) use (&$slept): void {
+                $slept[] = $seconds;
+            }
+        ));
+        self::assertSame(0, $this->connectAttempts, 'no reconnect for an outcome that was given up on');
+        self::assertSame([], $slept);
+    }
+
+    /** A failure that did not come out of the wait gets the whole budget, as settle does. */
+    public function testAFailureOutsideTheWaitGetsTheWholeBudget(): void
+    {
+        $channel = $this->channel();
+        $this->ops->writesFail = true;
+        $channel->log('stdout', 'x');
+
+        $slept = [];
+        self::assertNull(deploy_worker_failure_connection(
+            $channel,
+            [],
+            new RuntimeException('ssh transport lost'),
+            static function (int $seconds) use (&$slept): void {
+                $slept[] = $seconds;
+            }
+        ));
+        self::assertSame(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP, $this->connectAttempts);
+        self::assertSame(deploy_worker_db_recover_wait_seconds(VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP), array_sum($slept));
+    }
+
+    /** A live channel answers with its own handle and does not reconnect. */
+    /**
+     * mysqli_sql_exception is final, so the unpersisted outcome cannot inherit the
+     * outage handling. The loop's reconnect handler and the inventory classification
+     * name it beside that class; without them the loop worker would die on it.
+     */
+    public function testAnUnpersistedOutcomeIsTreatedAsADatabaseOutage(): void
+    {
+        $lib = dirname(__DIR__, 2) . '/lib/';
+
+        self::assertStringContainsString(
+            'catch (mysqli_sql_exception|DeployWorkerOutcomeUnpersisted $exception)',
+            (string) file_get_contents($lib . 'deploy_worker_loop.php')
+        );
+        self::assertStringContainsString(
+            '$failure instanceof mysqli_sql_exception || $failure instanceof DeployWorkerOutcomeUnpersisted',
+            (string) file_get_contents($lib . 'deploy_worker_runtime.php')
+        );
+    }
+
+    public function testAFailureOnALiveChannelUsesItsOwnHandle(): void
+    {
+        $channel = $this->channel();
+
+        self::assertSame(
+            $channel->connection(),
+            deploy_worker_failure_connection($channel, [], new RuntimeException('x'), static function (): void {})
+        );
+        self::assertSame(0, $this->connectAttempts);
+    }
+
     private function channel(): DeployWorkerDbChannel
     {
         return new DeployWorkerDbChannel(

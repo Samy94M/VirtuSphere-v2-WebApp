@@ -70,6 +70,8 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_confirm_owned_cancel',
         'deploy_worker_scope_vms',
         'deploy_worker_job_mac_result',
+        // WK-02: a cancel confirmed after every step ended with exit 0 converges like a success.
+        'deploy_worker_conclude_cancel_after_sequence',
         // Etappe 14B-E. The ownership fence of a claim, read fresh because
         // the per-VM create writes compare all three of its parts.
         'deploy_worker_job_fence',
@@ -155,6 +157,11 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_log_stream_flush',
         'deploy_worker_open_db_channel',
         'deploy_worker_settle_db_channel',
+        // WK-04: the wait budget of a recovery, and the connection a failure is written through.
+        'deploy_worker_db_recover_attempts',
+        'deploy_worker_db_recover_wait_seconds',
+        'deploy_worker_failure_connection',
+        'deploy_worker_log_unpersisted_failure',
     ];
 
     public function testTheRegistryAndTheFilesystemAgreeInBothDirections(): void

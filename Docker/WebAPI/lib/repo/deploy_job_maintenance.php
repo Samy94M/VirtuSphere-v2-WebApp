@@ -209,7 +209,11 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 $wasCancelling ? $cancelling : $running,
                 (string) $job['reaped_to']
             );
-            $message = ($wasCancelling ? 'Cancellation converged by the reaper. ' : 'Reaped stale deploy job. ') . $observation . $suffix;
+            // WK-07: the reaper observes silence, never the remote run. Whether the
+            // playbook sequence ended with exit code 0 before the silence is unknown,
+            // so the terminal detail must not present the job as a known failure.
+            $message = ($wasCancelling ? 'Cancellation converged by the reaper. ' : 'Reaped stale deploy job. ') . $observation
+                . ' Remote outcome unknown: the reaper cannot see whether the remote run finished, so its exit code is not known.' . $suffix;
             // Converge and describe the open Create units before terminalizing
             // their parent. The log owner rejects every terminal append; doing
             // this afterwards rolled back the entire mixed reaper batch.

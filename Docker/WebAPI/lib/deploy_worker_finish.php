@@ -12,6 +12,7 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_vm_state.php';
+require_once __DIR__ . '/deploy_worker_outcome_audit.php';
 
 /**
  * How a job ends: the success conclusion including its per-VM verdict, the
@@ -47,7 +48,9 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
             return null;
         }
         if ((string) $locked['status'] === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
-            return deploy_worker_confirm_owned_cancel($db, $job) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
+            // WK-02: every step of this sequence has ended with exit code 0, so a
+            // cancel confirmed here converges like the success path below.
+            return deploy_worker_conclude_cancel_after_sequence($db, $job, $vmIds, $priorLifecycles);
         }
         $jobId = (int) $job['id'];
         $payload = deploy_worker_payload($job);
@@ -90,6 +93,47 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $summary);
         deploy_worker_refresh_inventory_after_deploy($db, $job);
     }
+}
+
+/**
+ * WK-02 (ADR-0033): a cancel requested while the last playbook ran, confirmed
+ * only now that every step of the sequence has ended with exit code 0. The run
+ * completed, so the cancel converges the way the success path converges it: a
+ * sequence without an export step restores its lifecycle bracket, and a MAC
+ * result is applied as on success (a partial import fails the VMs it did not
+ * cover; a complete one leaves each VM as the import left it). The terminal
+ * detail records that finding. The status stays `cancelled`, the end state the
+ * operator asked for; no terminal state is added.
+ *
+ * Without a usable MAC result the run is no verified success, so the stop path's
+ * journal decision applies unchanged. Called only from
+ * deploy_worker_conclude_sequence(), inside its owned transaction.
+ *
+ * @param int[] $vmIds
+ * @param array<int,string> $priorLifecycles
+ */
+function deploy_worker_conclude_cancel_after_sequence(mysqli $db, array $job, array $vmIds, array $priorLifecycles): ?string
+{
+    $jobId = (int) $job['id'];
+    if (!ansible_mode_expects_mac_result((string) deploy_worker_payload($job)['mode'])) {
+        deploy_worker_restore_deploying_vms($db, $job, 'deploy job ' . $jobId . ' succeeded without export step; lifecycle restored', $vmIds, $priorLifecycles);
+    } else {
+        $macResult = deploy_worker_job_mac_result($db, $jobId);
+        if ($macResult === null || $macResult['outcome'] === 'failed') {
+            return deploy_worker_confirm_owned_cancel($db, $job) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
+        }
+        if ($macResult['outcome'] === 'partial') {
+            deploy_worker_mark_vms_failed($db, $job, 'deploy job ' . $jobId . ' mac import partial', $vmIds, $macResult['successful_vm_ids']);
+        }
+    }
+
+    return deploy_worker_confirm_owned_cancel(
+        $db,
+        $job,
+        'Cancelled after operator request; every playbook step ended with exit code 0 before the cancellation was confirmed, '
+            . 'so the VMs were converged as on success; no further step was started.',
+        true
+    ) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
 }
 
 /**
@@ -259,102 +303,11 @@ function deploy_worker_finish_job(
     return $published;
 }
 
-/**
- * WK-08: a write this worker no longer owns is dropped by design, but its message
- * is the only account of what the worker saw. One bounded, redacted line to the
- * error log; never a database write, because the row belongs to another claim.
- */
-function deploy_worker_log_discarded_write(int $jobId, string $what, ?string $message): void
-{
-    $text = mb_substr(trim((string) preg_replace('/\s+/', ' ', virtusphere_redact_log_text((string) $message))), 0, 500, 'UTF-8');
-    error_log('[deploy-worker] job ' . $jobId . ' is no longer owned by this worker; discarded ' . $what . ($text === '' ? '' : ': ' . $text));
-}
-
 function deploy_terminal_reason_for_exception(Throwable $exception): string
 {
     return $exception instanceof SshTransportBudgetExceeded
         ? VIRTUSPHERE_DEPLOY_TERMINAL_REASON_TIMEOUT
         : VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED;
-}
-
-/**
- * Records a finished MISSION deploy in the audit trail, so the logs page shows a
- * job ending, not just being queued. Attributed to the operator who queued it
- * (the job row carries user_id) even though the worker runs headless.
- *
- * Deliberately only for mission deploys, not the mission-less inventory system
- * jobs: those run on the interval and a "succeeded" line per credential every few
- * hours would bury real events. An inventory failure is already recorded in the
- * fetch-state row, and its one durable consequence, the auth pause, is audited
- * where it is set/cleared. Called after finish_job and never lets an audit hiccup
- * escape into the job's finally block.
- */
-function deploy_worker_audit_outcome(mysqli $db, array $job, string $status, ?string $error = null): void
-{
-    // A confirmed cancel wrote its row inside its own transaction (LG-08).
-    if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED) {
-        return;
-    }
-    try {
-        $reason = in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL], true) ? $error : null;
-        deploy_worker_write_outcome_audit($db, $job, $status, $reason);
-    } catch (Throwable $exception) {
-        error_log('[deploy-worker] outcome audit failed for job ' . (int) ($job['id'] ?? 0) . ' with status ' . $status . ': ' . virtusphere_redact_log_text($exception->getMessage()));
-    }
-}
-
-/**
- * The one writer of a mission job's deploy.outcome row (LG-07, LG-08). Conclusions
- * call it fail-soft after publication; a confirmed cancel and the reaper call it
- * inside their own transaction, so the row exists exactly when the state does.
- * Inventory jobs have no mission and no row. Returns false only when the row
- * was not stored.
- */
-function deploy_worker_write_outcome_audit(mysqli $db, array $job, string $status, ?string $reason = null): bool
-{
-    if (($job['mission_id'] ?? null) === null) {
-        return true;
-    }
-    $userId = isset($job['user_id']) ? (int) $job['user_id'] : null;
-    $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
-    $context = [
-        'mission_id' => (int) $job['mission_id'],
-        'mode' => audit_snippet($mode, 24),
-        'status' => $status,
-    ];
-    if ($reason !== null && $reason !== '') {
-        $snippet = audit_snippet($reason, 120);
-        if ($snippet !== '') {
-            $context['reason'] = $snippet;
-        }
-    }
-
-    return audit_event(
-        $db,
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME,
-        'deploy_job',
-        (int) $job['id'],
-        deploy_worker_outcome_audit_result($status),
-        $context,
-        $userId,
-        'cli'
-    );
-}
-
-/**
- * The closed audit result of a terminal deploy status. A partial run is a
- * warning, not a failure: the mission did change, just not completely, and
- * flattening the two would hide that difference from whoever reads the log.
- * Unknown statuses cannot slip through as "success": the default is failure,
- * and the registry refuses a result it does not know.
- */
-function deploy_worker_outcome_audit_result(string $status): string
-{
-    return match ($status) {
-        VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => VIRTUSPHERE_AUDIT_RESULT_WARNING,
-        default => VIRTUSPHERE_AUDIT_RESULT_FAILURE,
-    };
 }
 
 /** Every terminal create/full path refreshes after a durable Create launch. */

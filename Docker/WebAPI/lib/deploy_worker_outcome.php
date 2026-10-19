@@ -36,7 +36,8 @@ require_once __DIR__ . '/worker_heartbeat.php';
  *                               service status row, heartbeat, ownership check
  * - deploy_worker_reaper.php    observer window and the stale-job reaper
  * - deploy_worker_vm_state.php  deploy_vms transitions and the MAC verdict
- * - deploy_worker_finish.php    conclude/cancel/fail, terminal write, audit
+ * - deploy_worker_finish.php    conclude/cancel/fail, terminal write
+ * - deploy_worker_outcome_audit.php the deploy.outcome row and the discarded-write line
  */
 
 require_once __DIR__ . '/deploy_worker_modules.php';

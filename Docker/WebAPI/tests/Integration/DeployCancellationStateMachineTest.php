@@ -488,6 +488,56 @@ final class DeployCancellationStateMachineTest extends TestCase
 
     // --- helpers ------------------------------------------------------------
 
+    /**
+     * WK-02: the last boundary no longer confirms a cancel itself, because every
+     * step has ended with exit code 0 there and the conclusion decides the cancel
+     * (see DeployWorkerOutcomeTest). The lock is still checked, and the job stays
+     * `cancelling` until the conclusion publishes it.
+     */
+    public function testTheLastBoundaryLeavesTheCancelToTheConclusion(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, self::WORKER);
+
+        deploy_worker_assert_job_is_ours($this->db, $jobId, self::WORKER, false, null);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, (string) $this->job($jobId)['status']);
+        self::assertSame(0, $this->outcomeRows($jobId));
+    }
+
+    /**
+     * The same check against a foreign lock still stops the worker: the
+     * conclusion is not its to decide.
+     */
+    public function testTheLastBoundaryStillStopsAWorkerThatLostTheLock(): void
+    {
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_CANCELLING, 'phpunit:other');
+
+        try {
+            deploy_worker_assert_job_is_ours($this->db, $jobId, self::WORKER, false, null);
+            self::fail('a cancelling job locked by another worker must stop this one');
+        } catch (DeployWorkerCancelled $stop) {
+            self::assertStringContainsString('another party owns its conclusion', $stop->getMessage());
+        }
+    }
+
+    /**
+     * WK-07: a cancel the reaper converges is as unknown as a reaped failure, since
+     * the reaper cannot see whether the remote run finished.
+     */
+    public function testTheReaperRecordsAnUnknownRemoteOutcomeForAConvergedCancel(): void
+    {
+        $cancellingId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, self::WORKER, staleHeartbeat: true);
+        repo_cancel_deploy_job($this->db, $cancellingId, 42);
+        deploy_reap_observer_since(time() - VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1);
+
+        deploy_worker_reap_stale_jobs($this->db);
+
+        $job = $this->job($cancellingId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, (string) $job['status']);
+        self::assertStringContainsString('Remote outcome unknown', (string) $job['terminal_reason_detail']);
+        self::assertStringContainsString('Cancellation converged by the reaper.', (string) $job['terminal_reason_detail']);
+    }
+
     private function outcomeRows(int $jobId): int
     {
         $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = ? AND object_type = ? AND object_id = ?');

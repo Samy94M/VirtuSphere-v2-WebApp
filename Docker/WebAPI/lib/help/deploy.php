@@ -54,6 +54,7 @@ require_once __DIR__ . '/../settings_page.php';
             <h3><?php echo h(__t('help_deploy.deploy_terminal_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_terminal_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_terminal_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_terminal_p3')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_powercycle_wait_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_powercycle_wait_p1', ['modes' => deploy_mode_label_list(ansible_modes_using_powercycle())])); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_start_wait_heading')); ?></h3>

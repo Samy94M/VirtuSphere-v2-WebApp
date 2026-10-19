@@ -145,6 +145,28 @@ final class DeployJobReaperTest extends TestCase
         self::assertSame(1, $this->systemLogCount($jobId, 'Reaped stale deploy job%'));
     }
 
+    /**
+     * WK-07: the reaper cannot see whether the remote run finished before the
+     * heartbeat went silent. The terminal detail says so, in the existing English
+     * vocabulary, so a retry is never read as a clean, known failure.
+     */
+    public function testAReapedJobRecordsItsRemoteOutcomeAsUnknown(): void
+    {
+        $this->skipWhenForeignRunningJobsExist();
+
+        $missionId = $this->insertMission($this->prefix . '_unknown');
+        $jobId = $this->insertRunningJob($missionId, 'worker-silent', 700);
+
+        repo_reap_stale_deploy_jobs($this->db, 600);
+
+        $job = $this->job($jobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT, (string) $job['terminal_reason_code']);
+        self::assertStringContainsString('Remote outcome unknown', (string) $job['terminal_reason_detail']);
+        self::assertStringContainsString('Remote outcome unknown', (string) $job['last_error']);
+        self::assertStringContainsString('Reaped stale deploy job.', (string) $job['terminal_reason_detail'], 'the existing account stays');
+    }
+
     private function insertMission(string $name): int
     {
         $status = 'template';
