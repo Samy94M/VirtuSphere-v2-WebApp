@@ -64,20 +64,8 @@ parameters:
 		-
 			message: '#^Variable \$connection might not be defined\.$#'
 			identifier: variable.undefined
-			count: 7
-			path: portal/os.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
 			count: 1
 			path: portal/session_ping.php
-
-		-
-			message: '#^Variable \$connection might not be defined\.$#'
-			identifier: variable.undefined
-			count: 7
-			path: portal/vlans.php
 
 		-
 			message: '#^Unreachable statement \- code above always terminates\.$#'

@@ -14,6 +14,7 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help_credentials.credentials_ports_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.credentials_ports_esxi')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_ports_ansible')); ?></p>
+            <p><?php echo h(__t('help_credentials.credentials_usage')); ?></p>
         </section>
         <section class="panel">
             <h2><?php echo h(__t('help_credentials.credentials_trust_heading')); ?></h2>

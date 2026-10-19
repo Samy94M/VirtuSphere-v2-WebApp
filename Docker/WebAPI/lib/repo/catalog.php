@@ -6,6 +6,7 @@ require_once __DIR__ . '/../validate.php';
 require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/package_versions.php';
+require_once __DIR__ . '/usage_evidence.php';
 
 /**
  * Canonicalizes a free-text catalog status to one of the two stored values.
@@ -220,18 +221,11 @@ function repo_purge_retired_os(mysqli $db, int $afterDays = VIRTUSPHERE_PACKAGE_
 
 // VM usage per OS name (vm_os is a free-text string, not an FK), so the
 // read-only OS page can warn before a delete affects assigned VMs. Keyed by
-// os_name; missing names mean zero VMs.
+// os_name; missing names mean zero VMs. The count is the shared usage-evidence
+// reader's (F08), so the OS page's detail list and this number cannot diverge.
 function repo_os_vm_counts(mysqli $db): array
 {
-    $stmt = $db->prepare("SELECT vm_os, COUNT(*) AS c FROM deploy_vms WHERE vm_os IS NOT NULL AND vm_os <> '' GROUP BY vm_os");
-    $stmt->execute();
-
-    $counts = [];
-    foreach (repo_fetch_all($stmt->get_result()) as $row) {
-        $counts[(string) $row['vm_os']] = (int) $row['c'];
-    }
-
-    return $counts;
+    return usage_evidence_os_vm_counts($db);
 }
 
 function createOS($osName, $osStatus, $connection)

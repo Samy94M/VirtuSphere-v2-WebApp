@@ -6,6 +6,10 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
 require_once __DIR__ . '/../lib/repo/log.php';
+require_once __DIR__ . '/../lib/repo/usage_evidence.php';
+require_once __DIR__ . '/../lib/usage_evidence_view.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
 
 // Operating systems are owned by MECM: the packages sync (mecm_packages.php)
 // upserts the MECM Task Sequences into deploy_os and retires missing ones, so
@@ -62,6 +66,10 @@ $rows = array_values(array_filter($allRows, static function (array $row) use ($s
     };
 }));
 $vmCounts = repo_os_vm_counts($connection);
+// F08: one entry's "Verwendet in" is read only when the page lists that entry.
+$usageId = usage_evidence_requested_id($_GET['usage'] ?? null);
+$usageRow = usage_evidence_find_row($rows, $usageId);
+$usageEvidence = $usageRow !== null ? usage_evidence_os($connection, (string) ($usageRow['os_name'] ?? '')) : null;
 
 layout_header(__t('os.title'), $user, 'os', 'packages');
 ?>
@@ -94,7 +102,7 @@ layout_header(__t('os.title'), $user, 'os', 'packages');
                 <tr>
                     <td><?php echo h($osName); ?></td>
                     <td><?php echo catalog_status_badge((string) ($row['os_status'] ?? '')); ?></td>
-                    <td><?php echo h((string) $usage); ?></td>
+                    <td><?php echo h((string) $usage); ?> <span class="muted" aria-hidden="true">&middot;</span> <?php echo usage_evidence_toggle_html(usage_evidence_toggle_href('os.php', ['status' => $statusFilter], (int) $row['id']), $osName); ?></td>
                     <td><?php echo h(portal_format_timestamp((string) ($row['retired_at'] ?? ''))); ?></td>
                     <?php if ($canWrite) { ?>
                         <td>
@@ -106,6 +114,7 @@ layout_header(__t('os.title'), $user, 'os', 'packages');
                         </td>
                     <?php } ?>
                 </tr>
+                <?php if ($usageEvidence !== null && (int) $row['id'] === $usageId) { echo usage_evidence_expansion_row(usage_evidence_anchor($usageId), $canWrite ? 5 : 4, usage_evidence_section_html($usageEvidence, can('deploy.run', $user), true)); } ?>
             <?php } ?>
             <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="<?php echo $canWrite ? '5' : '4'; ?>"><?php echo portal_catalog_empty_state('os.php', $statusFilter, $allRows !== [], [
                 'empty' => __t('os.empty'),

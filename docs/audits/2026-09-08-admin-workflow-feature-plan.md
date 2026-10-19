@@ -153,6 +153,8 @@ Zähler und Zielansicht verwenden dieselbe fachliche Auswahl. Die bestehende mis
 
 ### F08: Verwendungsnachweis
 
+**Status 19.10.2026:** Umgesetzt im Arbeitsbaum, noch nicht committet und ohne Gate-Lauf. Lesemodul `lib/repo/usage_evidence.php` (Owner der Zählung; `repo_os_vm_counts()` delegiert dorthin), reine Regeln in `lib/usage_evidence.php`, Renderer `lib/usage_evidence_view.php`. Eingebunden in Paket-, Betriebssystem-, VLAN- und Zugangsansicht; Hilfe-Satz je Ansicht. Tests: `UsageEvidenceModelTest` (Unit), `UsageEvidenceContractTest` (Static), `UsageEvidenceTest` (Integration). QL03: jeder Nachweis nennt Stand und Quelle. Offen bzw. abweichend: keine Blätterfunktion über die feste Obergrenze, nur Gesamtzahl und „Angezeigt: N von M“; Mission-Ebene nur beim VLAN (WDS-Portgruppe), weil das Schema für Pakete, Betriebssysteme und VLAN-Netzwerkkarten keine Auftragsreferenz führt; Systemaufträge der Inventarabfrage nur als offene Referenz, ihre Historie entfällt (Aufbewahrung 30 Tage).
+
 **Funktionsumfang:** Auf Paket-, Betriebssystem-, VLAN- und Zugangsdatenansichten erscheint ein Bereich „Verwendet in“. Er nennt betroffene Missionen, Vorlagen und VMs mit Direktlinks. Direkte Zuweisung, mittelbare Nutzung und Referenz eines aktiven oder geplanten Auftrags werden getrennt erklärt; historische Referenzen erscheinen nur bei vorhandener belastbarer Verknüpfung.
 
 Bei VLANs zählt die exakte gespeicherte Zuordnung. Bei Zugangsdaten werden ausschließlich Referenzen und Bezeichnungen gezeigt. Der Verwendungsnachweis ergänzt vorhandene Änderungs- und Löschprüfungen, ersetzt deren unmittelbare serverseitige Prüfung aber nicht.

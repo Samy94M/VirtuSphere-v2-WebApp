@@ -7,6 +7,10 @@ require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
 require_once __DIR__ . '/../lib/repo/esxi_inventory.php';
 require_once __DIR__ . '/../lib/repo/log.php';
+require_once __DIR__ . '/../lib/repo/usage_evidence.php';
+require_once __DIR__ . '/../lib/usage_evidence_view.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
 
 // VLAN catalog is ESXi-owned (ADR-0023): read-only, synced from the ESXi
 // portgroups. No create/edit; an admin cleanup-delete is kept for retired rows
@@ -56,6 +60,11 @@ $presenceReport = repo_esxi_vlan_presence_report($connection);
 // successfully can prove presence or absence (ADR-0023).
 $eligibleHosts = $presenceReport['eligible'];
 $hostTotal = count($eligibleHosts);
+// F08: one VLAN's "Verwendet in" is read only when the page lists that VLAN. The
+// inventory presence above is not a use; the reader counts stored assignments only.
+$usageId = usage_evidence_requested_id($_GET['usage'] ?? null);
+$usageRow = usage_evidence_find_row($rows, $usageId);
+$usageEvidence = $usageRow !== null ? usage_evidence_vlan($connection, (string) ($usageRow['vlan_name'] ?? '')) : null;
 
 layout_header(__t('vlans.title'), $user, 'vlans', 'system-status', 'help-vlans');
 ?>
@@ -91,7 +100,7 @@ layout_header(__t('vlans.title'), $user, 'vlans', 'system-status', 'help-vlans')
                 $hosts = $presenceReport['by_name'][$nameKey] ?? [];
                 ?>
                 <tr>
-                    <td><?php echo h((string) ($row['vlan_name'] ?? '')); ?></td>
+                    <td><?php echo h((string) ($row['vlan_name'] ?? '')); ?> <span class="muted" aria-hidden="true">&middot;</span> <?php echo usage_evidence_toggle_html(usage_evidence_toggle_href('vlans.php', ['status' => $statusFilter], (int) $row['id']), $nameKey); ?></td>
                     <td>
                         <?php echo portal_badge($retired ? 'neutral' : 'success', $retired ? __t('vlans.status_retired') : __t('vlans.status_active')); ?>
                         <?php if ($retired) { ?><span class="muted nowrap"><?php echo h(portal_format_timestamp((string) $row['retired_at'])); ?></span><?php } ?>
@@ -160,6 +169,7 @@ layout_header(__t('vlans.title'), $user, 'vlans', 'system-status', 'help-vlans')
                         </td>
                     <?php } ?>
                 </tr>
+                <?php if ($usageEvidence !== null && (int) $row['id'] === $usageId) { echo usage_evidence_expansion_row(usage_evidence_anchor($usageId), $canWrite ? 5 : 4, usage_evidence_section_html($usageEvidence, can('deploy.run', $user), true)); } ?>
             <?php } ?>
             <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="<?php echo $canWrite ? 5 : 4; ?>"><?php echo portal_catalog_empty_state('vlans.php', $statusFilter, $allRows !== [], [
                 'empty' => __t('vlans.empty_catalog'),

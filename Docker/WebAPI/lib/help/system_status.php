@@ -281,5 +281,6 @@ require_once __DIR__ . '/../log_filter.php';
             <p><?php echo h(__t('help_system_status.vlans_p1')); ?></p>
             <p><?php echo h(__t('help_system_status.vlans_p2')); ?></p>
             <p><?php echo h(__t('help_system_status.vlans_p3')); ?></p>
+            <p><?php echo h(__t('help_system_status.vlans_usage')); ?></p>
         </section>
     </div>

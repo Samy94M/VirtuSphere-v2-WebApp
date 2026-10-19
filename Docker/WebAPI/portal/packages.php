@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/catalog.php';
+require_once __DIR__ . '/../lib/repo/usage_evidence.php';
+require_once __DIR__ . '/../lib/usage_evidence_view.php';
 require_once __DIR__ . '/../lib/system_status_urls.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
@@ -36,6 +38,10 @@ $catalogHasRows = $rows !== [] || repo_package_count($connection) > 0;
     'retired' => portal_sort_text('retired_at'),
     'updated' => portal_sort_text('updated_at'),
 ], 'name');
+// F08: one package's "Verwendet in" is read only when the page lists that package.
+$usageId = usage_evidence_requested_id($_GET['usage'] ?? null);
+$usageRow = usage_evidence_find_row($rows, $usageId);
+$usageEvidence = $usageRow !== null ? usage_evidence_package($connection, $usageId) : null;
 
 layout_header(__t('packages.title'), $user, 'packages', 'packages');
 ?>
@@ -72,8 +78,9 @@ layout_header(__t('packages.title'), $user, 'packages', 'packages');
                         'scope' => 'package',
                         'project' => (string) ($row['package_basename'] ?? ''),
                         'version' => (string) ($row['package_version'] ?? ''),
-                    ], '', '&', PHP_QUERY_RFC3986)); ?>"><?php echo h(__t('packages.diagnostics')); ?></a></td>
+                    ], '', '&', PHP_QUERY_RFC3986)); ?>"><?php echo h(__t('packages.diagnostics')); ?></a> <span class="muted" aria-hidden="true">&middot;</span> <?php echo usage_evidence_toggle_html(usage_evidence_toggle_href('packages.php', ['status' => $statusFilter, 'sort' => $sort, 'dir' => $dir], (int) $row['id']), (string) ($row['package_name'] ?? '')); ?></td>
                 </tr>
+                <?php if ($usageEvidence !== null && (int) $row['id'] === $usageId) { echo usage_evidence_expansion_row(usage_evidence_anchor($usageId), 7, usage_evidence_section_html($usageEvidence, can('deploy.run', $user), true)); } ?>
             <?php } ?>
             <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="7"><?php echo portal_catalog_empty_state('packages.php', $statusFilter, $catalogHasRows, [
                 'empty' => __t('packages.empty'),

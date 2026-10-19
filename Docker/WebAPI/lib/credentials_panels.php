@@ -24,6 +24,8 @@ require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/integration_health.php';
 require_once __DIR__ . '/system_status_remote_secret_notice.php';
+require_once __DIR__ . '/repo/usage_evidence.php';
+require_once __DIR__ . '/usage_evidence_view.php';
 
 /** @param array<string,mixed> $user */
 function credentials_render_page(mysqli $connection, array $user): void
@@ -236,6 +238,8 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                         </form>
                     </td>
                 </tr>
+                <?php // F08: where this access is used. A details row under the record, the host identity row's pattern.
+                echo usage_evidence_disclosure_row(usage_evidence_credential_anchor($rowId), 8, (string) ($row['name'] ?? ''), usage_evidence_section_html(usage_evidence_credential($connection, $rowId, (string) ($row['type'] ?? '')), can('deploy.run', $user), false)); ?>
             <?php } ?>
             <?php if ($credentials === []) { ?><tr><td colspan="8"><?php echo h(__t('credentials.empty')); ?></td></tr><?php } ?>
             </tbody>

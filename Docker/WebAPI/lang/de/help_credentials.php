@@ -31,4 +31,5 @@ return [
     'credentials_cadence_no_worker' => '„kein automatischer Abruf, der Bereitstellungsdienst läuft nicht": Der Abruf ist ein Bereitstellungsauftrag und wird nur vom Bereitstellungsdienst ausgeführt. Läuft der Dienst nicht, würde er eingereiht und nie bearbeitet. Den Dienst starten; erst danach hat ein Aufheben der Pause Wirkung.',
     'credentials_cadence_paused' => '„Anmeldung pausiert, kein automatischer Abruf“: Nur dieser Zugang ist nach Anmeldefehlern angehalten, damit das Konto nicht gesperrt wird. Er läuft wieder, sobald die Zugangsdaten gespeichert werden; ein einzelner Versuch geht jederzeit über „Inventarabruf starten".',
     'credentials_tests_p3' => 'Bei genau einem Ansible-Zugang wird er automatisch genutzt. Bei mehreren muss unter Einstellungen → Kataloge und Inventar genau einer ausgewählt werden. Wird dieser Zugang gelöscht oder in ESXi umgewandelt, bereinigt VirtuSphere die Auswahl und protokolliert das.',
+    'credentials_usage' => '„Verwendet in“ nennt die Aufträge mit diesem Zugang und die VMs, deren Bindung an ihn nachgewiesen ist; fehlt ein Nachweis, ist eine Verwendung nicht ausgeschlossen.',
 ];

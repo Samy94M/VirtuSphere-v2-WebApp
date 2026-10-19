@@ -196,6 +196,39 @@ tr.row-host-identity .host-identity-replace {
     margin-top: 8px;
 }
 
+/* F08 "Verwendet in": the usage section is a full-width row under the record it
+   explains (a credential's details row, or the catalog entry the page selected).
+   It reads as part of that record, like the host identity row above. */
+
+tr:has(+ tr.row-usage) > td {
+    border-bottom: 0;
+}
+
+tr.row-usage > td {
+    padding: 4px 12px 14px;
+    background: var(--surface-muted);
+}
+
+tr.row-usage details > summary {
+    margin-top: 4px;
+}
+
+.usage-evidence .usage-group {
+    margin-top: 10px;
+}
+
+.usage-evidence .usage-group ul {
+    margin: 4px 0 0;
+    padding-left: 1.25em;
+}
+
+/* The links of a usage line sit in prose, so colour alone does not mark them
+   (WCAG 1.4.1), as for `.table-empty a`. */
+.usage-evidence li a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 .pagination {
     display: flex;
     flex-wrap: wrap;

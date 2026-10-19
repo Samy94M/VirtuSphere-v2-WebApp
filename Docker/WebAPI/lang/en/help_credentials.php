@@ -31,4 +31,5 @@ return [
     'credentials_cadence_no_worker' => '"no automatic pull, the deploy service is not running": the pull is a deploy job and only the deploy service executes it. Without a running service it would be queued and never processed. Start the service; only then does lifting a pause have any effect.',
     'credentials_cadence_paused' => '"sign-in paused, no automatic pull": this credential alone is held after login failures so the account cannot be locked out. It resumes as soon as the credential is saved; a single attempt is always available through "Start inventory pull".',
     'credentials_tests_p3' => 'With exactly one Ansible credential it is used automatically. With several, exactly one must be selected under Settings → Catalogues and inventory. If that credential is deleted or changed to ESXi, VirtuSphere clears and audits the selection.',
+    'credentials_usage' => 'Used in lists the jobs that use this access and the VMs whose binding to it is proven; without proof, a use is not ruled out.',
 ];
