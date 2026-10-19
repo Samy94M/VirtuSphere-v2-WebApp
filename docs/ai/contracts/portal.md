@@ -40,7 +40,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A35 Sortable portal list tables use the lib/portal_sort.php helpers (portal_sort_apply() + portal_s
 
-- Sortable portal list tables use the `lib/portal_sort.php` helpers (`portal_sort_apply()` + `portal_sort_header()`); do not hand-roll per-page `usort`/sort links. Sort keys are whitelisted, sorting is display-only (no locale, auth or wire impact), and any CSV export link carries the active `sort`/`dir`.
+- Sortable portal list tables use the `lib/portal_sort.php` helpers (`portal_sort_apply()` + `portal_sort_header()`); do not hand-roll per-page `usort`/sort links. Sort keys are whitelisted, sorting is display-only (no locale, auth or wire impact), and any CSV export link carries the active `sort`/`dir`. A database-paged list orders its rows in SQL through `portal_sort_sql_order()` with the same whitelist, and every order ends on a unique id so a LIMIT window never repeats or skips a row (the dashboard VM overview, R55 of `docs/ai/reference/portal.md`).
 
 ## A36 Deep links into the log viewer go through log_category_url() (lib/repo/log.php), which derives
 

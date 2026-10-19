@@ -44,6 +44,11 @@ const PORTAL_PAGES = [
   // matrix scanning missions.php under this page's name.
   { path: 'vm_edit.php', access: 'user', query: (ids) => `mission_id=${ids.missionId}&vm_id=${ids.vmId}` },
 
+  // The two dashboard VM tiles open this read-only list. Both filters are scanned:
+  // the MECM one is the only view that renders template rows, with their marker.
+  { path: 'vm_overview.php?filter=all', label: 'vm_overview.php (all)', access: 'user' },
+  { path: 'vm_overview.php?filter=mecm_pending', label: 'vm_overview.php (mecm_pending)', access: 'user' },
+
   // Package-run diagnosis. The list renders without parameters; the detail page
   // needs a mission and a VM and, without a seeded run, renders its
   // "not available" state, which is a real page state with its own layout.

@@ -18,6 +18,9 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     'help-backup' => 'stack',
     'help-unsaved-changes' => 'overview',
     'help-copying-values' => 'overview',
+    // The dashboard numbers and the overview they open: what is counted, when,
+    // and why a list can differ from the tile it was opened from.
+    'help-dashboard-counts' => 'overview',
     'help-effective-values' => 'missions',
     'help-work-context' => 'missions',
     'help-status-overview' => 'system-status',

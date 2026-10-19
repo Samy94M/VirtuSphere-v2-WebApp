@@ -12,6 +12,7 @@ require_once __DIR__ . '/../lib/integration_health.php';
 require_once __DIR__ . '/../lib/deploy_service_health.php';
 require_once __DIR__ . '/../lib/system_status.php';
 require_once __DIR__ . '/../lib/client_phase_attention.php';
+require_once __DIR__ . '/../lib/vm_overview_page.php';
 // The three label helpers of the service warning below live here, and the page
 // called them without loading the module. Nothing noticed for two stages: the
 // call sits inside the branch that renders only while the deploy service wants
@@ -25,8 +26,11 @@ $user = portal_require_user($connection);
 
 $missionCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) <> ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
 $templateCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_missions WHERE LEFT(mission_name, 1) = ?', 's', [VIRTUSPHERE_TEMPLATE_PREFIX]);
-$vmCount = repo_vm_count_in_real_missions($connection);
-$mecmPending = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ?', 's', [VIRTUSPHERE_MECM_SYNC_PENDING]);
+// The two VM tiles and the overview they open read one predicate per filter
+// (lib/repo/vms_overview.php). The moment of counting travels with each tile link.
+$kpiCountedAt = time();
+$vmCount = repo_vm_overview_count($connection, VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL);
+$mecmPending = repo_vm_overview_count($connection, VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING);
 $vmProgressAttention = repo_vm_progress_attention_count($connection);
 $healthSnapshot = integration_health_snapshot($connection);
 // The MECM tile shows two separate signals and never a common worst-of: a
@@ -88,8 +92,8 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
     <section class="grid kpi-grid" aria-label="<?php echo h(__t('dashboard.key_metrics')); ?>">
         <a class="card kpi" href="missions.php?type=missions"><span class="muted"><?php echo h(__t('dashboard.kpi_missions')); ?></span><span class="value"><?php echo h($missionCount); ?></span></a>
         <a class="card kpi" href="missions.php?type=templates"><span class="muted"><?php echo h(__t('dashboard.kpi_templates')); ?></span><span class="value"><?php echo h($templateCount); ?></span></a>
-        <article class="card kpi"><span class="muted"><?php echo h(__t('dashboard.kpi_vms')); ?></span><span class="value"><?php echo h($vmCount); ?></span></article>
-        <article class="card kpi"><span class="muted"><?php echo h(__t('dashboard.kpi_mecm_pending')); ?></span><span class="value<?php echo $mecmPending > 0 ? ' value-warning' : ''; ?>"><?php echo h($mecmPending); ?></span></article>
+        <?php vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL, __t('dashboard.kpi_vms'), $vmCount, $kpiCountedAt); ?>
+        <?php vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING, __t('dashboard.kpi_mecm_pending'), $mecmPending, $kpiCountedAt, $mecmPending > 0); ?>
         <?php if ($vmProgressAttention > 0) { ?>
             <a class="card kpi" href="missions.php?type=missions&attention=1"><span class="muted"><?php echo h(__t('dashboard.kpi_vm_attention')); ?></span><span class="value value-warning"><?php echo h($vmProgressAttention); ?></span></a>
         <?php } ?>

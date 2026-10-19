@@ -252,3 +252,11 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 - The job presenter derives the skip count from persisted skipped_vm_ids and adds the localized sentence without changing MAC or generic result semantics. The optional Create link uses the same deploy.run permission as the deploy page and a canonical mission URL; it is display navigation, not Create authorization.
 - Schedule preview lists only eligible VMs and separately shows the skipped count. The Create link is shown only to authorized readers.
+
+## R55 The dashboard VM tiles and the VM overview share one reader
+
+- `repo_vm_overview_predicate()` (`lib/repo/vms_overview.php`) is the only definition of each filter. The tile count (`repo_vm_overview_count()`), the list total and the list rows call it. `all` is the VM tile: real-mission VMs only, templates excluded, and `repo_vm_count_in_real_missions()` delegates to it. `mecm_pending` keeps the meaning `updated = 1 OR mecm_sync_state = pending`, template rows included; the list marks them with the template badge, so the number and the list cannot disagree.
+- Only the mission is joined (one row per VM, the foreign key cannot drop a row). Interfaces, disks and packages are never joined into a count or a page.
+- Sorting goes through `portal_sort_sql_order()` (`lib/portal_sort_sql.php`, pure, so a repository can load it in a CLI closure): the key is whitelisted, the direction is reduced to ASC or DESC, and every key list ends with the VM id, so LIMIT pages cut one global order. The order is SQL collation, not the PHP natural order of `portal_sort_apply()`.
+- A tile carries the moment it was counted and its number (`counted`, `expected`) in `vm_overview_url()`, and the tile shows the time. The list keeps its own total and explains a difference in one sentence; it never changes its filter to reproduce the old number. A filter switch carries neither page nor snapshot.
+- The overview is read-only and is entered from the dashboard only; it has no nav entry, and the dashboard stays the active item. Its VM links open the editor without return context, because the closed work context (R10) cannot name this list as a return target.

@@ -37,6 +37,11 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_vm_progress_attention_count',
         'repo_vm_progress_attention_counts_by_mission',
         'repo_vm_count_in_real_missions',
+        // The dashboard VM overview reader (lib/repo/vms_overview.php): one predicate per filter.
+        'repo_vm_overview_predicate',
+        'repo_vm_overview_count',
+        'repo_vm_overview_sort_columns',
+        'repo_vm_overview_page',
         'repo_vm_progress_attention_sql',
         'repo_vm_network_scope',
         'repo_vm_network_issues_for_scope',

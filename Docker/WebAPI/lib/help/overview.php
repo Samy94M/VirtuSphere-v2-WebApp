@@ -31,6 +31,11 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_overview.copy_p2')); ?></p>
         </section>
 
+        <section class="panel" id="help-dashboard-counts">
+            <h2><?php echo h(__t('help_overview.dashboard_counts_heading')); ?></h2>
+            <p><?php echo h(__t('help_overview.dashboard_counts_p1')); ?></p>
+        </section>
+
         <section class="panel">
             <h2><?php echo h(__t('help_overview.glossary_heading')); ?></h2>
             <p><?php echo h(__t('help_overview.glossary_intro')); ?></p>

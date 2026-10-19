@@ -44,4 +44,5 @@ require_once __DIR__ . '/vms_validation.php';
 require_once __DIR__ . '/vms_persistence.php';
 require_once __DIR__ . '/vms_mecm_reset.php';
 require_once __DIR__ . '/vms_operations.php';
+require_once __DIR__ . '/vms_overview.php';
 require_once __DIR__ . '/vms_legacy.php';

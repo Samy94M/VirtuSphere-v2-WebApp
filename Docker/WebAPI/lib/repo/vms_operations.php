@@ -164,20 +164,13 @@ function repo_vm_progress_attention_count(mysqli $db, ?int $missionId = null): i
 }
 
 /**
- * VMs of real missions only. A template's VMs are the blueprint that a clone
- * copies into a real mission, so counting them would report every machine
- * twice on the dashboard. The template test is the same expression the mission
- * tiles use; deploy_vms.mission_id is NOT NULL and cascades on delete, so the
- * inner join drops no row a real mission owns.
+ * VMs of real missions only: the dashboard's VM tile. The predicate lives in
+ * repo_vm_overview_predicate() (lib/repo/vms_overview.php), the one definition
+ * the tile and its list share, so this name delegates instead of repeating it.
  */
 function repo_vm_count_in_real_missions(mysqli $db): int
 {
-    return (int) repo_scalar(
-        $db,
-        'SELECT COUNT(*) FROM deploy_vms v INNER JOIN deploy_missions m ON m.id = v.mission_id WHERE LEFT(m.mission_name, 1) <> ?',
-        's',
-        [VIRTUSPHERE_TEMPLATE_PREFIX]
-    );
+    return repo_vm_overview_count($db, VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL);
 }
 
 /** @return array<int,int> Overdue observation count keyed by mission id. */

@@ -40,7 +40,7 @@ final class PortalPageAssetSelectionTest extends TestCase
             'credentials.php', 'dashboard.php', 'deploy.php', 'deploy_log.php',
             'help.php', 'logs.php', 'missions.php', 'os.php', 'package_run.php', 'package_reports.php', 'packages.php',
             'settings.php', 'system_status.php', 'users.php', 'vlans.php',
-            'vm_edit.php', 'vms.php',
+            'vm_edit.php', 'vm_overview.php', 'vms.php',
         ];
 
         foreach (VIRTUSPHERE_LAYOUT_PAGES as $page) {
