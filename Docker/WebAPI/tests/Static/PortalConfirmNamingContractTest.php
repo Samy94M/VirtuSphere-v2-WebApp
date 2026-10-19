@@ -63,7 +63,6 @@ final class PortalConfirmNamingContractTest extends TestCase
         // serverseitig gerenderter Wert wuerde dort behaupten, was der
         // Bearbeiter womoeglich gerade ungespeichert ueberschrieben hat.
         'portal.vm_mecm_reset_confirm_editing',
-        'portal.vm_mecm_transfer_confirm',
         'settings.allowlist_confirm_delete',
         'settings.allowlist_confirm_role',
         'directory.confirm_deactivate_controller',
@@ -93,6 +92,9 @@ final class PortalConfirmNamingContractTest extends TestCase
         'users.confirm_role_self' => 'the target is the signed-in user themselves; "your own role" is the name',
         'vms.bulk_confirm_delete' => 'acts on the checkbox selection, which has no single name',
         'vms.bulk_confirm_reset' => 'acts on the checkbox selection, which has no single name',
+        // AV-R12: the save of the editor's own VM. Its name field sits in the same form and may hold
+        // a value the save has not stored yet, and the question is about the operating system.
+        'vm_edit.mecm_transfer_confirm' => 'the editor saves its own VM, whose name field may hold a value not stored yet; the question is about the operating system',
     ];
 
     /** @return array<string, string> path => source */

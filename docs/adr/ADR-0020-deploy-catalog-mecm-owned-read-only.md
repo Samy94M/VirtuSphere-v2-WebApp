@@ -122,3 +122,39 @@ Decided by the user on 28.09.2026 (AV-R08) and implemented on 15.10.2026:
 
 Until the portal carrying this amendment runs in production, `removeOldVersion`
 is not set in package `config.json` files.
+
+## Amendment 2026-10-19: a registered VM's save queues the MECM transfer (AV-R12)
+
+The transfer button ("Zuweisungen an MECM übertragen") and its preview are
+removed. The decision of 28.09.2026, confirmed by the user on 15.10.2026, is the
+rule now: a package change on a registered VM goes to MECM when the VM is saved,
+and packages marked "Required" install at the next opportunity without a second
+confirmation.
+
+- **Saving queues the VM in the same transaction.** When a registered VM's
+  desired state differs from its own rules (the transfer plan is not empty), any
+  save runs the same queue as the former button (`repo_mark_vm_for_mecm_resync()`)
+  and writes its `vm.mecm_state_changed` row, both inside the save's transaction.
+  A difference left from an earlier edit therefore goes with the next save; with
+  the button gone there is no other way. A failed audit rolls the change back. A
+  save without any difference queues nothing, and neither does a template or an
+  unregistered VM.
+- **An OS that deviates from MECM asks first.** The wanted operating system is
+  compared with the one of the VM's own `os` rule. A VM without such a rule counts
+  as deviating, because a transfer would add an OS collection that nothing in the
+  portal vouches for. On a deviation the editor shows a hint and the two buttons
+  "Speichern und an MECM übertragen" (with the shared confirmation about the
+  reinstall risk) and "Nur im Portal speichern". Only the first sends the change,
+  and it sends the whole desired state, because the device-sync always transfers
+  the whole state of a VM. The server decides alone, from the submitted button and
+  the stored state under the mission lock; the browser only follows the OS field.
+- **The save says what it sent.** A queued transfer names the additions and the
+  removals and says that a removal does not uninstall anything. A save held back
+  by an OS deviation says so.
+- **Audit actions.** A save-time transfer writes `queued_mecm_transfer_on_save`;
+  a transfer that accepted an OS deviation writes
+  `queued_mecm_transfer_os_confirmed`. Both are in `vm.mecm_state_changed`.
+
+Unchanged: the device-sync still only adds memberships and removes its own rules,
+the explicit `Reset MECM ID` action is still the only point that resets the MECM
+identity, and nothing in MECM is deleted by the portal.

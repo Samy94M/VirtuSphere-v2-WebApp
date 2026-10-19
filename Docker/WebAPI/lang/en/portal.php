@@ -52,13 +52,4 @@ return [
     'vm_rollout_current_label' => 'Current rollout name',
     'vm_rollout_next_label' => 'Next rollout name',
     'vm_rollout_frozen_hint' => 'This VM was already handed to MECM as ":current". The changed name only applies to the next rollout: delete the old device in MECM, then use "Reset MECM ID".',
-    // An explicit action rather than a silent state change: the portal is the
-    // intent before the rollout, MECM is the truth after it.
-    'vm_mecm_transfer_button' => 'Transfer assignments to MECM',
-    'vm_mecm_transfer_confirm' => 'Transfer the operating system and package assignments of VM :name to MECM now? The VM is queued for the device-sync again; its installation state stays as it is. This does not start an installation.',
-    'vm_mecm_transfer_success' => 'The VM is queued for the transfer. The device-sync reconciles the memberships on its next run: missing ones are added, obsolete own rules are removed. Rules created by hand in MECM always stay untouched.',
-    'vm_mecm_transfer_stale' => 'The assignments changed since this page was loaded. Reload the page and check the preview again.',
-    'vm_mecm_preview_add' => 'On the next transfer the VM is added to: :names',
-    'vm_mecm_preview_remove' => 'Own rules no longer assigned are removed: :names. Rules created by hand in MECM stay untouched.',
-    'vm_mecm_preview_none' => 'From the portal\'s view no changes to the own memberships are pending; the transfer still checks the state in MECM.',
 ];

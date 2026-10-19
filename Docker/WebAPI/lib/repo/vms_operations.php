@@ -193,14 +193,11 @@ function repo_vm_progress_attention_counts_by_mission(mysqli $db): array
  * Re-queues ONE already-registered VM for the device-sync, so a package or OS
  * change made in the portal after the registration reaches MECM.
  *
- * Why this is an explicit action and not a side effect of saving: the portal is
- * the intent before the rollout, MECM is the truth after it (ADR-0020 amendment /
- * WP-06). Ticking a package on a registered VM used to change the portal row and
- * nothing else, and nothing said so; the operator believed the VM would get the
- * package. Silently setting `updated = 1` on save would be the opposite mistake:
- * it re-runs the whole assignment pass for a machine that may be mid-installation,
- * from an edit that could have been a typo. So the save says the change has not
- * reached MECM, and this action carries it over when the operator decides.
+ * Since AV-R12 (ADR-0020 amendment 2026-10-19) the save itself calls this for a
+ * registered VM whose assignments changed (vm_mecm_save_transfer, same
+ * transaction). A save never sends an OS deviation unless the operator chose the
+ * transfer button, because the device-sync may then reinstall the machine. The
+ * decision itself lives in vm_mecm_save.php.
  *
  * Only the queue flag changes. The lifecycle stays exactly where it is: the VM is
  * installed or installing, and this does not undo that. device-sync only ever

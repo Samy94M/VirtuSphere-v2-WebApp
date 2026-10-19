@@ -80,6 +80,9 @@ $stmt->execute();
 $stmt = $db->prepare('DELETE FROM deploy_missions WHERE mission_name LIKE ?');
 $stmt->bind_param('s', $like);
 $stmt->execute();
+$stmt = $db->prepare('DELETE FROM deploy_os WHERE os_name LIKE ?');
+$stmt->bind_param('s', $like);
+$stmt->execute();
 echo 'CLEANED';
 `);
 }
@@ -141,32 +144,40 @@ test('vm_edit MECM reset: Cancel keeps the ID, Confirm clears it and returns to 
   expect(vmRow(vmId).mecm_id, 'Confirm cleared the MECM ID').toBeNull();
 });
 
-// e2e-covers: vm_edit.php:transfer_mecm
-// e2e-covers-cancel: vm_edit.php:transfer_mecm
-test('vm_edit MECM transfer: the preview names the removal, Cancel changes nothing, Confirm queues', async ({ page }) => {
-  const seed = seedMission(PREFIX + 'transfer', 1);
+// The MECM save of a registered VM whose OS deviates (AV-R12): two buttons, the question first,
+// and a portal-only save that leaves MECM untouched. No e2e-covers marker: neither save is a
+// `name="action"` form, so the action inventory does not list it.
+test('vm_edit MECM save: a deviating OS asks first, Cancel changes nothing, portal-only keeps MECM, Confirm queues', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'mecm-save', 1);
   const vmId = seed.vmIds[0];
-  // updated starts at 0 so the confirm's effect is observable, and one OWNED
-  // rule no longer covered by the assignments makes the removal preview real
-  // (ADR-0034: the transfer stopped being purely additive there).
+  // A registered VM whose MECM OS rule names another OS than the portal wants. updated starts at 0
+  // so the effect of each save is observable.
   runPhp(`
 $db = db();
 $vmId = ${Number(vmId)};
-$stmt = $db->prepare('UPDATE deploy_vms SET updated = 0 WHERE id = ?');
-$stmt->bind_param('i', $vmId);
+// The OS field is required and offers catalog entries only, so the portal side needs a real one.
+$os = '${PREFIX}mecm-os';
+$stmt = $db->prepare("INSERT INTO deploy_os (os_name, os_status, retired_at) VALUES (?, 'Active', NULL)");
+$stmt->bind_param('s', $os);
 $stmt->execute();
-$stmt = $db->prepare("INSERT INTO deploy_vm_mecm_rules (vm_id, collection_id, collection_name, collection_type, origin) VALUES (?, 'E2E00099', 'E2E-Obsolete-Pkg', 'package', 'created')");
+// Every seed VM is named E2EVM1, and a save refuses a name another mission already uses.
+$stmt = $db->prepare("UPDATE deploy_vms SET mecm_sync_state = 'registered', updated = 0, vm_os = ?, vm_name = CONCAT('E2EMS', id) WHERE id = ?");
+$stmt->bind_param('si', $os, $vmId);
+$stmt->execute();
+$stmt = $db->prepare("INSERT INTO deploy_vm_mecm_rules (vm_id, collection_id, collection_name, collection_type, origin) VALUES (?, 'E2E00098', 'E2E-MECM-OS', 'os', 'created')");
 $stmt->bind_param('i', $vmId);
 $stmt->execute();
 echo 'SEEDED';
 `);
 
   await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
-  // The preview names the own rule the next sync run will remove.
-  await expect(page.getByText('E2E-Obsolete-Pkg'), 'the removal preview names the obsolete own rule').toBeVisible();
-
+  // The suite renders EN; the data attributes name the two buttons in either locale.
+  const transfer = page.locator('button[data-mecm-save-transfer]');
+  const portalOnly = page.locator('button[data-mecm-save-portal]');
   const dialog = page.locator('[data-confirm-dialog]');
-  const transfer = page.locator('form:has(input[name="action"][value="transfer_mecm"]) button');
+  await expect(page.locator('[data-mecm-os-hint]'), 'the editor names the deviation').toBeVisible();
+  await expect(transfer, 'the transfer button replaces the single save').toBeVisible();
+  await expect(portalOnly).toBeVisible();
 
   await transfer.click();
   await expect(dialog, 'the transfer asks first').toBeVisible();
@@ -174,10 +185,18 @@ echo 'SEEDED';
   await expect(dialog).toBeHidden();
   expect(vmRow(vmId).updated, 'Cancel queued nothing').toBe(0);
 
+  await portalOnly.click();
+  await expect(page).toHaveURL(new RegExp(`vms\\.php\\?mission_id=${seed.missionId}`));
+  expect(vmRow(vmId).updated, 'the portal-only save leaves MECM untouched').toBe(0);
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
   await transfer.click();
   await expect(dialog).toBeVisible();
-  await confirmAndAwaitPost(page, dialog);
-  await expect(page).toHaveURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`));
+  // The editor posts to itself, not to the VM list, so wait for that POST before reading the row.
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('vm_edit.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
   expect(vmRow(vmId).updated, 'Confirm queued the VM for the device-sync').toBe(1);
 });
 

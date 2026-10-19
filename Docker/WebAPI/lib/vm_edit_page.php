@@ -88,12 +88,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             vm_parse_disks(is_array($_POST['disks'] ?? null) ? $_POST['disks'] : []),
             vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []),
             request_string($_POST, 'edit_version'),
-            (int) $user['id']
+            (int) $user['id'],
+            vm_mecm_save_mode($_POST)
         );
         $savedVmId = $saved['vm_id'];
         $frozenSnapshot = $saved['frozen_snapshot'];
 
-        flash_set('success', __t('vm_edit.flash_saved'));
+        // What a queued transfer sends is named here (AV-R12); a plain save keeps its sentence.
+        flash_set('success', vm_mecm_save_success_message($saved['mecm']));
         // A frozen snapshot means the correction was stored and changes nothing
         // about the machine that is already handed over. Saying so here is the
         // whole point: without it the operator leaves the page believing the
@@ -101,23 +103,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($frozenSnapshot !== '') {
             flash_set('info', __t('vm_edit.flash_rollout_frozen', ['hostname' => $frozenSnapshot]));
         }
-        // A registered VM is one MECM already holds, and the device-sync only
-        // looks at VMs it does not. So a package or OS change made here is stored
-        // and goes no further until somebody transfers it. Saying that is the
-        // whole point: the change used to be silently portal-only, and the
-        // operator believed the VM would get the package.
-        if ($vmId > 0 && !$isTemplate && (string) ($vm['mecm_sync_state'] ?? '') === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
-            $before = array_map(static fn (array $row): int => (int) ($row['id'] ?? $row['package_id'] ?? 0), (array) ($vm['packages'] ?? []));
-            $after = array_map(static fn (array $row): int => (int) $row['id'], vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []));
-            sort($before);
-            sort($after);
-            $osChanged = (string) ($vm['vm_os'] ?? '') !== $vmData['vm_os'];
-            if ($before !== $after || $osChanged) {
-                flash_set('info', __t('vm_edit.flash_mecm_transfer_pending'), '', [
-                    'url' => vm_edit_url($missionId, $savedVmId, null, $workContext),
-                    'label' => __t('portal.vm_mecm_transfer_button'),
-                ]);
-            }
+        // AV-R12: an OS that deviates from MECM was saved in the portal only, unless
+        // the operator chose the transfer button. The flash says so whenever MECM still
+        // lacks a difference that this save held back.
+        if ($saved['mecm']['held']) {
+            flash_set('info', __t('vm_edit.flash_mecm_portal_only'));
         }
         redirect_to(portal_work_context_vm_list_url($missionId, $workContext, $savedVmId));
     } catch (Throwable $exception) {
@@ -134,6 +124,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $vm ??= [];
 $canWrite = can('vms.write', $user);
+// AV-R12: the MECM state of this VM (two save buttons, or the single one).
+$mecmView = vm_mecm_save_view($connection, $vmId, $isTemplate, $vm);
 $effectiveValues = portal_vm_effective_values($mission, $vm);
 $selectedPackages = array_map(static fn (array $row): int => (int) ($row['id'] ?? $row['package_id'] ?? 0), $vm['packages'] ?? []);
 // Pickers exclude retired catalog entries but keep values this VM already

@@ -778,8 +778,11 @@ Lebenszyklus eines Katalogeintrags:
 **Neue Version für eine VM:** Der VM-Editor zeigt „Update verfügbar“, sobald
 eine echt höhere Version desselben Pakets aktiv ist, auch solange die alte noch
 aktiv ist. Der Admin setzt den Haken auf die neue Version, entfernt den alten
-und überträgt eine bereits registrierte VM mit „Zuweisungen an MECM
-übertragen“. Ein Haken auf einer zurückgezogenen Version zeigt eine Warnung:
+und speichert. Eine bereits registrierte VM geht beim Speichern automatisch an
+MECM (AV-R12), auch mit Änderungen, die MECM aus früheren Bearbeitungen noch
+fehlen. Weicht ihr Betriebssystem von dem ab, das MECM hält, fragt der
+Editor vorher und überträgt erst mit „Speichern und an MECM übertragen“. Ein
+Haken auf einer zurückgezogenen Version zeigt eine Warnung:
 Eine Übertragung damit bleibt mit `collection_missing` in der Warteschlange.
 
 **Vorlagen-VMs** (Missionen mit Vorlagen-Präfix, nie an MECM übertragen) folgen

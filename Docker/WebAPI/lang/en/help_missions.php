@@ -67,6 +67,8 @@ return [
     'vm_steps_7' => '7. Packages under "Packages" are optional. The editor does not offer retired packages; packages already linked stay visible.',
     'vm_steps_8' => '8. Choose "Save VM". Only then are the changes saved.',
     'vm_steps_note' => 'The network adapters of a VM cannot be changed while a running deployment job of this mission includes the VM. If datastore or datacenter is left empty, the VM takes the value of the mission.',
+    'vm_steps_mecm' => 'If the VM is already registered in MECM, every save automatically transfers what MECM does not have of the package selection yet, also from an earlier change. The client installs required packages at its next policy retrieval. Removed packages are only unassigned in MECM; installed software stays as it is.',
+    'vm_steps_mecm_os' => 'If the operating system differs from the one MECM holds for the VM, saving asks first, because a transfer can trigger a reinstallation. "Save and transfer to MECM" then sends the whole desired state of the VM. "Save in the portal only" leaves MECM unchanged until you trigger the transfer deliberately.',
     'domain_p1' => 'The domain of the mission is a complete DNS name with at least one dot, for example corp.example.local. It is the default for the domain of the VMs. When the settings of a mission are saved, datastore and domain are mandatory; for a template both stay optional.',
     'status_axes_heading' => 'The two axes in the VM list and in the editor',
     'status_axes_p1' => 'The "Status" column of the VM list shows which of the five deployment stages the VM has reached. The "MECM" column next to it shows the match with MECM. The VM editor also shows the lifecycle of the VM.',

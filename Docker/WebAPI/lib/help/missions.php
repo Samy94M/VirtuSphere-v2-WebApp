@@ -26,6 +26,8 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_missions.vm_steps_7')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_8')); ?></p>
             <p class="muted"><?php echo h(__t('help_missions.vm_steps_note')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_mecm')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_mecm_os')); ?></p>
         </section>
 
         <section class="panel" id="help-work-context">

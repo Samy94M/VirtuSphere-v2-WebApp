@@ -80,18 +80,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $outcome['changed'] ? 'portal.vm_mecm_reset_success' : 'portal.vm_mecm_reset_already_pending',
                 ['hostname' => $outcome['hostname']]
             ));
-        } elseif ($action === 'transfer_mecm') {
-            if ($isTemplate) {
-                throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
-            }
-            vm_queue_mecm_transfer_with_audit(
-                $connection,
-                $missionId,
-                $vmId,
-                request_string($_POST, 'assignment_revision'),
-                (int) $user['id']
-            );
-            flash_set('success', __t('portal.vm_mecm_transfer_success'));
         } elseif ($action === 'restart_progress_watch') {
             if ($isTemplate) {
                 throw new RuntimeException(__t('vms.progress_template_blocked'));

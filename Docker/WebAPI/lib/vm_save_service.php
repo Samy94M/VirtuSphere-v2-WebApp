@@ -8,13 +8,15 @@ require_once __DIR__ . '/mecm_hostname.php';
 require_once __DIR__ . '/repo/helpers.php';
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/repo/vms.php';
+require_once __DIR__ . '/vm_mecm_save.php';
 
 /**
  * The one owner of an interactive VM save and its audit rows (MECM plan
  * decision 32, shared with the identity plan). The write, the vm.changed row
  * and, when the desired Windows name moved, the vm.rollout_hostname row commit
  * or roll back together: before this, repo_save_vm() committed first and a
- * failed audit left a saved change without a trace.
+ * failed audit left a saved change without a trace. A registered VM's MECM
+ * queue (AV-R12, vm_mecm_save.php) joins that transaction.
  *
  * $before is the stored bundle read before the save (empty for a new VM). The
  * diff compares stored row against stored row, never raw POST values, because
@@ -23,12 +25,15 @@ require_once __DIR__ . '/repo/vms.php';
  * persisted. The legacy vm_disk summary and the free-text notes are withheld;
  * interfaces, disks and packages are child rows and outside this scalar diff.
  *
+ * $mecmMode is the submitted MECM save button ('' for the plain save, see
+ * vm_mecm_save.php). It only matters for a registered VM with an OS deviation.
+ *
  * @param array<string,mixed> $before
  * @param array<string,mixed> $vmData
  * @param list<array<string,mixed>> $interfaces
  * @param list<array<string,mixed>> $disks
  * @param list<array<string,mixed>> $packages
- * @return array{vm_id:int, frozen_snapshot:string}
+ * @return array{vm_id:int, frozen_snapshot:string, mecm: array{queued: bool, held: bool, added: list<string>, removed: list<string>}}
  */
 function vm_save_with_audit(
     mysqli $db,
@@ -41,10 +46,11 @@ function vm_save_with_audit(
     array $disks,
     array $packages,
     string $editVersion,
-    int $userId
+    int $userId,
+    string $mecmMode = ''
 ): array {
     return repo_transaction($db, static function () use (
-        $db, $missionId, $vmId, $before, $isTemplate, $vmData, $interfaces, $disks, $packages, $editVersion, $userId
+        $db, $missionId, $vmId, $before, $isTemplate, $vmData, $interfaces, $disks, $packages, $editVersion, $userId, $mecmMode
     ): array {
         $savedVmId = repo_save_vm($db, $missionId, $vmId > 0 ? $vmId : null, $vmData, $interfaces, $disks, $packages, $editVersion, $userId, requireVersion: true);
 
@@ -101,41 +107,12 @@ function vm_save_with_audit(
             }
         }
 
-        return ['vm_id' => $savedVmId, 'frozen_snapshot' => $frozenSnapshot];
-    });
-}
+        // AV-R12: the decision reads the stored state after the write, under the
+        // mission lock, so the queue and its audit row belong to this transaction.
+        $mecm = $vmId > 0 && !$isTemplate
+            ? vm_mecm_save_transfer($db, $missionId, $savedVmId, $savedVm, $mecmMode, $userId)
+            : ['queued' => false, 'held' => false, 'added' => [], 'removed' => []];
 
-/**
- * Queues a registered VM's current assignments for MECM and records the
- * operator action in the same transaction. The mission lock also serializes
- * the revision check with repo_save_vm(), which takes that lock before it
- * rewrites packages or the OS. A stale preview cannot authorize a newer save.
- */
-function vm_queue_mecm_transfer_with_audit(
-    mysqli $db,
-    int $missionId,
-    int $vmId,
-    string $expectedRevision,
-    int $userId
-): void {
-    repo_transaction($db, static function () use ($db, $missionId, $vmId, $expectedRevision, $userId): void {
-        $mission = repo_deploy_lock_mission($db, $missionId);
-        if ($mission === null) {
-            throw new RuntimeException('Mission not found.');
-        }
-        if (mission_name_is_template((string) $mission['mission_name'])) {
-            throw new RuntimeException(__t('portal.vm_mecm_reset_template_blocked'));
-        }
-
-        $transferState = mecm_transfer_state($db, $missionId, $vmId);
-        if (!hash_equals($transferState['revision'], $expectedRevision)) {
-            throw new RuntimeException(__t('portal.vm_mecm_transfer_stale'));
-        }
-
-        repo_mark_vm_for_mecm_resync($db, $missionId, $vmId, $userId);
-        audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, 'vm', $vmId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'queued_mecm_transfer',
-            'mission_id' => $missionId,
-        ], $userId);
+        return ['vm_id' => $savedVmId, 'frozen_snapshot' => $frozenSnapshot, 'mecm' => $mecm];
     });
 }

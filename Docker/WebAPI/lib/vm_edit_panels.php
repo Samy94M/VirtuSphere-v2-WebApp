@@ -44,6 +44,7 @@ declare(strict_types=1);
 /** @var string $vmListUrl */
 /** @var string $missionDetailsUrl */
 /** @var string $vmEditorUrl */
+/** @var array{split: bool, mecm_os: string, deviates: bool} $mecmView AV-R12 save state (vm_mecm_save.php). */
 ?>
 <div class="stack">
     <section class="panel">
@@ -58,41 +59,6 @@ declare(strict_types=1);
                     <input type="hidden" name="return_to" value="editor">
                     <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm_editing', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
                 </form>
-                <?php // Only for a VM MECM already knows: before the registration the
-                      // portal selection travels with the next sync on its own, so the
-                      // action would promise work it does not do (the repo refuses it
-                      // there too). ?>
-                <?php if ((string) ($vm['mecm_sync_state'] ?? '') === VIRTUSPHERE_MECM_SYNC_REGISTERED) { ?>
-                    <?php
-                    // Transfer preview (ADR-0034): what the next device-sync run
-                    // does to OUR rules, from the same loader the POST handler
-                    // re-checks. Removals need saying out loud - the transfer
-                    // used to be purely additive, and an operator who deselects
-                    // a package must see the removal before confirming it.
-                    $transferState = mecm_transfer_state($connection, $missionId, $vmId);
-                    $transferAdds = array_column($transferState['plan']['add'], 'name');
-                    $transferRemoves = array_column($transferState['plan']['remove'], 'collection_name');
-                    ?>
-                    <div class="stack">
-                        <?php if ($transferAdds !== []) { ?>
-                            <p class="muted"><?php echo h(__t('portal.vm_mecm_preview_add', ['names' => implode(', ', $transferAdds)])); ?></p>
-                        <?php } ?>
-                        <?php if ($transferRemoves !== []) { ?>
-                            <p class="muted"><?php echo h(__t('portal.vm_mecm_preview_remove', ['names' => implode(', ', $transferRemoves)])); ?></p>
-                        <?php } ?>
-                        <?php if ($transferAdds === [] && $transferRemoves === []) { ?>
-                            <p class="muted"><?php echo h(__t('portal.vm_mecm_preview_none')); ?></p>
-                        <?php } ?>
-                        <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_list_url($missionId, $workContext)); ?>">
-                            <?php echo csrf_field(); ?>
-                            <input type="hidden" name="action" value="transfer_mecm">
-                            <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
-                            <input type="hidden" name="assignment_revision" value="<?php echo h($transferState['revision']); ?>">
-                            <input type="hidden" name="return_to" value="editor">
-                            <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_transfer_confirm', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_transfer_button')); ?></button>
-                        </form>
-                    </div>
-                <?php } ?>
             <?php } ?>
         </div>
         <p class="muted"><?php echo h(__t('vm_edit.context_mission', ['name' => (string) ($mission['mission_name'] ?? '')])); ?></p>
@@ -171,7 +137,7 @@ declare(strict_types=1);
         </div>
     <?php } ?>
 
-    <form class="stack" method="post" action="<?php echo h($vmEditorUrl); ?>"<?php echo $canWrite ? form_unsaved_attrs('vm-editor', $error !== '') : ''; ?>>
+    <form class="stack" method="post" action="<?php echo h($vmEditorUrl); ?>"<?php echo $canWrite ? form_unsaved_attrs('vm-editor', $error !== '') . vm_mecm_save_form_attrs($mecmView) : ''; ?>>
         <?php echo csrf_field(); ?>
         <input type="hidden" name="mission_id" value="<?php echo h((string) $missionId); ?>">
         <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
@@ -188,7 +154,7 @@ declare(strict_types=1);
                       // ergibt. Geladen ueber die vm_edit_form.php-Fassade. ?>
                 <?php vm_edit_identity_fields($vm, $vmId, $isTemplate, $canWrite, $fieldErrors); ?>
                 <label><?php echo h(__t('vm_edit.label_domain')); ?><input name="vm_domain"<?php echo form_control_attrs('vm_edit', 'vm_domain', null, false, (string) ($fieldErrors['vm_domain'] ?? '')); ?> value="<?php echo h($vm['vm_domain'] ?? ($mission['domain'] ?? '')); ?>" pattern="<?php echo h(VIRTUSPHERE_FQDN_INPUT_PATTERN); ?>" title="<?php echo h(__t('vm_edit.domain_title')); ?>" autocomplete="off" spellcheck="false" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_domain'); ?></label>
-                <label><?php echo h(__t('vm_edit.label_os')); ?><select name="vm_os"<?php echo form_control_attrs('vm_edit', 'vm_os', null, false, (string) ($fieldErrors['vm_os'] ?? '')); ?> required <?php echo $canWrite ? '' : 'disabled'; ?>>
+                <label><?php echo h(__t('vm_edit.label_os')); ?><select name="vm_os"<?php echo form_control_attrs('vm_edit', 'vm_os', null, $mecmView['deviates'] ? [form_hint_id('vm_edit', 'mecm_os')] : false, (string) ($fieldErrors['vm_os'] ?? '')); ?> required <?php echo $canWrite ? '' : 'disabled'; ?>>
                     <option value=""><?php echo h(__t('vm_edit.select_os')); ?></option>
                     <?php foreach ($oses as $os) { ?>
                         <option value="<?php echo h($os['os_name'] ?? ''); ?>" <?php echo (string) ($vm['vm_os'] ?? '') === (string) ($os['os_name'] ?? '') ? 'selected' : ''; ?>><?php echo h($os['os_name'] ?? ''); ?></option>
@@ -388,7 +354,21 @@ declare(strict_types=1);
             </div>
         </section>
 
-        <?php if ($canWrite) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>"><?php echo h(__t('vm_edit.save_vm')); ?></button></div><?php } ?>
+        <?php if ($canWrite) { ?><?php echo form_unsaved_status_html(); ?>
+            <?php // AV-R12 (lib/vm_mecm_save.php): a registered VM gets the hint and two buttons while
+                  // its OS deviates from MECM, the single button otherwise. Both are rendered from the
+                  // stored state; forms.js follows the OS field. The server decides the transfer alone. ?>
+            <?php if ($mecmView['split']) { ?>
+                <p class="hint" id="<?php echo h(form_hint_id('vm_edit', 'mecm_os')); ?>" data-mecm-os-hint<?php echo $mecmView['deviates'] ? '' : ' hidden'; ?>><?php echo vm_mecm_os_hint_html($mecmView['mecm_os'], (string) ($vm['vm_os'] ?? '')); ?></p>
+            <?php } ?>
+            <div class="actions">
+                <?php if ($mecmView['split']) { ?>
+                    <button class="button button-secondary" type="submit" name="mecm_save" value="<?php echo h(VIRTUSPHERE_VM_MECM_SAVE_PORTAL_ONLY); ?>" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>" data-mecm-save-portal<?php echo $mecmView['deviates'] ? '' : ' hidden'; ?>><?php echo h(__t('vm_edit.save_portal_only')); ?></button>
+                    <button class="button button-danger" type="submit" data-confirm="<?php echo h(__t('vm_edit.mecm_transfer_confirm')); ?>" name="mecm_save" value="<?php echo h(VIRTUSPHERE_VM_MECM_SAVE_TRANSFER); ?>" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>" data-mecm-save-transfer<?php echo $mecmView['deviates'] ? '' : ' hidden'; ?>><?php echo h(__t('vm_edit.save_and_transfer')); ?></button>
+                <?php } ?>
+                <button class="button" type="submit" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>" data-mecm-save-single<?php echo $mecmView['deviates'] ? ' hidden' : ''; ?>><?php echo h(__t('vm_edit.save_vm')); ?></button>
+            </div>
+        <?php } ?>
     </form>
 
     <?php render_vm_status_history($statusEvents); ?>

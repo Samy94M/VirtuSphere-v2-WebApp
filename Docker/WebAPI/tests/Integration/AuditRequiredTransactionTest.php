@@ -124,28 +124,6 @@ final class AuditRequiredTransactionTest extends TestCase
         }
     }
 
-    public function testMecmTransferChecksRevisionAndAuditsTheQueue(): void
-    {
-        $vmId = $this->createVm();
-        $registered = VIRTUSPHERE_MECM_SYNC_REGISTERED;
-        repo_execute($this->db, 'UPDATE deploy_vms SET mecm_sync_state = ?, updated = 0 WHERE id = ?', 'si', [$registered, $vmId]);
-        $revision = mecm_transfer_state($this->db, $this->missionId, $vmId)['revision'];
-
-        repo_execute($this->db, 'UPDATE deploy_vms SET vm_os = ? WHERE id = ?', 'si', ['Changed OS', $vmId]);
-        try {
-            vm_queue_mecm_transfer_with_audit($this->db, $this->missionId, $vmId, $revision, $this->userId);
-            self::fail('A stale assignment preview must not queue the VM.');
-        } catch (RuntimeException $exception) {
-            self::assertSame(__t('portal.vm_mecm_transfer_stale'), $exception->getMessage());
-        }
-        self::assertSame(0, (int) repo_scalar($this->db, 'SELECT updated FROM deploy_vms WHERE id = ?', 'i', [$vmId]));
-
-        $revision = mecm_transfer_state($this->db, $this->missionId, $vmId)['revision'];
-        vm_queue_mecm_transfer_with_audit($this->db, $this->missionId, $vmId, $revision, $this->userId);
-        self::assertSame(1, (int) repo_scalar($this->db, 'SELECT updated FROM deploy_vms WHERE id = ?', 'i', [$vmId]));
-        self::assertSame(1, (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_logs WHERE object_type = ? AND object_id = ? AND event_code = ? AND JSON_UNQUOTE(JSON_EXTRACT(context_json, ?)) = ?', 'sssss', ['vm', (string) $vmId, VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED, '$.action', 'queued_mecm_transfer']));
-    }
-
     private function createVm(): int
     {
         $name = $this->vmName('at');

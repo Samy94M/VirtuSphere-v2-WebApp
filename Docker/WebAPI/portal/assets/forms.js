@@ -170,6 +170,44 @@
         }
     }
 
+    // AV-R12 (lib/vm_mecm_save.php): a registered VM whose wanted OS differs from the one MECM
+    // holds shows the hint and the two save buttons instead of the single one. The server rendered
+    // the stored state; this follows the OS field while the editor is open. The server still decides
+    // the transfer alone, from the submitted button. aria-describedby follows the hint's visibility.
+    function syncMecmSave(form) {
+        var osField = form.querySelector('select[name="vm_os"]');
+        var hint = form.querySelector('[data-mecm-os-hint]');
+        var portalButton = form.querySelector('[data-mecm-save-portal]');
+        var transferButton = form.querySelector('[data-mecm-save-transfer]');
+        var singleButton = form.querySelector('[data-mecm-save-single]');
+        if (!osField || !hint || !portalButton || !transferButton || !singleButton) {
+            return;
+        }
+        var mecmOs = (form.getAttribute('data-mecm-os') || '').trim();
+        var portalOs = osField.value.trim();
+        var deviates = portalOs !== mecmOs;
+        hint.hidden = !deviates;
+        portalButton.hidden = !deviates;
+        transferButton.hidden = !deviates;
+        singleButton.hidden = deviates;
+        var portalValue = hint.querySelector('[data-mecm-os-portal]');
+        if (portalValue) {
+            portalValue.textContent = portalOs;
+        }
+        var ids = (osField.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+        var position = ids.indexOf(hint.id);
+        if (deviates && position === -1) {
+            ids.push(hint.id);
+        } else if (!deviates && position !== -1) {
+            ids.splice(position, 1);
+        }
+        if (ids.length) {
+            osField.setAttribute('aria-describedby', ids.join(' '));
+        } else {
+            osField.removeAttribute('aria-describedby');
+        }
+    }
+
     // The certificate text means nothing while "No certificate verification" is
     // chosen: the server removes the stored certificate then. The field is disabled,
     // so it is visibly unused and not submitted, until a certificate type is chosen.
@@ -284,6 +322,9 @@
         if (downgradeForm && downgradeForm.hasAttribute('data-downgrade-confirm')) {
             syncVerificationDowngrade(downgradeForm);
         }
+        if (downgradeForm && event.target.name === 'vm_os' && downgradeForm.hasAttribute('data-mecm-os')) {
+            syncMecmSave(downgradeForm);
+        }
 
         if (event.target.closest('[data-bulk-all]')) {
             var bulkForm = document.querySelector('[data-bulk-form]');
@@ -384,4 +425,5 @@
         }
     });
     document.querySelectorAll('form[data-downgrade-confirm]').forEach(syncVerificationDowngrade);
+    document.querySelectorAll('form[data-mecm-os]').forEach(syncMecmSave);
 }());

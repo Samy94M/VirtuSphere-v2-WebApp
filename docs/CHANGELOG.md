@@ -4,6 +4,8 @@ Ab dem ersten Release gliedert sich dieses Changelog nach Release-Nummern (`JJJJ
 
 ## Noch in keinem Release
 
+- **Speichern einer registrierten VM überträgt ihre Pakete an MECM; der Knopf „Zuweisungen an MECM übertragen“ entfällt (19.10.2026).** Hat MECM einen Teil der Paketauswahl noch nicht, auch aus einer früheren Bearbeitung, reiht das Speichern die VM für die Übertragung ein. Die Meldung nennt, was hinzukommt und was entfällt; entfernte Pakete werden nicht deinstalliert. Weicht das Betriebssystem von dem ab, das MECM hält, zeigt der Editor einen Hinweis und die Knöpfe „Speichern und an MECM übertragen“ (mit Rückfrage zum Neuinstallationsrisiko) und „Nur im Portal speichern“. Ohne bekanntes Betriebssystem in MECM gilt das als Abweichung.
+
 - **Die Dashboard-Zahlen „VMs in Missionen“ und „MECM ausstehend“ sind anklickbar (19.10.2026).** Jede Kachel öffnet eine missionsübergreifende, nur lesende VM-Liste mit demselben Filter: Mission, VM-Name, Windows-Hostname, Status und MECM-Zustand, sortier- und blätterbar, mit Link zur VM. Kachel und Liste zählen mit derselben Abfrage. Hat sich der Bestand seit dem Klick geändert, zeigt die Liste die aktuelle Anzahl und sagt, um wie viel sie von der Kachel abweicht. Vorlagen zählen bei „MECM ausstehend“ mit und sind gekennzeichnet.
 
 - **Seitenangaben im Systemstatus stimmen wieder (19.10.2026).** Die Abweichungsliste zeigte auf Seite 2 von 3 „Seite 2 von 2s“, weil ein kürzerer Platzhalter den Anfang eines längeren ersetzte. Platzhalter werden jetzt in einem Durchgang gefüllt, der längste zuerst.

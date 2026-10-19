@@ -47,7 +47,7 @@ return [
     'hostname_legacy_warning' => 'Warning: this hostname violates the Windows rules (max. 15 characters, no dots). The client would change it to ":preview" during deploy. Please correct it with your next save.',
     'package_retired_suffix' => '(retired)',
     'package_update_available' => 'Update available: this VM is linked to ":old" while ":new" is active in the catalog.',
-    'package_retired_selected' => '":name" is retired and no longer exists in MECM. If the VM is transferred to MECM with this box ticked, it stays in the queue because its collection is missing in MECM. Untick it or replace it with the current version.',
+    'package_retired_selected' => '":name" is retired and no longer exists in MECM. If the VM is saved and transferred to MECM with this box ticked, it stays in the queue because its collection is missing in MECM. Untick it or replace it with the current version.',
     'package_versions_duplicate' => 'Several versions of ":basename" are ticked: :names. MECM installs every ticked version. Untick the versions no longer needed.',
     'client_events_summary' => 'Show recent client events',
     'client_events_empty' => 'No client reports for this VM yet.',
@@ -108,10 +108,17 @@ return [
     // Without this sentence the editor leaves the page believing the rename
     // took effect and finds out at the next rollout that it did not.
     'flash_rollout_frozen' => 'The new Windows hostname is saved but only applies to the next rollout: this VM was already handed to MECM as ":hostname". For a new rollout, delete the old device in MECM and then run "Reset MECM ID".',
-    // MECM already knows this VM, and the device-sync only looks at VMs it does
-    // not. So the change is stored and takes effect once it is transferred;
-    // before, nothing said so.
-    'flash_mecm_transfer_pending' => 'Saved, but not in MECM yet: this VM is already registered there, so changed operating system or package assignments only reach MECM once you transfer them.',
+    // AV-R12: saving transfers a registered VM to MECM. If the operating system deviates,
+    // the editor asks first, because a transfer can trigger a reinstallation.
+    'flash_mecm_queued' => 'Saved and queued for the transfer to MECM. :changes',
+    'flash_mecm_added' => 'Added: :names.',
+    'flash_mecm_removed' => 'Removed: :names (no uninstall).',
+    'flash_mecm_portal_only' => 'Saved in the portal only: MECM does not have these changes yet. A transfer also sends the deviating operating system and can trigger a reinstallation. To transfer, choose "Save and transfer to MECM".',
+    'mecm_os_hint' => 'The operating system differs from MECM (MECM: :mecm, Portal: :portal). A transfer can trigger a reinstallation.',
+    'mecm_os_unknown' => 'unknown',
+    'mecm_transfer_confirm' => 'The operating system differs from MECM. The transfer can trigger a reinstallation. Save and transfer to MECM now?',
+    'save_portal_only' => 'Save in the portal only',
+    'save_and_transfer' => 'Save and transfer to MECM',
     'err_invalid_disk_type' => 'Invalid disk type.',
     // Removing the last network interface: the form used to insert an empty
     // default one silently, overwriting the imported MAC address while reporting

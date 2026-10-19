@@ -179,6 +179,10 @@ sogar „bestehende Mitgliedschaften werden nie entfernt".
   Portalsicht des Plans (Adds, eigene Removes), und der POST trägt eine
   Assignment-Revision (Hash über desired+owned, reihenfolgeunabhängig). Ändern
   sich die Zuweisungen zwischen Vorschau und Bestätigung, wird abgelehnt.
+  Seit AV-R12 (19.10.2026, Nachtrag in ADR-0020) gibt es weder Vorschau noch
+  eigenen Übertragungsknopf: Das Speichern einer registrierten VM reiht sie unter
+  der Missionssperre ein, wenn der Plan nicht leer ist, und die Speichermeldung
+  nennt Adds und Removes. Die Revision bleibt für die Planberechnung.
 - **Verteilwahrheit (B7):** `Get-VsContentDistributionState` ist mehrwertig
   (not_started|in_progress|succeeded|failed|unknown), liest `NumberErrors`,
   adressiert per CI_ID, wo das Objekt vorliegt, und nur `succeeded` erlaubt

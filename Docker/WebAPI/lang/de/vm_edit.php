@@ -47,7 +47,7 @@ return [
     'hostname_legacy_warning' => 'Achtung: Dieser Hostname erfüllt die Windows-Regeln nicht (max. 15 Zeichen, keine Punkte). Der Client würde ihn beim Deploy zu ":preview" ändern. Bitte beim nächsten Speichern korrigieren.',
     'package_retired_suffix' => '(zurückgezogen)',
     'package_update_available' => 'Update verfügbar: Diese VM ist mit „:old“ verknüpft, im Katalog ist „:new“ aktiv.',
-    'package_retired_selected' => '„:name“ ist zurückgezogen und in MECM nicht mehr vorhanden. Wird die VM mit diesem Haken an MECM übertragen, bleibt sie in der Warteschlange, weil ihre Collection in MECM fehlt. Haken entfernen oder durch die aktuelle Version ersetzen.',
+    'package_retired_selected' => '„:name“ ist zurückgezogen und in MECM nicht mehr vorhanden. Wird die VM mit diesem Haken gespeichert und an MECM übertragen, bleibt sie in der Warteschlange, weil ihre Collection in MECM fehlt. Haken entfernen oder durch die aktuelle Version ersetzen.',
     'package_versions_duplicate' => 'Mehrere Versionen von „:basename“ angehakt: :names. MECM installiert jede angehakte Version. Nicht mehr gebrauchte Versionen abwählen.',
     'client_events_summary' => 'Letzte Client-Ereignisse anzeigen',
     'client_events_empty' => 'Noch keine Client-Meldungen für diese VM.',
@@ -109,10 +109,17 @@ return [
     // Umbenennung sei wirksam, und merkt erst beim naechsten Rollout, dass sie
     // es nicht war.
     'flash_rollout_frozen' => 'Der neue Windows-Hostname ist gespeichert, gilt aber erst für den nächsten Rollout: Diese VM wurde bereits als „:hostname" an MECM übergeben. Für einen neuen Rollout das alte Gerät in MECM löschen und danach „MECM-ID zurücksetzen" ausführen.',
-    // Diese VM kennt MECM schon, und der Device-Sync schaut nur auf VMs, die es
-    // nicht kennt. Die Änderung ist also gespeichert und wirkt erst nach der
-    // Übertragung; vorher hat das niemand gesagt.
-    'flash_mecm_transfer_pending' => 'Gespeichert, aber noch nicht in MECM: Diese VM ist dort bereits registriert, deshalb erreichen geänderte Betriebssystem- oder Paketzuweisungen MECM erst, wenn Sie sie übertragen.',
+    // AV-R12: Speichern überträgt eine registrierte VM an MECM. Weicht das Betriebssystem
+    // ab, fragt der Editor vorher, weil eine Übertragung eine Neuinstallation auslösen kann.
+    'flash_mecm_queued' => 'Gespeichert und für die Übertragung an MECM vorgemerkt. :changes',
+    'flash_mecm_added' => 'Hinzugefügt: :names.',
+    'flash_mecm_removed' => 'Entfernt: :names (keine Deinstallation).',
+    'flash_mecm_portal_only' => 'Nur im Portal gespeichert: MECM hat diese Änderungen noch nicht. Eine Übertragung schickt auch das abweichende Betriebssystem mit und kann eine Neuinstallation auslösen. Zum Übertragen wählen Sie „Speichern und an MECM übertragen“.',
+    'mecm_os_hint' => 'Das Betriebssystem weicht von MECM ab (MECM: :mecm, Portal: :portal). Eine Übertragung kann eine Neuinstallation auslösen.',
+    'mecm_os_unknown' => 'unbekannt',
+    'mecm_transfer_confirm' => 'Das Betriebssystem weicht von MECM ab. Die Übertragung kann eine Neuinstallation auslösen. Jetzt speichern und an MECM übertragen?',
+    'save_portal_only' => 'Nur im Portal speichern',
+    'save_and_transfer' => 'Speichern und an MECM übertragen',
     'err_invalid_disk_type' => 'Ungültiger Datenträgertyp.',
     // Die letzte Netzwerkkarte entfernt: früher setzte das Formular still eine
     // leere Standardkarte ein und überschrieb damit die importierte MAC-Adresse,
