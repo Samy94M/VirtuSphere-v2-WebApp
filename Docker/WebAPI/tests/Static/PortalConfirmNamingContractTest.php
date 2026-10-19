@@ -32,6 +32,8 @@ final class PortalConfirmNamingContractTest extends TestCase
         // carried by data-downgrade-confirm and set on the Save button by forms.js.
         'credentials.confirm_disable_verification',
         'credentials.host_identity_confirm',
+        // UX-HK: the second step after a deviating host key names the row whose pin it replaces.
+        'credentials.host_identity_replace_confirm',
         // K21-F: the acknowledgement of the ESXi access files left on one Ansible target. The question
         // names the target (host:port), which the server renders from the stored credential target, not
         // from an editable field.

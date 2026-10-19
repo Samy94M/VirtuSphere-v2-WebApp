@@ -88,7 +88,8 @@ final class AnsibleHostIdentityIntegrationTest extends TestCase
         repo_confirm_ansible_host_identity($this->db, $this->id, 1, '', $old['fingerprint'], $old['type'], $this->userId);
         $snapshot = $this->row();
         $new = $this->identity('b');
-        repo_confirm_ansible_host_identity($this->db, $this->id, (int) $snapshot['config_revision'], $old['fingerprint'], $new['fingerprint'], $new['type'], $this->userId);
+        // A pin change is a deviation: the explicit second step (UX-HK) is the replace flag.
+        repo_confirm_ansible_host_identity($this->db, $this->id, (int) $snapshot['config_revision'], $old['fingerprint'], $new['fingerprint'], $new['type'], $this->userId, true);
         $this->reject($snapshot, $old, 'mismatch');
         repo_verify_ansible_host_identity($this->db, $snapshot, $new);
         try {
@@ -240,6 +241,67 @@ final class AnsibleHostIdentityIntegrationTest extends TestCase
     }
 
     /** @return array<string,mixed> */
+    /** UX-HK: a value that matches the observed key takes its type; no select is needed. */
+    public function testObservedMatchTakesTheKeyTypeWithoutASelect(): void
+    {
+        $this->allowUpgrade();
+        repo_verify_ansible_host_identity($this->db, $this->row(), $this->identity('a'));
+        $before = $this->row();
+        $identity = $this->identity('a');
+        repo_confirm_ansible_host_identity($this->db, $this->id, (int) $before['config_revision'], (string) $before['ansible_host_fingerprint'], $identity['fingerprint'], '', $this->userId);
+        $after = $this->row();
+        self::assertSame('confirmed', credential_host_identity_state($after));
+        self::assertSame('ssh-ed25519', $after['ansible_host_key_type']);
+    }
+
+    /** UX-HK: the whole ssh-keygen line is read, and its short type name becomes the OpenSSH name. */
+    public function testWholeKeygenLineIsAcceptedAndItsTypeDerived(): void
+    {
+        $identity = $this->identity('a');
+        $line = '256 ' . $identity['fingerprint'] . ' root@fixture.invalid (ED25519)';
+        repo_confirm_ansible_host_identity($this->db, $this->id, (int) $this->row()['config_revision'], '', $line, '', $this->userId);
+        $after = $this->row();
+        self::assertSame($identity['fingerprint'], $after['ansible_host_fingerprint']);
+        self::assertSame('ssh-ed25519', $after['ansible_host_key_type']);
+        self::assertSame('confirmed', credential_host_identity_state($after));
+    }
+
+    /** UX-HK: a value that matches neither key, without a type, is refused with the line hint. */
+    public function testBareFingerprintThatMatchesNoObservedKeyNeedsTheLine(): void
+    {
+        $this->allowUpgrade();
+        repo_verify_ansible_host_identity($this->db, $this->row(), $this->identity('a'));
+        $snapshot = $this->row();
+        try {
+            repo_confirm_ansible_host_identity($this->db, $this->id, (int) $snapshot['config_revision'], (string) $snapshot['ansible_host_fingerprint'], $this->identity('b')['fingerprint'], '', $this->userId);
+            self::fail('A bare fingerprint without a type was pinned.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('host_fingerprint', $exception->errors());
+        }
+        self::assertSame((int) $snapshot['config_revision'], (int) $this->row()['config_revision']);
+    }
+
+    /** UX-HK: a deviating value writes nothing until the second step confirms it. */
+    public function testDeviationWritesNothingUntilTheSecondStepConfirmsIt(): void
+    {
+        $old = $this->identity('a');
+        repo_confirm_ansible_host_identity($this->db, $this->id, (int) $this->row()['config_revision'], '', $old['fingerprint'], 'ssh-ed25519', $this->userId);
+        $snapshot = $this->row();
+        $new = $this->identity('b');
+        $line = '256 ' . $new['fingerprint'] . ' root@fixture.invalid (ED25519)';
+        try {
+            repo_confirm_ansible_host_identity($this->db, $this->id, (int) $snapshot['config_revision'], $old['fingerprint'], $line, '', $this->userId);
+            self::fail('A deviating key was saved without the second step.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('host_identity_deviation', $exception->errors());
+        }
+        self::assertSame($old['fingerprint'], $this->row()['ansible_host_fingerprint']);
+        self::assertSame((int) $snapshot['config_revision'], (int) $this->row()['config_revision']);
+        self::assertTrue(repo_confirm_ansible_host_identity($this->db, $this->id, (int) $snapshot['config_revision'], $old['fingerprint'], $line, '', $this->userId, true));
+        self::assertSame($new['fingerprint'], $this->row()['ansible_host_fingerprint']);
+        self::assertSame('ssh-ed25519', $this->row()['ansible_host_key_type']);
+    }
+
     private function row(): array
     {
         return repo_credential($this->db, $this->id) ?? throw new RuntimeException('Fixture vanished.');

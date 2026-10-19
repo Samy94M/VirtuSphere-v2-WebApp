@@ -163,6 +163,8 @@ Ergebnis inklusive der IP, die freizugeben ist (Schritt 4.4). Die eigentlichen v
 **separaten ESXi-Zugang** (VM anlegen/schalten/auslesen; eine freie ESXi-Lizenz
 erlaubt keine Schreibzugriffe, das meldet der Systemstatus als Warnung).
 
+**Host-Schlüssel bestätigen.** Der Fingerprint des Ansible-Hosts wird im Portal unter **Zugangsdaten** in der Zeile **Host-Schlüssel** bestätigt, nachdem er auf dem Host selbst verglichen wurde. Auf dem Ansible-Host liefert `sh virtusphere/Ansible/host-identity/virtusphere-host-identity.sh` je öffentlichem Host-Schlüssel die Zeile, die das Feld akzeptiert; sie wird kopiert, nicht abgetippt. Ablauf, Abweichung und zweite Bestätigung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#betrieb).
+
 Der Systemstatus benennt diesen Nachweis als **Volltest**. Nach dem
 Gültigkeitsfenster steht dort „Test veraltet": Das ist kein gemeldeter Fehler,
 sondern fehlender aktueller Gesamtnachweis. Der letzte vom Worker bearbeitete

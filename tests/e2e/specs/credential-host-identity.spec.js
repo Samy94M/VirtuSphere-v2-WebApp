@@ -6,6 +6,7 @@ const { submitAndWaitForNavigation } = require('../lib/navigation');
 test.use({ storageState: ROLES.admin.storageState });
 const PREFIX = 'e2e-host-identity-';
 
+// The fixture is a provisional pin: the observed key is the pinned one, and the row opens by itself (UX-HK).
 function seed(suffix) {
   return phpJson(`
 $db = db();
@@ -14,8 +15,9 @@ $id = repo_create_credential($db, ['type' => 'ansible', 'name' => '${PREFIX}${su
 $stmt = $db->prepare('UPDATE deploy_credentials SET ansible_host_accept_new = 1 WHERE id = ?');
 $stmt->bind_param('i', $id); $stmt->execute();
 $identity = ['type' => 'ssh-ed25519', 'fingerprint' => 'SHA256:' . rtrim(base64_encode(hash('sha256', 'public-fixture', true)), '=')];
+$other = 'SHA256:' . rtrim(base64_encode(hash('sha256', 'public-fixture-other', true)), '=');
 repo_verify_ansible_host_identity($db, repo_credential($db, $id), $identity);
-echo 'JSON' . json_encode(['id' => $id, 'fingerprint' => $identity['fingerprint']]) . 'JSON';
+echo 'JSON' . json_encode(['id' => $id, 'fingerprint' => $identity['fingerprint'], 'other' => $other]) . 'JSON';
 `, ['lib/repo/credential_host_identity.php']);
 }
 
@@ -49,13 +51,12 @@ test('host confirmation preserves the provisional pin on cancel and records the 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('credentials.php');
   const panel = form(page, fixture.id);
-  await panel.locator('..').locator('summary').click();
+  // The row is open by itself while the key is provisional; the type comes from the observed key.
   await expect(panel).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await expect(panel.locator('[name="host_fingerprint"]')).toHaveValue('');
-  await expect(panel.locator('[name="host_key_type"]')).toHaveValue('');
+  await expect(panel.locator('[name="host_key_type"]')).toHaveCount(0);
   await panel.locator('[name="host_fingerprint"]').fill(fixture.fingerprint);
-  await panel.locator('[name="host_key_type"]').fill('ssh-ed25519');
   const before = state(fixture.id);
   await panel.locator('button[type="submit"]').click();
   const dialog = page.locator('[data-confirm-dialog]');
@@ -82,14 +83,42 @@ test('host confirmation remains usable without JavaScript', async ({ browser }) 
     const page = await context.newPage();
     await page.goto('credentials.php');
     const panel = form(page, fixture.id);
-    await panel.locator('..').locator('summary').click();
     await expect(panel).toBeVisible();
     await expect(panel.locator('[name="host_fingerprint"]')).toHaveValue('');
     await panel.locator('[name="host_fingerprint"]').fill(fixture.fingerprint);
-    await panel.locator('[name="host_key_type"]').fill('ssh-ed25519');
     await submitAndWaitForNavigation(page, panel.locator('button[type="submit"]'), 'credentials.php');
     expect(state(fixture.id).confirmed_at).not.toBeNull();
   } finally { await context.close(); }
+});
+
+// UX-HK second step: a value that differs from the pin is shown with both values and saved only on "Pin ersetzen".
+test('a deviating host key is saved only after the second confirmation', async ({ page }) => {
+  const fixture = seed('deviation');
+  await page.goto('credentials.php');
+  const panel = form(page, fixture.id);
+  await expect(panel).toBeVisible();
+  const before = state(fixture.id);
+  await panel.locator('[name="host_fingerprint"]').fill('256 ' + fixture.other + ' root@fixture.invalid (ED25519)');
+  await panel.locator('button[type="submit"]').click();
+  const dialog = page.locator('[data-confirm-dialog]');
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'credentials.php');
+  const warning = page.locator('[data-host-identity-deviation]');
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText(fixture.other);
+  expect(state(fixture.id)).toEqual(before);
+  await warning.locator('form.host-identity-replace button[type="submit"]').click();
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'credentials.php');
+  expect(state(fixture.id).fingerprint).toBe(fixture.other);
+});
+
+// UX-HK anchor: the System status link and the test result open the credential's own row.
+test('the host identity anchor opens the credential row', async ({ page }) => {
+  const fixture = seed('anchor');
+  await page.goto('system_status.php');
+  await expect(page.locator('a[href="credentials.php#host-identity-' + fixture.id + '"]').first()).toBeVisible();
+  await page.goto('credentials.php#host-identity-' + fixture.id);
+  await expect(page.locator('#host-identity-' + fixture.id)).toBeVisible();
+  await expect(page.locator('#host-identity-' + fixture.id + ' details')).toHaveAttribute('open', '');
 });
 
 test('host confirmation requires credentials.manage before looking up the credential', async ({ browser }) => {

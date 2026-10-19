@@ -6,6 +6,7 @@ require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/settings_page.php';
+require_once __DIR__ . '/ssh_host_key_format.php';
 
 /**
  * A test that passed but found the host's IP missing from the machine-API
@@ -117,10 +118,11 @@ function credentials_test_message(array $result): string
  * @param array{ok: bool, code: string, detail: string, context: array<string, string|int>} $result
  * @return array{url: string, label: string}|null
  */
-function credentials_test_action(array $result): ?array
+function credentials_test_action(array $result, int $credentialId = 0): ?array
 {
     if ($result['code'] === VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_HOST_IDENTITY && can('credentials.manage')) {
-        return ['url' => 'credentials.php', 'label' => __t('credentials.host_identity_manage')];
+        // The host key row of this credential, not the top of the page (HK-5).
+        return ['url' => $credentialId > 0 ? credential_host_identity_url($credentialId) : 'credentials.php', 'label' => __t('credentials.host_identity_manage')];
     }
     if (credentials_test_is_allowlist_warning($result)) {
         return [

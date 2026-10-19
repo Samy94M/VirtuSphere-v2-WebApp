@@ -33,7 +33,8 @@
     .modal-box,
     .alert,
     .table-wrap,
-    tr.row-editor > td {
+    tr.row-editor > td,
+    tr.row-host-identity > td {
         background: Canvas;
         color: CanvasText;
         border-color: CanvasText;

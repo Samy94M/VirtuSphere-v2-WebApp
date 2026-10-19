@@ -94,7 +94,7 @@ function credentials_complete_ansible_test(
     $flashType = $result['ok']
         ? ($isAllowlistWarning ? 'warning' : 'success')
         : 'error';
-    $flashAction = credentials_test_action($result);
+    $flashAction = credentials_test_action($result, $credentialId);
     if ($returnToAnsibleStatus && $flashAction === null) {
         $flashAction = [
             'url' => system_status_url('credential-' . $credentialId),
@@ -245,10 +245,11 @@ function credentials_handle_post(mysqli $connection, array $user): string
             }
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
         } elseif ($action === 'confirm_host_identity') {
-            repo_confirm_ansible_host_identity($connection, $id, request_int($_POST, 'config_revision'),
+            // replace_pin is only ever sent by the second step after a deviating value (UX-HK).
+            $replaced = repo_confirm_ansible_host_identity($connection, $id, request_int($_POST, 'config_revision'),
                 request_string($_POST, 'old_host_fingerprint'), request_string($_POST, 'host_fingerprint'),
-                request_string($_POST, 'host_key_type'), (int) $user['id']);
-            flash_set('success', __t('credentials.host_identity_saved'));
+                request_string($_POST, 'host_key_type'), (int) $user['id'], request_string($_POST, 'replace_pin') === '1');
+            flash_set('success', __t($replaced ? 'credentials.host_identity_replaced' : 'credentials.host_identity_saved'));
         } elseif ($action === 'remote_secret_acknowledge') {
             // K21-F: the operator confirms, with a reason, that the ESXi access files on one
             // Ansible target were removed by hand or the host is out of service. The repository

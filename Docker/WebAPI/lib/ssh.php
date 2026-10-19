@@ -22,6 +22,7 @@ const VIRTUSPHERE_SSH_TRANSPORT_MODULES = [
     'ssh_sftp.php',
     'ssh_transport_exceptions.php',
     'ssh_host_identity.php',
+    'ssh_host_key_format.php',
 ];
 
 /**

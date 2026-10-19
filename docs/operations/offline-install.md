@@ -117,6 +117,8 @@ Benutzername, den der Ansible-Zugang im Portal unter **Zugangsdaten** trägt,
 nicht das eigene Anmeldekonto. Was der Timer tut und warum er empfohlen ist, steht in
 [Go-Live, Abschnitt Ansible-Host vorbereiten](go-live.md#ansible-host-vorbereiten-vor-schritt-4).
 
+Der Host-Schlüssel des Ansible-Hosts wird im Portal bestätigt. Dafür liegt im Bundle unter `virtusphere/Ansible/host-identity/` das Werkzeug `virtusphere-host-identity.sh`; es liest nur die öffentlichen Host-Schlüssel dieses Hosts, schreibt nichts und braucht kein Netz. Es gibt die Zeile je Schlüssel aus, die das Portal akzeptiert; Ablauf und Grenzen stehen in [Verbindungen und Vertrauensanker](trust-flows.md#betrieb).
+
 ## Schritt 4: deaktivierten Durable Runner installieren und prüfen (Ansible-Host)
 
 Das Bundle enthält unter `runner/` den in Etappe 8R-O entwickelten Runner. Der

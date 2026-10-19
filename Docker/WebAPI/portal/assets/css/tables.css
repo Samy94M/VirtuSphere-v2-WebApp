@@ -164,6 +164,38 @@ tr.row-editor textarea {
     background: var(--surface);
 }
 
+/* UX-HK: the host identity of an Ansible credential is a full-width row under
+   its record, reached through the anchor host-identity-<id>. It opens by itself
+   while someone has to act; the warning bar on the left marks that state. The
+   record above keeps no bottom border, so both read as one entry. */
+
+tr:has(+ tr.row-host-identity) > td {
+    border-bottom: 0;
+}
+
+tr.row-host-identity > td {
+    padding: 4px 12px 14px;
+    background: var(--surface-muted);
+}
+
+tr.row-host-identity[data-host-identity-attention] > td {
+    box-shadow: inset 3px 0 0 var(--warning);
+}
+
+tr.row-host-identity .host-identity-commands {
+    margin: 4px 0 0;
+    padding-left: 1.25em;
+}
+
+tr.row-host-identity input,
+tr.row-host-identity select {
+    background: var(--surface);
+}
+
+tr.row-host-identity .host-identity-replace {
+    margin-top: 8px;
+}
+
 .pagination {
     display: flex;
     flex-wrap: wrap;

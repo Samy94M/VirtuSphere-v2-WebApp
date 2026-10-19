@@ -152,7 +152,6 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <small class="status-time"><?php echo $pfState !== null && !empty($pfState['last_checked_at']) ? h(portal_format_timestamp($pfState['last_checked_at'])) : h(__t('credentials.status_never')); ?></small>
                             <?php if ($pfState !== null && empty($pfState['evidence_current'])) { ?><small class="status-cadence"><?php echo h(__t('credentials.test_evidence_invalid')); ?></small><?php } ?>
                             <small class="status-cadence" data-credential-cadence><?php echo h(credential_cadence_ansible($ansibleTestIntervalHours)); ?></small>
-                            <?php credential_render_host_identity($row); ?>
                         <?php } else { ?>
                             <span class="muted">&mdash;</span>
                         <?php } ?>
@@ -181,12 +180,6 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                             <input type="hidden" name="credential_id" value="<?php echo h((string) $rowId); ?>">
                             <button class="button button-danger" type="submit" name="action" value="delete" data-confirm="<?php echo h(__t('credentials.confirm_delete', ['name' => (string) ($row['name'] ?? '')])); ?>"><?php echo h(__t('common.delete')); ?></button>
                         </form>
-                        <?php if (!$isEsxi) { ?>
-                            <details<?php echo form_has_state('host-identity-' . $rowId) ? ' open' : ''; ?>>
-                                <summary class="button button-secondary"><?php echo h(__t('credentials.host_identity_button')); ?></summary>
-                                <?php credential_render_host_identity_form($row); ?>
-                            </details>
-                        <?php } ?>
                     </td>
                 </tr>
                 <?php if ($isAnsible && ($remoteSecretOpen[$rowId] ?? []) !== []) { ?>
@@ -195,6 +188,8 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                         <td colspan="8"><?php remote_secret_render_open_line($rowId, $remoteSecretOpen[$rowId], $user); ?></td>
                     </tr>
                 <?php } ?>
+                <?php // UX-HK: the host identity is a full-width row (anchor host-identity-<id>), not a narrow action-column drawer.
+                if ($isAnsible) { credential_render_host_identity_row($row, form_error(credential_host_identity_anchor($rowId), 'host_identity_deviation') !== ''); } ?>
                 <tr class="row-editor" id="<?php echo h($editorId); ?>"<?php echo $editorOpen ? '' : ' hidden'; ?>>
                     <td colspan="8">
                         <form class="form-grid" method="post" action="credentials.php" autocomplete="off"<?php if ($strictRow) { ?> data-downgrade-confirm="<?php echo h(__t('credentials.confirm_disable_verification', ['name' => (string) ($row['name'] ?? '')])); ?>"<?php } ?>>

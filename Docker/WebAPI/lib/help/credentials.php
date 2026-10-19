@@ -19,6 +19,7 @@ declare(strict_types=1);
             <h2><?php echo h(__t('help_credentials.credentials_trust_heading')); ?></h2>
             <h3><?php echo h(__t('help_credentials.ansible_host_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.ansible_host_identity')); ?></p>
+            <p><?php echo h(__t('help_credentials.ansible_host_identity_tool')); ?></p>
             <h3><?php echo h(__t('help_credentials.credentials_trust_why_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.credentials_trust_why')); ?></p>
             <h3><?php echo h(__t('help_credentials.credentials_trust_what_heading')); ?></h3>
