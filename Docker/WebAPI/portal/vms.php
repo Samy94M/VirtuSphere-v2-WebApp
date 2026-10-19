@@ -267,12 +267,12 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
             <form id="bulk-vms" method="post" action="<?php echo h($vmListUrl); ?>" class="actions" data-bulk-form>
                 <?php echo csrf_field(); ?>
                 <span class="muted"><span data-bulk-count>0</span> <?php echo h(__t('vms.bulk_selected')); ?></span>
-                <button class="button button-danger" type="submit" name="action" value="bulk_delete" data-confirm="<?php echo h(__t('vms.bulk_confirm_delete')); ?>" data-bulk-submit disabled><?php echo h(__t('vms.bulk_delete_btn')); ?></button>
+                <button class="button button-danger" type="submit" name="action" value="bulk_delete" data-confirm="<?php echo h(__t('vms.bulk_confirm_delete')); ?>" data-bulk-submit><?php echo h(__t('vms.bulk_delete_btn')); ?></button>
                 <?php if (!$isTemplate) { ?>
-                    <button class="button button-secondary" type="submit" name="action" value="bulk_reset_mecm_id" data-confirm="<?php echo h(__t('vms.bulk_confirm_reset')); ?>" data-bulk-submit disabled><?php echo h(__t('vms.bulk_reset_btn')); ?></button>
+                    <button class="button button-secondary" type="submit" name="action" value="bulk_reset_mecm_id" data-confirm="<?php echo h(__t('vms.bulk_confirm_reset')); ?>" data-bulk-submit><?php echo h(__t('vms.bulk_reset_btn')); ?></button>
                 <?php } ?>
             </form>
-            <p class="muted"><?php echo h(__t('vms.bulk_hint')); ?></p>
+            <p class="muted"><?php echo h(__t('vms.bulk_select_hint')); ?> <?php echo h(__t('vms.bulk_hint', ['cap' => VIRTUSPHERE_VM_BULK_CAP])); ?></p>
         </section>
     <?php } ?>
 
@@ -292,7 +292,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                     echo portal_sort_header('vms.php', 'os', __t('vms.th_os'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'cpu', __t('vms.th_cpu'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'ram', __t('vms.th_ram'), $sort, $dir, $vmSortParams);
-                    echo portal_sort_header('vms.php', 'status', __t('common.status'), $sort, $dir, $vmSortParams);
+                    echo portal_sort_header('vms.php', 'status', __t('vms.th_status'), $sort, $dir, $vmSortParams);
                 ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><?php if ($hasNetworkIssues) { ?><th><?php echo h(__t('vms.th_network')); ?></th><?php } ?><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th class="table-action-cell"><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $vm) { ?>

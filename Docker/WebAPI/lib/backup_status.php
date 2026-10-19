@@ -201,16 +201,16 @@ function backup_status_alert_class(string $state): string
 }
 
 /**
- * Maps a backup state to a `.badge-*` CSS variant for the settings card.
+ * Maps a backup state to the bare variant for portal_badge() on the settings card.
  */
 function backup_status_badge_class(string $state): string
 {
     return match ($state) {
-        VIRTUSPHERE_BACKUP_STATE_OK => 'badge-success',
-        VIRTUSPHERE_BACKUP_STATE_FAILED => 'badge-danger',
+        VIRTUSPHERE_BACKUP_STATE_OK => 'success',
+        VIRTUSPHERE_BACKUP_STATE_FAILED => 'danger',
         VIRTUSPHERE_BACKUP_STATE_STALE,
-        VIRTUSPHERE_BACKUP_STATE_DISK_LOW => 'badge-warning',
-        default => 'badge-neutral',
+        VIRTUSPHERE_BACKUP_STATE_DISK_LOW => 'warning',
+        default => 'neutral',
     };
 }
 

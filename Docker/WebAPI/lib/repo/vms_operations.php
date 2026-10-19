@@ -53,7 +53,9 @@ function repo_bulk_delete_vms(mysqli $db, int $missionId, array $vmIds): array
  * single-row path of vms.php is the same click one row over and had no guard at
  * all: it removed a VM the running worker was about to receive MACs for, and
  * the MAC upload then reported an unknown VM while the deploy looked healthy.
- * Both callers are now behind one predicate.
+ * Both callers are now behind one predicate, and it is the mission-wide one:
+ * a queued or running job of the mission refuses the row whatever VM its scope
+ * names (QL-08). The scope check this replaced let a job for another VM through.
  */
 function repo_delete_vm_by_id(mysqli $db, int $missionId, int $vmId): bool
 {
@@ -65,7 +67,8 @@ function repo_delete_vm_by_id(mysqli $db, int $missionId, int $vmId): bool
         if (repo_deploy_lock_mission($db, $missionId) === null) {
             return false;
         }
-        repo_vm_network_assert_scope_idle($db, $missionId, [$vmId]);
+        // The same predicate as repo_bulk_delete_vms(): repo_deploy_active_job_id() under the mission lock.
+        repo_deploy_assert_mission_idle($db, $missionId);
 
         return repo_execute($db, 'DELETE FROM deploy_vms WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
     });

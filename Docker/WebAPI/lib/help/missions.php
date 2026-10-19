@@ -74,6 +74,8 @@ declare(strict_types=1);
                   // last report that arrived, not the work that is done. Without it
                   // "5/5" reads as "finished", which is what it used to promise. ?>
             <p><?php echo h(__t('help_missions.status_p2')); ?></p>
+            <?php // The column header "Status (MECM-Schnittstelle)" names these values; this sentence says why they stay English. ?>
+            <p><?php echo h(__t('help_missions.status_wire')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_missions.status_1')); ?></li>
                 <li><?php echo h(__t('help_missions.status_2')); ?></li>

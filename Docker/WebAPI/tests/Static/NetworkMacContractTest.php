@@ -37,7 +37,9 @@ final class NetworkMacContractTest extends TestCase
         // AV-F11 removed the legacy aggregate writers (vmListToCreate, vmListToUpdate);
         // the legacy file must not grow an interface writer back outside the gates.
         self::assertStringNotContainsString('repo_replace_interfaces(', $this->source('lib/repo/vms_legacy.php'));
-        self::assertStringContainsString('repo_vm_network_assert_scope_idle(', $this->source('lib/repo/vms_operations.php'));
+        // QL-08: the single-row delete is gated by the mission-wide predicate the bulk delete uses,
+        // which covers every scope (the scope gate alone let a job for another VM through).
+        self::assertStringContainsString('repo_deploy_assert_mission_idle(', $this->source('lib/repo/vms_operations.php'));
         self::assertStringContainsString("require_once __DIR__ . '/repo/vlan_reassign.php';", $this->source('lib/system_status_page.php'));
         $vlanReassign = $this->source('lib/repo/vlan_reassign.php');
         self::assertStringContainsString("\$scope['active_jobs'] !== []", $vlanReassign);

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return [
     'title' => 'VLANs',
-    'confirm_delete' => 'Zurückgezogenen Katalog-Eintrag :name entfernen? Existiert die Portgruppe auf ESXi noch, legt der nächste Abruf sie neu an.',
+    'confirm_delete' => 'Zurückgezogenen Katalog-Eintrag :name löschen? Existiert die Portgruppe auf ESXi noch, legt der nächste Abruf sie neu an.',
     'flash_deleted' => 'Katalog-Eintrag entfernt.',
     'catalog_hint' => 'Der VLAN-Katalog wird aus ESXi gelesen (nur Anzeige): Portgruppen werden aus den ESXi-Zugängen übernommen, die auf der Seite „Zugangsdaten" registriert sind. Anlegen und Bearbeiten entfällt; verschwindet eine Portgruppe, wird der Eintrag zurückgezogen (nicht gelöscht). Zuweisungen in Missionen und VMs bleiben als Name erhalten. Die Spalte „Auf ESXi" zeigt, auf wie vielen erfolgreich abgerufenen Hosts die Portgruppe existiert; die Spalte „VLAN-ID" warnt, wenn derselbe Name auf verschiedenen Hosts unterschiedliche IDs trägt.',
     'link_credentials' => 'Zu den Zugangsdaten',

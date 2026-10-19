@@ -221,7 +221,8 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
         <form class="stack" method="post" action="<?php echo h($detailsUrl); ?>"<?php echo can('missions.write', $user) ? form_unsaved_attrs('mission-settings', form_has_state('update')) : ''; ?>>
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="update">
-            <input type="hidden" name="edit_version" value="<?php echo h($mission['edit_version'] ?? ''); ?>">
+            <?php // The token the save was submitted with, not the row's current one: after a conflict the next save must fail again until the page is reloaded (QL-01). ?>
+            <input type="hidden" name="edit_version" value="<?php echo h(form_old('update', 'edit_version', (string) ($mission['edit_version'] ?? ''))); ?>">
             <div class="form-grid">
                 <label><?php echo h(__t('common.name')); ?><input name="mission_name"<?php echo form_control_attrs('update', 'mission_name'); ?> pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('update', 'mission_name', (string) ($mission['mission_name'] ?? ''))); ?>" required <?php echo can('missions.write', $user) ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'mission_name'); ?></label>
                 <?php $wdsHintId = form_hint_id('update', 'wds_vlan'); ?>
@@ -349,7 +350,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                 </label>
                 <p class="hint form-grid-span-2" id="<?php echo h($delayHintId); ?>"><?php echo h(__t('mission_details.autostart_delay_hint')); ?></p>
             </div>
-            <?php if (can('missions.write', $user)) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div><?php } ?>
+            <?php if (can('missions.write', $user)) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit" data-busy-label="<?php echo h(__t('mission_details.save_busy')); ?>"><?php echo h(__t('common.save')); ?></button></div><?php } ?>
         </form>
     </section>
 

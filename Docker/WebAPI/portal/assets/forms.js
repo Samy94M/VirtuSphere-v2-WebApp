@@ -111,8 +111,10 @@
     // VM bulk selection (vms.php): the row checkboxes sit in the table body and
     // associate with the bulk form via form="..."; they are not descendants, so
     // form.elements is the one collection that sees them. The submit buttons are
-    // rendered disabled and only a non-empty selection enables them; the header
-    // checkbox mirrors the selection (checked = all, indeterminate = some).
+    // rendered enabled, so the action also works without JavaScript (the server
+    // refuses an empty selection); here a non-empty selection enables them, and
+    // an empty one disables them. The header checkbox mirrors the selection
+    // (checked = all, indeterminate = some).
     function bulkItems(form) {
         var items = [];
         for (var index = 0; index < form.elements.length; index += 1) {

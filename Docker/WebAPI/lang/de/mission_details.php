@@ -39,6 +39,7 @@ return [
     'err_template_prefix_keep' => 'Vorlagennamen müssen das Vorlagen-Präfix behalten.',
     'err_mission_prefix' => 'Missionsnamen dürfen nicht mit dem Vorlagen-Präfix beginnen.',
     'flash_saved' => 'Mission gespeichert.',
+    'save_busy' => 'Wird gespeichert…',
     'flash_cloned' => 'Vorlage in Mission kopiert. Erstellte VMs: :count.',
     'flash_saved_as_template' => 'Mission als Vorlage gespeichert. Kopierte VMs: :count.',
     'export_json' => 'Als JSON exportieren',

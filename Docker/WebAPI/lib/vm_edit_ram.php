@@ -53,7 +53,7 @@ function render_vm_ram_field(?array $vm, bool $canWrite, array $fieldErrors): vo
                 <?php foreach (VIRTUSPHERE_RAM_PRESETS_MB as $mb) { ?><option value="<?php echo h((string) $mb); ?>"><?php echo h(vm_ram_format($mb)); ?></option><?php } ?>
             </select>
         </div>
-        <small class="hint" id="<?php echo h(form_hint_id('vm_edit', 'ram_group')); ?>"><?php echo h(__t('vm_edit.ram_rounding')); ?></small>
+        <small class="hint" id="<?php echo h(form_hint_id('vm_edit', 'ram_group')); ?>"><?php echo h(__t('vm_edit.ram_range', ['min' => vm_ram_format(VIRTUSPHERE_VM_LIMITS['ram_mb_min']), 'max' => vm_ram_format(VIRTUSPHERE_VM_LIMITS['ram_mb_max'])])); ?> <?php echo h(__t('vm_edit.ram_rounding')); ?></small>
         <output data-ram-output aria-live="polite"></output>
         <?php echo form_error_html('vm_edit', 'vm_ram', null, $error); ?>
     </div>

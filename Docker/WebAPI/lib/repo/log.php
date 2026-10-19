@@ -146,14 +146,14 @@ function log_category_badge_class(string $category): string
         VIRTUSPHERE_LOG_CATEGORY_AUTH,
         VIRTUSPHERE_LOG_CATEGORY_MISSIONS,
         VIRTUSPHERE_LOG_CATEGORY_MECM,
-        VIRTUSPHERE_LOG_CATEGORY_SETTINGS => 'badge-info',
+        VIRTUSPHERE_LOG_CATEGORY_SETTINGS => 'info',
         VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
         VIRTUSPHERE_LOG_CATEGORY_DIRECTORY,
         VIRTUSPHERE_LOG_CATEGORY_OS,
-        VIRTUSPHERE_LOG_CATEGORY_LEGACY_API => 'badge-warning',
+        VIRTUSPHERE_LOG_CATEGORY_LEGACY_API => 'warning',
         VIRTUSPHERE_LOG_CATEGORY_VMS,
-        VIRTUSPHERE_LOG_CATEGORY_DEPLOY => 'badge-success',
-        default => 'badge-neutral',
+        VIRTUSPHERE_LOG_CATEGORY_DEPLOY => 'success',
+        default => 'neutral',
     };
 }
 

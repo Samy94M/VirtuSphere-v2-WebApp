@@ -6,6 +6,7 @@ return [
     'ram_unit' => 'RAM-Einheit',
     'ram_invalid' => 'Geben Sie eine gültige RAM-Größe und die Einheit MB oder GB ein. MB erlaubt nur ganze Zahlen; GB auch Dezimalzahlen mit Punkt oder Komma.',
     'ram_unit_invalid' => 'Wählen Sie MB oder GB als RAM-Einheit.',
+    'ram_range' => 'Zulässig: :min bis :max.',
     'ram_rounding' => 'GB-Werte werden bei Bedarf auf ganze MB gerundet. Ohne JavaScript gilt die gewählte Einheit beim Speichern.',
     'ram_preview' => 'Gespeichert werden :mb MB.',
     'ram_rounded' => 'Der Wert wurde gerundet.',
@@ -102,6 +103,7 @@ return [
     'heading_packages' => 'Pakete',
     'no_packages' => 'Keine Pakete verfügbar.',
     'save_vm' => 'VM speichern',
+    'save_vm_busy' => 'Wird gespeichert…',
     'flash_saved' => 'VM gespeichert.',
     // Ohne diesen Satz verlaesst der Bearbeiter die Seite in dem Glauben, die
     // Umbenennung sei wirksam, und merkt erst beim naechsten Rollout, dass sie
@@ -116,7 +118,7 @@ return [
     // leere Standardkarte ein und überschrieb damit die importierte MAC-Adresse,
     // während es Erfolg meldete.
     'err_interfaces_required' => 'Eine VM braucht mindestens eine Netzwerkkarte. Die gespeicherten Netzwerkkarten bleiben unverändert, bis eine eingetragen ist.',
-    'err_conflict' => 'Diese VM wurde inzwischen von jemand anderem geändert. Bitte die Seite neu laden und die Änderung erneut eingeben; sonst würden die zwischenzeitlichen Änderungen überschrieben.',
+    'err_conflict' => 'Diese VM wurde inzwischen von jemand anderem geändert. Ein erneutes Speichern schlägt fehl, bis Sie die Seite neu laden. Das Neuladen verwirft Ihre Eingaben; öffnen Sie die Seite deshalb vorher in einem neuen Tab, um die zwischenzeitliche Änderung zu sehen.',
     'label_ip' => 'Konfigurierte IP-Adresse',
     'label_subnet' => 'Subnetz',
     'subnet_mask' => 'Subnetzmaske',

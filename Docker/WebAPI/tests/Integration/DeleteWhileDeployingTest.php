@@ -117,10 +117,45 @@ final class DeleteWhileDeployingTest extends TestCase
         try {
             repo_delete_vm_by_id($this->db, $this->missionId, $this->vmId);
             self::fail('the single-VM delete must be refused while a job is running');
-        } catch (RuntimeException $exception) {
-            self::assertStringContainsString('VM network scope', $exception->getMessage());
+        } catch (DeployMissionBusyException $exception) {
+            // The mission-wide predicate (QL-08) answers with the same refusal as mission delete,
+            // and the sentence links to the blocking job's log.
+            self::assertSame('Mission has an active deploy job.', $exception->getMessage());
+            self::assertStringContainsString('id=' . $jobId, (string) $exception->portalAction()['url']);
         }
 
+        self::assertSame(1, $this->vmRows());
+    }
+
+    public function testASingleVmDeleteIsRefusedForAJobScopedToAnotherVm(): void
+    {
+        // QL-08: the single-row path used to test only the VMs a running job names
+        // in its scope, so a job for VM 2 let VM 1 go, while the bulk path refused it.
+        $otherVmId = $this->addVm('PHPUNITDEL2');
+        $jobId = $this->queueJob();
+        $this->scopeJob($jobId, [$otherVmId]);
+        $this->setJobStatus($jobId, VIRTUSPHERE_DEPLOY_STATUS_RUNNING);
+
+        $bulk = repo_bulk_delete_vms($this->db, $this->missionId, [$this->vmId]);
+        self::assertSame(0, $bulk['deleted']);
+        self::assertSame('active_job', $bulk['skipped'][0]['reason'] ?? '');
+
+        $this->expectException(DeployMissionBusyException::class);
+        try {
+            repo_delete_vm_by_id($this->db, $this->missionId, $this->vmId);
+        } finally {
+            self::assertSame(2, $this->vmRows(), 'neither row may go while the mission has a running job');
+        }
+    }
+
+    public function testASingleVmDeleteIsAllowedOnceTheScopedJobFinished(): void
+    {
+        $otherVmId = $this->addVm('PHPUNITDEL2');
+        $jobId = $this->queueJob();
+        $this->scopeJob($jobId, [$otherVmId]);
+        $this->setJobStatus($jobId, VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED);
+
+        self::assertTrue(repo_delete_vm_by_id($this->db, $this->missionId, $this->vmId));
         self::assertSame(1, $this->vmRows());
     }
 
@@ -147,6 +182,30 @@ final class DeleteWhileDeployingTest extends TestCase
         $userId = (int) repo_scalar($this->db, 'SELECT id FROM deploy_users ORDER BY id LIMIT 1');
 
         return repo_create_deploy_job($this->db, $this->missionId, $userId, $this->esxiId, $this->ansibleId, ['mode' => 'full']);
+    }
+
+    private function addVm(string $name): int
+    {
+        return repo_save_vm(
+            $this->db,
+            $this->missionId,
+            null,
+            ['vm_name' => $name, 'vm_hostname' => $name, 'vm_os' => 'Windows Server 2019', 'vm_domain' => 'dc.example.com', 'vm_guest_id' => 'windows2019srv_64Guest'],
+            [['ip' => '', 'subnet' => '', 'gateway' => '', 'mode' => 'dhcp', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
+            [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
+            [],
+            '',
+            1
+        );
+    }
+
+    /** @param list<int> $vmIds the VMs the job's payload scopes it to (payload vm_ids) */
+    private function scopeJob(int $jobId, array $vmIds): void
+    {
+        $payload = json_encode(['mode' => 'full', 'vm_ids' => $vmIds], JSON_THROW_ON_ERROR);
+        $stmt = $this->db->prepare('UPDATE deploy_jobs SET payload_json = ? WHERE id = ?');
+        $stmt->bind_param('si', $payload, $jobId);
+        $stmt->execute();
     }
 
     private function setJobStatus(int $jobId, string $status): void

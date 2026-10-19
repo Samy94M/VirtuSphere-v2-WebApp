@@ -6,6 +6,12 @@ existing mission/VM locks before the editor changes the row, child rows or
 hostname claims. Reload the page and re-enter the change after a conflict.
 Forms opened before this contract was installed must also be reloaded.
 
+After a refused save both editors render the version the save was submitted
+with (`form_old()`), not the row's current one, so every further save fails
+until the operator reloads on purpose (QL-01, decision A). The conflict message
+says that a reload discards the input. A per-field comparison view is a later
+package.
+
 Migration `0053_edit_versions` adds the counters; the fresh schema contains the
 same definitions. Configuration writes advance their version through the
 repository, even within the same database second. Rollback rolls the version

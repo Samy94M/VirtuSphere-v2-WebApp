@@ -28,6 +28,7 @@ return [
     'status_heading' => 'VM status: the five stages',
     'status_p1' => 'Deployment uses five numbered stages. They show the last transition accepted by the portal, not the machine\'s complete work progress:',
     'status_p2' => 'What matters when reading the stages: they say which **report arrived last**, not how much work is finished. Every stage has exactly one writer, named below. A stage nobody writes does not occur in operation either.',
+    'status_wire' => 'The values in the Status column, for example "3/5 Deployed", are the MECM interface states. They are shown untranslated, as they are stored and transmitted.',
     'status_1' => '1/5 Initializing: exists in the numbering but is written by no code path. A newly created VM starts at 2/5 directly, because the portal entry is exactly what 2/5 means. So do not expect to see this stage in operation.',
     'status_2' => '2/5 Registered: the VM exists in the portal. This is the starting value of a new VM, before anything exists on ESXi. It is waiting for a deploy job and then for its MAC address.',
     'status_3' => '3/5 Deployed: the MAC addresses have been reported back by the Ansible host (`db_importMAC.php`) or the VM was queued again for rollout by “Reset MECM ID”. MECM is not involved yet and does not know the VM. It is now waiting for the device sync to import it. The client phases are empty here by design.',

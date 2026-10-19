@@ -282,7 +282,7 @@ function repo_update_mission_checked(mysqli $db, int $missionId, array $missionD
             throw new RuntimeException(validator_text('validate.mission_not_found', 'Mission not found.'));
         }
         if (!repo_edit_version_matches($expectedVersion, $mission['edit_version'], $requireVersion)) {
-            throw new RuntimeException(validator_text('validate.mission_stale', 'The mission was changed by someone else in the meantime. Please reload and save again.'));
+            throw new RuntimeException(validator_text('validate.mission_stale', 'The mission was changed by someone else in the meantime. Saving again fails until you reload the page. Reloading discards your input, so open the page in a new tab first to see the change made in the meantime.'));
         }
         $values = [];
         foreach (REPO_MISSION_EDITABLE_COLUMNS as $column) {

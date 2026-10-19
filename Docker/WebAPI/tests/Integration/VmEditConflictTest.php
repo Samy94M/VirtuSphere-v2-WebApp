@@ -88,6 +88,8 @@ final class VmEditConflictTest extends TestCase
                 self::fail('Stale, missing and malformed portal versions must fail closed.');
             } catch (RuntimeException $error) {
                 self::assertNotSame('', $error->getMessage());
+                // QL-01: the operator is told that the next save fails until a reload, and that the reload discards the input.
+                self::assertStringContainsString('verwirft', $error->getMessage());
             }
             self::assertSame($before, repo_get_mission($this->db, $missionId));
         }

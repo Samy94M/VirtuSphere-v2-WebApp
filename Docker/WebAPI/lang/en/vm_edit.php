@@ -6,6 +6,7 @@ return [
     'ram_unit' => 'RAM unit',
     'ram_invalid' => 'Enter a valid RAM size and choose MB or GB. MB requires whole numbers; GB also accepts decimals with a dot or comma.',
     'ram_unit_invalid' => 'Choose MB or GB as the RAM unit.',
+    'ram_range' => 'Allowed: :min to :max.',
     'ram_rounding' => 'GB values are rounded to whole MB when needed. Without JavaScript, the selected unit applies when saving.',
     'ram_preview' => ':mb MB will be saved.',
     'ram_rounded' => 'The value was rounded.',
@@ -102,6 +103,7 @@ return [
     'heading_packages' => 'Packages',
     'no_packages' => 'No packages available.',
     'save_vm' => 'Save VM',
+    'save_vm_busy' => 'Saving…',
     'flash_saved' => 'VM saved.',
     // Without this sentence the editor leaves the page believing the rename
     // took effect and finds out at the next rollout that it did not.
@@ -115,7 +117,7 @@ return [
     // default one silently, overwriting the imported MAC address while reporting
     // success.
     'err_interfaces_required' => 'A VM needs at least one network interface. The stored interfaces stay unchanged until one is entered.',
-    'err_conflict' => 'This VM was changed by someone else in the meantime. Please reload the page and re-enter your change; otherwise it would overwrite the changes made since.',
+    'err_conflict' => 'This VM was changed by someone else in the meantime. Saving again fails until you reload the page. Reloading discards your input, so open the page in a new tab first to see the change made in the meantime.',
     'label_ip' => 'Configured IP address',
     'label_subnet' => 'Subnet',
     'subnet_mask' => 'Subnet mask',

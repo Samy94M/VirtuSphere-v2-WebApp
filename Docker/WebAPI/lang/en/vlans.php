@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return [
     'title' => 'VLANs',
-    'confirm_delete' => 'Remove retired catalog entry :name? If the portgroup still exists on ESXi, the next fetch re-creates it.',
+    'confirm_delete' => 'Delete retired catalog entry :name? If the portgroup still exists on ESXi, the next fetch re-creates it.',
     'flash_deleted' => 'Catalog entry removed.',
     'catalog_hint' => 'The VLAN catalog is ESXi-owned (display only): portgroups are taken from the ESXi credentials registered on the "Credentials" page. Create and edit are gone; when a portgroup disappears the entry is retired (not deleted). Assignments in missions and VMs are kept as names. The "On ESXi" column shows on how many successfully fetched hosts the portgroup exists; the "VLAN ID" column warns when the same name carries different IDs on different hosts.',
     'link_credentials' => 'Go to credentials',

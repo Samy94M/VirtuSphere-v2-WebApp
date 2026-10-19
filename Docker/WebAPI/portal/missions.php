@@ -303,7 +303,7 @@ layout_header($title, $user, $active, 'missions');
 <div class="stack">
     <?php if (!$isTemplateView) { client_phase_attention_render(repo_client_phase_failures($connection)); } ?>
     <?php if (can('missions.write', $user)) { ?>
-        <section class="panel">
+        <section class="panel" id="mission-create">
             <h2><?php echo h($isTemplateView ? __t('missions.create_heading_template') : __t('missions.create_heading_mission')); ?></h2>
             <form class="form-grid" method="post" action="<?php echo h($missionListActionUrl); ?>">
                 <?php echo csrf_field(); ?>
@@ -389,7 +389,7 @@ layout_header($title, $user, $active, 'missions');
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if ($rows === []) { ?><tr><td colspan="5"><?php echo h($attentionOnly ? __t('missions.attention_empty') : __t('missions.empty')); ?></td></tr><?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="5"><?php echo missions_empty_list_html($attentionOnly, $isTemplateView, can('missions.write', $user)); ?></td></tr><?php } ?>
                 </tbody>
             </table>
         </div>

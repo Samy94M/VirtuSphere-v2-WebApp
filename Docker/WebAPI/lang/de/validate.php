@@ -66,7 +66,7 @@ return [
 
     // Missions- und Vorlagenzustände jenseits der Feldprüfung.
     'mission_not_found' => 'Mission nicht gefunden.',
-    'mission_stale' => 'Die Mission wurde zwischenzeitlich von jemand anderem geändert. Bitte neu laden und erneut speichern.',
+    'mission_stale' => 'Die Mission wurde zwischenzeitlich von jemand anderem geändert. Ein erneutes Speichern schlägt fehl, bis Sie die Seite neu laden. Das Neuladen verwirft Ihre Eingaben; öffnen Sie die Seite deshalb vorher in einem neuen Tab, um die zwischenzeitliche Änderung zu sehen.',
     'template_name_required' => 'Bitte einen Vorlagennamen eingeben.',
     'target_mission_name_required' => 'Bitte einen Missionsnamen für das Ziel eingeben.',
     'target_mission_no_prefix' => 'Zielmissionen dürfen nicht mit dem Vorlagen-Präfix beginnen.',
@@ -74,7 +74,7 @@ return [
     'source_not_mission' => 'Die Quelle ist keine normale Mission.',
 
     // VM-, Katalog- und Zugangsdatenprüfungen.
-    'vm_name_charset' => 'VM-Name darf nur Buchstaben, Zahlen und Bindestriche im Inneren enthalten.',
+    'vm_name_charset' => 'VM-Name darf nur ASCII-Buchstaben (A bis Z), Ziffern und Bindestriche im Inneren enthalten.',
     'vm_name_taken_in_mission' => 'VM-Name existiert in dieser Mission bereits.',
     'credential_name_taken_for_type' => 'Für diesen Typ existiert bereits ein Eintrag mit diesem Namen.',
     'interface_entry_invalid' => 'Der Schnittstelleneintrag ist ungültig.',

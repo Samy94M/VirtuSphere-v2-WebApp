@@ -32,6 +32,13 @@ final class MissionFormStickyContractTest extends TestCase
         'mission_status' => 'set by the status actions on missions.php, never by this form',
     ];
 
+    /**
+     * The one non-column field the stash restores: the version token the save was
+     * submitted with. After a conflict the next save must send that old token again,
+     * so it fails until the page is reloaded (QL-01); it is not an editable column.
+     */
+    private const STASHED_TOKEN = 'edit_version';
+
     /** @return array<string, string> path => source, the page plus its own modules */
     private function missionEditorSources(): array
     {
@@ -100,13 +107,31 @@ final class MissionFormStickyContractTest extends TestCase
     public function testTheFormReadsNothingButEditableColumnsFromTheStash(): void
     {
         preg_match_all("/form_old\('update',\s*'([^']+)'/", $this->missionEditorSource(), $matches);
-        $unknown = array_values(array_unique(array_diff($matches[1], REPO_MISSION_EDITABLE_COLUMNS)));
+        $unknown = array_values(array_unique(array_diff($matches[1], REPO_MISSION_EDITABLE_COLUMNS, [self::STASHED_TOKEN])));
 
         sort($unknown);
         self::assertSame(
             [],
             $unknown,
             'the mission form restores a field the update path cannot save; it would come back and be dropped'
+        );
+    }
+
+    public function testTheVersionTokenComesFromTheSubmittedSaveNotTheRow(): void
+    {
+        // QL-01: a failed save redirects and the next render reads the row again. Rendering
+        // the token from the row would let the next save pass the version check and overwrite
+        // the other operator's change, so the stashed (submitted) token must win.
+        $source = $this->missionEditorSource();
+
+        self::assertStringContainsString(
+            "form_old('update', '" . self::STASHED_TOKEN . "', (string) (\$mission['edit_version'] ?? ''))",
+            $source
+        );
+        self::assertStringNotContainsString(
+            "value=\"<?php echo h(\$mission['edit_version'] ?? ''); ?>\"",
+            $source,
+            'the hidden version token must not be rendered from the freshly loaded row alone'
         );
     }
 }

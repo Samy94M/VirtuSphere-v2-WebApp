@@ -103,7 +103,7 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
                 <tr>
                     <td><?php echo h((string) $row['id']); ?></td>
                     <td class="nowrap"><?php echo h(portal_format_timestamp($row['created_at'] ?? '')); ?></td>
-                    <td><?php echo portal_badge((string) preg_replace('/^badge-/', '', log_category_badge_class((string) ($row['category'] ?? ''))), log_category_label((string) ($row['category'] ?? ''))); ?></td>
+                    <td><?php echo portal_badge(log_category_badge_class((string) ($row['category'] ?? '')), log_category_label((string) ($row['category'] ?? ''))); ?></td>
                     <td><?php echo h($row['user_name'] ?? ($row['user_id'] ?? '')); ?></td>
                     <td><?php echo h($row['ip'] ?? ''); ?></td>
                     <td class="log-message"><?php echo h($row['log_message'] ?? ''); ?></td>

@@ -24,9 +24,9 @@ function settings_build_view_model(mysqli $connection): array
         default => __t('settings.api_base_url_source_none'),
     };
     $apiBaseUrlSourceBadge = match ($apiBaseUrlSource) {
-        'portal' => 'badge-info',
-        'env' => 'badge-neutral',
-        default => 'badge-warning',
+        'portal' => 'info',
+        'env' => 'neutral',
+        default => 'warning',
     };
     $effectiveApiBaseUrl = '';
     $effectiveApiBaseUrlError = '';

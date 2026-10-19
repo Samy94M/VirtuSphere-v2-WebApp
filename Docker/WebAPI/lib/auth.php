@@ -348,9 +348,10 @@ function current_user(?mysqli $db = null): ?array
 
 function require_login(?mysqli $db = null): array
 {
+    $wasSignedIn = (int) ($_SESSION['user_id'] ?? 0) > 0; // read before current_user(), whose logout() wipes an expired session (QL-04)
     $user = current_user($db);
     if ($user === null) {
-        header('Location: login.php');
+        header('Location: login.php' . ($wasSignedIn ? '?reason=session_expired' : ''));
         exit;
     }
 

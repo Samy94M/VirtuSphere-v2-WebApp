@@ -13,6 +13,8 @@ if (current_user($connection) !== null) {
 
 $error = '';
 $username = '';
+// require_login() sends an ended session here with ?reason=session_expired; there is no return URL yet (QL-04).
+$sessionEnded = request_string($_GET, 'reason') === 'session_expired';
 $directoryEnabled = directory_is_enabled($connection);
 $directoryLoginAvailable = $directoryEnabled && virtusphere_is_request_secure();
 $source = $directoryLoginAvailable
@@ -77,6 +79,7 @@ $nonce = h(virtusphere_csp_nonce());
     <h1>VirtuSphere</h1>
     <p class="login-tagline"><?php echo h(__t('login.tagline')); ?></p>
     <?php foreach (flash_messages() as $flash) { echo flash_alert_html(is_array($flash) ? $flash : []); } ?>
+    <?php if ($sessionEnded) { ?><div class="alert alert-warning"><?php echo h(__t('login.session_expired')); ?></div><?php } ?>
     <?php if ($error !== '') { ?><div class="alert alert-error"><?php echo h($error); ?></div><?php } ?>
     <?php if ($directoryEnabled && !$directoryLoginAvailable) { ?><div class="alert alert-warning"><?php echo h(__t('login.directory_requires_https')); ?></div><?php } ?>
     <form class="stack" method="post" action="login.php">

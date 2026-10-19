@@ -57,4 +57,22 @@ final class VmRamTest extends TestCase
             if ($method === null) { unset($_SERVER['REQUEST_METHOD']); } else { $_SERVER['REQUEST_METHOD'] = $method; }
         }
     }
+
+    public function testTheVisibleRangeHintIsFormattedFromTheLimitConstants(): void
+    {
+        // QL-13: the RAM field shows its allowed range; the words come from the limits, never a literal.
+        self::assertSame('128 MB', vm_ram_format(VIRTUSPHERE_VM_LIMITS['ram_mb_min']));
+        self::assertSame('1024 GB', vm_ram_format(VIRTUSPHERE_VM_LIMITS['ram_mb_max']));
+
+        $method = $_SERVER['REQUEST_METHOD'] ?? null;
+        try {
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            ob_start();
+            render_vm_ram_field(['vm_ram' => '4096'], true, []);
+            $html = (string) ob_get_clean();
+        } finally {
+            if ($method === null) { unset($_SERVER['REQUEST_METHOD']); } else { $_SERVER['REQUEST_METHOD'] = $method; }
+        }
+        self::assertStringContainsString('Zulässig: 128 MB bis 1024 GB.', $html);
+    }
 }

@@ -66,7 +66,7 @@ return [
 
     // Mission and template states beyond per-field checks.
     'mission_not_found' => 'Mission not found.',
-    'mission_stale' => 'The mission was changed by someone else in the meantime. Please reload and save again.',
+    'mission_stale' => 'The mission was changed by someone else in the meantime. Saving again fails until you reload the page. Reloading discards your input, so open the page in a new tab first to see the change made in the meantime.',
     'template_name_required' => 'Enter a template name.',
     'target_mission_name_required' => 'Enter a target mission name.',
     'target_mission_no_prefix' => 'Target mission names must not start with the template prefix.',
@@ -74,7 +74,7 @@ return [
     'source_not_mission' => 'The source is not a normal mission.',
 
     // VM, catalog and credential checks.
-    'vm_name_charset' => 'VM name may use only letters, numbers and internal hyphens.',
+    'vm_name_charset' => 'VM name may use only ASCII letters (A to Z), digits and internal hyphens.',
     'vm_name_taken_in_mission' => 'VM name already exists in this mission.',
     'credential_name_taken_for_type' => 'A credential with this name already exists for this type.',
     'interface_entry_invalid' => 'Interface entry is invalid.',

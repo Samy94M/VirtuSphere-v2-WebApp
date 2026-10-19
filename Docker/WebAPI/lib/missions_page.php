@@ -37,3 +37,21 @@ function missions_export_csv_if_requested(mysqli $connection, array $user, array
     ], (int) $user['id']);
     portal_send_csv($isTemplateView ? 'vorlagen' : 'missionen', $header, $csvRows);
 }
+
+/**
+ * The empty-list sentence of the mission and template table. The create form
+ * sits above the table, so the sentence links to it, but only to a user who can
+ * submit it: a reader without missions.write still learns that nothing exists.
+ */
+function missions_empty_list_html(bool $attentionOnly, bool $templateView, bool $canCreate): string
+{
+    if ($attentionOnly) {
+        return h(__t('missions.attention_empty'));
+    }
+    $sentence = h(__t($templateView ? 'missions.empty_template' : 'missions.empty_mission'));
+    if (!$canCreate) {
+        return $sentence;
+    }
+
+    return $sentence . ' <a href="#mission-create">' . h(__t('missions.empty_create_link')) . '</a>';
+}

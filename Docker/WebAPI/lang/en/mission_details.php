@@ -39,6 +39,7 @@ return [
     'err_template_prefix_keep' => 'Template names must keep the template prefix.',
     'err_mission_prefix' => 'Mission names must not start with the template prefix.',
     'flash_saved' => 'Mission saved.',
+    'save_busy' => 'Saving…',
     'flash_cloned' => 'Template copied to mission. Created VMs: :count.',
     'flash_saved_as_template' => 'Mission saved as template. Copied VMs: :count.',
     'export_json' => 'Export as JSON',

@@ -98,7 +98,9 @@ final class DeployWorkerNetworkPreflightIntegrationTest extends TestCase
     public function testDeletedExplicitSelectionIsBlockedWithStructuredProgress(): void
     {
         $jobId = $this->queueFullJob();
-        self::assertTrue(repo_delete_vm_by_id($this->db, $this->missionId, $this->vmId));
+        // The portal refuses this delete while the job is queued (QL-08); the preflight stays
+        // the defence against a row that disappears outside the portal.
+        self::assertTrue(repo_execute($this->db, 'DELETE FROM deploy_vms WHERE id = ? AND mission_id = ?', 'ii', [$this->vmId, $this->missionId]));
 
         $this->processClaimed($jobId);
 

@@ -67,6 +67,8 @@ final class StatusWriterContractTest extends TestCase
         'help_missions.status_2' => [2],
         'help_missions.status_3' => [3],
         'help_missions.status_4' => [4],
+        // The column sentence (QL-10) uses "3/5 Deployed" as its example and teaches the wording, not the stage.
+        'help_missions.status_wire' => [3],
         'help_missions.status_5' => [5],
         'help_missions.status_stuck_1' => [2],
         'help_missions.status_stuck_2' => [3],

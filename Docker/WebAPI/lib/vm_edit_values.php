@@ -115,6 +115,26 @@ function vm_parse_packages(array $packageIds): array
     return $packages;
 }
 
+/**
+ * The CPU count of the VM editor, trimmed. An emptied field is a missing value
+ * and says so: the repository default (2 CPUs) would otherwise store the VM
+ * without a word, while the RAM field answers the same gesture with "required"
+ * (vm_edit_ram_from_post). The default stays for callers that send no key.
+ *
+ * @param array<string, mixed> $post
+ * @throws ValidationException when the field is empty
+ */
+function vm_edit_cpu_from_post(array $post): string
+{
+    $raw = request_trimmed($post, 'vm_cpu');
+    if ($raw === '') {
+        $message = __t('validate.required', ['field' => __t('vm_edit.label_cpu')]);
+        throw new ValidationException(['vm_cpu' => $message], $message);
+    }
+
+    return $raw;
+}
+
 function vm_cidr_to_netmask(int $prefix): string
 {
     $bits = str_repeat('1', $prefix) . str_repeat('0', 32 - $prefix);

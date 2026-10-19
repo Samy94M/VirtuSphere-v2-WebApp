@@ -195,7 +195,7 @@ declare(strict_types=1);
                     <?php } ?>
                 </select><?php echo vm_field_error($fieldErrors, 'vm_os'); ?></label>
                 <?php render_vm_ram_field($vm, $canWrite, $fieldErrors); ?>
-                <label><?php echo h(__t('vm_edit.label_cpu')); ?><input name="vm_cpu" type="number"<?php echo form_control_attrs('vm_edit', 'vm_cpu', null, false, (string) ($fieldErrors['vm_cpu'] ?? '')); ?> min="1" value="<?php echo h($vm['vm_cpu'] ?? (string) VIRTUSPHERE_VM_DEFAULTS['cpu_count']); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_cpu'); ?></label>
+                <label><?php echo h(__t('vm_edit.label_cpu')); ?><input name="vm_cpu" type="number"<?php echo form_control_attrs('vm_edit', 'vm_cpu', null, false, (string) ($fieldErrors['vm_cpu'] ?? '')); ?> min="<?php echo h((string) VIRTUSPHERE_VM_LIMITS['cpu_count_min']); ?>" max="<?php echo h((string) VIRTUSPHERE_VM_LIMITS['cpu_count_max']); ?>" value="<?php echo h($vm['vm_cpu'] ?? (string) VIRTUSPHERE_VM_DEFAULTS['cpu_count']); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_cpu'); ?></label>
                 <?php
                     // Fields and hint form one group spanning two grid tracks, so the prose
                     // stays under the controls it explains. Its column cannot be pinned in
@@ -388,7 +388,7 @@ declare(strict_types=1);
             </div>
         </section>
 
-        <?php if ($canWrite) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit"><?php echo h(__t('vm_edit.save_vm')); ?></button></div><?php } ?>
+        <?php if ($canWrite) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>"><?php echo h(__t('vm_edit.save_vm')); ?></button></div><?php } ?>
     </form>
 
     <?php render_vm_status_history($statusEvents); ?>

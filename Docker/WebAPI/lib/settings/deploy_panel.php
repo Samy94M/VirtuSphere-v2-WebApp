@@ -50,7 +50,7 @@ declare(strict_types=1);
                 <article class="runtime-fact">
                     <div class="runtime-fact-head">
                         <h3><?php echo h(__t('settings.effective_api_url')); ?></h3>
-                        <?php echo portal_badge((string) preg_replace('/^badge-/', '', $apiBaseUrlSourceBadge), $apiBaseUrlSourceLabel); ?>
+                        <?php echo portal_badge($apiBaseUrlSourceBadge, $apiBaseUrlSourceLabel); ?>
                     </div>
                     <?php if ($effectiveApiBaseUrlError === '') { ?>
                         <code class="runtime-value" data-effective-api-url><?php echo h($effectiveApiBaseUrl); ?></code>
