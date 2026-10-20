@@ -7,6 +7,7 @@ require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/correlation_display.php';
 require_once __DIR__ . '/../lib/log_filter.php';
 require_once __DIR__ . '/../lib/logs_correlation_panel.php';
+require_once __DIR__ . '/../lib/audit_log_view.php';
 require_once __DIR__ . '/../lib/logs_export.php';
 require_once __DIR__ . '/../lib/logs_filter_form.php';
 require_once __DIR__ . '/../lib/portal_export.php';
@@ -106,7 +107,7 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
                     <td><?php echo portal_badge(log_category_badge_class((string) ($row['category'] ?? '')), log_category_label((string) ($row['category'] ?? ''))); ?></td>
                     <td><?php echo h($row['user_name'] ?? ($row['user_id'] ?? '')); ?></td>
                     <td><?php echo h($row['ip'] ?? ''); ?></td>
-                    <td class="log-message"><?php echo h($row['log_message'] ?? ''); ?></td>
+                    <td class="log-message"><?php echo h(audit_log_display_message($row)); ?></td>
                     <?php // The trace link is dropped while this view already IS
                           // that trace: a link to the page you are on reads as a
                           // different page. ?>

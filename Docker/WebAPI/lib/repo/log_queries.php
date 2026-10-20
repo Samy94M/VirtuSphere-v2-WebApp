@@ -7,7 +7,7 @@ function repo_recent_logs(mysqli $db, array $filter, int $limit = 50): array
 {
     $limit = max(1, min(500, $limit));
     $filter = repo_log_filter($filter);
-    $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.user_id, u.name AS user_name, l.correlation_id, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
+    $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.event_code, l.object_type, l.object_id, l.result, l.context_json, l.user_id, u.name AS user_name, l.correlation_id, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
         . $filter['sql'] . ' ORDER BY l.id DESC LIMIT ?';
     $types = $filter['types'] . 'i';
     $params = [...$filter['params'], $limit];
@@ -50,7 +50,7 @@ function repo_log_page(
     $query = repo_log_filter($filter);
     $ascending = $after !== null;
     $fetch = $limit + 1;
-    $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.user_id, u.name AS user_name, l.correlation_id, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
+    $sql = 'SELECT l.id, l.ip, l.category, l.log_message, l.event_code, l.object_type, l.object_id, l.result, l.context_json, l.user_id, u.name AS user_name, l.correlation_id, l.created_at FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id'
         . $query['sql'] . ' ORDER BY l.id ' . ($ascending ? 'ASC' : 'DESC') . ' LIMIT ?';
     $types = $query['types'] . 'i';
     $params = [...$query['params'], $fetch];

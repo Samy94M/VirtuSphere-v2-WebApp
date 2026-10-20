@@ -3,280 +3,258 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/audit_registry.php';
+require_once __DIR__ . '/lang.php';
+require_once __DIR__ . '/audit_presenter_parts.php';
 
-/** @param array<string,mixed> $context */
-function audit_event_description(string $eventCode, string $objectType, ?string $objectId, string $result, array $context): string
+/**
+ * The sentence of one audit row, rendered from lang/{de,en}/audit_log.php.
+ *
+ * The writers call this with the default locale 'en' and store the result, so the
+ * stored log_message is English and canonical: search, the CSV export and the
+ * saved filters read it. The logs page renders structured rows again in the
+ * viewer's locale (lib/audit_log_view.php). A missing key renders as its own name,
+ * which the catalog tests catch.
+ *
+ * @param array<string,mixed> $context The normalized context (lib/audit_registry.php).
+ */
+function audit_event_description(string $eventCode, string $objectType, ?string $objectId, string $result, array $context, string $locale = 'en'): string
 {
     $id = $objectId ?? 'unknown';
     $action = (string) ($context['action'] ?? 'changed');
+    $actionLabel = audit_token_label($locale, 'action_', $action);
+    $unknown = audit_t($locale, 'unknown');
     $message = match ($eventCode) {
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_CSRF_REJECTED => 'csrf token rejected on ' . ($context['page'] ?? $id),
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCESS_DENIED => 'access denied: ' . ($context['permission'] ?? $id) . ' required',
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT => 'logout',
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_CSRF_REJECTED => audit_t($locale, 'csrf_rejected', ['page' => (string) ($context['page'] ?? $id)]),
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCESS_DENIED => audit_t($locale, 'access_denied', ['permission' => (string) ($context['permission'] ?? $id)]),
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT => audit_t($locale, 'logout'),
         // The result, not the code, says whether it happened: `changed own
         // password` on success, `rejected own password change` otherwise. One
         // neutral code carries both, so a refusal can never be filed under a
         // name that asserts the change went through.
         VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT => $result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS
-            ? 'changed ' . ($context['scope'] ?? 'own') . ' password'
-            : 'rejected ' . ($context['scope'] ?? 'own') . ' password change' . audit_description_reason($context),
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN => audit_login_description($id, $result, $context),
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED => 'account locked for ' . ($context['duration_minutes'] ?? 0) . ' minutes after ' . ($context['failure_count'] ?? 0) . ' failed sign-ins',
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED => 'ip rate limited for ' . ($context['duration_minutes'] ?? 0) . ' minutes after ' . ($context['failure_count'] ?? 0) . ' failed sign-ins',
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED => audit_session_description($context),
-        VIRTUSPHERE_AUDIT_EVENT_USER_CREATED => 'created ' . ($context['source'] ?? 'local') . ' user id ' . $id . audit_description_named($context),
-        VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED => 'changed active state for user id ' . $id . ' to ' . audit_bool_word((bool) ($context['enabled'] ?? false)),
-        VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED => 'changed role for user id ' . $id . ' to ' . ($context['role'] ?? 'unknown'),
-        VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED => $action . ' email address for local user id ' . $id,
-        VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED => $action . ' for local user id ' . $id,
-        VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED => 'imported Active Directory user id ' . $id,
-        VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED => 'synchronized Active Directory user id ' . $id,
-        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED => $action . ' directory configuration' . (isset($context['revision']) ? ' revision ' . $context['revision'] : ''),
-        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED => audit_directory_controller_description($id, $context),
-        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_LOGIN_CHANGED => audit_bool_word((bool) ($context['enabled'] ?? false)) . ' Active Directory login',
-        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_STATE => 'directory controller ' . $id . ' state changed to ' . ($context['outcome'] ?? 'unknown'),
-        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED => 'tested directory controller ' . $id . ': ' . ($context['outcome'] ?? $result),
-        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_BIND_REJECTED => 'directory search account bind rejected; automatic attempts paused',
-        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED => $action . ' credential id ' . $id . audit_description_named($context) . (isset($context['host']) ? ' on host ' . $context['host'] : '') . audit_description_changes($context)
-            . (!empty($context['selection_cleared']) ? '; inventory ansible selection cleared' : ''),
-        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED => (!empty($context['scheduled']) ? 'scheduled full test for credential id ' : 'tested credential id ') . $id . ': ' . ($context['outcome'] ?? $result) . audit_description_component($context),
-        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION => 'esxi inventory auto-pull ' . $action . ' for credential id ' . $id . audit_description_reason($context),
-        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_APP_KEY_ROTATED => 're-encrypted ' . ($context['credential_count'] ?? 0) . ' credential secret(s) and ' . ($context['directory_count'] ?? 0)
-            . ' directory secret(s) with a new APP_KEY (' . ($context['already_count'] ?? 0) . ' already current)',
-        VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED => $action . ' mission id ' . $id . audit_description_named($context)
-            . (isset($context['vm_count']) ? ' (' . $context['vm_count'] . ' vms)' : '') . audit_description_changes($context),
-        VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED => audit_mission_transfer_description($id, $context),
-        VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED => 'exported ' . $id . ' list as CSV (' . ($context['row_count'] ?? 0) . ' row(s))',
-        VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED => $action . ' vm id ' . $id . audit_description_named($context) . ' in mission id ' . ($context['mission_id'] ?? 0) . audit_description_changes($context),
-        VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED => $action . ' for vm id ' . $id . ' in mission id ' . ($context['mission_id'] ?? 0) . (isset($context['progress_kind']) ? ' (' . $context['progress_kind'] . ')' : ''),
-        VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED => $action . ' ' . ($context['affected_count'] ?? 0) . ' vm(s) in mission id ' . $id . audit_description_ids($context['vm_ids'] ?? []),
-        VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED => 'exported vm list of mission id ' . $id . ' as CSV (' . ($context['row_count'] ?? 0) . ' row(s))',
-        VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED => 'adopted ESXi identity for vm id ' . $id . ' from credential id ' . ($context['credential_id'] ?? 0) . ' (moid ' . ($context['moid'] ?? '') . ', instance uuid ' . ($context['instance_uuid'] ?? '') . ')',
+            ? audit_t($locale, 'password_changed', ['scope' => audit_scope_label($locale, $context)])
+            : audit_t($locale, 'password_change_rejected', ['scope' => audit_scope_label($locale, $context), 'reason_part' => audit_description_reason($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN => audit_login_description($id, $result, $context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED => audit_t($locale, 'account_locked', ['duration' => (string) ($context['duration_minutes'] ?? 0), 'failures' => (string) ($context['failure_count'] ?? 0)]),
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED => audit_t($locale, 'ip_rate_limited', ['duration' => (string) ($context['duration_minutes'] ?? 0), 'failures' => (string) ($context['failure_count'] ?? 0)]),
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED => audit_session_description($context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_USER_CREATED => audit_t($locale, 'user_created', ['source' => (string) ($context['source'] ?? 'local'), 'id' => $id, 'named' => audit_description_named($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED => audit_t($locale, 'user_active_changed', ['id' => $id, 'state' => audit_bool_word((bool) ($context['enabled'] ?? false), $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED => audit_t($locale, 'user_role_changed', ['id' => $id, 'role' => (string) ($context['role'] ?? $unknown)]),
+        VIRTUSPHERE_AUDIT_EVENT_USER_EMAIL_CHANGED => audit_t($locale, 'user_email_changed', ['action' => $actionLabel, 'id' => $id]),
+        VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED => audit_t($locale, 'user_security_changed', ['action' => $actionLabel, 'id' => $id]),
+        VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED => audit_t($locale, 'user_directory_imported', ['id' => $id]),
+        VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED => audit_t($locale, 'user_directory_synchronized', ['id' => $id]),
+        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED => audit_t($locale, 'directory_config_changed', ['action' => $actionLabel, 'revision_part' => isset($context['revision']) ? audit_t($locale, 'revision_part', ['revision' => (string) $context['revision']]) : '']),
+        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED => audit_directory_controller_description($id, $context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_LOGIN_CHANGED => audit_t($locale, 'directory_login_changed', ['state' => audit_bool_word((bool) ($context['enabled'] ?? false), $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_STATE => audit_t($locale, 'directory_controller_state', ['id' => $id, 'outcome' => (string) ($context['outcome'] ?? $unknown)]),
+        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED => audit_t($locale, 'directory_controller_tested', ['id' => $id, 'outcome' => (string) ($context['outcome'] ?? $result)]),
+        VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_BIND_REJECTED => audit_t($locale, 'directory_bind_rejected'),
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED => audit_t($locale, 'credential_changed', [
+            'action' => $actionLabel,
+            'id' => $id,
+            'named' => audit_description_named($context, $locale),
+            'host_part' => isset($context['host']) ? audit_t($locale, 'host_part', ['host' => (string) $context['host']]) : '',
+            'changes_part' => audit_description_changes($context, $locale),
+            'selection_part' => !empty($context['selection_cleared']) ? audit_t($locale, 'selection_part') : '',
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED => audit_t($locale, !empty($context['scheduled']) ? 'credential_test_scheduled' : 'credential_tested', [
+            'id' => $id,
+            'outcome' => (string) ($context['outcome'] ?? $result),
+            'component_part' => audit_description_component($context, $locale),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION => audit_t($locale, 'credential_inventory_automation', ['action' => $actionLabel, 'id' => $id, 'reason_part' => audit_description_reason($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_APP_KEY_ROTATED => audit_t($locale, 'app_key_rotated', [
+            'credential_count' => (string) ($context['credential_count'] ?? 0),
+            'directory_count' => (string) ($context['directory_count'] ?? 0),
+            'already_count' => (string) ($context['already_count'] ?? 0),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED => audit_t($locale, 'mission_changed', [
+            'action' => $actionLabel,
+            'id' => $id,
+            'named' => audit_description_named($context, $locale),
+            'vm_part' => isset($context['vm_count']) ? audit_t($locale, 'vm_part', ['count' => (string) $context['vm_count']]) : '',
+            'changes_part' => audit_description_changes($context, $locale),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_MISSION_TRANSFERRED => audit_mission_transfer_description($id, $context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_MISSION_LIST_EXPORTED => audit_t($locale, 'mission_list_exported', ['id' => $id, 'count' => (string) ($context['row_count'] ?? 0)]),
+        VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED => audit_t($locale, 'vm_changed', [
+            'action' => $actionLabel,
+            'id' => $id,
+            'named' => audit_description_named($context, $locale),
+            'mission' => (string) ($context['mission_id'] ?? 0),
+            'changes_part' => audit_description_changes($context, $locale),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_VM_MECM_CHANGED => audit_t($locale, 'vm_mecm_changed', [
+            'action' => $actionLabel,
+            'id' => $id,
+            'mission' => (string) ($context['mission_id'] ?? 0),
+            'progress_part' => isset($context['progress_kind']) ? audit_t($locale, 'progress_part', ['kind' => (string) $context['progress_kind']]) : '',
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_VM_BULK_CHANGED => audit_t($locale, 'vm_bulk_changed', [
+            'action' => $actionLabel,
+            'count' => (string) ($context['affected_count'] ?? 0),
+            'id' => $id,
+            'ids_part' => audit_description_ids($context['vm_ids'] ?? []),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_VM_LIST_EXPORTED => audit_t($locale, 'vm_list_exported', ['id' => $id, 'count' => (string) ($context['row_count'] ?? 0)]),
+        VIRTUSPHERE_AUDIT_EVENT_VM_IDENTITY_ADOPTED => audit_t($locale, 'vm_identity_adopted', [
+            'id' => $id,
+            'credential' => (string) ($context['credential_id'] ?? 0),
+            'moid' => (string) ($context['moid'] ?? ''),
+            'instance_uuid' => (string) ($context['instance_uuid'] ?? ''),
+        ]),
         // Etappe 14D. The effect is the load-bearing half: `current_pending`
         // means the rollout that is waiting picked the new name up, while
         // `next_rollout` means it did not and will not until a reset.
-        VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME => 'changed windows hostname of vm id ' . $id . ' in mission id ' . ($context['mission_id'] ?? 0)
-            . ' from ' . ($context['old_value'] ?? '') . ' to ' . ($context['new_value'] ?? '')
-            . ' (effect ' . ($context['effect'] ?? '') . ', rollout name ' . ($context['rollout_hostname'] ?? '') . ', revision ' . ($context['rollout_revision'] ?? 0) . ')',
-        VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED => 'deleted retired ' . $objectType . ' id ' . $id . audit_description_named($context),
-        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED => audit_setting_description($id, $context),
-        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED => 'installed https certificate (CN=' . ($context['subject'] ?? '') . ', expires ' . ($context['valid_to'] ?? '') . ' UTC)',
-        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN => ($action === 'generated' ? 'generated' : 'cleared') . ' machine report token',
-        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP => $action . ' machine API ip ' . $id . (isset($context['role']) ? ' as ' . $context['role'] . (($context['previous_role'] ?? '') !== '' ? ' (was ' . $context['previous_role'] . ')' : '') : ''),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED => 'queued ' . audit_deploy_object_label($objectType, $id) . (isset($context['job_count']) ? ' (' . $context['job_count'] . ' jobs)' : '') . (!empty($context['scheduled']) ? ' (scheduled)' : ''),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED => 'requested cancel of deploy job id ' . $id,
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_LOG_EXPORTED => 'downloaded the raw log of deploy job id ' . $id,
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED => $action . ' ' . audit_deploy_object_label($objectType, $id) . (isset($context['job_count']) ? ' (' . $context['job_count'] . ' jobs)' : ''),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED => 'queued deploy job id ' . $id . ' (retry of job id ' . ($context['retry_of_job_id'] ?? 0) . ')',
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME => 'deploy job id ' . $id . ' (mission id ' . ($context['mission_id'] ?? 0) . ', mode ' . ($context['mode'] ?? '') . ') ' . ($context['status'] ?? $result) . audit_description_reason($context),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REQUESTED => 'requested ESXi inventory pull for credential id ' . $id . audit_description_reason($context) . (isset($context['job_id']) ? '; job id ' . $context['job_id'] : ''),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REFRESH => audit_inventory_refresh_description($context),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_VLAN_REASSIGNED => 'reassigned vlan ' . $id . ' to ' . ($context['target_vlan'] ?? '') . ' (' . ($context['mission_count'] ?? 0) . ' missions, ' . ($context['interface_count'] ?? 0) . ' interfaces)',
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE => '[maintenance-worker] convergence sweep marked ' . ($context['vm_count'] ?? 0) . ' VM(s) of mission id ' . $id . ' as failed' . audit_description_reason($context),
+        VIRTUSPHERE_AUDIT_EVENT_VM_ROLLOUT_HOSTNAME => audit_t($locale, 'vm_rollout_hostname', [
+            'id' => $id,
+            'mission' => (string) ($context['mission_id'] ?? 0),
+            'old_value' => (string) ($context['old_value'] ?? ''),
+            'new_value' => (string) ($context['new_value'] ?? ''),
+            'effect' => (string) ($context['effect'] ?? ''),
+            'rollout_hostname' => (string) ($context['rollout_hostname'] ?? ''),
+            'rollout_revision' => (string) ($context['rollout_revision'] ?? 0),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_CATALOG_ITEM_DELETED => audit_t($locale, 'catalog_item_deleted', ['type' => audit_token_label($locale, 'object_', $objectType), 'id' => $id, 'named' => audit_description_named($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED => audit_setting_description($id, $context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CERT_INSTALLED => audit_t($locale, 'setting_cert_installed', ['subject' => (string) ($context['subject'] ?? ''), 'valid_to' => (string) ($context['valid_to'] ?? '')]),
+        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN => audit_t($locale, $action === 'generated' ? 'report_token_generated' : 'report_token_cleared'),
+        VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP => audit_t($locale, 'machine_ip', [
+            'action' => $actionLabel,
+            'id' => $id,
+            'role_part' => isset($context['role']) ? audit_t($locale, 'role_part', [
+                'role' => (string) $context['role'],
+                'previous_part' => ($context['previous_role'] ?? '') !== '' ? audit_t($locale, 'previous_part', ['previous' => (string) ($context['previous_role'] ?? '')]) : '',
+            ]) : '',
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_QUEUED => audit_t($locale, 'deploy_queued', [
+            'label' => audit_deploy_object_label($objectType, $id, $locale),
+            'job_count_part' => isset($context['job_count']) ? audit_t($locale, 'job_count_part', ['count' => (string) $context['job_count']]) : '',
+            'scheduled_part' => !empty($context['scheduled']) ? audit_t($locale, 'scheduled_part') : '',
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCEL_REQUESTED => audit_t($locale, 'deploy_cancel_requested', ['id' => $id]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_LOG_EXPORTED => audit_t($locale, 'deploy_log_exported', ['id' => $id]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CANCELLED => audit_t($locale, 'deploy_cancelled', [
+            'action' => $actionLabel,
+            'label' => audit_deploy_object_label($objectType, $id, $locale),
+            'job_count_part' => isset($context['job_count']) ? audit_t($locale, 'job_count_part', ['count' => (string) $context['job_count']]) : '',
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RETRIED => audit_t($locale, 'deploy_retried', ['id' => $id, 'retry_of' => (string) ($context['retry_of_job_id'] ?? 0)]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME => audit_t($locale, 'deploy_outcome', [
+            'id' => $id,
+            'mission' => (string) ($context['mission_id'] ?? 0),
+            'mode' => (string) ($context['mode'] ?? ''),
+            'status' => (string) ($context['status'] ?? $result),
+            'reason_part' => audit_description_reason($context, $locale),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REQUESTED => audit_t($locale, 'inventory_requested', [
+            'id' => $id,
+            'reason_part' => audit_description_reason($context, $locale),
+            'job_part' => isset($context['job_id']) ? audit_t($locale, 'job_part', ['job' => (string) $context['job_id']]) : '',
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REFRESH => audit_inventory_refresh_description($context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_VLAN_REASSIGNED => audit_t($locale, 'vlan_reassigned', [
+            'id' => $id,
+            'target_vlan' => (string) ($context['target_vlan'] ?? ''),
+            'missions' => (string) ($context['mission_count'] ?? 0),
+            'interfaces' => (string) ($context['interface_count'] ?? 0),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE => audit_t($locale, 'convergence_sweep', ['count' => (string) ($context['vm_count'] ?? 0), 'id' => $id, 'reason_part' => audit_description_reason($context, $locale)]),
         // The compatibility description names the state that was REACHED, not
         // the button that was pressed: a pause requested while a job runs lands
         // on pause_after_current, and a trail saying "paused" there would be
         // wrong for as long as that job kept running.
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED => 'deploy job intake set to ' . ($context['new_state'] ?? 'paused')
-            . (isset($context['job_id']) ? ' while job id ' . $context['job_id'] . ' was active' : ''),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED => 'deploy job intake resumed',
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS ? 'queued' : 'refused')
-            . ' remote cleanup retry for deploy job id ' . $id . ' (execution ' . ($context['execution_id'] ?? 0) . ')',
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_CLEARED => 'ESXi access file of job ' . $id
-            . (($context['outcome'] ?? '') === 'absent' ? ' was no longer on' : ' removed from')
-            . ' the Ansible host ' . ($context['host'] ?? 'unknown') . ':' . ($context['port'] ?? 0) . ' at a later contact',
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_PAUSED => audit_t($locale, 'claim_paused', [
+            'state' => (string) ($context['new_state'] ?? 'paused'),
+            'claim_job_part' => isset($context['job_id']) ? audit_t($locale, 'claim_job_part', ['job' => (string) $context['job_id']]) : '',
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLAIM_RESUMED => audit_t($locale, 'claim_resumed'),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CLEANUP_RETRIED => audit_t(
+            $locale,
+            $result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS ? 'cleanup_retry_queued' : 'cleanup_retry_refused',
+            ['id' => $id, 'execution' => (string) ($context['execution_id'] ?? 0)]
+        ),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_CLEARED => audit_t($locale, 'secret_cleared', [
+            'id' => $id,
+            'outcome_part' => ($context['outcome'] ?? '') === 'absent' ? audit_t($locale, 'secret_absent') : audit_t($locale, 'secret_removed'),
+            'address' => (string) ($context['host'] ?? $unknown) . ':' . (string) ($context['port'] ?? 0),
+        ]),
         // K21-F. The object is the credential; 0 names one that was deleted. The
         // operator's reason stays in the context, not in this sentence.
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_ACKNOWLEDGED => 'acknowledged by hand ' . ($context['count'] ?? 0)
-            . ' ESXi access file record(s) on the Ansible host ' . ($context['host'] ?? 'unknown') . ':' . ($context['port'] ?? 0)
-            . ($id === '0' ? ' of a deleted Ansible credential' : ' of Ansible credential id ' . $id),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => 'documented external check for deploy job id ' . $id
-            . ': ' . ($context['resolution_code'] ?? 'inconclusive') . ' (resolution ' . ($context['resolution_id'] ?? 0) . ')',
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_REMOTE_SECRET_ACKNOWLEDGED => audit_t($locale, 'secret_acknowledged', [
+            'count' => (string) ($context['count'] ?? 0),
+            'address' => (string) ($context['host'] ?? $unknown) . ':' . (string) ($context['port'] ?? 0),
+            'credential_part' => $id === '0' ? audit_t($locale, 'credential_deleted_part') : audit_t($locale, 'credential_id_part', ['id' => $id]),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_DOCUMENTED => audit_t($locale, 'recovery_documented', [
+            'id' => $id,
+            'resolution_code' => (string) ($context['resolution_code'] ?? audit_t($locale, 'inconclusive')),
+            'resolution_id' => (string) ($context['resolution_id'] ?? 0),
+        ]),
         // Etappe 14B-F. The sentence says what the operator ESTABLISHED, never
         // what this system checked: it cannot see the host, and a line reading
         // "verified" would claim a probe nobody ran.
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED => ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS
-            ? 'released create unit ' . ($context['position'] ?? 0) . ' of deploy job id ' . $id
-                . ' as not created (resolution ' . ($context['resolution_id'] ?? 0) . ')'
-            : 'refused to release create unit ' . ($context['position'] ?? 0) . ' of deploy job id ' . $id
-                . ': ' . ($context['blocker'] ?? 'unknown')),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED => $result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+            ? audit_t($locale, 'create_released', ['position' => (string) ($context['position'] ?? 0), 'id' => $id, 'resolution_id' => (string) ($context['resolution_id'] ?? 0)])
+            : audit_t($locale, 'create_refused', ['position' => (string) ($context['position'] ?? 0), 'id' => $id, 'blocker' => (string) ($context['blocker'] ?? $unknown)]),
         // Etappe 14C. A refusal names the ONE condition it stopped at, because
         // that condition is the operator's next task; "not ready" would not be.
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_SUPERVISOR_CONTRACT => ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS
-            ? 'switched the deploy process contract from ' . ($context['previous_contract'] ?? 'unknown')
-                . ' to ' . ($context['target_contract'] ?? 'unknown')
-            : 'refused to switch the deploy process contract to ' . ($context['target_contract'] ?? 'unknown')
-                . ': ' . ($context['blocker'] ?? 'unknown')),
-        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED => 'recovery review over ' . ($context['reviewed_count'] ?? 0)
-            . ' stale job(s): ' . ($context['requested_count'] ?? 0) . ' requested, ' . ($context['manual_count'] ?? 0) . ' left for manual review',
-        VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE => '[maintenance-worker] integration ' . $id . ' state ' . ($context['old_state'] ?? 'unknown') . ' -> ' . ($context['new_state'] ?? 'unknown'),
-        VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR => 'error [' . $id . '] ' . ($context['error_class'] ?? 'Throwable'),
-        VIRTUSPHERE_AUDIT_EVENT_SYSTEM_RETENTION_PURGED => 'retention purge: ' . audit_description_items($context),
-        VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED => audit_logs_export_description($id, $context),
-        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED => 'Refused ' . $id . (isset($context['action']) ? '?action=' . $context['action'] : '')
-            . (($context['reason'] ?? '') === 'ip_role_not_permitted'
-                ? ': the IP is on the machine API allowlist only under a role this endpoint does not accept (and no known MAC presented).'
-                : ': not on the machine API IP allowlist (and no known MAC presented).'),
-        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED => 'MAC callback rejected for job id ' . $id . ': ' . ($context['reason_code'] ?? 'conflict'),
-        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_TOUCH_REFUSED => 'VM access confirmation refused for job id ' . $id . ': ' . ($context['reason_code'] ?? 'refused'),
-        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE => 'Machine endpoint ' . $id . ' failed internally (' . ($context['error_class'] ?? 'Throwable') . ')',
-        VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM => ($context['report_type'] ?? 'report') . ' for unknown VM id ' . $id . (isset($context['resource_id']) ? ' (ResourceID ' . $context['resource_id'] . ')' : ''),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_SUPERVISOR_CONTRACT => $result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS
+            ? audit_t($locale, 'supervisor_switched', ['previous' => (string) ($context['previous_contract'] ?? $unknown), 'target' => (string) ($context['target_contract'] ?? $unknown)])
+            : audit_t($locale, 'supervisor_refused', ['target' => (string) ($context['target_contract'] ?? $unknown), 'blocker' => (string) ($context['blocker'] ?? $unknown)]),
+        VIRTUSPHERE_AUDIT_EVENT_DEPLOY_RECOVERY_REVIEWED => audit_t($locale, 'recovery_reviewed', [
+            'reviewed' => (string) ($context['reviewed_count'] ?? 0),
+            'requested' => (string) ($context['requested_count'] ?? 0),
+            'manual' => (string) ($context['manual_count'] ?? 0),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE => audit_t($locale, 'integration_state', [
+            'id' => $id,
+            'old_state' => (string) ($context['old_state'] ?? $unknown),
+            'new_state' => (string) ($context['new_state'] ?? $unknown),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR => audit_t($locale, 'system_error', ['id' => $id, 'error_class' => (string) ($context['error_class'] ?? 'Throwable')]),
+        VIRTUSPHERE_AUDIT_EVENT_SYSTEM_RETENTION_PURGED => audit_t($locale, 'retention_purge', ['items' => audit_description_items($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_LOGS_CSV_EXPORTED => audit_logs_export_description($id, $context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED => audit_machine_api_denied($id, $context, $locale),
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED => audit_t($locale, 'callback_rejected', ['id' => $id, 'reason_code' => (string) ($context['reason_code'] ?? audit_t($locale, 'conflict'))]),
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_TOUCH_REFUSED => audit_t($locale, 'touch_refused', ['id' => $id, 'reason_code' => (string) ($context['reason_code'] ?? audit_t($locale, 'refused'))]),
+        VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_FAILURE => audit_t($locale, 'machine_endpoint_failed', ['id' => $id, 'error_class' => (string) ($context['error_class'] ?? 'Throwable')]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_UNKNOWN_VM => audit_t($locale, 'unknown_vm', [
+            'report' => (string) ($context['report_type'] ?? audit_t($locale, 'report')),
+            'id' => $id,
+            'resource_part' => isset($context['resource_id']) ? audit_t($locale, 'resource_part', ['resource' => (string) $context['resource_id']]) : '',
+        ]),
         // Etappe 14D. Reported revision 0 means the caller sent none at all,
         // which is the pre-cutover script or client; it is a different finding
         // from an outdated number and reads as such.
-        VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED => 'refused ' . ($context['report_type'] ?? 'report') . ' for vm id ' . $id
-            . ' (reported rollout revision ' . ($context['reported_revision'] ?? 0) . ', current ' . ($context['rollout_revision'] ?? 0) . ')',
-        VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => 'Catalog sync rejected for ' . $id . ': payload would retire ' . ($context['retire_count'] ?? 0) . ' of ' . ($context['active_count'] ?? 0) . ' active entries (threshold ' . ($context['threshold_percent'] ?? 0) . '%).',
-        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => '[mecm_packages] package relink: ' . audit_description_items($context),
-        VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED => '[mecm_packages] catalog ' . $id . ': ' . ($context['created_count'] ?? 0) . ' created, ' . ($context['retired_count'] ?? 0) . ' retired',
-        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => '[mecm_packages] retired without relink (no newer version in this payload): ' . audit_description_items($context),
-        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED => '[mecm_packages] retired version still assigned, nothing moved: ' . audit_description_items($context),
-        VIRTUSPHERE_AUDIT_EVENT_MECM_REPORT_TOKEN_REJECTED => 'Rejected ' . ($context['action'] ?? 'report') . ' with invalid token',
-        VIRTUSPHERE_AUDIT_EVENT_MECM_CLIENT_CAP => 'Daily client event cap reached for vm ' . $id,
-        VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED => 'reporter ' . $id . ' switched from legacy heartbeats to V' . ($context['report_version'] ?? VIRTUSPHERE_REPORT_CHANNEL_VERSION) . ' result reports',
+        VIRTUSPHERE_AUDIT_EVENT_MECM_ROLLOUT_REVISION_REFUSED => audit_t($locale, 'rollout_revision_refused', [
+            'report' => (string) ($context['report_type'] ?? audit_t($locale, 'report')),
+            'id' => $id,
+            'reported' => (string) ($context['reported_revision'] ?? 0),
+            'current' => (string) ($context['rollout_revision'] ?? 0),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_REJECTED => audit_t($locale, 'catalog_rejected', [
+            'id' => $id,
+            'retire' => (string) ($context['retire_count'] ?? 0),
+            'active' => (string) ($context['active_count'] ?? 0),
+            'threshold' => (string) ($context['threshold_percent'] ?? 0),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINKED => audit_t($locale, 'packages_relinked', ['items' => audit_description_items($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_CATALOG_CHANGED => audit_t($locale, 'catalog_changed', [
+            'id' => $id,
+            'created' => (string) ($context['created_count'] ?? 0),
+            'retired' => (string) ($context['retired_count'] ?? 0),
+        ]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGES_RELINK_SKIPPED => audit_t($locale, 'relink_skipped', ['items' => audit_description_items($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_PACKAGE_RETIRED_ASSIGNED => audit_t($locale, 'retired_assigned', ['items' => audit_description_items($context, $locale)]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_REPORT_TOKEN_REJECTED => audit_t($locale, 'report_token_rejected', ['action' => (string) ($context['action'] ?? audit_t($locale, 'report'))]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_CLIENT_CAP => audit_t($locale, 'client_cap', ['id' => $id]),
+        VIRTUSPHERE_AUDIT_EVENT_MECM_REPORTER_UPGRADED => audit_t($locale, 'reporter_upgraded', ['id' => $id, 'version' => (string) ($context['report_version'] ?? VIRTUSPHERE_REPORT_CHANNEL_VERSION)]),
         default => throw new LogicException('No audit description for event ' . $eventCode),
     };
-    $message .= audit_description_throttle($context);
+    $message .= audit_description_throttle($context, $locale);
 
     return virtusphere_log_text_bytes(virtusphere_redact_log_text($message), VIRTUSPHERE_AUDIT_MESSAGE_MAX_BYTES);
-}
-
-function audit_bool_word(bool $enabled): string
-{
-    return $enabled ? 'enabled' : 'disabled';
-}
-
-/**
- * How a deploy job and a deploy group name themselves in a description.
- *
- * They differ, and the difference is not cosmetic: the job carries "id" and the
- * group does not, because that is what these lines have said since the deploy
- * queue shipped, and existing operator filters and E2E assertions match on it.
- * A structured rewrite may change what a row STORES; changing what a decade of
- * saved searches read would be a migration of somebody else's data.
- */
-function audit_deploy_object_label(string $objectType, string $id): string
-{
-    return $objectType === 'deploy_group' ? 'deploy group ' . $id : 'deploy job id ' . $id;
-}
-
-/** @param array<string,mixed> $context */
-function audit_login_description(string $id, string $result, array $context): string
-{
-    $source = (string) ($context['source'] ?? 'local');
-    if ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS) {
-        return 'login succeeded (' . $source . (isset($context['controller_id']) ? ', controller ' . $context['controller_id'] : '') . ')';
-    }
-    $reason = (string) ($context['reason'] ?? 'invalid credentials');
-    $user = isset($context['username']) ? ' for user "' . $context['username'] . '"' : ($id !== 'unknown' ? ' for user id ' . $id : '');
-    return 'login rejected' . $user . ': ' . $reason;
-}
-
-/** @param array<string,mixed> $context */
-function audit_session_description(array $context): string
-{
-    $reason = (string) ($context['reason'] ?? 'ended');
-    return $reason === 'expired' && isset($context['duration_seconds'])
-        ? 'session expired after ' . $context['duration_seconds'] . ' seconds'
-        : 'Active Directory session ended: ' . $reason;
-}
-
-/** @param array<string,mixed> $context */
-function audit_directory_controller_description(string $id, array $context): string
-{
-    $action = (string) ($context['action'] ?? 'changed');
-    $suffix = isset($context['host']) ? ' (' . $context['host'] . ':' . ($context['port'] ?? 0) . ')' : '';
-    return $action . ' directory controller ' . $id . $suffix;
-}
-
-/** @param array<string,mixed> $context */
-function audit_mission_transfer_description(string $id, array $context): string
-{
-    $action = (string) ($context['action'] ?? 'exported');
-    if (isset($context['target_mission_id'])) {
-        return $action . ' mission id ' . $id . ' to mission id ' . $context['target_mission_id'];
-    }
-    return $action . ' mission id ' . $id . audit_description_named($context);
-}
-
-/** @param array<string,mixed> $context */
-function audit_setting_description(string $id, array $context): string
-{
-    $action = (string) ($context['action'] ?? 'updated');
-    if (array_key_exists('enabled', $context)) {
-        return audit_bool_word((bool) $context['enabled']) . ' ' . str_replace('_', ' ', $id)
-            . (!empty($context['redirect_disabled']) ? ' (redirect auto-disabled)' : '');
-    }
-    $change = isset($context['old_value'], $context['new_value']) ? ' ' . $context['old_value'] . ' -> ' . $context['new_value'] : '';
-    return $action . ' ' . str_replace('_', ' ', $id) . $change;
-}
-
-/** @param array<string,mixed> $context */
-function audit_inventory_refresh_description(array $context): string
-{
-    return 'requested ESXi inventory refresh targets' . audit_description_ids($context['target_ids'] ?? [])
-        . ' jobs' . audit_description_ids($context['job_ids'] ?? [])
-        . ' (' . ($context['queued_count'] ?? 0) . ' queued, ' . ($context['open_count'] ?? 0) . ' open, '
-        . ($context['paused_count'] ?? 0) . ' paused, ' . ($context['failed_count'] ?? 0) . ' failed)';
-}
-
-/** @param array<string,mixed> $context */
-function audit_logs_export_description(string $tab, array $context): string
-{
-    $message = 'exported logs tab ' . $tab . ' as CSV (' . ($context['rows_exported'] ?? 0) . ' of ' . ($context['total_rows'] ?? 0) . ' row(s))';
-    return !empty($context['truncated']) ? $message . '; truncated at ' . ($context['limit'] ?? 0) : $message;
-}
-
-/** @param array<string,mixed> $context */
-function audit_description_reason(array $context): string
-{
-    return isset($context['reason']) && $context['reason'] !== '' ? ': ' . $context['reason'] : '';
-}
-
-/** @param array<string,mixed> $context */
-function audit_description_named(array $context): string
-{
-    return isset($context['name']) && $context['name'] !== '' ? ' ("' . $context['name'] . '")' : '';
-}
-
-/** @param array<string,mixed> $context */
-function audit_description_changes(array $context): string
-{
-    if (isset($context['changes']) && $context['changes'] !== '') {
-        return ' (' . $context['changes'] . ')';
-    }
-
-    // An update that changed nothing says so rather than reading as an
-    // unexplained write: under optimistic locking a no-op save is a real,
-    // recorded event, and silence would look like a missing diff.
-    return ($context['action'] ?? '') === 'updated' ? ' (no field changes)' : '';
-}
-
-/** @param array<string,mixed> $context */
-function audit_description_component(array $context): string
-{
-    return isset($context['component']) && $context['component'] !== '' ? ' (' . $context['component'] . ')' : '';
-}
-
-/** @param list<int> $ids */
-function audit_description_ids(array $ids): string
-{
-    return ' [' . implode(',', $ids) . ']';
-}
-
-/** @param array<string,mixed> $context */
-function audit_description_items(array $context): string
-{
-    $items = is_array($context['items'] ?? null) ? $context['items'] : [];
-    return $items !== [] ? implode('; ', $items) : (string) ($context['item_count'] ?? 0) . ' item(s)';
-}
-
-/** @param array<string,mixed> $context */
-function audit_description_throttle(array $context): string
-{
-    $suppressed = (int) ($context['suppressed_count'] ?? 0);
-    if ($suppressed <= 0) {
-        return '';
-    }
-    return ' (' . $suppressed . ' further occurrence(s) suppressed in the last ' . ($context['throttle_seconds'] ?? 0) . ' s)';
 }

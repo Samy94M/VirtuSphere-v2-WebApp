@@ -95,6 +95,24 @@ final class Lang
     }
 
     /**
+     * Text of a key in a given locale, whatever the active one is. For output that
+     * must exist in two languages in one request (the audit presenter renders the
+     * stored English text and a German display from the same row). An unknown
+     * locale falls back to the default, and a missing key returns the key, as get().
+     *
+     * @param array<string, string|int> $replace
+     */
+    public static function getIn(string $locale, string $key, array $replace = []): string
+    {
+        if (!in_array($locale, self::LOCALES, true)) {
+            $locale = self::DEFAULT_LOCALE;
+        }
+        $strings = self::catalog($locale);
+
+        return self::replace($strings[$key] ?? $key, $replace);
+    }
+
+    /**
      * Fills :placeholders in one pass. strtr() tries the longest key first, so
      * :page cannot eat the start of :pages, and a filled-in value is never
      * searched again for a later placeholder.

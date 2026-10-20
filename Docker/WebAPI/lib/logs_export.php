@@ -131,7 +131,7 @@ function logs_export_rows(mysqli $connection, array $filter, int $max): array
                 log_category_label((string) ($row['category'] ?? '')),
                 (string) ($row['user_name'] ?? ($row['user_id'] ?? '')),
                 (string) ($row['ip'] ?? ''),
-                (string) ($row['log_message'] ?? ''),
+                (string) ($row['log_message'] ?? ''), // Stored English text on purpose: search and the filters match it, so the export does too.
                 (string) ($row['correlation_id'] ?? ''),
             ];
         }
