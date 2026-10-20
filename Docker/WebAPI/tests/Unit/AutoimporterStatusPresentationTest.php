@@ -172,6 +172,44 @@ final class AutoimporterStatusPresentationTest extends TestCase
         self::assertNotSame($missingGroup, $unknownProjection);
     }
 
+    public function testGroupAndFolderCausesAreLabelledInBothLocalesAndSortedByDistribution(): void
+    {
+        // AV-F27 is distribution evidence (prefix package_content_), PS-09 is placement.
+        $group = 'package_content_group_empty target=Leer-Gruppe';
+        self::assertSame([__t('system_status.finding_package_content_group_empty')], system_status_autoimporter_findings($group, true));
+        self::assertSame([], system_status_autoimporter_findings($group, false));
+        $folder = 'package_folder_failed target=Agent-1.0';
+        self::assertSame([__t('system_status.finding_package_folder_failed')], system_status_autoimporter_findings($folder, false));
+        self::assertSame([], system_status_autoimporter_findings($folder, true));
+
+        foreach (['de', 'en'] as $locale) {
+            $catalog = require __DIR__ . '/../../lang/' . $locale . '/system_status.php';
+            $help = require __DIR__ . '/../../lang/' . $locale . '/help_system_status.php';
+            foreach (['package_content_group_empty', 'package_folder_failed'] as $code) {
+                self::assertArrayHasKey('finding_' . $code, $catalog, $locale);
+                self::assertNotSame('', trim((string) $catalog['finding_' . $code]), $locale);
+                self::assertArrayHasKey('system_status_status_code_' . $code, $help, $locale);
+                self::assertNotSame('', trim((string) $help['system_status_status_code_' . $code]), $locale);
+            }
+        }
+    }
+
+    public function testProducerNamesTheEmptyGroupBeforeAnyContentRequestAndCountsTheFolderMove(): void
+    {
+        $producer = (string) file_get_contents(__DIR__ . '/../../../../Powershell-MECM/mecm/mecm_autoimporter.ps1');
+        // The initial request is refused for an empty group, so no intent without a target is stored.
+        self::assertMatchesRegularExpression(
+            '/(?s)Get-VsDistributionPointGroupState -GroupName \$dpGroupName\) -eq \'empty\'\) \{.*?Cause \'package_content_group_empty\'.*?continue.*?Start-CMContentDistribution/',
+            $producer
+        );
+        // A confirmed intent with no target names the group instead of an open-ended "in progress".
+        self::assertMatchesRegularExpression('/\$intentCause = \'package_content_group_empty\'/', $producer);
+        self::assertMatchesRegularExpression('/Add-VsRunCause -Causes \$causes -Cause \$intentCause -Target \$fullName/', $producer);
+        // The folder move is retried and counted; no SilentlyContinue swallows it.
+        self::assertStringNotContainsString('Move-CMObject -FolderPath $appOrgFolder -ErrorAction SilentlyContinue', $producer);
+        self::assertMatchesRegularExpression('/Add-VsRunCause -Causes \$causes -Cause \'package_folder_failed\'/', $producer);
+    }
+
     public function testMissingReportRendersThreeAxesWithoutClaimingDistributionSuccess(): void
     {
         $html = $this->renderAutoimporter(null, 'unknown');

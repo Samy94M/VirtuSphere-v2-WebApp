@@ -1441,7 +1441,7 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 | Fall | Verhalten | Log |
 |---|---|---|
 | `config.json` fehlt im Ordner | Ordner ignoriert | still |
-| `config.json` ungültig / ohne ProjectName+version | übersprungen, **offener Punkt** (`package_config_invalid`) | WARN |
+| `config.json` ungültig / ohne ProjectName+version / ohne gültiges ErrorAction (`Stop` oder `Continue`) | übersprungen, **offener Punkt** (`package_config_invalid`). Ohne gültiges `ErrorAction` wird das Paket nicht importiert, weil der Paketwrapper sonst auf jedem Client mit Exit-Code 1 abbricht | WARN |
 | `PackagesShare` fehlt in Registry | wartet in 60-s-Schleife auf den Installer | ERROR einmalig |
 | files-Baum unverändert (SHA-256-Manifest) | kein Scan | still |
 | files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
@@ -1449,6 +1449,8 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 | Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
 | Vorlagen-install.ps1 nicht kopierbar oder beide install.ps1-Dateien fehlen | Keine Application-/DT-/Contentmutation für dieses Paket; Kopie muss den SHA-256-Vergleich bestehen. Ein vorhandenes lesbares Paketskript bleibt auch ohne Vorlage zulässig. Retry im nächsten Durchlauf (`package_template_failed`). | WARN |
 | Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
+| DP-Gruppe der Erstverteilung hat keine Mitglieder | Keine Erstanforderung, solange die Gruppe leer ist; ein bereits bestätigter Erstauftrag wartet auf ein Ziel. Sobald ein Verteilungspunkt in der Gruppe ist, setzt der nächste Durchlauf die Verteilung fort (`package_content_group_empty`). | WARN |
+| Neue Application lässt sich nicht in `VirtuSphere_Applications` verschieben | Die Application bleibt im Wurzelordner und funktioniert. Der Verschub wird im nächsten Durchlauf wiederholt (`package_folder_failed`); der Paket-Sync liest nur den Collection-Ordner. | WARN |
 | Content-Verteilung bleibt offen oder einzelne/alle DPs melden Fehler | Nach einem bestätigten Contentauftrag werden Collection und Deployments auch bei null erfolgreichen DPs nachgezogen; Geräte können das Paket verwenden, sobald ihr DP den Inhalt anbietet. Neue Manifeste dürfen einmal angefordert werden, gleiche Manifeste werden nur beobachtet. Vollständiger Abschluss verlangt Application-/DT-Contentidentität, erfolgreiche Aggregatzähler und neuere Kopien aller bisherigen DP-Ziele. Die Package-`SourceVersion` bleibt Diagnose. Unbekannte Identität/Projektion, Zielverlust, Löschzustände und unbestätigte Aufrufe blockieren. | INFO bei neuem Auftrag und weiterlaufendem Deploymentabgleich, WARN mit Paket/Ursachencode beim offenen Nachweis |
 | Tracking enthält einen unbestätigten `intent`, ist unvollständig oder stammt aus dem alten Schema | Keine automatische zweite Contentmutation; Tageslog, Trackingidentitäten und MECM-Verteilung manuell klären. Alte Trackingstände ohne Content-ID werden auch bei früherem `complete` nicht durch Vermutung übernommen. | WARN `package_content_unknown` |
 | `DeployTo`-Ziel-Collection fehlt | Offener Punkt mit Collection-Name; der Dateistand wird nicht gemerkt, der nächste Lauf versucht das Available-Deployment erneut, bis die Collection existiert | WARN `package_deploy_failed` |

@@ -296,6 +296,8 @@ BeforeAll {
         $providerMachine = $null
         $lastFilesStamp = ''
         $loop = 0
+        # Prozessweiter Zustand wie im Skriptkopf (PS-09): der Block liest ihn nur.
+        $pendingAppFolderMoves = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
 
         & $script:AutoimporterCycleBlock
         return [pscustomobject]@{
@@ -1142,6 +1144,39 @@ Describe 'Get-VsFilesManifestStamp (Inhalt statt mtime)' {
         Set-Content -Path $script:Template -Value 'exit 2' -Encoding UTF8
         Get-ManifestStampForTest | Should -Not -Be $withNew
     }
+
+    It 'zaehlt versteckte Dateien mit: eine Aenderung nur an einer versteckten Datei loest den Stamp aus (AV-F26)' {
+        # MECM verteilt versteckte Dateien mit. Ohne -Force sah der Stamp sie nicht,
+        # und ein Paket mit geaenderter versteckter Datei blieb unverteilt.
+        $hidden = Join-Path (Split-Path $script:Payload -Parent) '.hidden-setting.ini'
+        try {
+            Set-Content -Path $hidden -Value 'a=1' -Encoding UTF8
+            (Get-Item -LiteralPath $hidden -Force).Attributes = 'Hidden'
+            $before = Get-ManifestStampForTest
+            Set-Content -Path $hidden -Value 'a=2' -Encoding UTF8
+            (Get-Item -LiteralPath $hidden -Force).Attributes = 'Hidden'
+            Get-ManifestStampForTest | Should -Not -Be $before
+        } finally {
+            Remove-Item -LiteralPath $hidden -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'ignoriert Verwaltungsdateien von Explorer und Finder: Thumbs.db und desktop.ini loesen keine Neuverteilung aus (AV-F26)' {
+        # Sie aendern sich ohne Paketaenderung; zaehlten sie mit, verteilte schon das
+        # Oeffnen des Ordners im Explorer das Paket neu.
+        $folder = Split-Path $script:Payload -Parent
+        $before = Get-ManifestStampForTest
+        $junk = @((Join-Path $folder 'Thumbs.db'), (Join-Path $folder 'desktop.ini'), (Join-Path $folder '.DS_Store'))
+        try {
+            foreach ($path in $junk) {
+                Set-Content -Path $path -Value 'x' -Encoding UTF8
+                (Get-Item -LiteralPath $path -Force).Attributes = 'Hidden'
+            }
+            Get-ManifestStampForTest | Should -Be $before
+        } finally {
+            foreach ($path in $junk) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+        }
+    }
 }
 
 Describe 'Installer: die vier Aufgaben ueberleben ihren eigenen Neustartzaehler' {
@@ -1523,6 +1558,66 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
         $script:Template = Join-Path (Join-Path $script:PsRoot 'Package_Vorlage') 'install.ps1'
         $script:TemplateAst = Get-Ast -Path $script:Template
         $script:TemplateText = Get-Content -Raw -Path $script:Template
+
+        # Pflichtfelder des Wrappers: jede if-Anweisung mit exit, deren Bedingung
+        # ein Feld von $config liest oder eine Variable prueft, der ein Feld von
+        # $config zugewiesen wurde ($ErrorAction = $config.ErrorAction).
+        function Get-WrapperConfigFields {
+            param([string]$Path)
+            $ast = Get-Ast -Path $Path
+            $fields = New-Object System.Collections.Generic.List[string]
+            $guardNames = New-Object System.Collections.Generic.List[string]
+            $guards = @($ast.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                @($n.Clauses[0].Item2.FindAll({ param($m) $m -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count -gt 0
+            }, $true))
+            foreach ($guard in $guards) {
+                $condition = $guard.Clauses[0].Item1
+                foreach ($member in @($condition.FindAll({ param($m)
+                    $m -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                    $m.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                    $m.Expression.VariablePath.UserPath -eq 'config'
+                }, $true))) { $fields.Add([string]$member.Member.Value) }
+                foreach ($variable in @($condition.FindAll({ param($m) $m -is [System.Management.Automation.Language.VariableExpressionAst] }, $true))) {
+                    $guardNames.Add([string]$variable.VariablePath.UserPath)
+                }
+            }
+            foreach ($assignment in @($ast.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $guardNames.Contains([string]$n.Left.VariablePath.UserPath)
+            }, $true))) {
+                foreach ($member in @($assignment.Right.FindAll({ param($m)
+                    $m -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                    $m.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                    $m.Expression.VariablePath.UserPath -eq 'config'
+                }, $true))) { $fields.Add([string]$member.Member.Value) }
+            }
+            return @($fields | Sort-Object -Unique)
+        }
+
+        # Pflichtfelder von Read-VsPackageConfig: jede if-Anweisung in der Funktion,
+        # die $null zurueckgibt, und die cfg-Felder in ihrer Bedingung.
+        function Get-ServerConfigFields {
+            param([string]$Path, [string]$FunctionName)
+            $ast = Get-Ast -Path $Path
+            $function = @($ast.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $FunctionName
+            }, $true))
+            if ($function.Count -ne 1) { throw "Funktion $FunctionName ist nicht eindeutig." }
+            $fields = New-Object System.Collections.Generic.List[string]
+            foreach ($guard in @($function[0].Body.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                $n.Clauses[0].Item2.Extent.Text -match '(?m)^\s*return \$null\s*$'
+            }, $true))) {
+                foreach ($member in @($guard.Clauses[0].Item1.FindAll({ param($m)
+                    $m -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                    $m.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                    $m.Expression.VariablePath.UserPath -eq 'cfg'
+                }, $true))) { $fields.Add([string]$member.Member.Value) }
+            }
+            return @($fields | Sort-Object -Unique)
+        }
     }
 
     It 'bricht ab, bevor das erste Teilskript laeuft' {
@@ -1598,14 +1693,35 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
 
     It 'prueft dieselben Pflichtfelder wie Read-VsPackageConfig' {
         # Zwillingsbeziehung, keine gemeinsame Datei: die Vorlage sieht Common
-        # nie. Driftet eine der beiden Listen, akzeptiert eine Seite ein Paket,
-        # das die andere ablehnt.
-        $commonText = Get-Content -Raw -Path $script:MecmCommon
-        $required = @('ProjectName', 'version')
-        foreach ($field in $required) {
-            $commonText | Should -Match ([regex]::Escape('$cfg.' + $field))
-            $script:TemplateText | Should -Match ([regex]::Escape('$config.' + $field))
+        # nie. Driftet eine der beiden Seiten, akzeptiert sie ein Paket, das die
+        # andere ablehnt. Beide Mengen kommen aus dem AST, keine Liste wird hier
+        # gepflegt: sonst prueft der Test nur, was er selbst schon weiss (PS-10).
+        $wrapperRequired = @(Get-WrapperConfigFields -Path $script:Template)
+        $serverChecked = @(Get-ServerConfigFields -Path $script:MecmCommon -FunctionName 'Read-VsPackageConfig')
+        $wrapperRequired.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $serverChecked.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $wrapperRequired | Should -Contain 'ErrorAction' -Because 'der ErrorAction-Guard des Wrappers muss gefunden werden'
+        foreach ($field in $wrapperRequired) {
+            $serverChecked | Should -Contain $field -Because ("der Wrapper bricht ohne {0} ab, Read-VsPackageConfig prueft es nicht" -f $field)
         }
+    }
+
+    It 'erlaubt im Wrapper und im Server dieselben ErrorAction-Werte' {
+        # Der Wrapper prueft mit -notin, der Server mit $script:VsPackageErrorActions.
+        # Driften beide Listen, nimmt eine Seite ein Paket an, das die andere
+        # abweist, und das Paket scheitert auf den Clients.
+        $wrapperValues = @($script:TemplateAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+            "$($n.Operator)" -match '(?i)notin' -and
+            $n.Left.Extent.Text -match 'ErrorAction'
+        }, $true) | ForEach-Object {
+            @($_.Right.FindAll({ param($m)
+                $m -is [System.Management.Automation.Language.ConstantExpressionAst] -and $m.Value -is [string]
+            }, $true)) | ForEach-Object { [string]$_.Value }
+        })
+        $wrapperValues.Count | Should -BeGreaterThan 0 -Because 'der -notin-Vergleich des Wrappers ist nicht gefunden'
+        $serverValues = @(Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsPackageErrorActions })
+        (($wrapperValues | Sort-Object) -join ',') | Should -Be (($serverValues | Sort-Object) -join ',')
     }
 }
 
@@ -1776,5 +1892,101 @@ Describe 'Autoimporter PS-33: das Entfernen einer unvollstaendigen Application m
         @($r.Logs | Where-Object { $_ -match 'Entfernen der unvollstaendigen' }).Count | Should -Be 0
         $r.Warnings | Should -Be 0
         $r.Causes.Count | Should -Be 0
+    }
+}
+
+Describe 'Autoimporter PS-09 und AV-F28: der Verschub einer Application wird wiederholt und gezaehlt' {
+    BeforeAll {
+        # Der Verschub-Block: das if, dessen Bedingung die offene Liste prueft. Ueber
+        # den AST gesucht, damit ein Umbau am Text nicht still am falschen Stueck
+        # prueft.
+        $ifAst = @((Get-Ast -Path $script:Importer).FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.IfStatementAst] -and
+            $n.Clauses[0].Item1.Extent.Text -match 'pendingAppFolderMoves\.Contains'
+        }, $true))
+        if ($ifAst.Count -ne 1) { throw 'Verschub-Block konnte nicht eindeutig gefunden werden.' }
+        $script:MoveBlock = [scriptblock]::Create($ifAst[0].Extent.Text)
+        $script:ImporterText = Get-Content -LiteralPath $script:Importer -Raw
+
+        function Invoke-MoveBlockFixture {
+            param([Parameter(Mandatory)][ValidateSet('move-fails', 'move-ok')][string]$Mode)
+            $fullName = 'Agent-1.0'
+            $appOrgFolder = 'PS1:\Application\VirtuSphere_Applications'
+            $app = [pscustomobject]@{ Name = $fullName }
+            $pendingAppFolderMoves = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+            [void]$pendingAppFolderMoves.Add($fullName)
+            $scanWarnings = 0
+            $causes = New-Object System.Collections.Generic.List[object]
+            $logs = New-Object System.Collections.Generic.List[string]
+            $calls = New-Object System.Collections.Generic.List[string]
+
+            function Write-VsLog { param($Level, $Context, $Message) [void]$logs.Add([string]$Message) }
+            function Add-VsRunCause { param($Causes, $Cause, $Target, $Collection) [void]$Causes.Add([string]$Cause) }
+            function Move-CMObject {
+                param($FolderPath, $ErrorAction)
+                [void]$calls.Add(('move|{0}|{1}' -f $ErrorAction, $FolderPath))
+                if ($Mode -eq 'move-fails') { throw 'SMS Provider: Ordner gesperrt' }
+            }
+
+            $thrown = $null
+            try {
+                . $script:MoveBlock
+            } catch {
+                $thrown = $_
+            }
+            [pscustomobject]@{
+                Thrown = $thrown; Logs = $logs.ToArray(); Causes = $causes.ToArray(); Calls = $calls.ToArray()
+                Warnings = $scanWarnings; Pending = $pendingAppFolderMoves.Contains($fullName)
+            }
+        }
+    }
+
+    It 'ein gelungener Verschub nimmt die Application aus der offenen Liste und zaehlt nichts' {
+        $r = Invoke-MoveBlockFixture -Mode 'move-ok'
+        $r.Thrown | Should -BeNullOrEmpty
+        $r.Calls | Should -Contain ('move|Stop|PS1:\Application\VirtuSphere_Applications') -Because 'der Verschub laeuft mit -ErrorAction Stop'
+        $r.Pending | Should -BeFalse
+        $r.Warnings | Should -Be 0
+        $r.Causes.Count | Should -Be 0
+    }
+
+    It 'ein fehlgeschlagener Verschub bleibt offen, zaehlt mit eigener Ursache und nennt den MECM-Text' {
+        $r = Invoke-MoveBlockFixture -Mode 'move-fails'
+        $r.Thrown | Should -BeNullOrEmpty -Because 'ein Verschubfehler darf den Scan nicht abbrechen'
+        $r.Pending | Should -BeTrue -Because 'der naechste Durchlauf muss ihn wiederholen'
+        $r.Warnings | Should -Be 1
+        ($r.Causes -join ',') | Should -Be 'package_folder_failed'
+        ($r.Logs -join "`n") | Should -Match 'SMS Provider: Ordner gesperrt'
+    }
+
+    It 'der Anlagezweig und der Scan verschlucken keinen Verschubfehler mehr' {
+        $script:ImporterText | Should -Not -Match 'Move-CMObject[^\r\n]*SilentlyContinue' -Because 'SilentlyContinue hat den Fehler ohne Zaehler verschluckt'
+        $script:ImporterText | Should -Match '\[void\]\$pendingAppFolderMoves\.Add\(\$fullName\)'
+    }
+}
+
+Describe 'Autoimporter AV-F27: eine DP-Gruppe ohne Mitglieder wird als eigene Ursache genannt' {
+    BeforeAll {
+        $script:ImporterF27 = Get-Content -LiteralPath $script:Importer -Raw
+    }
+
+    It 'prueft die Gruppe vor der Erstanforderung und fordert ohne Ziel nichts an' {
+        $requestStart = $script:ImporterF27.IndexOf('if ($needsContentRequest) {')
+        $requestStart | Should -BeGreaterThan -1 -Because 'sonst prueft dieser Test die falsche Stelle'
+        $check = $script:ImporterF27.IndexOf("Get-VsDistributionPointGroupState -GroupName `$dpGroupName) -eq 'empty') {", $requestStart)
+        $cause = $script:ImporterF27.IndexOf("-Cause 'package_content_group_empty'", $requestStart)
+        $request = $script:ImporterF27.IndexOf('Start-CMContentDistribution -ApplicationName $fullName', $requestStart)
+        $check | Should -BeGreaterThan $requestStart
+        $cause | Should -BeGreaterThan $check
+        $request | Should -BeGreaterThan $cause -Because 'die Anforderung darf nicht vor der Gruppenpruefung stehen'
+    }
+
+    It 'nennt den bestaetigten Erstauftrag ohne Ziel die Gruppe statt package_content_in_progress' {
+        $script:ImporterF27 | Should -Match "\`$intentCause = 'package_content_group_empty'"
+        $script:ImporterF27 | Should -Match 'Add-VsRunCause -Causes \$causes -Cause \$intentCause -Target \$fullName'
+    }
+
+    It 'der Scan hat fuer jeden Ausgang eine Ursache: der Standard bleibt package_content_in_progress' {
+        $script:ImporterF27 | Should -Match "\`$intentCause = 'package_content_in_progress'"
     }
 }

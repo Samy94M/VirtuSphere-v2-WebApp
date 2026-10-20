@@ -79,7 +79,7 @@ require_once __DIR__ . '/../log_filter.php';
             <p><?php echo h(__t('help_system_status.system_status_status_p3')); ?></p>
             <?php // One entry per cause code the autoimporter writes into the cause line. ?>
             <ul>
-                <?php foreach (['membership_operation_uncertain', 'package_content_in_progress', 'package_content_unknown', 'package_content_failed', 'package_definition_drift', 'package_cleanup_failed'] as $statusCode) { ?>
+                <?php foreach (['membership_operation_uncertain', 'package_content_in_progress', 'package_content_unknown', 'package_content_failed', 'package_content_group_empty', 'package_definition_drift', 'package_cleanup_failed', 'package_folder_failed'] as $statusCode) { ?>
                     <li><code><?php echo h($statusCode); ?></code>: <?php echo h(__t('help_system_status.system_status_status_code_' . $statusCode)); ?></li>
                 <?php } ?>
             </ul>

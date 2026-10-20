@@ -626,7 +626,7 @@ Alle vier Dienste teilen dieselbe Überlebensstrategie:
 **Konvention:** Die **Version darf keinen Bindestrich enthalten** (die WebApp
 splittet `Name-Version` am letzten Bindestrich).
 
-`config.json` (Pflichtfelder für den Autoimporter: `ProjectName`, `version`; die Paketvorlage `install.ps1` verlangt zusätzlich `ErrorAction` mit `Stop` oder `Continue` und bricht sonst mit Exit-Code 1 ab):
+`config.json` (Pflichtfelder für den Autoimporter: `ProjectName`, `version` und `ErrorAction` mit `Stop` oder `Continue`; die Paketvorlage `install.ps1` bricht ohne gültiges `ErrorAction` auf jedem Client mit Exit-Code 1 ab, deshalb importiert der Autoimporter ein solches Paket gar nicht):
 
 ```json
 {
@@ -640,11 +640,14 @@ splittet `Name-Version` am letzten Bindestrich).
 }
 ```
 
-Ordner ohne `ProjectName`/`version` werden übersprungen und protokolliert. `version`
+Ordner ohne `ProjectName`/`version` oder mit fehlendem bzw. ungültigem
+`ErrorAction` werden übersprungen und protokolliert; sie zählen als offener Punkt
+(`package_config_invalid`) und werden nicht importiert. `version`
 darf keinen Bindestrich enthalten (der Katalog trennt `Name-Version` am letzten
-Bindestrich). `ErrorAction` (`Stop`/`Continue`) steuert die paketeigene
-`install.ps1`; `DeployTo` leer lassen, sonst wird ein Available-Deployment an eine
-Collection erzeugt, die es meist noch nicht gibt.
+Bindestrich). `ErrorAction` (`Stop`/`Continue`, ohne Unterschied bei Groß- und
+Kleinschreibung) steuert die paketeigene `install.ps1`; `DeployTo` leer lassen,
+sonst wird ein Available-Deployment an eine Collection erzeugt, die es meist noch
+nicht gibt.
 
 `InstallationBehaviorType` kennt genau zwei Werte, `InstallForSystem` und
 `InstallForUser`; Groß-/Kleinschreibung spielt keine Rolle. Fehlt das Feld oder

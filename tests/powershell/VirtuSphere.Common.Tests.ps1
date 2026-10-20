@@ -607,7 +607,7 @@ Describe 'Read-VsPackageConfig' {
     }
 
     It 'liest eine gueltige config.json und ergaenzt den Ordnernamen' {
-        $dir = New-PackageFolder -Name 'firefox' -Json '{"ProjectName":"Firefox","version":"115"}'
+        $dir = New-PackageFolder -Name 'firefox' -Json '{"ProjectName":"Firefox","ErrorAction":"Stop","version":"115"}'
         $cfg = Read-Config -Folder $dir
         $cfg | Should -Not -BeNullOrEmpty
         $cfg.ProjectName | Should -Be 'Firefox'
@@ -618,7 +618,7 @@ Describe 'Read-VsPackageConfig' {
     It 'erlaubt einen Bindestrich im ProjectName' {
         # Der Katalog trennt am LETZTEN Bindestrich: 'Firefox-ESR-115' hat den
         # Basisnamen 'Firefox-ESR'. Das ist gueltig und muss durchgehen.
-        $dir = New-PackageFolder -Name 'firefox-esr' -Json '{"ProjectName":"Firefox-ESR","version":"115"}'
+        $dir = New-PackageFolder -Name 'firefox-esr' -Json '{"ProjectName":"Firefox-ESR","ErrorAction":"Stop","version":"115"}'
         (Read-Config -Folder $dir).ProjectName | Should -Be 'Firefox-ESR'
     }
 
@@ -630,7 +630,7 @@ Describe 'Read-VsPackageConfig' {
         $ue = [char]0x00FC
         $name = 'B' + $ue + 'ro-Paket'
         $collection = 'B' + $ue + 'ro Sammlung'
-        $json = '{"ProjectName":"' + $name + '","version":"1.0","DeployTo":"' + $collection + '"}'
+        $json = '{"ProjectName":"' + $name + '","ErrorAction":"Stop","version":"1.0","DeployTo":"' + $collection + '"}'
         $dir = Join-Path $script:PkgRoot 'buero-utf8-ohne-bom'
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $dir 'config.json'), $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -642,7 +642,7 @@ Describe 'Read-VsPackageConfig' {
     It 'liest dieselbe Datei mit UTF-8-BOM weiterhin korrekt (das BOM bleibt nicht im Wert)' {
         $ue = [char]0x00FC
         $name = 'B' + $ue + 'ro-Paket'
-        $json = '{"ProjectName":"' + $name + '","version":"1.0"}'
+        $json = '{"ProjectName":"' + $name + '","ErrorAction":"Stop","version":"1.0"}'
         $dir = Join-Path $script:PkgRoot 'buero-utf8-mit-bom'
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $dir 'config.json'), $json, (New-Object System.Text.UTF8Encoding($true)))
@@ -652,33 +652,55 @@ Describe 'Read-VsPackageConfig' {
     }
 
     It 'rejects invalid JSON types or ambiguous names: <why>' -ForEach @(
-        @{ why = 'numeric version'; json = '{"ProjectName":"Agent","version":0.2}' },
-        @{ why = 'array version'; json = '{"ProjectName":"Agent","version":["0.2"]}' },
-        @{ why = 'object name'; json = '{"ProjectName":{},"version":"0.2"}' },
-        @{ why = 'wildcard name'; json = '{"ProjectName":"Agent*","version":"0.2"}' },
-        @{ why = 'version whitespace'; json = '{"ProjectName":"Agent","version":" 0.2"}' }
+        @{ why = 'numeric version'; json = '{"ProjectName":"Agent","ErrorAction":"Stop","version":0.2}' },
+        @{ why = 'array version'; json = '{"ProjectName":"Agent","ErrorAction":"Stop","version":["0.2"]}' },
+        @{ why = 'object name'; json = '{"ProjectName":{},"ErrorAction":"Stop","version":"0.2"}' },
+        @{ why = 'wildcard name'; json = '{"ProjectName":"Agent*","ErrorAction":"Stop","version":"0.2"}' },
+        @{ why = 'version whitespace'; json = '{"ProjectName":"Agent","ErrorAction":"Stop","version":" 0.2"}' }
     ) {
         $dir = New-PackageFolder -Name ([guid]::NewGuid().ToString('N')) -Json $json
         Read-Config -Folder $dir | Should -BeNullOrEmpty
     }
 
     It 'preserves supported legacy letter versions without inventing a cleanup order' {
-        $dir = New-PackageFolder -Name 'legacy-letter' -Json '{"ProjectName":"Agent-FINAL","version":"0.1b"}'
+        $dir = New-PackageFolder -Name 'legacy-letter' -Json '{"ProjectName":"Agent-FINAL","ErrorAction":"Stop","version":"0.1b"}'
         (Read-Config -Folder $dir).version | Should -Be '0.1b'
     }
 
     It 'weist eine version mit Bindestrich ab' {
         # Sonst verschiebt sich die Basisnamen-Gruppierung fuer Retire/Relink:
         # 'Firefox-1.0-beta' waere der Basisname 'Firefox-1.0'.
-        $dir = New-PackageFolder -Name 'beta' -Json '{"ProjectName":"Firefox","version":"1.0-beta"}'
+        $dir = New-PackageFolder -Name 'beta' -Json '{"ProjectName":"Firefox","ErrorAction":"Stop","version":"1.0-beta"}'
         Read-Config -Folder $dir | Should -BeNullOrEmpty
     }
 
+    It 'weist ein Paket ohne ErrorAction ab (PS-10: der Wrapper bricht sonst auf jedem Client ab)' {
+        $dir = New-PackageFolder -Name 'no-erroraction' -Json '{"ProjectName":"Firefox","version":"115"}'
+        Read-Config -Folder $dir | Should -BeNullOrEmpty
+    }
+
+    It 'weist einen ErrorAction-Wert ab, den der Wrapper nicht kennt: <value>' -ForEach @(
+        @{ value = 'Abort';     json = '{"ProjectName":"Firefox","version":"115","ErrorAction":"Abort"}' }
+        @{ value = 'Tippfehler'; json = '{"ProjectName":"Firefox","version":"115","ErrorAction":"Stpo"}' }
+        @{ value = 'leer';      json = '{"ProjectName":"Firefox","version":"115","ErrorAction":""}' }
+        @{ value = 'Zahl';      json = '{"ProjectName":"Firefox","version":"115","ErrorAction":1}' }
+    ) {
+        $dir = New-PackageFolder -Name ('erroraction-' + [guid]::NewGuid().ToString('N')) -Json $json
+        Read-Config -Folder $dir | Should -BeNullOrEmpty
+    }
+
+    It 'nimmt Stop und Continue in jeder Schreibweise an, wie der Wrapper' {
+        foreach ($value in @('Stop', 'continue')) {
+            $dir = New-PackageFolder -Name ('erroraction-ok-' + $value) -Json ('{"ProjectName":"Firefox","version":"115","ErrorAction":"' + $value + '"}')
+            (Read-Config -Folder $dir).ProjectName | Should -Be 'Firefox'
+        }
+    }
+
     It 'weist eine config.json ohne <field> ab' -ForEach @(
-        @{ field = 'ProjectName'; json = '{"version":"1.0"}' }
+        @{ field = 'ProjectName'; json = '{"ErrorAction":"Stop","version":"1.0"}' }
         @{ field = 'version';     json = '{"ProjectName":"Firefox"}' }
-        @{ field = 'Werte (leer)'; json = '{"ProjectName":"","version":""}' }
-        @{ field = 'Werte (Leerraum)'; json = '{"ProjectName":"  ","version":"1.0"}' }
+        @{ field = 'Werte (leer)'; json = '{"ProjectName":"","ErrorAction":"Stop","version":""}' }
+        @{ field = 'Werte (Leerraum)'; json = '{"ProjectName":"  ","ErrorAction":"Stop","version":"1.0"}' }
     ) {
         $dir = New-PackageFolder -Name ('bad-' + [guid]::NewGuid().ToString('N')) -Json $json
         Read-Config -Folder $dir | Should -BeNullOrEmpty
@@ -701,10 +723,10 @@ Describe 'Read-VsPackageConfig' {
     # Feld schickte sie frueher in verschiedene Zweige, ein Tippfehler ebenso:
     # die App galt nie als installiert und wurde endlos erneut versucht.
     It 'normalisiert <case>' -ForEach @(
-        @{ case = 'ein fehlendes InstallationBehaviorType auf InstallForSystem'; json = '{"ProjectName":"F","version":"1"}'; expected = 'InstallForSystem' }
-        @{ case = 'ein leeres Feld auf InstallForSystem'; json = '{"ProjectName":"F","version":"1","InstallationBehaviorType":""}'; expected = 'InstallForSystem' }
-        @{ case = 'ein gesetztes InstallForUser unveraendert'; json = '{"ProjectName":"F","version":"1","InstallationBehaviorType":"InstallForUser"}'; expected = 'InstallForUser' }
-        @{ case = 'Kleinschreibung auf die kanonische Form'; json = '{"ProjectName":"F","version":"1","InstallationBehaviorType":"installforsystem"}'; expected = 'InstallForSystem' }
+        @{ case = 'ein fehlendes InstallationBehaviorType auf InstallForSystem'; json = '{"ProjectName":"F","ErrorAction":"Stop","version":"1"}'; expected = 'InstallForSystem' }
+        @{ case = 'ein leeres Feld auf InstallForSystem'; json = '{"ProjectName":"F","ErrorAction":"Stop","version":"1","InstallationBehaviorType":""}'; expected = 'InstallForSystem' }
+        @{ case = 'ein gesetztes InstallForUser unveraendert'; json = '{"ProjectName":"F","ErrorAction":"Stop","version":"1","InstallationBehaviorType":"InstallForUser"}'; expected = 'InstallForUser' }
+        @{ case = 'Kleinschreibung auf die kanonische Form'; json = '{"ProjectName":"F","ErrorAction":"Stop","version":"1","InstallationBehaviorType":"installforsystem"}'; expected = 'InstallForSystem' }
     ) {
         $dir = New-PackageFolder -Name ('beh-' + [guid]::NewGuid().ToString('N')) -Json $json
         (Read-Config -Folder $dir).InstallationBehaviorType | Should -Be $expected
@@ -715,8 +737,51 @@ Describe 'Read-VsPackageConfig' {
         # und keine Meinungsaeusserung. Das Paket verschwindet dabei nicht (der
         # Autoimporter loescht nichts), es bekommt nur keine Aktualisierung, und
         # der offene Punkt nennt Ordner und Wert.
-        $dir = New-PackageFolder -Name 'typo' -Json '{"ProjectName":"F","version":"1","InstallationBehaviorType":"InstalForSystem"}'
+        $dir = New-PackageFolder -Name 'typo' -Json '{"ProjectName":"F","ErrorAction":"Stop","version":"1","InstallationBehaviorType":"InstalForSystem"}'
         Read-Config -Folder $dir | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-VsDistributionPointGroupState (AV-F27: DP-Gruppe ohne Ziele)' {
+    BeforeAll {
+        # Die MECM-Cmdlets sind Stubs; die Szenarien steuern, was die Gruppe liefert.
+        function Get-GroupStateForTest {
+            param([string]$GroupName, [string]$Scenario)
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($GroupName, $Scenario) -Body {
+                param($name, $scenario)
+                function Get-CMDistributionPointGroup {
+                    param($Name, $ErrorAction)
+                    if ($scenario -eq 'provider-throws') { throw 'SMS Provider: Zugriff verweigert' }
+                    if ($scenario -eq 'no-group') { return @() }
+                    return @([pscustomobject]@{ Name = $Name; GroupID = 'PS100001' })
+                }
+                function Get-CMDistributionPoint {
+                    param($DistributionPointGroup, $ErrorAction)
+                    if ($scenario -eq 'has-members') { return @([pscustomobject]@{ SiteSystemServerName = 'DP01' }) }
+                    return @()
+                }
+                Get-VsDistributionPointGroupState -GroupName $name
+            }
+        }
+    }
+
+    It 'meldet eine Gruppe ohne Verteilungspunkt als empty' {
+        Get-GroupStateForTest -GroupName 'DP-Leer' -Scenario 'empty' | Should -Be 'empty'
+    }
+
+    It 'meldet eine Gruppe mit Verteilungspunkt als has_members' {
+        Get-GroupStateForTest -GroupName 'DP-Voll' -Scenario 'has-members' | Should -Be 'has_members'
+    }
+
+    It 'bleibt bei unsicherer Lage unknown und nennt dann keine leere Gruppe: <why>' -ForEach @(
+        @{ why = 'Provider antwortet mit Fehler'; scenario = 'provider-throws' }
+        @{ why = 'Gruppe nicht gefunden'; scenario = 'no-group' }
+    ) {
+        Get-GroupStateForTest -GroupName 'DP-Unbekannt' -Scenario $scenario | Should -Be 'unknown'
+    }
+
+    It 'fragt ohne Gruppennamen gar nicht erst ab' {
+        Get-GroupStateForTest -GroupName '' -Scenario 'empty' | Should -Be 'unknown'
     }
 }
 

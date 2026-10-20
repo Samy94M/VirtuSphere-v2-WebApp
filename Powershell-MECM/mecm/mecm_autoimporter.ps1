@@ -81,6 +81,9 @@ $siteCode = $null
 $providerMachine = $null
 $lastFilesStamp = ''
 $loop = 0
+# Applications, deren Verschub in den Ordner fehlschlug (PS-09, AV-F28). Der
+# naechste Durchlauf wiederholt ihn; prozessintern, ein Neustart verwirft die Liste.
+$pendingAppFolderMoves = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
 
 # Read-VsPackageConfig und Get-VsSupersededNamePattern liegen in
 # VirtuSphere-Common.ps1: dieses Skript ist eine Endlosschleife, was in ihm steht
@@ -308,7 +311,9 @@ while ($true) {
                     }
                     $app = $freshApps[0]
 
-                    Get-CMApplication -Name $fullName | Move-CMObject -FolderPath $appOrgFolder -ErrorAction SilentlyContinue | Out-Null
+                    # Der Verschub laeuft unten zusammen mit jeder Wiederholung. Ein
+                    # SilentlyContinue hier verschluckte den Fehler ohne Zaehler (PS-09).
+                    [void]$pendingAppFolderMoves.Add($fullName)
                     $newCount++
                 } else {
                     Write-Host ("  {0} bereits vorhanden" -f $fullName) -ForegroundColor DarkGray
@@ -335,6 +340,22 @@ while ($true) {
                     continue
                 }
                 $app = $contentApplications[0]
+
+                # --- Verschub der Application in den Ordner (PS-09, AV-F28) ---
+                # Wie bei Collections: ein fehlgeschlagener Verschub wird im naechsten
+                # Durchlauf wiederholt und mit eigener Ursache gezaehlt. Bis dahin liegt
+                # die Application im Wurzelordner. Der Paket-Sync liest nur den
+                # Collection-Ordner, deshalb ist der Befund fuer den Katalog kosmetisch.
+                if ($pendingAppFolderMoves.Contains($fullName)) {
+                    try {
+                        $app | Move-CMObject -FolderPath $appOrgFolder -ErrorAction Stop | Out-Null
+                        [void]$pendingAppFolderMoves.Remove($fullName)
+                    } catch {
+                        Write-VsLog -Level WARN -Context $fullName -Message ("Application nicht in '{0}' verschoben - Wiederholung im naechsten Durchlauf: {1}" -f $appOrgFolder, $_.Exception.Message)
+                        $scanWarnings++
+                        Add-VsRunCause -Causes $causes -Cause 'package_folder_failed' -Target $fullName
+                    }
+                }
 
                 # --- Contentmanifest -> konkrete Application-/DT-Identitaet ---
                 # Tracking wird vor dem Update als Intent gespeichert. Dadurch
@@ -432,6 +453,7 @@ while ($true) {
                 $contentDistributionOpen = $false
                 $effectiveContentState = if ($tracking) { [string]$tracking.State } else { '' }
                 $effectiveRequestConfirmed = $tracking -and [bool]$tracking.RequestConfirmed
+                $intentCause = 'package_content_in_progress'
                 if ($tracking -and $tracking.State -eq 'intent') {
                     if (-not $tracking.RequestConfirmed) {
                         Write-VsLog -Level WARN -Context $fullName -Message 'Content-Intent wurde nicht durch einen erfolgreich zurueckgekehrten MECM-Aufruf bestaetigt; keine automatische Wiederholung oder Uebernahme.'
@@ -457,9 +479,16 @@ while ($true) {
                         Write-VsLog -Context $fullName -Message ("Angeforderte Deployment-Type-ContentId {0} gelesen; Verteilstatus wird im naechsten Durchlauf geprueft. Die Verteilung ist noch nicht vollstaendig bestaetigt." -f $deploymentTypeIdentity.ContentId)
                     } else {
                         Write-VsLog -Level WARN -Context $fullName -Message ("Contentauftrag ist noch nicht als neue Deployment-Type-ContentId sichtbar (Baseline {0})." -f $tracking.BaselineContentId)
+                        # Erstauftrag ohne Ziel: liegt es an einer leeren DP-Gruppe, wird
+                        # das genannt statt eines unbestimmten "unterwegs" (AV-F27).
+                        if ($tracking.RequestKind -eq 'initial' -and
+                            (Get-VsDistributionPointGroupState -GroupName $dpGroupName) -eq 'empty') {
+                            Write-VsLog -Level WARN -Context $fullName -Message ("DP-Gruppe '{0}' hat keine Mitglieder; der bestaetigte Erstauftrag hat kein Ziel, bis ein Verteilungspunkt in der Gruppe ist." -f $dpGroupName)
+                            $intentCause = 'package_content_group_empty'
+                        }
                     }
                     $scanWarnings++
-                    Add-VsRunCause -Causes $causes -Cause 'package_content_in_progress' -Target $fullName
+                    Add-VsRunCause -Causes $causes -Cause $intentCause -Target $fullName
                     $contentDistributionOpen = $true
                 }
 
@@ -490,6 +519,17 @@ while ($true) {
                             Write-VsLog -Level WARN -Context $fullName -Message 'DP-Gruppe fehlt; Erstverteilung wird ohne Voraussetzung nicht als Content-Intent gespeichert.'
                             $scanWarnings++
                             Add-VsRunCause -Causes $causes -Cause 'package_content_failed' -Target $fullName
+                            continue
+                        }
+                        # Eine DP-Gruppe ohne Mitglieder nimmt den Inhalt nicht auf: MECM
+                        # startete die Verteilung, aber nie erschien ein Ziel. Der Intent
+                        # blieb dann unbestaetigt "unterwegs" und die Ursache unbenannt
+                        # (AV-F27). Ohne Ziel wird deshalb nichts angefordert.
+                        if ($requestKind -eq 'initial' -and
+                            (Get-VsDistributionPointGroupState -GroupName $dpGroupName) -eq 'empty') {
+                            Write-VsLog -Level WARN -Context $fullName -Message ("DP-Gruppe '{0}' hat keine Mitglieder; die Erstverteilung wird nicht angefordert, bis ein Verteilungspunkt in der Gruppe ist." -f $dpGroupName)
+                            $scanWarnings++
+                            Add-VsRunCause -Causes $causes -Cause 'package_content_group_empty' -Target $fullName
                             continue
                         }
                         if (-not (Test-VsDistributionCopyBaselineReady -RequestKind $requestKind -Snapshot $copySnapshot)) {

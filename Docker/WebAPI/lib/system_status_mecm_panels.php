@@ -51,8 +51,12 @@ function system_status_autoimporter_result(?string $outcome): string
 function system_status_autoimporter_findings(string $detail, ?bool $distribution = null): array
 {
     $findings = [];
+    // package_content_group_empty (AV-F27) is a distribution finding by its prefix:
+    // a DP group without members is the reason no copy record can ever arrive.
+    // package_folder_failed (PS-09) is a placement finding and stays configuration.
     foreach (['package_config_invalid', 'package_content_failed', 'package_content_in_progress',
-        'package_content_unknown', 'package_definition_drift', 'package_cleanup_failed'] as $code) {
+        'package_content_unknown', 'package_content_group_empty', 'package_definition_drift',
+        'package_cleanup_failed', 'package_folder_failed'] as $code) {
         if ($distribution !== null && str_starts_with($code, 'package_content_') !== $distribution) {
             continue;
         }

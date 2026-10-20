@@ -44,6 +44,11 @@ $script:VsApplicationsFolderName = 'VirtuSphere_Applications'
 # nie existiert.
 $script:VsInstallationBehaviorTypes = @('InstallForSystem', 'InstallForUser')
 
+# ErrorAction der config.json: Pflicht, genau diese Werte (ohne Unterschied zu
+# Gross-/Kleinschreibung, wie der Wrapper es prueft). Die Paketvorlage fuehrt die
+# Liste gespiegelt; der Zwillingstest leitet beide Seiten aus dem AST ab (PS-10).
+$script:VsPackageErrorActions = @('Stop', 'Continue')
+
 # SSoT der Schalter, mit denen VirtuSphere eine powershell.exe startet - in den
 # geplanten Aufgaben, in den Deployment-Types der Client-Apps und in denen des
 # Autoimporters. Alles davon laeuft als SYSTEM.
@@ -736,10 +741,12 @@ $script:VsRunCauseVocabulary = @(
     'package_content_failed',    # Content-Verteilung fehlgeschlagen oder auf DPs mit Fehlern
     'package_content_in_progress', # Verteilung laeuft noch; Stamp wartet (B7)
     'package_content_unknown',   # Verteilstatus nicht abfragbar; Stamp wartet (B7)
+    'package_content_group_empty', # DP-Gruppe der Erstverteilung hat keine Mitglieder: kein Ziel fuer den Inhalt (AV-F27)
     'package_definition_drift',  # Application/Deployment-Type nicht eindeutig oder vertragswidrig
     'package_source_missing',    # files-Pfad des Paketordners fehlt
     'package_deploy_failed',     # New-CMApplicationDeployment fehlgeschlagen
     'package_cleanup_failed',    # Alt-Version nicht vollstaendig entfernt
+    'package_folder_failed',     # Application nicht in den Ordner VirtuSphere_Applications verschoben (PS-09, AV-F28)
     'package_template_failed'    # Vorlagen-install.ps1 nicht ueberschrieben
 )
 
@@ -986,6 +993,31 @@ function Test-VsDistributionCopyBaselineReady {
     return @($targets | Where-Object { [int]$_.State -notin @(0, 1, 2, 3, 7, 8) -or [long]$_.LastCopiedTicks -lt 0 }).Count -eq 0
 }
 
+# Hat die DP-Gruppe der Erstverteilung Mitglieder? (AV-F27)
+#
+# Eine Gruppe ohne Verteilungspunkt bekommt nie ein Ziel im Kopiernachweis. Der
+# Erstauftrag blieb dann ohne Bindung dauerhaft "unterwegs", und die Ursache stand
+# nirgends. Die Antwort kommt aus der Gruppe selbst, nicht aus dem Nachweis, damit
+# eine verzoegerte Projektion nicht als leere Gruppe gilt.
+#
+# Liefert 'empty' (Gruppe ohne Mitglieder), 'has_members' oder 'unknown'. Unsicherheit
+# (fehlender Name, Providerfehler, Gruppe nicht eindeutig) ist 'unknown' und
+# aendert am bisherigen Verhalten nichts.
+function Get-VsDistributionPointGroupState {
+    param([string]$GroupName)
+    if ([string]::IsNullOrWhiteSpace($GroupName)) { return 'unknown' }
+    try {
+        $groups = @(Get-CMDistributionPointGroup -Name $GroupName -ErrorAction Stop)
+        if ($groups.Count -ne 1) { return 'unknown' }
+        $points = @(Get-CMDistributionPoint -DistributionPointGroup $groups[0] -ErrorAction Stop)
+        if ($points.Count -eq 0) { return 'empty' }
+        return 'has_members'
+    } catch {
+        Write-Debug $_
+        return 'unknown'
+    }
+}
+
 function Test-VsDistributionCopyAdvanced {
     param([Parameter(Mandatory)][string]$BaselineJson, [Parameter(Mandatory)]$CurrentSnapshot)
     return Test-VsDistributionCopyEvidence -BaselineJson $BaselineJson -CurrentSnapshot $CurrentSnapshot -Requirement complete
@@ -1162,8 +1194,19 @@ function Get-VsFilesManifestStamp {
     )
     if (-not (Test-Path -LiteralPath $Path)) { return 'missing' }
     $root = (Get-Item -LiteralPath $Path -ErrorAction Stop).FullName.TrimEnd('\', '/')
-    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop |
-        Where-Object { $_.Name -notmatch '^(\.~|~\$)' -and $_.Extension -notin @('.tmp', '.partial') } |
+    # -Force: versteckte Dateien gehoeren zum Paket, MECM verteilt sie mit. Ohne
+    # den Schalter loeste eine Aenderung nur an einer versteckten Datei nichts aus
+    # (AV-F26, PS-06). Verwaltungsdateien von Explorer und Finder (Thumbs.db,
+    # desktop.ini, .DS_Store) zaehlen nicht: Sie aendern sich ohne Paketaenderung
+    # und loesten sonst eine Neuverteilung aus.
+    $isStampFile = {
+        param($file)
+        $file.Name -notmatch '^(\.~|~\$)' -and
+            $file.Name -notmatch '^(?i:thumbs\.db|desktop\.ini|\.ds_store)$' -and
+            $file.Extension -notin @('.tmp', '.partial')
+    }
+    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop |
+        Where-Object { & $isStampFile $_ } |
         Sort-Object FullName)
     if ($files.Count -eq 0) { return 'empty' }
 
@@ -1173,14 +1216,14 @@ function Get-VsFilesManifestStamp {
         $beforeLength = $file.Length
         $beforeTicks = $file.LastWriteTimeUtc.Ticks
         $hash = Get-VsStampFileHash -Path $file.FullName -Relative $relative
-        $after = Get-Item -LiteralPath $file.FullName -ErrorAction Stop
+        $after = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
         if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
             throw (New-VsRunCategoryError -Message ("Paketdatei hat sich waehrend des Scans geaendert: {0}" -f $relative) -Category 'source_changing')
         }
         $parts.Add(('{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
     }
-    $afterNames = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Stop |
-        Where-Object { $_.Name -notmatch '^(\.~|~\$)' -and $_.Extension -notin @('.tmp', '.partial') } |
+    $afterNames = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop |
+        Where-Object { & $isStampFile $_ } |
         Sort-Object FullName | ForEach-Object { $_.FullName })
     if ((@($files.FullName) -join "`n") -cne ($afterNames -join "`n")) {
         throw (New-VsRunCategoryError -Message 'Paketdateiliste hat sich waehrend des Scans geaendert.' -Category 'source_changing')
@@ -1799,8 +1842,8 @@ function Add-VsRunCause {
             'membership_query_failed', 'membership_operation_uncertain', 'membership_report_pending', 'membership_report_failed',
             'resource_id_pending', 'resource_update_failed',
             'package_config_invalid', 'package_content_failed', 'package_content_in_progress',
-            'package_content_unknown', 'package_definition_drift', 'package_source_missing',
-            'package_deploy_failed', 'package_cleanup_failed', 'package_template_failed')]
+            'package_content_unknown', 'package_content_group_empty', 'package_definition_drift', 'package_source_missing',
+            'package_deploy_failed', 'package_cleanup_failed', 'package_folder_failed', 'package_template_failed')]
         [string]$Cause,
         [string]$Target = '',
         [string]$Collection = ''
@@ -2275,6 +2318,14 @@ function Read-VsPackageConfig {
     # fuer Retire/Relink verschieben, daher hier hart ablehnen.
     if ([string]$cfg.version -match '-') {
         Write-VsLog -Level WARN -Context $context -Message ('version "{0}" enthaelt einen Bindestrich. Bindestriche sind nur in ProjectName erlaubt; version z.B. "0.2". Eine neue Version ergibt einen neuen Anwendungsnamen. Paket uebersprungen.' -f $cfg.version)
+        return $null
+    }
+    # ErrorAction hat dieselbe Regel wie der Paketwrapper (Package_Vorlage\install.ps1):
+    # Stop oder Continue. Fehlt es oder ist es ungueltig, bricht der Wrapper auf
+    # jedem Client mit Exit 1 ab. Dieses Paket wird deshalb nicht importiert und
+    # verteilt, sondern bleibt als offener Punkt stehen (PS-10, AV-F25).
+    if ([string]$cfg.ErrorAction -notin $script:VsPackageErrorActions) {
+        Write-VsLog -Level WARN -Context $context -Message ('ErrorAction fehlt oder ist nicht Stop/Continue (Wert: "{0}"). Der Paketwrapper bricht sonst auf jedem Client ab. Paket uebersprungen.' -f [string]$cfg.ErrorAction)
         return $null
     }
     # InstallationBehaviorType: zwei getrennte Entscheidungen.

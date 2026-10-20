@@ -415,7 +415,7 @@ Describe 'E3 - InstallationBehaviorType ist ungeprueft' -Tag 'Haertung' {
     It 'E3 - ein fehlendes InstallationBehaviorType wird auf InstallForSystem normalisiert' {
         # Ein Bestandspaket ohne das Feld darf nicht verschwinden. Es wird
         # kanonisch gesetzt, damit die Vorlage denselben Wert sieht.
-        $dir = New-PkgFolder -Name 'ohne-feld' -Json '{"ProjectName":"Firefox","version":"115"}'
+        $dir = New-PkgFolder -Name 'ohne-feld' -Json '{"ProjectName":"Firefox","ErrorAction":"Stop","version":"115"}'
         $cfg = Read-Pkg -Folder $dir
         $cfg | Should -Not -BeNullOrEmpty
         $cfg.InstallationBehaviorType | Should -Be 'InstallForSystem'
@@ -423,7 +423,7 @@ Describe 'E3 - InstallationBehaviorType ist ungeprueft' -Tag 'Haertung' {
         # Gegenprobe im selben It, damit sie nicht als eigener, heute schon
         # gruener Test den Fortschritt der Kampagne verwaessert: ein gueltig
         # gesetztes InstallForUser darf die Normalisierung nicht ueberschreiben.
-        $peruser = New-PkgFolder -Name 'peruser' -Json '{"ProjectName":"Firefox","version":"117","InstallationBehaviorType":"InstallForUser"}'
+        $peruser = New-PkgFolder -Name 'peruser' -Json '{"ProjectName":"Firefox","ErrorAction":"Stop","version":"117","InstallationBehaviorType":"InstallForUser"}'
         (Read-Pkg -Folder $peruser).InstallationBehaviorType | Should -Be 'InstallForUser'
     }
 
@@ -431,7 +431,7 @@ Describe 'E3 - InstallationBehaviorType ist ungeprueft' -Tag 'Haertung' {
         # Ein Tippfehler ist keine Meinungsaeusserung. Heute legt MECM die
         # Detection auf HKLM und die Vorlage schreibt nach HKCU: die App gilt
         # nie als installiert und wird endlos erneut versucht.
-        $dir = New-PkgFolder -Name 'tippfehler' -Json '{"ProjectName":"Firefox","version":"116","InstallationBehaviorType":"InstalForSystem"}'
+        $dir = New-PkgFolder -Name 'tippfehler' -Json '{"ProjectName":"Firefox","ErrorAction":"Stop","version":"116","InstallationBehaviorType":"InstalForSystem"}'
         Read-Pkg -Folder $dir | Should -BeNullOrEmpty
     }
 
