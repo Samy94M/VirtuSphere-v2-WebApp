@@ -142,16 +142,19 @@ function Initialize-VsClientBootstrap {
         # Schema 1: genau die vier API-Felder. Schema 2 (MC03-Bundle): dieselben
         # Felder plus BundleId als 64 Kleinbuchstaben-Hexzeichen.
         $schemaKeys = @('Schema', 'WebAPI', 'Scheme', 'CertThumbprint')
+        # Windows PowerShell 5.1 liefert JSON-Ganzzahlen als Int32, pwsh 7 als
+        # Int64. Dieselbe Pruefung wie im Reporter ([int] oder [long]) (CI-N2).
+        $schemaIsInteger = ($manifest.Schema -is [int] -or $manifest.Schema -is [long])
         $bundleId = $null
-        if ($manifest.Schema -is [int] -and [int]$manifest.Schema -eq 2) {
+        if ($schemaIsInteger -and [long]$manifest.Schema -eq 2) {
             $schemaKeys += 'BundleId'
             if ($manifest.PSObject.Properties['BundleId'] -and $manifest.BundleId -is [string] -and [string]$manifest.BundleId -cmatch '\A[0-9a-f]{64}\z') {
                 $bundleId = [string]$manifest.BundleId
             }
         }
         if ($keys.Count -ne $schemaKeys.Count -or @($schemaKeys | Where-Object { $_ -cnotin $keys }).Count -gt 0 -or
-            $manifest.Schema -isnot [int] -or [int]$manifest.Schema -notin @(1, 2) -or
-            ([int]$manifest.Schema -eq 2 -and -not $bundleId) -or
+            -not $schemaIsInteger -or [long]$manifest.Schema -notin @(1, 2) -or
+            ([long]$manifest.Schema -eq 2 -and -not $bundleId) -or
             $manifest.WebAPI -isnot [string] -or $manifest.Scheme -isnot [string] -or
             $manifest.CertThumbprint -isnot [string]) { throw 'unbekanntes Bootstrap-Schema oder ungueltige Feldtypen' }
         $desired = ConvertTo-VsClientApiConfiguration -Api ([string]$manifest.WebAPI) -Scheme ([string]$manifest.Scheme) -CertThumbprint ([string]$manifest.CertThumbprint)
@@ -436,7 +439,14 @@ function Send-VsPhase {
         [string]$Detail = ''
     )
     $api = Resolve-VsApi
-    if (-not $api) { return }
+    if (-not $api) {
+        # Ohne aufloesbares Portal gibt es nichts zu melden, aber der Verlust
+        # muss im Dateilog stehen: sonst sieht man nicht, dass das Portal fehlte
+        # (PS-31). Die Phase laeuft trotzdem weiter.
+        Write-VsClientLog -Level WARN -Context ("{0}/{1}" -f $Phase, $PhaseEvent) `
+            -Message 'Phasenmeldung nicht zustellbar: kein Portal erreichbar'
+        return
+    }
     try {
         $body = @{ mac = $Mac; phase = $Phase; event = $PhaseEvent }
         if ($Detail) { $body['detail'] = $Detail }

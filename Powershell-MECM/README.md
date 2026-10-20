@@ -664,6 +664,10 @@ einer leeren Konfiguration weiter, schrieb nach `…\Packages\-` und startete
 trotzdem alle Teilskripte als SYSTEM; MECM fing das erst über die nicht
 erfüllte Detection ab, also nach der Ausführung.
 
+`config.json` wird als UTF-8 gelesen, mit oder ohne Byte-Order-Mark. Vorlage und
+Server lesen gleich, und es gibt keinen ANSI-Ausweichweg: eine im Editor als
+ANSI gespeicherte Datei verliert ihre Umlaute. Beim Speichern UTF-8 wählen.
+
 Ein ausdrücklich erneut gestartetes `install.ps1` überspringt Teilskripte nur
 bei einem Erfolgsmarker mit genau ihrem aktuellen SHA-256. Sobald ein
 Teilskript erneut laufen muss, entfernt die Vorlage vor seinem Start den
@@ -735,6 +739,13 @@ Teilskripte bleiben deren Verantwortung. Für den MECM-Installationsaufruf und
 die Erkennung helfen zusätzlich `AppEnforce.log` und `AppDiscovery.log`. Ein
 erfolgreicher Wrapper-Aufruf bestätigt keine späteren Arbeiten einer geplanten
 Aufgabe.
+
+Für Systeminstallationen liegt der verwaltete Unterordner `PackageWrapper` mit
+geschützter ACL unter `%ProgramData%\VirtuSphere\Logs`: nur SYSTEM und
+Administratoren haben Zugriff, Benutzer keinen. Die gemeinsame Logwurzel wird
+dabei nicht umgebaut; ein von `%ProgramData%` geerbtes Benutzerrecht auf ihr ist
+zulässig, ein ausdrücklich gesetztes wird abgelehnt und schaltet die Wrapper-Logs
+ab.
 
 **Paketlauf-Reporting:** Der
 Serverinstaller erzeugt aus den vier kanonischen Clientquellen eine
@@ -811,6 +822,14 @@ welcher gesetzt wurde, steht im Detail dieser einen Meldung und als WARN-Zeile
 im Log. Ergibt die Bereinigung einen leeren Namen, ist das ein benannter
 Fehlschlag mit `failed` und Exit-Code 1, weil es dann tatsächlich keinen
 setzbaren Namen gibt.
+
+Fehlerursachen der Clientphasen: Blockiert der Bootstrap in `client_getInfos`
+(Konfigurationsdrift, ungültige Konfiguration, fehlendes Manifest), steht die
+Ursache als ERROR im Phasenlog, und der Lauf endet mit Exit-Code 1. Eine
+Phasenmeldung ohne erreichbares Portal hinterlässt eine WARN-Zeile im Clientlog.
+Das Clientlog begrenzt jede Tageslogdatei auf 10 MiB und rotiert in numerierte
+Nachbarn wie das Serverlog. Diese Änderungen wirken erst mit dem Clientcutover,
+also mit neuem Clientpaket und neuer Paketvorlage.
 
 ## Bekannte Punkte / Wartung
 

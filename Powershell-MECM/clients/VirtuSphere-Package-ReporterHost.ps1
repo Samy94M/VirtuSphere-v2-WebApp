@@ -327,6 +327,27 @@ function Invoke-VsPackageReportWorkerMessage {
     return $answer
 }
 
+# TLS 1.2 fuer den Berichtsweg, einmal beim Hoststart und nur bei https. Der Host
+# sourct Client-Common, ruft aber nie Initialize-VsTls: Windows PowerShell 5.1 startet
+# je nach .NET-Registry mit SSL3/TLS 1.0, und dann endet jeder Bericht an ein
+# HTTPS-Portal als transport_error (PS-12). Initialize-VsTls bleibt hier draussen, weil
+# es zusaetzlich einen globalen Zertifikatsrueckruf setzt; die Anfrage bringt ihren
+# Fingerabdruck pro Verbindung selbst mit. Die Konfiguration wird nur gelesen
+# (Get-VsPackageReportApiConfiguration bleibt read-only). Rueckgabe: ob das Protokoll
+# gesetzt wurde.
+function Set-VsPackageReportTlsProtocol {
+    param([AllowNull()][object]$ApiConfiguration)
+
+    if ($null -eq $ApiConfiguration -or [string]$ApiConfiguration.Scheme -cne 'https') { return $false }
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    } catch {
+        Write-Debug $_
+        return $false
+    }
+    return $true
+}
+
 # Invoked only by the suspended-and-job-bound worker launch. Connecting first
 # lets the wrapper authenticate this exact process before any registry or
 # module import; an import fault leaves no successful ready handshake.
@@ -347,11 +368,17 @@ function Start-VsPackageReportPipeWorker {
             (Get-VsClientLoggingContractVersion) -ne 1 -or
             (Get-VsPackageReporterContractVersion) -ne $script:VsPackageReporterHostExpectedAdapterContractVersion -or
             -not (Test-VsPackageReporterDependencies -CommonContractVersion 2 -LoggingContractVersion 1)) { return }
+        # Eigene Komponente, damit die Hostmeldungen nicht im Clientlog der Phasen landen.
+        Initialize-VsClientLog -Component 'reporter'
+        $null = Set-VsPackageReportTlsProtocol -ApiConfiguration (Get-VsPackageReportApiConfiguration)
         $encoding = New-Object Text.UTF8Encoding($false, $true)
         $reader = New-Object IO.StreamReader($pipe, $encoding, $false, 1024, $true)
         $writer = New-Object IO.StreamWriter($pipe, $encoding, 1024, $true)
         $writer.AutoFlush = $true
         $writer.WriteLine('{"schema_version":1,"state":"ready"}')
+        # Obergrenze einer IPC-Zeile in UTF-8-Bytes. Der Sender (Package_Vorlage\install.ps1)
+        # fuehrt dieselbe Zahl unter demselben Namen; ein Pester-Test haelt beide gleich (SD-11).
+        $ipcMaxBytes = 16384
         $state = [pscustomobject]@{
             Budget = (New-VsPackageReportBudget)
             Snapshot = $null
@@ -361,7 +388,12 @@ function Start-VsPackageReportPipeWorker {
         while ($pipe.IsConnected) {
             $line = $reader.ReadLine()
             if ($null -eq $line -or $line -ceq '{"action":"stop"}') { break }
-            if ([Text.Encoding]::UTF8.GetByteCount($line) -gt 16384) { break }
+            if ([Text.Encoding]::UTF8.GetByteCount($line) -gt $ipcMaxBytes) {
+                # Die Zeile selbst bleibt aus dem Log: sie kann beliebig gross und
+                # unredigiert sein. Die Grenze genuegt als Ursache (SD-11).
+                Write-VsClientLog -Level WARN -Context 'ipc' -Message ('Reporter-IPC-Zeile ueber {0} Bytes; der Empfaenger endet ohne Antwort.' -f $ipcMaxBytes)
+                break
+            }
             try {
                 $message = ConvertFrom-Json -InputObject $line -ErrorAction Stop
                 $answer = Invoke-VsPackageReportWorkerMessage -State $state -Message $message

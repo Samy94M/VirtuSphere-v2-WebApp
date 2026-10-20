@@ -9,7 +9,7 @@
 # ...) und die Tagesdatei neu begonnen. Die Retention (30 Tage nach Aenderungs-
 # zeit) erfasst die Nachbarn wie die Tagesdateien; eine Umbenennung behaelt die
 # Aenderungszeit. Die Client-Implementation (VirtuSphere-Client-Logging.ps1) hat
-# diese Grenze noch nicht; die Paritaet dafuer ist offen.
+# dieselbe Grenze und Rotation; beide Vertragsobjekte nennen sie als FileMaxBytes.
 Set-StrictMode -Version 1.0
 
 $script:VsLoggingContractVersion = 1
@@ -48,6 +48,7 @@ function Get-VsLogContract {
         ContextMaxBytes     = $script:VsLogContextMaxBytes
         MessageMaxBytes     = $script:VsLogMessageMaxBytes
         LineMaxBytes        = $script:VsLogLineMaxBytes
+        FileMaxBytes        = $script:VsLogFileMaxBytes
         FileNamePattern     = 'yyyy-MM-dd_<component>.log'
         FieldCount          = 6
     }

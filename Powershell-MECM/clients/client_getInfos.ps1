@@ -21,7 +21,15 @@
 . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
 Initialize-VsClientLog -Component 'getinfo'
 Write-VsClientLog 'Starte getinfo'
-Initialize-VsClientBootstrap -ManifestPath (Join-Path $PSScriptRoot 'bootstrap.json')
+# Ein blockierter Bootstrap (configuration_drift, configuration_invalid, fehlendes
+# Manifest) ist eine benannte Ursache und keine unbehandelte Ausnahme: sie steht
+# im Phasenlog, bevor der Prozess mit 1 endet (PS-11).
+try {
+    Initialize-VsClientBootstrap -ManifestPath (Join-Path $PSScriptRoot 'bootstrap.json')
+} catch {
+    Write-VsClientLog -Level ERROR -Message ('getinfo beendet: {0}' -f $_.Exception.Message)
+    exit 1
+}
 
 $registryBase = 'HKLM:\SOFTWARE\VirtuSphere'
 # Nur diese Felder werden aus der API-Antwort persistiert.

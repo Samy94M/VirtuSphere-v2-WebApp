@@ -211,3 +211,41 @@ Describe 'Clientinstaller: Manifestabnahme vor MECM' {
         ($result.Output -join "`n") | Should -Match 'SourceDir'
     }
 }
+
+# PS-32: ein fehlgeschlagener Umzug der Application in den Ordner ist kosmetisch. Die
+# Zeile muss im Tageslog als WARN stehen, ohne den Blockerzaehler zu erhoehen. Der
+# Test liest den Aufruf aus dem AST, weil der Lauf bis zur CM-Schreibgrenze nie
+# eine Application anlegt.
+Describe 'Clientinstaller: Ordnerumzug der Application ist sichtbar (PS-32)' {
+    BeforeAll {
+        $tokens = $null
+        $errors = $null
+        $script:InstallerAst = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$tokens, [ref]$errors)
+        $script:MoveCalls = @($script:InstallerAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Move-CMObject'
+        }, $true))
+    }
+
+    It 'Move-CMObject laeuft mit -ErrorAction Stop innerhalb eines try-Blocks' {
+        $script:MoveCalls.Count | Should -Be 1
+        $call = $script:MoveCalls[0]
+        $call.Extent.Text | Should -Match '-ErrorAction Stop'
+        $call.Extent.Text | Should -Not -Match 'SilentlyContinue'
+        $try = $call.Parent
+        while ($try -and -not ($try -is [System.Management.Automation.Language.TryStatementAst])) { $try = $try.Parent }
+        $try | Should -Not -BeNullOrEmpty -Because 'ohne try wuerde der Fehler den ganzen Lauf beenden'
+        $call.Extent.StartOffset | Should -BeGreaterOrEqual $try.Body.Extent.StartOffset
+        $call.Extent.EndOffset | Should -BeLessOrEqual $try.Body.Extent.EndOffset
+    }
+
+    It 'der catch-Block schreibt eine WARN-Zeile mit dem Fehlertext und zaehlt keinen Blocker' {
+        $call = $script:MoveCalls[0]
+        $try = $call.Parent
+        while ($try -and -not ($try -is [System.Management.Automation.Language.TryStatementAst])) { $try = $try.Parent }
+        $catchText = $try.CatchClauses[0].Body.Extent.Text
+        $catchText | Should -Match 'Write-VsLog -Level WARN'
+        $catchText | Should -Match 'Get-VsErrorDetail'
+        $catchText | Should -Not -Match 'VsInstallBlockers'
+        $catchText | Should -Not -Match 'Write-Warn'
+    }
+}

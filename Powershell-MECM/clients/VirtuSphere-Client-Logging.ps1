@@ -2,10 +2,17 @@
 # Lokale Logging-Domaene der Windows-Clientphasen (Etappe 10D).
 # Sie bleibt vom MECM-Serverpaket getrennt, implementiert aber denselben
 # versionierten Schema-, Bounds- und Retentionvertrag (ADR-0029).
+#
+# Obergrenze je Tageslogdatei: 10 MiB (VsClientLogFileMaxBytes = 10485760 Bytes),
+# Paritaet zu mecm\VirtuSphere-Logging.ps1 (VsLogFileMaxBytes). Wuerde eine Zeile
+# die Datei darueber bringen, wird die volle Datei vorher in den naechsten freien
+# Nachbarn `yyyy-MM-dd_<component>.<N>.log` umbenannt. Die Retention erfasst die
+# Nachbarn wie die Tagesdateien.
 Set-StrictMode -Version 1.0
 
 $script:VsClientLoggingContractVersion = 1
 $script:VsClientLogLevels = @('DEBUG', 'INFO', 'WARN', 'ERROR')
+$script:VsClientLogFileMaxBytes = 10485760
 $script:VsClientLogRetentionDays = 30
 $script:VsClientLogRetentionCheckHours = 24
 $script:VsClientLogComponentMaxChars = 64
@@ -39,6 +46,7 @@ function Get-VsClientLogContract {
         ContextMaxBytes     = $script:VsClientLogContextMaxBytes
         MessageMaxBytes     = $script:VsClientLogMessageMaxBytes
         LineMaxBytes        = $script:VsClientLogLineMaxBytes
+        FileMaxBytes        = $script:VsClientLogFileMaxBytes
         FileNamePattern     = 'yyyy-MM-dd_<component>.log'
         FieldCount          = 6
     }
@@ -189,6 +197,27 @@ function Initialize-VsClientLog {
     }
 }
 
+# Haelt eine Tageslogdatei unter VsClientLogFileMaxBytes: wuerde die naechste Zeile
+# (AddBytes inklusive Zeilenende) die Grenze reissen, wandert die volle Datei in
+# den naechsten freien Nachbarn `<Basis>.<N>.log`. Die neue Tagesdatei entsteht
+# danach beim Anhaengen. Ohne Datei passiert nichts. Zwilling von
+# Invoke-VsLogRotation in mecm\VirtuSphere-Logging.ps1 (ADR-0029).
+function Invoke-VsClientLogRotation {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][int]$AddBytes
+    )
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $current = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if (($current.Length + $AddBytes) -le $script:VsClientLogFileMaxBytes) { return }
+
+    $directory = Split-Path -Parent $Path
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+    $number = 1
+    while (Test-Path -LiteralPath (Join-Path $directory ('{0}.{1}.log' -f $base, $number))) { $number++ }
+    Move-Item -LiteralPath $Path -Destination (Join-Path $directory ('{0}.{1}.log' -f $base, $number)) -ErrorAction Stop
+}
+
 function Write-VsClientLog {
     param(
         [Parameter(Mandatory)][string]$Message,
@@ -201,6 +230,8 @@ function Write-VsClientLog {
     Write-Host $line
     try {
         $file = Join-Path $script:VsClientLogRoot ('{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd'), (Get-VsClientLogComponentName -Component $script:VsClientLogComponent))
+        # + 2: das Zeilenende (CRLF) gehoert zur Zeile und zur Obergrenze.
+        Invoke-VsClientLogRotation -Path $file -AddBytes ([System.Text.Encoding]::UTF8.GetByteCount($line) + 2)
         Add-Content -Path $file -Value $line -Encoding UTF8 -ErrorAction Stop
         $retentionHealthy = $true
         if ($null -eq $script:VsClientLogRetentionNextCheck -or (Get-Date) -ge $script:VsClientLogRetentionNextCheck) {

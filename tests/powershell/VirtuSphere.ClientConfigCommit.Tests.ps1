@@ -156,5 +156,24 @@ if ($HasRegistry) {
             Set-ItemProperty -Path $script:ConfigProbe -Name ConfigHash -Value (Get-VsClientConfigHash -Configuration $forged)
             Get-VsPreparedClientApiConfiguration | Should -BeNullOrEmpty
         }
+
+        It 'accepts a schema given as Int64, as pwsh 7 ConvertFrom-Json returns JSON integers (CI-N2)' {
+            # Windows PowerShell 5.1 liefert hier Int32, deshalb wird der Manifestinhalt
+            # ueber ConvertFrom-Json vorgegeben: der Pfad ist derselbe, der Typ ist Int64.
+            Mock ConvertFrom-Json {
+                [pscustomobject]@{ Schema = [long]2; WebAPI = 'portal.test:8021'; Scheme = 'https'; CertThumbprint = ''; BundleId = ('a' * 64) }
+            }
+            { Initialize-VsClientBootstrap -ManifestPath $script:ManifestFile } | Should -Not -Throw
+            $script:VsBootstrapBundleId | Should -Be ('a' * 64)
+            (Get-ItemProperty -Path $script:ConfigProbe).ConfigSchemaVersion | Should -Be 1
+        }
+
+        It 'rejects a schema given as a string even though the value reads as 2' {
+            Mock ConvertFrom-Json {
+                [pscustomobject]@{ Schema = '2'; WebAPI = 'portal.test:8021'; Scheme = 'https'; CertThumbprint = ''; BundleId = ('a' * 64) }
+            }
+            { Initialize-VsClientBootstrap -ManifestPath $script:ManifestFile } | Should -Throw '*Bootstrap-Schema*'
+            Test-Path -LiteralPath $script:ConfigProbe | Should -BeFalse
+        }
     }
 }

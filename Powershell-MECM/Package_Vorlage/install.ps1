@@ -470,9 +470,14 @@ function Invoke-VsPackageReporterPipeExchange {
 
     if ($Session.Disabled -or -not $Session.Job.IsRunning) { return $null }
     $clock = [Diagnostics.Stopwatch]::StartNew()
+    # Obergrenze einer IPC-Zeile in UTF-8-Bytes. Dieselbe Zahl steht unter demselben
+    # Namen im Empfaenger clients\VirtuSphere-Package-ReporterHost.ps1; ein Pester-Test
+    # haelt beide gleich (SD-11). Lokal statt Skriptvariable, damit die Funktion allein
+    # (Pester extrahiert sie einzeln) ohne den Rest der Vorlage korrekt rechnet.
+    $ipcMaxBytes = 16384
     try {
         $json = ConvertTo-Json -InputObject $Message -Compress -Depth 6 -ErrorAction Stop
-        if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 16384) { throw 'reporter IPC message too large' }
+        if ([Text.Encoding]::UTF8.GetByteCount($json) -gt $ipcMaxBytes) { throw 'reporter IPC message too large' }
         $send = $Session.Writer.WriteLineAsync($json)
         if (-not $send.Wait($TimeoutMs)) { throw 'reporter IPC write timed out' }
         $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
@@ -554,7 +559,14 @@ function Get-VsPackageIdentityHash {
 }
 
 function Test-VsPackageLogAccess {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        # Nur fuer die gemeinsame Logwurzel (PS-13): ein von C:\ProgramData geerbtes
+        # Benutzerschreibrecht bleibt zulaessig, weil der verwaltete Unterbau selbst
+        # geschuetzt ist. Ein explizit an die Wurzel gehaengtes Benutzerrecht ist
+        # dagegen eine fremde ACL und wird abgelehnt.
+        [switch]$IgnoreInherited
+    )
 
     $broadWriteSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-32-546')
     $unsafeRights = [Security.AccessControl.FileSystemRights]::WriteData -bor
@@ -569,6 +581,7 @@ function Test-VsPackageLogAccess {
         $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
         foreach ($rule in $acl.Access) {
             if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+            if ($IgnoreInherited -and $rule.IsInherited) { continue }
             try {
                 $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
             } catch {
@@ -582,6 +595,25 @@ function Test-VsPackageLogAccess {
     } catch {
         return $false
     }
+}
+
+# Legt einen verwalteten PackageWrapper-Ordner mit geschuetzter ACL an: keine
+# Vererbung von der Elternebene, nur SYSTEM und Administratoren mit Vollzugriff
+# (vererbt auf Unterordner und Dateien). Der Ordner entsteht mit dieser DACL und
+# nicht erst nach einem Set-Acl, damit es kein Zeitfenster mit der geerbten
+# ProgramData-ACL gibt (PS-13).
+function New-VsPackageManagedDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $security = New-Object Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $identity = New-Object Security.Principal.SecurityIdentifier($sid)
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+        $security.AddAccessRule($rule)
+    }
+    [IO.Directory]::CreateDirectory($Path, $security) | Out-Null
 }
 
 function Write-VsPackageLog {
@@ -1055,7 +1087,10 @@ if (-not (Test-Path $configPath)) {
     exit 1
 }
 try {
-    $config = Get-Content $configPath -Raw | ConvertFrom-Json
+    # UTF-8 wie der Server (Read-VsPackageConfig): ohne -Encoding liest Windows
+    # PowerShell 5.1 eine BOM-lose Datei als ANSI, und Umlaute werden zu Mojibake
+    # (PS-19). Ein ANSI-Fallback gibt es bewusst nicht; die Datei ist UTF-8.
+    $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 } catch {
     Write-Host "config.json ist kein gueltiges JSON ($configPath): $($_.Exception.Message). Installation abgebrochen." -ForegroundColor Red
     exit 1
@@ -1107,7 +1142,13 @@ if ($config.InstallationBehaviorType -eq 'InstallForUser') {
 }
 
 # Die vorhandenen Teilskript-Logs und die neuen Gesamtlogs teilen nur die
-# Logwurzel. PackageWrapper verwaltet ausschliesslich seinen eigenen Unterbaum.
+# Logwurzel. PackageWrapper verwaltet ausschliesslich seinen eigenen Unterbaum
+# und sichert ihn selbst ab (PS-13). Die geerbte Wurzel wird nicht repariert:
+# C:\ProgramData gibt BUILTIN\Users Schreibrecht weiter, also erbt auch eine
+# frisch angelegte Wurzel es. Bei Systeminstallationen wird die Wurzel nur bei
+# einem explizit gesetzten Benutzerschreibrecht (fremde ACL) abgelehnt; den
+# Unterbau PackageWrapper legt der Wrapper mit geschuetzter ACL (SYSTEM und
+# Administratoren) an.
 if (!(Test-Path $logDirectory)) {
     New-Item -Path $logDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
 }
@@ -1117,13 +1158,22 @@ try {
     $packageWrapperRoot = Join-Path $logDirectory 'PackageWrapper'
     $packageLogDirectory = Join-Path $packageWrapperRoot $packageIdentity
     $logRootInfo = Get-Item -LiteralPath $logDirectory -Force -ErrorAction Stop
+    # Nur Systeminstallationen dulden das geerbte Benutzerrecht der Wurzel; die
+    # Profilwurzel einer Benutzerinstallation wird wie bisher streng geprueft.
+    $systemLogRoot = $config.InstallationBehaviorType -ne 'InstallForUser'
     if (($logRootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
-        -not (Test-VsPackageLogAccess -Path $logRootInfo.FullName)) {
+        -not (Test-VsPackageLogAccess -Path $logRootInfo.FullName -IgnoreInherited:$systemLogRoot)) {
         throw 'Gemeinsame Logwurzel ist fuer PackageWrapper nicht sicher.'
     }
     foreach ($directory in @($packageWrapperRoot, $packageLogDirectory)) {
         if (!(Test-Path -LiteralPath $directory)) {
-            New-Item -Path $directory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            # InstallForUser schreibt in das eigene Profil (LOCALAPPDATA): dort darf
+            # der Benutzer selbst schreiben, eine SYSTEM-only-ACL wuerde ihn aussperren.
+            if ($config.InstallationBehaviorType -eq 'InstallForUser') {
+                New-Item -Path $directory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            } else {
+                New-VsPackageManagedDirectory -Path $directory
+            }
         }
         $directoryInfo = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
         if (($directoryInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {

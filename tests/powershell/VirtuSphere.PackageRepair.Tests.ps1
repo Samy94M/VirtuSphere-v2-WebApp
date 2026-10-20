@@ -209,6 +209,17 @@ function Get-VsPackageReportApiConfiguration {
             return "reporting log unreadable ($($_.Exception.Message)); wrapper_wall_ms=$WrapperWallMs"
         }
     }
+
+    # Identitaetshash des Wrappers (SHA-256 der laengenpraefixierten UTF-8-Bytes), damit
+    # der Test den verwalteten Ordner genau dort vorbereiten kann, wo der Lauf schreibt.
+    $script:TemplateTokensForIdentity = $null
+    $script:TemplateErrorsForIdentity = $null
+    $script:TemplateAstForIdentity = [System.Management.Automation.Language.Parser]::ParseFile($script:Template, [ref]$script:TemplateTokensForIdentity, [ref]$script:TemplateErrorsForIdentity)
+    $identityDefinition = @($script:TemplateAstForIdentity.FindAll({ param($n)
+        $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-VsPackageIdentityHash'
+    }, $true))
+    if ($identityDefinition.Count -ne 1) { throw "Get-VsPackageIdentityHash in der Vorlage nicht eindeutig ($($identityDefinition.Count))." }
+    . ([scriptblock]::Create($identityDefinition[0].Extent.Text))
 }
 
 # Discovery-time capability flag, like $HasRegistry in VirtuSphere.ErrorPaths.Tests.ps1.
@@ -217,6 +228,13 @@ function Get-VsPackageReportApiConfiguration {
 # Linux has neither, so those cases are defined only on Windows, where the
 # PS-5.1 CI job proves them.
 $IsWindowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+# PS-13: der geschuetzte Unterbau gibt nur SYSTEM und Administratoren Zugriff. Ein
+# Lauf, der die Logs wirklich schreiben laesst, braucht daher eine erhoehte Sitzung
+# (Administratoren-SID aktiv im Token) oder SYSTEM, wie MECM sie hat.
+$IsElevatedHost = $false
+if ($IsWindowsHost) {
+    $IsElevatedHost = (New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
 
 Describe 'Package repair invalidates only an actual hash-miss before child execution' {
     BeforeEach {
@@ -242,6 +260,12 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         $script:HadLastExitCode = $null -ne $script:OldLastExitCode
         $script:OldLastExitValue = if ($script:HadLastExitCode) { $script:OldLastExitCode.Value } else { $null }
         $env:ProgramData = $script:PackageRoot
+        # Der verwaltete Unterbau liegt vor dem Lauf bereit, mit der geerbten ACL dieses
+        # Testordners (dem Testbenutzer gehoerend). Der geschuetzte Anlagepfad (SYSTEM und
+        # Administratoren) wird nur im PS-13-Block geprueft: er braucht eine erhoehte
+        # Sitzung, und ein geschuetzter Ordner unter TestDrive laesst sich ohne sie nicht
+        # wieder entfernen. Die Logtests hier pruefen die Protokollierung selbst.
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $script:PackageRoot ('VirtuSphere\Logs\PackageWrapper\' + (Get-VsPackageIdentityHash -ProjectName 'RepairFixture' -Version '1')))
         Set-RepairStepMarker '01.ps1'
         Set-RepairStepMarker '02.ps1'
 
@@ -465,7 +489,7 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         $script:WrapperExit | Should -Be 0
         $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
         $global:VirtuSpherePackageRepairFixture.Children.Count | Should -Be 0
-        Test-Path -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') | Should -BeFalse
+        @(Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') -Recurse -File).Count | Should -Be 0 -Because 'der vorbereitete Unterbau darf bei abgelehnter Logwurzel keine Logdatei bekommen'
     }
 
     # Windows only: managed logs (ACL check) or the job-bound reporter child.
@@ -507,7 +531,7 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
             Invoke-RepairWrapper
             $script:WrapperExit | Should -Be 0
             $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
-            Test-Path -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') | Should -BeFalse
+            @(Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') -Recurse -File).Count | Should -Be 0 -Because 'der vorbereitete Unterbau darf bei abgelehnter Logwurzel keine Logdatei bekommen'
         }
     }
 
@@ -595,5 +619,205 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
         Invoke-RepairWrapper
         $script:WrapperExit | Should -Be 1
         $global:VirtuSpherePackageRepairFixture.Registry.ContainsKey('Version') | Should -BeFalse
+    }
+
+    # PS-13 (Windows only): echte, geerbte ACLs statt Get-Acl-Mocks. Der Elternordner
+    # gibt BUILTIN\Users Schreibrecht mit ContainerInherit weiter, wie C:\ProgramData.
+    # Die Faelle beweisen: Logs entstehen trotz geerbtem Benutzerrecht, der verwaltete
+    # Unterbau ist geschuetzt, und ein explizit gesetztes Benutzerrecht auf der Wurzel
+    # wird weiter abgelehnt.
+    if ($IsWindowsHost) {
+        Context 'PS-13: geschuetzter Unterbau trotz geerbter ProgramData-Rechte' {
+            BeforeEach {
+                $script:InheritedParent = Join-Path $TestDrive ('pd-' + [guid]::NewGuid().ToString('N'))
+                $null = New-Item -ItemType Directory -Path $script:InheritedParent
+                $parentAcl = Get-Acl -LiteralPath $script:InheritedParent
+                $parentAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                    [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),
+                    [Security.AccessControl.FileSystemRights]::Write,
+                    [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+                    [Security.AccessControl.PropagationFlags]::None,
+                    [Security.AccessControl.AccessControlType]::Allow
+                ))
+                Set-Acl -LiteralPath $script:InheritedParent -AclObject $parentAcl
+                $env:ProgramData = $script:InheritedParent
+                $script:SharedLogRoot = Join-Path $script:InheritedParent 'VirtuSphere\Logs'
+                $script:ManagedRoot = Join-Path $script:SharedLogRoot 'PackageWrapper'
+            }
+
+            It 'vererbt das Benutzerschreibrecht tatsaechlich auf die Logwurzel' {
+                $null = New-Item -ItemType Directory -Path $script:SharedLogRoot -Force
+                $usersRules = @((Get-Acl -LiteralPath $script:SharedLogRoot).Access | Where-Object {
+                    $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-545' -and
+                    $_.IsInherited -and (($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::WriteData) -ne 0)
+                })
+                $usersRules.Count | Should -BeGreaterThan 0 -Because 'ohne geerbtes Benutzerrecht prueft der Test den Standardfall nicht'
+            }
+
+            Context 'mit erhoehter Sitzung oder SYSTEM: die Logs laufen' -Skip:(-not $IsElevatedHost) {
+            It 'schaltet die Logs trotz geerbtem Benutzerrecht ein und schuetzt den verwalteten Unterbau' {
+                Invoke-RepairWrapper
+                $script:WrapperExit | Should -Be 0
+                Get-Content -LiteralPath (Join-Path $script:PackageRoot 'wrapper.log') -Raw | Should -Not -Match 'deaktiviert'
+
+                $identityDirs = @(Get-ChildItem -LiteralPath $script:ManagedRoot -Directory)
+                $identityDirs.Count | Should -Be 1
+                foreach ($dir in @($script:ManagedRoot, $identityDirs[0].FullName)) {
+                    $acl = Get-Acl -LiteralPath $dir
+                    $acl.AreAccessRulesProtected | Should -BeTrue -Because 'der verwaltete Unterbau erbt nichts von ProgramData'
+                    $usersRules = @($acl.Access | Where-Object {
+                        $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-545'
+                    })
+                    $usersRules.Count | Should -Be 0 -Because "Benutzer haben auf $dir weder Schreib- noch Leserecht"
+                }
+                @(Get-ChildItem -LiteralPath $identityDirs[0].FullName -Filter 'wrapper_*.log' -File).Count | Should -Be 1
+                @(Get-ChildItem -LiteralPath $identityDirs[0].FullName -Filter 'reporting_*.log' -File).Count | Should -Be 1
+            }
+
+            It 'bleibt beim zweiten Lauf aktiv, obwohl die Logwurzel das geerbte Recht weiter traegt' {
+                Invoke-RepairWrapper
+                $script:WrapperExit | Should -Be 0
+                Invoke-RepairWrapper
+                $script:WrapperExit | Should -Be 0
+                Get-Content -LiteralPath (Join-Path $script:PackageRoot 'wrapper.log') -Raw | Should -Not -Match 'deaktiviert'
+                $identityDir = @(Get-ChildItem -LiteralPath $script:ManagedRoot -Directory)[0].FullName
+                @(Get-ChildItem -LiteralPath $identityDir -Filter 'wrapper_*.log' -File).Count | Should -Be 2
+            }
+            }
+
+            It 'verweigert die Logwurzel bei einem explizit gesetzten Benutzerschreibrecht und aendert kein Recht' {
+                $null = New-Item -ItemType Directory -Path $script:SharedLogRoot -Force
+                $rootAcl = Get-Acl -LiteralPath $script:SharedLogRoot
+                $rootAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                    [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),
+                    [Security.AccessControl.FileSystemRights]::Write,
+                    [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+                    [Security.AccessControl.PropagationFlags]::None,
+                    [Security.AccessControl.AccessControlType]::Allow
+                ))
+                Set-Acl -LiteralPath $script:SharedLogRoot -AclObject $rootAcl
+
+                Invoke-RepairWrapper
+                $script:WrapperExit | Should -Be 0
+                $global:VirtuSpherePackageRepairFixture.Registry.Version | Should -Be '1'
+                Get-Content -LiteralPath (Join-Path $script:PackageRoot 'wrapper.log') -Raw | Should -Match 'deaktiviert'
+                Test-Path -LiteralPath $script:ManagedRoot | Should -BeFalse
+                $explicitUsers = @((Get-Acl -LiteralPath $script:SharedLogRoot).Access | Where-Object {
+                    -not $_.IsInherited -and $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-545'
+                })
+                $explicitUsers.Count | Should -Be 1 -Because 'die Wurzel wird nicht repariert, nur abgelehnt'
+            }
+        }
+    }
+}
+
+# PS-13 auf Funktionsebene: die beiden Regeln aus der Vorlage (Logwurzel ohne
+# explizites Benutzerrecht, geschuetzter Unterbau) mit echten geerbten ACLs. Diese
+# Pruefung braucht keine erhoehte Sitzung, weil sie keinen Lauf schreiben laesst.
+Describe 'PS-13: Logwurzel und geschuetzter Unterbau (Funktionsebene)' -Skip:(-not $IsWindowsHost) {
+    BeforeAll {
+        $tokens = $null
+        $errors = $null
+        $templateAst = [System.Management.Automation.Language.Parser]::ParseFile($script:Template, [ref]$tokens, [ref]$errors)
+        foreach ($name in @('Test-VsPackageLogAccess', 'New-VsPackageManagedDirectory')) {
+            $definition = @($templateAst.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name
+            }, $true))
+            if ($definition.Count -ne 1) { throw "$name in der Vorlage nicht eindeutig ($($definition.Count))." }
+            . ([scriptblock]::Create($definition[0].Extent.Text))
+        }
+        function Add-TestUsersWriteRule {
+            param([string]$Path)
+            $acl = Get-Acl -LiteralPath $Path
+            $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),
+                [Security.AccessControl.FileSystemRights]::Write,
+                [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow
+            ))
+            Set-Acl -LiteralPath $Path -AclObject $acl
+        }
+    }
+
+    BeforeEach {
+        $script:FnParent = Join-Path $TestDrive ('fn-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:FnParent
+    }
+
+    AfterEach {
+        # Der geschuetzte Testordner gehoert dem Testbenutzer, der ohne SYSTEM- oder
+        # Administratorrecht nicht hineinsieht. Der Eigentuemer gibt sich seine Rechte
+        # zurueck, damit TestDrive sich wieder entfernen laesst.
+        if (Test-Path -LiteralPath $script:FnParent) {
+            $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            icacls $script:FnParent /grant ("*{0}:(OI)(CI)F" -f $me) /T /C | Out-Null
+        }
+    }
+
+    It 'die geerbte Benutzer-Schreibrecht-ACL der Wurzel ist zulaessig, ein explizites Benutzerrecht nicht' {
+        Add-TestUsersWriteRule -Path $script:FnParent
+        $root = Join-Path $script:FnParent 'Logs'
+        $null = New-Item -ItemType Directory -Path $root
+        $inherited = @((Get-Acl -LiteralPath $root).Access | Where-Object { $_.IsInherited })
+        $inherited.Count | Should -BeGreaterThan 0 -Because 'die Wurzel muss das Recht wirklich erben'
+        Test-VsPackageLogAccess -Path $root -IgnoreInherited | Should -BeTrue
+        Test-VsPackageLogAccess -Path $root | Should -BeFalse -Because 'ohne Ausnahme zaehlt das geerbte Recht wie frueher'
+        Add-TestUsersWriteRule -Path $root
+        Test-VsPackageLogAccess -Path $root -IgnoreInherited | Should -BeFalse -Because 'ein explizites Benutzerrecht ist fremde ACL'
+    }
+
+    It 'der verwaltete Unterbau hat eine geschuetzte ACL nur fuer SYSTEM und Administratoren' {
+        Add-TestUsersWriteRule -Path $script:FnParent
+        $managed = Join-Path $script:FnParent 'PackageWrapper'
+        New-VsPackageManagedDirectory -Path $managed
+        $acl = Get-Acl -LiteralPath $managed
+        $acl.AreAccessRulesProtected | Should -BeTrue -Because 'keine Vererbung von der Elternebene'
+        $sids = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object)
+        ($sids -join ',') | Should -Be 'S-1-5-18,S-1-5-32-544'
+        Test-VsPackageLogAccess -Path $managed | Should -BeTrue
+    }
+}
+
+# PS-19: die Paketvorlage liest config.json als UTF-8 wie der Server. Ohne -Encoding
+# liest Windows PowerShell 5.1 eine BOM-lose Datei als ANSI, und Umlaute werden zu Mojibake.
+Describe 'PS-19: config.json wird in Vorlage und Server als UTF-8 gelesen' {
+    BeforeAll {
+        $script:PsRoot19 = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'Powershell-MECM'
+        $script:TemplateInstall = Join-Path (Join-Path $script:PsRoot19 'Package_Vorlage') 'install.ps1'
+        $script:ServerCommonFile = Join-Path (Join-Path $script:PsRoot19 'mecm') 'VirtuSphere-Common.ps1'
+        function Get-ConfigReadCommandTexts {
+            param([string]$Path)
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+            @($ast.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.CommandAst] -and
+                $n.GetCommandName() -eq 'Get-Content' -and $n.Extent.Text -match '\$configPath'
+            }, $true) | ForEach-Object { $_.Extent.Text })
+        }
+    }
+
+    It 'die Paketvorlage liest config.json mit -Encoding UTF8' {
+        $reads = @(Get-ConfigReadCommandTexts -Path $script:TemplateInstall)
+        $reads.Count | Should -Be 1
+        $reads[0] | Should -Match '-Encoding UTF8\b'
+    }
+
+    It 'der Server liest config.json ebenfalls mit -Encoding UTF8 (Read-VsPackageConfig)' {
+        $reads = @(Get-ConfigReadCommandTexts -Path $script:ServerCommonFile)
+        $reads.Count | Should -BeGreaterThan 0
+        foreach ($read in $reads) { $read | Should -Match '-Encoding UTF8\b' }
+    }
+
+    It 'eine BOM-lose UTF-8-Datei mit Umlaut wird mit dieser Lesart unverfaelscht gelesen' {
+        $dir = Join-Path $TestDrive ('cfg-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $dir
+        $path = Join-Path $dir 'config.json'
+        # Umlaut per Codepoint, damit diese Testdatei ASCII bleibt.
+        $umlaut = 'B' + [char]0x00FC + 'ro'
+        [IO.File]::WriteAllText($path, ('{{"ProjectName":"{0}-App","version":"1"}}' -f $umlaut), (New-Object Text.UTF8Encoding($false)))
+        $config = Get-Content -Path $path -Raw -Encoding UTF8 | ConvertFrom-Json
+        $config.ProjectName | Should -Be ($umlaut + '-App')
     }
 }

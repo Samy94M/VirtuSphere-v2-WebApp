@@ -1200,13 +1200,17 @@ Describe 'Grenzen der Fehlerdetails und der Reporter-IPC sind auf beiden Seiten 
     }
 
     It 'die Reporter-IPC-Grenze ist auf Sender (Package_Vorlage) und Empfaenger (ReporterHost) gleich' {
+        # Je eine benannte Konstante pro Seite (SD-11, lokal in der jeweiligen Funktion):
+        # der Test liest beide Werte und prueft, dass jede Pruefung die eigene Konstante nennt.
         $receiverText = Get-Content -LiteralPath $script:ReporterHostFile -Raw
         $senderText = Get-Content -LiteralPath $script:PackageInstallerFile -Raw
-        $receiverLimit = [regex]::Match($receiverText, 'GetByteCount\(\$line\)\s*-gt\s*(\d+)').Groups[1].Value
-        $senderLimit = [regex]::Match($senderText, 'GetByteCount\(\$json\)\s*-gt\s*(\d+)').Groups[1].Value
-        $receiverLimit | Should -Not -BeNullOrEmpty -Because 'der Empfaenger muss seine Grenze pruefen'
-        $senderLimit | Should -Not -BeNullOrEmpty -Because 'der Sender muss seine Grenze pruefen'
+        $receiverLimit = [regex]::Match($receiverText, '\$ipcMaxBytes\s*=\s*(\d+)').Groups[1].Value
+        $senderLimit = [regex]::Match($senderText, '\$ipcMaxBytes\s*=\s*(\d+)').Groups[1].Value
+        $receiverLimit | Should -Not -BeNullOrEmpty -Because 'der Empfaenger muss seine Grenze als Konstante fuehren'
+        $senderLimit | Should -Not -BeNullOrEmpty -Because 'der Sender muss seine Grenze als Konstante fuehren'
         $receiverLimit | Should -Be $senderLimit
         $receiverLimit | Should -Be '16384'
+        $receiverText | Should -Match 'GetByteCount\(\$line\)\s*-gt\s*\$ipcMaxBytes' -Because 'der Empfaenger muss die Konstante pruefen, nicht ein Literal'
+        $senderText | Should -Match 'GetByteCount\(\$json\)\s*-gt\s*\$ipcMaxBytes' -Because 'der Sender muss die Konstante pruefen, nicht ein Literal'
     }
 }

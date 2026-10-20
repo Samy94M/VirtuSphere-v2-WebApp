@@ -220,7 +220,14 @@ foreach ($spec in $specs) {
         if ($null -eq $existing) {
             Write-Ok ("NEU: erstelle Application '{0}'" -f $spec.AppName)
             New-CMApplication -Name $spec.AppName -Description $spec.ManagedMarker -ErrorAction Stop | Out-Null
-            Get-CMApplication -Name $spec.AppName -Fast | Move-CMObject -FolderPath $appFolderPath -ErrorAction SilentlyContinue | Out-Null
+            # Ein fehlgeschlagener Umzug ist kosmetisch: die Application bleibt im
+            # Stammordner und funktioniert. Deshalb eine WARN-Zeile im Tageslog, aber
+            # kein Blocker (Write-Warn wuerde den Exit-Code auf 1 setzen) (PS-32).
+            try {
+                Get-CMApplication -Name $spec.AppName -Fast | Move-CMObject -FolderPath $appFolderPath -ErrorAction Stop | Out-Null
+            } catch {
+                Write-VsLog -Level WARN -Context 'client-packaging' -Message ("    !   Application '{0}' liegt nicht im Ordner {1}: {2}" -f $spec.AppName, $appFolderPath, (Get-VsErrorDetail -ErrorRecord $_)) -Color Yellow
+            }
             $createdMatches = @(Get-CMApplication -Name $spec.AppName -ErrorAction Stop)
             if ($createdMatches.Count -ne 1) { throw ("Neu angelegte Application '{0}' ist nicht eindeutig lesbar." -f $spec.AppName) }
             $existing = $createdMatches[0]
