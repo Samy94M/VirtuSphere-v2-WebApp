@@ -36,7 +36,7 @@ layout_header(vm_overview_title($filter), $user, 'dashboard', 'overview', 'help-
     </section>
 
     <section class="panel">
-        <?php vm_overview_render_table($listing['rows'], $filter, $sort, $dir, $snapshot); ?>
+        <?php vm_overview_render_table($listing['rows'], $filter, $sort, $dir, $snapshot, (int) $listing['page']); ?>
         <?php vm_overview_render_pagination($listing, $filter, $sort, $dir, $snapshot); ?>
     </section>
 </div>

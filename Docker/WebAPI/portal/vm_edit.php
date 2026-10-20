@@ -20,6 +20,7 @@ require_once __DIR__ . '/../lib/mecm_rollout_display.php';
 require_once __DIR__ . '/../lib/mecm_plan.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/vm_urls.php';
+require_once __DIR__ . '/../lib/vm_overview_page.php';
 // For the deep link to the ESXi card of a credential that was never pulled.
 require_once __DIR__ . '/../lib/system_status.php';
 

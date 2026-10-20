@@ -76,4 +76,81 @@ final class PortalWorkContextTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         portal_work_context_vm_list_url(0, []);
     }
+
+    public function testOverviewOriginIsClosedCompressedAndOwnedByTheOverview(): void
+    {
+        self::assertSame([
+            'work_ov_filter' => 'mecm_pending',
+            'work_ov_sort' => 'status',
+            'work_ov_dir' => 'desc',
+            'work_ov_page' => '3',
+        ], portal_work_context([
+            'work_ov_filter' => 'mecm_pending',
+            'work_ov_sort' => 'status',
+            'work_ov_dir' => 'desc',
+            'work_ov_page' => '3',
+            'counted' => '1792400000',
+            'expected' => '4',
+        ]));
+
+        self::assertSame(['work_ov_filter' => 'all'], portal_work_context([
+            'work_ov_filter' => 'all',
+            'work_ov_sort' => 'mission',
+            'work_ov_dir' => 'asc',
+            'work_ov_page' => '1',
+        ]));
+        self::assertSame(['work_ov_filter' => 'all'], portal_work_context([
+            'work_ov_filter' => 'all',
+            'work_ov_sort' => 'ram',
+            'work_ov_dir' => 'sideways',
+            'work_ov_page' => '-2',
+        ]), 'the mission VM list sort ram is not an overview sort');
+
+        self::assertSame([], portal_work_context([
+            'work_ov_filter' => 'everything',
+            'work_ov_sort' => 'name',
+            'work_ov_page' => '2',
+        ]), 'an unknown filter is no overview origin');
+        self::assertSame([], portal_work_context([
+            'work_ov_sort' => 'name',
+            'work_ov_dir' => 'desc',
+        ]), 'sort without filter is no overview origin');
+        self::assertSame([], portal_work_context(['work_ov_filter' => ['all']]));
+    }
+
+    public function testOverviewReturnUrlRestoresTheListAndFocusesTheRow(): void
+    {
+        $context = vm_overview_editor_context('mecm_pending', 'status', 'desc', 3);
+
+        self::assertSame(
+            'vm_overview.php?filter=mecm_pending&sort=status&dir=desc&page=3#vm-42',
+            vm_overview_return_url($context, 42)
+        );
+        self::assertSame('vm_overview.php?filter=all', vm_overview_return_url(['work_ov_filter' => 'all']));
+        self::assertNull(vm_overview_return_url([]));
+        self::assertNull(vm_overview_return_url(portal_work_context_from_mission_list('missions', 'vms', 'desc', false), 42));
+    }
+
+    public function testMissionScopedDestinationsDropTheOverviewOriginButTheEditorRoundTripKeepsIt(): void
+    {
+        $context = portal_work_context(array_merge(
+            ['work_list_type' => 'templates', 'work_vm_sort' => 'ram'],
+            vm_overview_editor_context('all', 'name', 'desc', 2)
+        ));
+
+        self::assertSame(['work_list_type' => 'templates', 'work_vm_sort' => 'ram'], portal_work_context_mission_scope($context));
+        self::assertSame(
+            'vms.php?mission_id=17&sort=ram&work_list_type=templates#vm-42',
+            portal_work_context_vm_list_url(17, $context, 42)
+        );
+        self::assertSame(
+            'vms.php?mission_id=17&sort=ram&work_list_type=templates&work_ov_filter=all&work_ov_sort=name&work_ov_dir=desc&work_ov_page=2',
+            portal_work_context_vm_editor_action_url(17, $context)
+        );
+        self::assertSame(
+            'vm_edit.php?mission_id=17&vm_id=42&work_list_type=templates&work_vm_sort=ram&work_ov_filter=all&work_ov_sort=name&work_ov_dir=desc&work_ov_page=2',
+            portal_work_context_append_url('vm_edit.php?mission_id=17&vm_id=42', $context)
+        );
+        self::assertSame('vms.php?mission_id=17', portal_work_context_vm_editor_action_url(17, []));
+    }
 }

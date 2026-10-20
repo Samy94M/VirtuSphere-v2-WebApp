@@ -94,10 +94,14 @@ function vm_overview_render_change_notice(?array $snapshot, int $total): void
  * The read-only table. The sort headers keep the filter and the snapshot but not
  * the page, so a new order starts at its first page.
  *
+ * Each row owns the fragment vm-<id>; its VM link carries this list's view (filter,
+ * sort, direction, page) to the editor, which returns here after saving or going
+ * back (UX03).
+ *
  * @param list<array<string,mixed>> $rows
  * @param array{counted:int,expected:int}|null $snapshot
  */
-function vm_overview_render_table(array $rows, string $filter, string $sort, string $dir, ?array $snapshot): void
+function vm_overview_render_table(array $rows, string $filter, string $sort, string $dir, ?array $snapshot, int $page = 1): void
 {
     $base = ['filter' => $filter];
     if ($snapshot !== null) {
@@ -125,7 +129,7 @@ function vm_overview_render_table(array $rows, string $filter, string $sort, str
                 $missionId = (int) $row['mission_id'];
                 $missionName = (string) $row['mission_name'];
                 ?>
-                <tr>
+                <tr id="vm-<?php echo h((string) $row['id']); ?>">
                     <td>
                         <a href="<?php echo h(mission_details_url($missionId)); ?>"><?php echo h($missionName); ?></a>
                         <?php if (mission_name_is_template($missionName)) { echo portal_badge('neutral', __t('vm_overview.template_badge')); } ?>
@@ -134,7 +138,7 @@ function vm_overview_render_table(array $rows, string $filter, string $sort, str
                     <td><?php echo h((string) $row['vm_hostname']); ?></td>
                     <td><?php echo status_badge((string) $row['vm_status']); ?></td>
                     <td><?php echo mecm_sync_badge((string) $row['mecm_sync_state']); ?> <span class="muted"><?php echo h(mecm_updated_display($row['updated'] ?? 0)); ?></span></td>
-                    <td class="actions"><a class="button button-secondary" href="<?php echo h(vm_edit_url($missionId, (int) $row['id'])); ?>"><?php echo h(__t('vm_overview.open_vm')); ?></a></td>
+                    <td class="actions"><a class="button button-secondary" href="<?php echo h(vm_edit_url($missionId, (int) $row['id'], null, vm_overview_editor_context($filter, $sort, $dir, $page))); ?>"><?php echo h(__t('vm_overview.open_vm')); ?></a></td>
                 </tr>
             <?php } ?>
             <?php if ($rows === []) { ?>

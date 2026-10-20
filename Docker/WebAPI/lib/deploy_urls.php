@@ -41,7 +41,7 @@ function mission_details_url(int $missionId, array $workContext = []): string
         throw new InvalidArgumentException('Mission id must be positive.');
     }
 
-    return portal_work_context_append_url(sprintf('mission_details.php?id=%d', $missionId), $workContext);
+    return portal_work_context_append_url(sprintf('mission_details.php?id=%d', $missionId), portal_work_context_mission_scope($workContext));
 }
 
 const VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG = 'job_log';

@@ -110,3 +110,76 @@ function vm_overview_url(string $filter, array $state = []): string
 
     return 'vm_overview.php?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
 }
+
+/**
+ * The overview's part of the work context (UX03, F05; lib/portal_work_context.php).
+ * A VM link of the list carries its filter, sort, direction and page, so saving or
+ * going back in the editor reopens this list where the operator left it. The
+ * filter is the marker: without a known filter there is no overview origin, and
+ * the editor keeps its mission parent. Values are this list's own whitelist;
+ * defaults are left out like everywhere else in the work context.
+ *
+ * @return array<string,string>
+ */
+function vm_overview_work_context(array $input): array
+{
+    $scalar = static function (string $key) use ($input): string {
+        return isset($input[$key]) && is_string($input[$key]) ? $input[$key] : '';
+    };
+    $filter = $scalar('work_ov_filter');
+    if (!in_array($filter, VIRTUSPHERE_VM_OVERVIEW_FILTERS, true)) {
+        return [];
+    }
+    $context = ['work_ov_filter' => $filter];
+    $sort = vm_overview_sort($scalar('work_ov_sort'));
+    if ($sort !== VIRTUSPHERE_VM_OVERVIEW_SORT_DEFAULT) {
+        $context['work_ov_sort'] = $sort;
+    }
+    if (vm_overview_dir($scalar('work_ov_dir')) === 'desc') {
+        $context['work_ov_dir'] = 'desc';
+    }
+    $page = vm_overview_page_number($scalar('work_ov_page'));
+    if ($page > 1) {
+        $context['work_ov_page'] = (string) $page;
+    }
+
+    return $context;
+}
+
+/**
+ * The work context a VM link of the overview hands to the editor: this list's
+ * filter, sort, direction and page. The tile snapshot stays behind; it describes
+ * the tile, not the list the editor returns to.
+ *
+ * @return array<string,string>
+ */
+function vm_overview_editor_context(string $filter, string $sort, string $dir, int $page): array
+{
+    return vm_overview_work_context([
+        'work_ov_filter' => $filter,
+        'work_ov_sort' => $sort,
+        'work_ov_dir' => $dir,
+        'work_ov_page' => (string) $page,
+    ]);
+}
+
+/**
+ * Where the editor returns when it was opened from the overview: the same list,
+ * with the VM's row as fragment. Null without an overview origin. The list clamps
+ * the page itself (repo_vm_overview_page()), so a list that shrank in the meantime
+ * still opens on a page with rows.
+ */
+function vm_overview_return_url(array $context, ?int $focusVmId = null): ?string
+{
+    $context = vm_overview_work_context($context);
+    if ($context === []) {
+        return null;
+    }
+    $url = vm_overview_url($context['work_ov_filter'], [
+        'sort' => $context['work_ov_sort'] ?? '',
+        'dir' => $context['work_ov_dir'] ?? '',
+        'page' => (int) ($context['work_ov_page'] ?? '1'),
+    ]);
+
+    return $url . ($focusVmId !== null && $focusVmId > 0 ? '#vm-' . $focusVmId : '');
+}

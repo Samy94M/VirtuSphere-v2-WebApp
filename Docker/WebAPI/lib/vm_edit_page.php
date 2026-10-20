@@ -8,12 +8,15 @@ declare(strict_types=1);
 /** @var array<string, mixed> $user Authenticated portal user from the shell. */
 
 $workContext = portal_work_context($_GET);
+// UX03/F05: a VM opened from the dashboard VM overview returns there. Null when the
+// link came from a mission list or from nowhere; the mission parent applies then.
+$overviewReturnUrl = vm_overview_return_url($workContext);
 $missionId = request_int($_GET, 'mission_id', request_int($_POST, 'mission_id'));
 $vmId = request_int($_GET, 'vm_id', request_int($_POST, 'vm_id'));
 $mission = repo_get_mission($connection, $missionId);
 if ($mission === null) {
     flash_set('error', __t('portal.mission_not_found'));
-    redirect_to(portal_work_context_mission_list_url($workContext));
+    redirect_to($overviewReturnUrl ?? portal_work_context_mission_list_url($workContext));
 }
 $isTemplate = mission_name_is_template((string) $mission['mission_name']);
 if (!isset($workContext['work_list_type'])) {
@@ -25,9 +28,13 @@ if (!isset($workContext['work_list_type'])) {
 $vm = $vmId > 0 ? repo_get_vm_bundle($connection, $vmId) : null;
 if ($vmId > 0 && ($vm === null || (int) $vm['mission_id'] !== $missionId)) {
     flash_set('error', __t('portal.vm_not_found'));
-    redirect_to(portal_work_context_vm_list_url($missionId, $workContext));
+    redirect_to($overviewReturnUrl ?? portal_work_context_vm_list_url($missionId, $workContext));
 }
 $vmListUrl = portal_work_context_vm_list_url($missionId, $workContext, $vmId > 0 ? $vmId : null);
+$backUrl = vm_overview_return_url($workContext, $vmId > 0 ? $vmId : null) ?? $vmListUrl;
+$backLabel = $overviewReturnUrl !== null
+    ? __t('vm_edit.back_to_overview', ['list' => vm_overview_title($workContext['work_ov_filter'] ?? '')])
+    : __t('vm_edit.back_to_vms');
 $missionDetailsUrl = mission_details_url($missionId, $workContext);
 $vmEditorUrl = $vmId > 0
     ? vm_edit_url($missionId, $vmId, null, $workContext)
@@ -109,7 +116,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($saved['mecm']['held']) {
             flash_set('info', __t('vm_edit.flash_mecm_portal_only'));
         }
-        redirect_to(portal_work_context_vm_list_url($missionId, $workContext, $savedVmId));
+        redirect_to(vm_overview_return_url($workContext, $savedVmId)
+            ?? portal_work_context_vm_list_url($missionId, $workContext, $savedVmId));
     } catch (Throwable $exception) {
         $error = portal_error_message($exception);
         if ($exception instanceof ValidationException) {

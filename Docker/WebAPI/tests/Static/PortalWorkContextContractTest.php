@@ -17,7 +17,7 @@ final class PortalWorkContextContractTest extends TestCase
         preg_match("/const VIRTUSPHERE_WORK_CONTEXT_KEYS = \[(.*?)\];/s", $helper, $match);
         self::assertArrayHasKey(1, $match);
         preg_match_all("/'work_[a-z_]+' /x", $match[1], $keys);
-        self::assertCount(6, $keys[0]);
+        self::assertCount(10, $keys[0]);
     }
 
     public function testConsumersUseCanonicalUrlsAndStableRowTargets(): void
@@ -39,5 +39,24 @@ final class PortalWorkContextContractTest extends TestCase
         self::assertStringContainsString('vm_edit_url(', $vms);
         self::assertStringContainsString("\$returnTo === 'editor'", $vms);
         self::assertStringContainsString('portal_work_context_vm_list_url(', $edit);
+    }
+
+    public function testTheVmOverviewHandsItsViewToTheEditorAndTheEditorReturnsThere(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $overviewPage = file_get_contents($root . '/lib/vm_overview_page.php');
+        $edit = file_get_contents($root . '/lib/vm_edit_page.php');
+        $panels = file_get_contents($root . '/lib/vm_edit_panels.php');
+        $urls = file_get_contents($root . '/lib/deploy_urls.php');
+        foreach ([$overviewPage, $edit, $panels, $urls] as $source) {
+            self::assertIsString($source);
+        }
+
+        self::assertStringContainsString('id="vm-', $overviewPage, 'overview rows own a stable fragment');
+        self::assertStringContainsString('vm_overview_editor_context(', $overviewPage);
+        self::assertStringContainsString('vm_overview_return_url($workContext, $savedVmId)', $edit, 'a save returns to the overview');
+        self::assertStringContainsString('portal_work_context_vm_editor_action_url(', $panels, 'round trips through vms.php keep the origin');
+        self::assertStringNotContainsString('portal_work_context_vm_list_url($missionId, $workContext)); ?>">', $panels);
+        self::assertStringContainsString('portal_work_context_mission_scope($workContext)', $urls, 'mission details drop the overview origin');
     }
 }

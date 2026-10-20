@@ -13,6 +13,7 @@ return [
     'title_edit' => 'Edit VM',
     'title_add' => 'Add VM',
     'back_to_vms' => 'Back to VMs',
+    'back_to_overview' => 'Back to ":list"',
     'mission_details' => 'Mission details',
     'context_mission' => 'Part of mission: :name',
     'heading_vm' => 'VM',

@@ -42,6 +42,8 @@ declare(strict_types=1);
 /** @var bool $showProgressWatch */
 /** @var array<string, string> $workContext */
 /** @var string $vmListUrl */
+/** @var string $backUrl */
+/** @var string $backLabel */
 /** @var string $missionDetailsUrl */
 /** @var string $vmEditorUrl */
 /** @var array{split: bool, mecm_os: string, deviates: bool} $mecmView AV-R12 save state (vm_mecm_save.php). */
@@ -49,10 +51,10 @@ declare(strict_types=1);
 <div class="stack">
     <section class="panel">
         <div class="actions">
-            <a class="button button-secondary" href="<?php echo h($vmListUrl); ?>"><?php echo h(__t('vm_edit.back_to_vms')); ?></a>
+            <a class="button button-secondary" href="<?php echo h($backUrl); ?>"><?php echo h($backLabel); ?></a>
             <a class="button button-secondary" href="<?php echo h($missionDetailsUrl); ?>"><?php echo h(__t('vm_edit.mission_details')); ?></a>
             <?php if ($canWrite && $vmId > 0 && !$isTemplate) { ?>
-                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_list_url($missionId, $workContext)); ?>">
+                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_editor_action_url($missionId, $workContext)); ?>">
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="reset_mecm_id">
                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
@@ -92,7 +94,7 @@ declare(strict_types=1);
             <?php } ?>
             <p class="muted"><?php echo h(__t('vm_edit.progress_no_auto_failure')); ?></p>
             <?php if ($canWrite) { ?>
-                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_list_url($missionId, $workContext)); ?>">
+                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_editor_action_url($missionId, $workContext)); ?>">
                     <?php echo csrf_field(); ?>
                     <input type="hidden" name="action" value="restart_progress_watch">
                     <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">

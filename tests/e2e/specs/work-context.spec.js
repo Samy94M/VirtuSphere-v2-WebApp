@@ -133,3 +133,41 @@ test('server-rendered return links work without JavaScript and direct entry stay
     await noJs.close();
   }
 });
+
+test('a VM opened from the VM overview returns to the same list view after save and back', async ({ page }) => {
+  const ids = seed();
+  // The MECM-pending list holds template rows too; queuing the template VM puts it there.
+  runPhp(`
+$db = db();
+$stmt = $db->prepare('UPDATE deploy_vms SET updated = 1 WHERE id = ?');
+$vmId = ${ids.template.vm};
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'QUEUED';
+`);
+
+  await page.goto('vm_overview.php?filter=mecm_pending&sort=name&dir=desc');
+  await page.locator(`#vm-${ids.template.vm}`).getByRole('link', { name: 'Open VM' }).click();
+  await expect(page).toHaveURL(/vm_edit\.php/);
+  const editorUrl = new URL(page.url());
+  expect(editorUrl.searchParams.get('work_ov_filter')).toBe('mecm_pending');
+  expect(editorUrl.searchParams.get('work_ov_sort')).toBe('name');
+  expect(editorUrl.searchParams.get('work_ov_dir')).toBe('desc');
+  expect(editorUrl.searchParams.get('counted')).toBeNull();
+
+  const back = page.getByRole('link', { name: 'Back to "MECM pending"' });
+  expect(await back.getAttribute('href')).toBe(`vm_overview.php?filter=mecm_pending&sort=name&dir=desc#vm-${ids.template.vm}`);
+  const details = await page.getByRole('link', { name: 'Mission details' }).first().getAttribute('href');
+  expect(details).not.toContain('work_ov_');
+
+  await page.locator('textarea[name="vm_notes"]').fill('overview save');
+  await Promise.all([
+    page.waitForURL(new RegExp(`vm_overview\\.php\\?filter=mecm_pending&sort=name&dir=desc#vm-${ids.template.vm}$`)),
+    page.getByRole('button', { name: 'Save VM' }).click(),
+  ]);
+  await expect(page.locator(`#vm-${ids.template.vm}`)).toBeFocused();
+
+  await page.goto(`vm_edit.php?mission_id=${ids.template.id}&vm_id=${ids.template.vm}&work_ov_filter=bogus`);
+  expect(await page.getByRole('link', { name: 'Back to VMs' }).getAttribute('href'))
+    .toBe(`vms.php?mission_id=${ids.template.id}&work_list_type=templates#vm-${ids.template.vm}`);
+});

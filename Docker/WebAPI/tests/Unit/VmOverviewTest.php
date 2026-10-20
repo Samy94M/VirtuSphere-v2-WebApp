@@ -129,7 +129,8 @@ final class VmOverviewTest extends TestCase
         $html = (string) ob_get_clean();
 
         self::assertStringContainsString('href="mission_details.php?id=3"', $html);
-        self::assertStringContainsString('href="vm_edit.php?mission_id=3&amp;vm_id=7"', $html, 'the VM link opens the editor without a return context');
+        self::assertStringContainsString('href="vm_edit.php?mission_id=3&amp;vm_id=7&amp;work_ov_filter=mecm_pending"', $html, 'the VM link carries the list view; defaults stay out');
+        self::assertStringContainsString('<tr id="vm-7">', $html, 'the row owns the fragment the editor returns to');
         self::assertStringContainsString(h(__t('vm_overview.template_badge')), $html);
         self::assertStringContainsString(h(__t('common.mecm_queued')), $html, 'the queued flag that put the row into the count is shown');
     }
@@ -153,6 +154,29 @@ final class VmOverviewTest extends TestCase
 
         self::assertStringNotContainsString(h(__t('vm_overview.template_badge')), $html);
         self::assertStringContainsString('href="mission_details.php?id=4"', $html);
+        self::assertStringContainsString('href="vm_edit.php?mission_id=4&amp;vm_id=8&amp;work_ov_filter=all&amp;work_ov_sort=name"', $html);
+    }
+
+    public function testTheVmLinkCarriesPageAndDirectionButNeverTheTileSnapshot(): void
+    {
+        $rows = [[
+            'id' => 9,
+            'mission_id' => 5,
+            'vm_name' => 'VM-C',
+            'vm_hostname' => 'vm-c',
+            'vm_status' => '3/5 Deployed',
+            'mecm_sync_state' => 'registered',
+            'updated' => 0,
+            'mission_name' => 'Produktion',
+        ]];
+
+        ob_start();
+        vm_overview_render_table($rows, 'all', 'status', 'desc', ['counted' => 1792400000, 'expected' => 3], 4);
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('href="vm_edit.php?mission_id=5&amp;vm_id=9&amp;work_ov_filter=all&amp;work_ov_sort=status&amp;work_ov_dir=desc&amp;work_ov_page=4"', $html);
+        self::assertStringNotContainsString('vm_edit.php?mission_id=5&amp;vm_id=9&amp;counted', $html);
+        self::assertStringContainsString('href="mission_details.php?id=5"', $html, 'the mission link stays mission-scoped');
     }
 
     public function testPaginationLinksOnlyToExistingPagesOtherThanTheCurrentOne(): void
