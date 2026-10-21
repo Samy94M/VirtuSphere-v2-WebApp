@@ -15,6 +15,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/../portal_sort_sql.php';
+require_once __DIR__ . '/../vm_phase.php';
 
 const VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL = 'all';
 const VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING = 'mecm_pending';
@@ -70,7 +71,9 @@ function repo_vm_overview_sort_columns(): array
         'mission' => ['m.mission_name', 'v.vm_name', 'v.id'],
         'name' => ['v.vm_name', 'm.mission_name', 'v.id'],
         'hostname' => ['v.vm_hostname', 'm.mission_name', 'v.vm_name', 'v.id'],
-        'status' => ['v.vm_status', 'm.mission_name', 'v.vm_name', 'v.id'],
+        // The SQL twin of the PHP phase (virtusphere_vm_phase), so the column sorts
+        // like it shows. The finding is not sortable: it needs several sources.
+        'status' => [virtusphere_vm_phase_sql('v'), 'm.mission_name', 'v.vm_name', 'v.id'],
         'mecm' => ['v.mecm_sync_state', 'm.mission_name', 'v.vm_name', 'v.id'],
     ];
 }
@@ -95,7 +98,10 @@ function repo_vm_overview_page(mysqli $db, string $filter, string $sort, string 
 
     $order = portal_sort_sql_order(repo_vm_overview_sort_columns(), $sort, $dir, 'mission');
     $stmt = $db->prepare(
-        'SELECT v.id, v.mission_id, v.vm_name, v.vm_hostname, v.vm_status, v.mecm_sync_state, v.updated, m.mission_name'
+        // The columns beyond the list's own are the evidence of the phase and of the findings.
+        'SELECT v.id, v.mission_id, v.vm_name, v.vm_hostname, v.vm_status, v.mecm_sync_state, v.updated, m.mission_name,'
+        . ' v.lifecycle_state, v.vm_instance_uuid, v.vm_bound_credential_id, v.vm_bound_esxi_host, v.mecm_previous_id,'
+        . ' v.mecm_pending_since, v.os_install_watch_started_at'
         . ' FROM deploy_vms v INNER JOIN deploy_missions m ON m.id = v.mission_id'
         . ' WHERE ' . $where . ' ORDER BY ' . $order . ' LIMIT ? OFFSET ?'
     );

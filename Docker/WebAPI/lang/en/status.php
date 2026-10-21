@@ -11,6 +11,11 @@ declare(strict_types=1);
 // neutrally instead of echoed raw: the raw value used to be the badge label,
 // and `os_installing` next to `pending` reads for nobody except the schema that
 // wrote it.
+//
+// The phase and the finding of a VM (lib/vm_phase.php) are derived when read
+// from stored evidence: no column, no writer. Their texts are at the end of this
+// catalog. The phase names the last evidence that arrived, never a progress; the
+// finding names the next step.
 return [
     // VM lifecycle (VIRTUSPHERE_LIFECYCLE_STATES).
     'lifecycle_initializing' => 'Preparing',
@@ -26,7 +31,7 @@ return [
     'mecm_not_ready' => 'Not ready yet',
     'mecm_pending' => 'Waiting for MECM',
     'mecm_registered' => 'Registered in MECM',
-    'mecm_failed' => 'MECM sync failed',
+    'mecm_failed' => 'MECM sync open after failure',
     'mecm_unknown' => 'Unknown state',
 
     // Job status (the active and terminal sets from lib/deploy_constants.php).
@@ -59,4 +64,42 @@ return [
     // `active` and empty carry a fixed meaning, and any other legacy value is
     // shown with its own text rather than read as something it never was.
     'mission_active' => 'Active',
+
+    // VM phase (VIRTUSPHERE_VM_PHASES, lib/vm_phase.php). The names follow the
+    // order of the phases; `phase_template` applies to templates.
+    'phase_created' => 'Created',
+    'phase_in_progress' => 'In progress',
+    'phase_on_esxi' => 'On ESXi',
+    'phase_mac_known' => 'MAC known',
+    'phase_handed_to_mecm' => 'Handed to MECM',
+    'phase_windows_reports' => 'Windows reports',
+    'phase_client_done' => 'Client done',
+    'phase_template' => 'Template',
+    'phase_unknown' => 'Unknown phase',
+    'phase_technical' => 'Technical: :status',
+
+    // VM findings (VIRTUSPHERE_VM_FINDINGS, lib/vm_phase.php). The time part drops
+    // out only when no valid server time exists; then the variant without time or
+    // origin applies. `mecm_sync_failed` reuses `mecm_failed`.
+    'finding_create_uncertain' => 'Create unresolved (job :job_id, unit :position)',
+    'finding_job_failed' => 'Job failed: :mode, :time',
+    'finding_job_failed_unknown' => 'Job failed',
+    'finding_missing_from_inventory' => 'No longer in the inventory (:host, as of :time)',
+    'finding_missing_from_inventory_no_host' => 'No longer in the inventory (as of :time)',
+    'finding_job_running' => 'Job running since :since (:mode)',
+    'finding_job_running_unknown' => 'Job running',
+    'finding_old_mecm_device' => 'Delete the old MECM device (ResourceID :id)',
+    'finding_mecm_pending_overdue' => 'Waiting for MECM since :since, longer than :hours h',
+    'finding_mecm_pending_since' => 'Waiting for MECM since :since',
+    'finding_mecm_pending' => 'Waiting for MECM',
+    'finding_powered_off' => 'Powered off according to the inventory (as of :time)',
+    'finding_os_install_overdue' => 'OS installation observed for longer than :hours h',
+    'finding_pxe_unwatched' => 'PXE evidence missing',
+    'finding_os_install_watching' => 'Observation running since :since',
+    'finding_client_phase_failed' => 'Client phase failed: :phase',
+    'finding_client_phase_unconfirmed' => 'Client phase :phase unconfirmed for :minutes min',
+    'finding_package_run_failed' => 'Package report failed: :package',
+    'finding_unknown' => 'Unknown finding',
+    'finding_more' => '+:count',
+    'finding_more_title' => ':count more findings, all in the VM editor',
 ];

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 return [
     'csv_ram' => 'RAM (MB)',
+    'csv_phase' => 'phase',
     'title_template' => 'Template VMs',
     'title_mission' => 'Mission VMs',
     'open_deploy' => 'Deploy',
@@ -12,8 +13,9 @@ return [
     // "Hostname" left open which of them ends up in MECM.
     'th_vm_name' => 'VM name in ESXi',
     'th_hostname' => 'Windows hostname',
-    // The state values are MECM interface values and stay in English (help: help_missions.status_wire).
-    'th_status' => 'Status (MECM interface)',
+    // The column shows the derived phase; the raw x/5 value is in the tooltip and in the editor.
+    'th_status' => 'Phase',
+    'th_finding' => 'Finding',
     'rollout_diverged' => 'waiting for reset',
     'rollout_diverged_title' => 'This rollout continues as ":current". The changed name only applies after the old MECM device is deleted and "Reset MECM ID" is run.',
     'th_os' => 'OS',
@@ -30,10 +32,6 @@ return [
     'csv_network_detail' => 'network_config_detail',
     'th_disks' => 'Disks',
     'th_packages' => 'Packages',
-    'th_attention' => 'Attention',
-    'progress_badge_pending' => 'MECM longer than :hours h',
-    'progress_badge_installing' => 'OS installation longer than :hours h',
-    'progress_badge_unwatched' => 'PXE observation missing',
     'progress_template_blocked' => 'Templates do not have an active progress observation.',
     'progress_flash_pending' => 'MECM observation was restarted.',
     'progress_flash_installing' => 'OS installation observation was started.',

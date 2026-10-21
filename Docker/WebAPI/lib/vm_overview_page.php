@@ -16,6 +16,7 @@ require_once __DIR__ . '/defaults.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/vm_urls.php';
 require_once __DIR__ . '/vm_overview.php';
+require_once __DIR__ . '/vm_phase_cells.php';
 
 function vm_overview_filter_label(string $filter): string
 {
@@ -118,6 +119,7 @@ function vm_overview_render_table(array $rows, string $filter, string $sort, str
                     echo portal_sort_header('vm_overview.php', 'name', __t('vms.th_vm_name'), $sort, $dir, $base);
                     echo portal_sort_header('vm_overview.php', 'hostname', __t('vms.th_hostname'), $sort, $dir, $base);
                     echo portal_sort_header('vm_overview.php', 'status', __t('vms.th_status'), $sort, $dir, $base);
+                    echo '<th>' . h(__t('vms.th_finding')) . '</th>';
                     echo portal_sort_header('vm_overview.php', 'mecm', __t('vms.th_mecm'), $sort, $dir, $base);
                     ?>
                     <th><?php echo h(__t('common.actions')); ?></th>
@@ -136,13 +138,14 @@ function vm_overview_render_table(array $rows, string $filter, string $sort, str
                     </td>
                     <td><?php echo h((string) $row['vm_name']); ?></td>
                     <td><?php echo h((string) $row['vm_hostname']); ?></td>
-                    <td><?php echo status_badge((string) $row['vm_status']); ?></td>
+                    <td><?php echo vm_phase_cell($row, (string) $row['phase']); ?></td>
+                    <td><?php echo vm_findings_cell($row['findings'], $missionId, (int) $row['id'], vm_overview_editor_context($filter, $sort, $dir, $page)); ?></td>
                     <td><?php echo mecm_sync_badge((string) $row['mecm_sync_state']); ?> <span class="muted"><?php echo h(mecm_updated_display($row['updated'] ?? 0)); ?></span></td>
                     <td class="actions"><a class="button button-secondary" href="<?php echo h(vm_edit_url($missionId, (int) $row['id'], null, vm_overview_editor_context($filter, $sort, $dir, $page))); ?>"><?php echo h(__t('vm_overview.open_vm')); ?></a></td>
                 </tr>
             <?php } ?>
             <?php if ($rows === []) { ?>
-                <tr><td colspan="6"><?php echo h($filter === VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING
+                <tr><td colspan="7"><?php echo h($filter === VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING
                     ? __t('vm_overview.empty_mecm_pending')
                     : __t('vm_overview.empty_all')); ?></td></tr>
             <?php } ?>

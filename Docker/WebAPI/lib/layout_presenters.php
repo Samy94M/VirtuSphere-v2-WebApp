@@ -312,17 +312,22 @@ function portal_page_nav(string $ariaLabel, array $items): string
     return $html . '</nav>';
 }
 
-// Localized label for a client deploy phase (fixed set, full-literal keys so
-// the lang catalog test can verify them).
-function client_phase_label(string $phase): string
+// The VM phase badge: colour from the phase state machine, words from the
+// portal label helper (lib/portal_status_display.php).
+function vm_phase_badge(string $phase): string
 {
-    return match ($phase) {
-        VIRTUSPHERE_CLIENT_PHASE_GETINFO => __t('vm_edit.phase_getinfo'),
-        VIRTUSPHERE_CLIENT_PHASE_HOSTNAME => __t('vm_edit.phase_hostname'),
-        VIRTUSPHERE_CLIENT_PHASE_STATICIP => __t('vm_edit.phase_staticip'),
-        VIRTUSPHERE_CLIENT_PHASE_DISKS => __t('vm_edit.phase_disks'),
-        default => $phase,
-    };
+    $meta = virtusphere_vm_phase_meta($phase);
+
+    return portal_badge((string) $meta['badge'], portal_vm_phase_label($phase));
+}
+
+// One VM finding as a badge: severity colour from the finding table, the whole
+// sentence as its text (the cell puts the same sentence in the tooltip).
+function vm_finding_badge(array $finding): string
+{
+    $meta = virtusphere_vm_finding_meta($finding);
+
+    return portal_badge((string) $meta['badge'], portal_vm_finding_text($finding));
 }
 
 // Localized label and action hint for an integration heartbeat source.

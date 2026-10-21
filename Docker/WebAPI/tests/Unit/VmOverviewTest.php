@@ -122,6 +122,8 @@ final class VmOverviewTest extends TestCase
             'mecm_sync_state' => 'pending',
             'updated' => 1,
             'mission_name' => '_Vorlage1',
+            'phase' => VIRTUSPHERE_VM_PHASE_TEMPLATE,
+            'findings' => [],
         ]];
 
         ob_start();
@@ -146,6 +148,8 @@ final class VmOverviewTest extends TestCase
             'mecm_sync_state' => 'registered',
             'updated' => 0,
             'mission_name' => 'Produktion',
+            'phase' => VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM,
+            'findings' => [],
         ]];
 
         ob_start();
@@ -168,11 +172,17 @@ final class VmOverviewTest extends TestCase
             'mecm_sync_state' => 'registered',
             'updated' => 0,
             'mission_name' => 'Produktion',
+            'phase' => VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM,
+            // One finding that links into the editor: its href must carry the same view as the row's own link.
+            'findings' => [['kind' => VIRTUSPHERE_VM_FINDING_PXE_UNWATCHED, 'severity' => 'info', 'params' => [], 'link' => ['target' => VIRTUSPHERE_VM_FINDING_LINK_VM_EDITOR]]],
         ]];
 
         ob_start();
         vm_overview_render_table($rows, 'all', 'status', 'desc', ['counted' => 1792400000, 'expected' => 3], 4);
         $html = (string) ob_get_clean();
+
+        self::assertStringContainsString(h(__t('status.finding_pxe_unwatched')), $html, 'the finding cell renders the worst finding');
+        self::assertStringContainsString('title="' . h(__t('status.phase_technical', ['status' => '3/5 Deployed'])) . '"', $html, 'the raw stage stays as the tooltip of the phase');
 
         self::assertStringContainsString('href="vm_edit.php?mission_id=5&amp;vm_id=9&amp;work_ov_filter=all&amp;work_ov_sort=status&amp;work_ov_dir=desc&amp;work_ov_page=4"', $html);
         self::assertStringNotContainsString('vm_edit.php?mission_id=5&amp;vm_id=9&amp;counted', $html);

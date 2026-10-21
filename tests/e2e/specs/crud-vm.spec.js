@@ -364,3 +364,44 @@ test('bulk delete: Cancel changes nothing, Confirm removes the selection', async
   await expect(outcome, 'the exact deletion scope is named').toContainText('2 of 2');
   await expect(outcome, 'portal deletion is not presented as a hypervisor change').toContainText(/No VM was deleted on the hypervisor/i);
 });
+
+// The list derives the phase and the worst finding from stored evidence (no action, so no e2e-covers marker).
+test('VM list shows the derived phase and the worst finding with its link', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'phase', 2);
+  const vm2 = seed.vmIds[1];
+  // Three hours of MECM wait: past the two-hour clock, so the overdue wait is the worst finding of VM 2.
+  // The clock is written in UTC, because the portal reads the stored timestamp as UTC.
+  runPhp(`
+$db = db();
+$vmId = ${Number(vm2)};
+$stmt = $db->prepare("UPDATE deploy_vms SET lifecycle_state = 'deployed', mecm_sync_state = 'pending', mecm_pending_since = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 3 HOUR) WHERE id = ?");
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'SEEDED';
+`);
+
+  await page.goto(`vms.php?mission_id=${seed.missionId}`);
+
+  const header = page.locator('thead');
+  await expect(header, 'the phase column is named').toContainText(/Phase/);
+  await expect(header, 'the finding column is named').toContainText(/Befund|Finding/);
+
+  // The phase is a badge; the raw x/5 value stays visible as the tooltip of its span.
+  const phaseBadge = rowFor(page, 'E2EVM1').locator('.badge', { hasText: /Handed to MECM|An MECM übergeben/ });
+  await expect(phaseBadge, 'VM 1 is handed to MECM').toHaveCount(1);
+  await expect(
+    phaseBadge.locator('xpath=ancestor-or-self::span[@title][1]'),
+    'the raw value is the tooltip of the phase'
+  ).toHaveAttribute('title', /2\/5 Registered/);
+
+  // The worst finding of VM 2 is the overdue MECM wait, and it links to the MECM status.
+  const overdue = rowFor(page, 'E2EVM2').locator('a[href*="system_status.php#mecm"]', { hasText: /longer than 2 h|länger als 2 h/ });
+  await expect(overdue, 'the overdue wait links to the MECM status').toHaveCount(1);
+  await expect(overdue).toHaveAttribute('href', /system_status\.php#mecm/);
+
+  // VM 1 has no finding, so its row links nowhere.
+  await expect(
+    rowFor(page, 'E2EVM1').locator('a[href*="system_status.php#mecm"]'),
+    'a VM without a finding links to nothing'
+  ).toHaveCount(0);
+});

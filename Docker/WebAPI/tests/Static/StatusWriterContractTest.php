@@ -63,13 +63,8 @@ final class StatusWriterContractTest extends TestCase
      * locales must teach the same numbers, or one of them lies alone.
      */
     private const STAGE_CLAIMS = [
-        'help_missions.status_1' => [1, 2],
-        'help_missions.status_2' => [2],
-        'help_missions.status_3' => [3],
-        'help_missions.status_4' => [4],
-        // The column sentence (QL-10) uses "3/5 Deployed" as its example and teaches the wording, not the stage.
-        'help_missions.status_wire' => [3],
-        'help_missions.status_5' => [5],
+        // The technical sentence names the stage 1/5, which no writer stores; it is shown only as an axis value.
+        'help_missions.status_technical_p1' => [1],
         'help_missions.status_stuck_1' => [2],
         'help_missions.status_stuck_2' => [3],
         'help_missions.status_stuck_3' => [4, 5],

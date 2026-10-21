@@ -127,20 +127,29 @@ final class PortalQolMarkupContractTest extends TestCase
         }
     }
 
-    public function testQl10TheStatusColumnNamesTheMecmInterfaceAndTheHelpSaysWhy(): void
+    /**
+     * QL-10 named the column after the MECM interface value it showed. Since
+     * the phase/finding rework (ST-1) the column shows the derived phase, the
+     * raw x/5 value is its tooltip, and the help's technical paragraph says
+     * where that value still lives and who reads it.
+     */
+    public function testQl10TheStatusColumnIsThePhaseAndTheHelpExplainsTheTechnicalValue(): void
     {
         self::assertStringContainsString(
             "portal_sort_header('vms.php', 'status', __t('vms.th_status')",
             self::source('portal/vms.php')
         );
         [$deHeader, $enHeader] = self::texts('vms', 'th_status');
-        self::assertStringContainsString('MECM', $deHeader);
-        self::assertStringContainsString('MECM', $enHeader);
+        self::assertSame('Phase', $deHeader);
+        self::assertSame('Phase', $enHeader);
+        self::assertStringContainsString("__t('status.phase_technical'", self::source('lib/vm_phase_cells.php'));
 
-        self::assertStringContainsString("__t('help_missions.status_wire')", self::source('lib/help/missions.php'));
-        [$deHelp, $enHelp] = self::texts('help_missions', 'status_wire');
-        self::assertStringContainsString('MECM', $deHelp);
-        self::assertStringContainsString('MECM', $enHelp);
+        self::assertStringContainsString("__t('help_missions.status_technical_p1')", self::source('lib/help/missions.php'));
+        [$deHelp, $enHelp] = self::texts('help_missions', 'status_technical_p1');
+        foreach ([$deHelp, $enHelp] as $help) {
+            self::assertStringContainsString('MECM', $help);
+            self::assertStringContainsString('x/5', $help);
+        }
     }
 
     public function testQl11TheDeleteWordingSaysOnlyThePortalRecordGoes(): void

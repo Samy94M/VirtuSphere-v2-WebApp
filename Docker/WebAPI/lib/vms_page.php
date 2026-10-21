@@ -36,7 +36,7 @@ function vms_export_csv_if_requested(
     // Override columns are stable in the export even when every value is empty.
     $header = [
         __t('vms.th_vm_name'), __t('vms.th_hostname'), __t('vms.th_os'), __t('vms.th_cpu'), __t('vms.csv_ram'),
-        __t('common.status'), __t('vms.th_datastore_override'), __t('vms.th_datacenter_override'),
+        __t('common.status'), __t('vms.csv_phase'), __t('vms.th_datastore_override'), __t('vms.th_datacenter_override'),
         __t('vms.th_mecm'), __t('vms.th_interfaces'), __t('vms.th_disks'), __t('vms.th_packages'),
         __t('vms.csv_network_status'), __t('vms.csv_network_detail'),
     ];
@@ -51,6 +51,7 @@ function vms_export_csv_if_requested(
             (string) ($vm['vm_cpu'] ?? ''),
             (string) ($vm['vm_ram'] ?? ''),
             (string) ($vm['vm_status'] ?? ''),
+            (string) ($vm['phase'] ?? ''),
             (string) ($vm['vm_datastore'] ?? ''),
             (string) ($vm['vm_datacenter'] ?? ''),
             (string) ($vm['mecm_sync_state'] ?? ''),

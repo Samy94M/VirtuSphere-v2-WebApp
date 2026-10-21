@@ -8,6 +8,7 @@ require_once dirname(__DIR__, 2) . '/lib/layout_response.php';
 require_once dirname(__DIR__, 2) . '/lib/status.php';
 require_once dirname(__DIR__, 2) . '/lib/layout_presenters.php';
 require_once dirname(__DIR__, 2) . '/lib/deploy_display.php';
+require_once dirname(__DIR__, 2) . '/lib/vm_phase.php';
 
 /**
  * The portal-only status vocabulary.
@@ -52,6 +53,12 @@ final class PortalStatusDisplayTest extends TestCase
                 array_merge(array_keys(virtusphere_deploy_mode_labels()), [VIRTUSPHERE_DEPLOY_MODE_INVENTORY]),
                 deploy_mode_label(...),
                 'status.mode_unknown',
+            ],
+            // `template` is no stored state, but the list shows it in the same column.
+            'vm phase' => [
+                array_merge(VIRTUSPHERE_VM_PHASES, [VIRTUSPHERE_VM_PHASE_TEMPLATE]),
+                portal_vm_phase_label(...),
+                'status.phase_unknown',
             ],
         ];
     }
@@ -153,6 +160,7 @@ final class PortalStatusDisplayTest extends TestCase
             mecm_sync_badge('not_a_state');
             deploy_job_status_badge('not_a_state');
             portal_mission_status_label('not_a_status');
+            vm_phase_badge('not_a_phase');
 
             self::assertSame('', (string) file_get_contents($log), 'rendering an unknown state wrote to the error log');
         } finally {
@@ -178,6 +186,100 @@ final class PortalStatusDisplayTest extends TestCase
         );
         // An unknown value keeps the neutral variant it already had.
         self::assertStringContainsString('badge-neutral', lifecycle_badge('not_a_state'));
+    }
+
+    /**
+     * Every finding kind is named in both locales, its text never leaks a
+     * catalog key or the raw kind, and its badge variant comes from the meta.
+     * `mecm_sync_failed` deliberately reuses `status.mecm_failed`, so it stays
+     * out of the uniqueness walk.
+     */
+    public function testEveryFindingKindIsNamedInBothLocalesAndHasAColour(): void
+    {
+        $params = [
+            'job_id' => 7,
+            'position' => 2,
+            'mode' => 'create',
+            'time' => '2026-10-21 10:00:00',
+            'since' => '2026-10-21 10:00:00',
+            'host' => 'esxi01',
+            'id' => 'R123',
+            'hours' => 2,
+            'minutes' => 15,
+            'phase' => 'hostname',
+            'package' => 'Paket 1.0',
+        ];
+
+        foreach (Lang::LOCALES as $locale) {
+            Lang::load($locale);
+            $seen = [];
+            foreach (array_keys(VIRTUSPHERE_VM_FINDINGS) as $kind) {
+                $finding = ['kind' => $kind, 'severity' => VIRTUSPHERE_VM_FINDINGS[$kind], 'params' => $params, 'link' => []];
+                $text = portal_vm_finding_text($finding);
+
+                self::assertNotSame('', trim($text), $locale . ': ' . $kind . ' has no text');
+                self::assertStringNotContainsString('status.', $text, $locale . ': ' . $kind . ' renders an untranslated key');
+                self::assertStringNotContainsString($kind, $text, $locale . ': ' . $kind . ' renders its raw kind');
+                if ($kind !== VIRTUSPHERE_VM_FINDING_MECM_SYNC_FAILED) {
+                    self::assertArrayNotHasKey($text, $seen, $locale . ': ' . $kind . ' shares a text with ' . ($seen[$text] ?? ''));
+                    $seen[$text] = $kind;
+                }
+                self::assertContains(
+                    virtusphere_vm_finding_meta($finding)['badge'],
+                    ['success', 'warning', 'danger', 'info', 'neutral'],
+                    $locale . ': ' . $kind . ' has no palette variant'
+                );
+            }
+        }
+    }
+
+    /**
+     * A finding whose facts are missing says so in its neutral sentence, never
+     * with an empty clause and never with the raw token.
+     */
+    public function testAFindingWithoutItsFactsFallsBackToItsNeutralSentence(): void
+    {
+        Lang::load('de');
+
+        $this->assertNamedText('status.finding_unknown', portal_vm_finding_text(
+            ['kind' => 'not_a_kind', 'severity' => 'neutral', 'params' => [], 'link' => []]
+        ));
+        $this->assertNamedText('status.finding_job_failed_unknown', portal_vm_finding_text(
+            ['kind' => VIRTUSPHERE_VM_FINDING_JOB_FAILED, 'severity' => 'danger', 'params' => [], 'link' => []]
+        ));
+        $this->assertNamedText('status.finding_job_running_unknown', portal_vm_finding_text(
+            ['kind' => VIRTUSPHERE_VM_FINDING_JOB_RUNNING, 'severity' => 'info', 'params' => [], 'link' => []]
+        ));
+        $this->assertNamedText('status.finding_mecm_pending', portal_vm_finding_text(
+            ['kind' => VIRTUSPHERE_VM_FINDING_MECM_PENDING, 'severity' => 'info', 'params' => ['since' => ''], 'link' => []]
+        ));
+        $this->assertNamedText('status.finding_missing_from_inventory_no_host', portal_vm_finding_text(
+            ['kind' => VIRTUSPHERE_VM_FINDING_MISSING_FROM_INVENTORY, 'severity' => 'danger', 'params' => ['host' => '', 'time' => '2026-10-21 10:00:00'], 'link' => []]
+        ), ['time' => portal_format_datetime('2026-10-21 10:00:00')]);
+    }
+
+    public function testPhaseAndFindingBadgesTakeTheirVariantFromTheMeta(): void
+    {
+        Lang::load('de');
+
+        self::assertStringContainsString('badge-success', vm_phase_badge(VIRTUSPHERE_VM_PHASE_CLIENT_DONE));
+        self::assertStringContainsString(__t('status.phase_client_done'), vm_phase_badge(VIRTUSPHERE_VM_PHASE_CLIENT_DONE));
+        self::assertStringContainsString('badge-neutral', vm_phase_badge('not_a_phase'));
+        self::assertStringContainsString(__t('status.phase_unknown'), vm_phase_badge('not_a_phase'));
+        self::assertStringContainsString('badge-danger', vm_finding_badge([
+            'kind' => VIRTUSPHERE_VM_FINDING_CREATE_UNCERTAIN,
+            'severity' => 'danger',
+            'params' => ['job_id' => 1, 'position' => 1],
+            'link' => [],
+        ]));
+    }
+
+    /** The text is the catalog sentence of that key, and no key or raw token leaks through. */
+    /** @param array<string,string> $replace */
+    private function assertNamedText(string $key, string $text, array $replace = []): void
+    {
+        self::assertStringNotContainsString('status.', $text, $key . ' renders an untranslated key');
+        self::assertSame(__t($key, $replace), $text);
     }
 
     public function testMissionStatusIsNotTreatedAsAnEnum(): void

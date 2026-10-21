@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 return [
     'csv_ram' => 'RAM (MB)',
+    'csv_phase' => 'phase',
     'title_template' => 'Vorlagen-VMs',
     'title_mission' => 'Missions-VMs',
     'open_deploy' => 'Bereitstellen',
@@ -12,8 +13,9 @@ return [
     // „Hostname" liessen offen, welcher davon in MECM landet.
     'th_vm_name' => 'VM-Name in ESXi',
     'th_hostname' => 'Windows-Hostname',
-    // Die Zustandswerte sind MECM-Schnittstellenwerte und bleiben englisch (Hilfe: help_missions.status_wire).
-    'th_status' => 'Status (MECM-Schnittstelle)',
+    // Die Spalte zeigt die abgeleitete Phase; der Rohwert x/5 steht im Tooltip und im VM-Editor.
+    'th_status' => 'Phase',
+    'th_finding' => 'Befund',
     'rollout_diverged' => 'wartet auf Reset',
     'rollout_diverged_title' => 'Dieser Rollout läuft weiter unter „:current". Der geänderte Name gilt erst nach dem Löschen des alten MECM-Geräts und „MECM-ID zurücksetzen".',
     'th_os' => 'OS',
@@ -30,10 +32,6 @@ return [
     'csv_network_detail' => 'network_config_detail',
     'th_disks' => 'Datenträger',
     'th_packages' => 'Pakete',
-    'th_attention' => 'Achtung',
-    'progress_badge_pending' => 'MECM länger als :hours h',
-    'progress_badge_installing' => 'OS-Installation länger als :hours h',
-    'progress_badge_unwatched' => 'PXE-Beobachtung fehlt',
     'progress_template_blocked' => 'Vorlagen haben keine laufende Fortschrittsbeobachtung.',
     'progress_flash_pending' => 'MECM-Beobachtung wurde neu gestartet.',
     'progress_flash_installing' => 'Beobachtung der OS-Installation wurde gestartet.',

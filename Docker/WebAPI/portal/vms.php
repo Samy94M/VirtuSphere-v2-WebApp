@@ -17,6 +17,9 @@ require_once __DIR__ . '/../lib/vm_network_display.php';
 require_once __DIR__ . '/../lib/vm_urls.php';
 require_once __DIR__ . '/../lib/mecm_rollout_display.php';
 require_once __DIR__ . '/../lib/vms_page.php';
+require_once __DIR__ . '/../lib/vm_phase.php';
+require_once __DIR__ . '/../lib/repo/vm_evidence.php';
+require_once __DIR__ . '/../lib/vm_phase_cells.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -194,6 +197,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $rows = getVMs($connection, $missionId);
+// Phase, rank and findings are derived at read time from one evidence batch
+// (lib/repo/vm_evidence.php); the rank is the sort key of the status column.
+$vmEvidence = repo_vm_evidence($connection, $rows);
+foreach ($rows as $index => $vmRow) {
+    $evidence = repo_vm_evidence_for_vm($vmEvidence, $vmRow, $isTemplate);
+    $rows[$index]['phase'] = virtusphere_vm_phase($vmRow, $evidence);
+    $rows[$index]['phase_rank'] = virtusphere_vm_phase_rank($rows[$index]['phase']);
+    $rows[$index]['findings'] = virtusphere_vm_findings($vmRow, $evidence);
+}
 $networkIssuesByVm = [];
 foreach ($rows as $networkVm) {
     $networkIssuesByVm[(int) $networkVm['id']] = vm_network_issues_for_interfaces(
@@ -213,7 +225,7 @@ $canWrite = can('vms.write', $user);
     'os' => portal_sort_text('vm_os'),
     'cpu' => portal_sort_number('vm_cpu'),
     'ram' => portal_sort_number('vm_ram'),
-    'status' => portal_sort_text('vm_status'),
+    'status' => portal_sort_number('phase_rank'),
 ], 'name');
 $workContext = portal_work_context_with_vm_list($workContext, $sort, $dir);
 $vmListUrl = portal_work_context_vm_list_url($missionId, $workContext);
@@ -225,15 +237,9 @@ vms_export_csv_if_requested($connection, $user, $missionId, $mission, $rows, $ne
 // exception, and a column of dashes states nothing while pushing the columns
 // that do off a narrow screen (portal display restraint).
 $hasLocationOverride = false;
-$hasProgressAttention = false;
 foreach ($rows as $vmRow) {
     if ($vmLocationOverride($vmRow) !== '') {
         $hasLocationOverride = true;
-    }
-    if (($vmRow['progress_attention'] ?? null) !== null
-        || (($vmRow['progress_watch_kind'] ?? null) === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING
-            && empty($vmRow['os_install_watch_started_at']))) {
-        $hasProgressAttention = true;
     }
 }
 
@@ -267,8 +273,9 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
     <section class="panel">
         <div class="table-wrap" tabindex="0">
             <?php // The one table with a pinned action column (tables.css):
-                  // fifteen columns, so the row actions would otherwise sit off
-                  // screen exactly while scrolling back loses which row it was. ?>
+                  // up to fifteen columns (checkbox, location and network are
+                  // optional), so the row actions would otherwise sit off screen
+                  // exactly while scrolling back loses which row it was. ?>
             <table class="table-sticky-actions">
                 <thead><tr><?php if ($canWrite) { ?><th><input type="checkbox" data-bulk-all aria-label="<?php echo h(__t('vms.bulk_select_all')); ?>"></th><?php } ?><?php
                     $vmSortParams = array_merge(
@@ -281,7 +288,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                     echo portal_sort_header('vms.php', 'cpu', __t('vms.th_cpu'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'ram', __t('vms.th_ram'), $sort, $dir, $vmSortParams);
                     echo portal_sort_header('vms.php', 'status', __t('vms.th_status'), $sort, $dir, $vmSortParams);
-                ?><?php if ($hasProgressAttention) { ?><th><?php echo h(__t('vms.th_attention')); ?></th><?php } ?><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><?php if ($hasNetworkIssues) { ?><th><?php echo h(__t('vms.th_network')); ?></th><?php } ?><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th class="table-action-cell"><?php echo h(__t('common.actions')); ?></th></tr></thead>
+                ?><th><?php echo h(__t('vms.th_finding')); ?></th><?php if ($hasLocationOverride) { ?><th><?php echo h(__t('vms.th_location')); ?></th><?php } ?><th><?php echo h(__t('vms.th_mecm')); ?></th><th><?php echo h(__t('vms.th_interfaces')); ?></th><?php if ($hasNetworkIssues) { ?><th><?php echo h(__t('vms.th_network')); ?></th><?php } ?><th><?php echo h(__t('vms.th_disks')); ?></th><th><?php echo h(__t('vms.th_packages')); ?></th><th class="table-action-cell"><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $vm) { ?>
                     <tr id="vm-<?php echo h((string) $vm['id']); ?>">
@@ -299,24 +306,8 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <td><?php echo h($vm['vm_os'] ?? ''); ?></td>
                         <td><?php echo h($vm['vm_cpu'] ?? ''); ?></td>
                         <td><?php echo h(vm_ram_format($vm['vm_ram'] ?? '')); ?></td>
-                        <td><?php echo status_badge((string) ($vm['vm_status'] ?? '')); ?></td>
-                        <?php if ($hasProgressAttention) { ?>
-                            <td><?php
-                                $attention = $vm['progress_attention'] ?? null;
-                                $watchMissing = ($vm['progress_watch_kind'] ?? null) === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING
-                                    && empty($vm['os_install_watch_started_at']);
-                                if (is_array($attention)) {
-                                    $label = $attention['kind'] === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
-                                        ? __t('vms.progress_badge_pending', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)])
-                                        : __t('vms.progress_badge_installing', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)]);
-                                    ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo portal_badge('warning', $label); ?></a><?php
-                                } elseif ($watchMissing) {
-                                    ?><a href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo portal_badge('info', __t('vms.progress_badge_unwatched')); ?></a><?php
-                                } else {
-                                    echo '&mdash;';
-                                }
-                            ?></td>
-                        <?php } ?>
+                        <td><?php echo vm_phase_cell($vm, (string) $vm['phase']); ?></td>
+                        <td><?php echo vm_findings_cell($vm['findings'], $missionId, (int) $vm['id'], $workContext); ?></td>
                         <?php if ($hasLocationOverride) { $override = $vmLocationOverride($vm); ?>
                             <td><?php echo $override !== '' ? h($override) : '&mdash;'; ?></td>
                         <?php } ?>
@@ -361,7 +352,7 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if ($rows === []) { ?><tr><td colspan="<?php echo ($canWrite ? 12 : 11) + ($hasLocationOverride ? 1 : 0) + ($hasProgressAttention ? 1 : 0); ?>"><?php echo h(__t('vms.empty')); ?></td></tr><?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="<?php echo ($canWrite ? 13 : 12) + ($hasLocationOverride ? 1 : 0); ?>"><?php echo h(__t('vms.empty')); ?></td></tr><?php } ?>
                 </tbody>
             </table>
         </div>

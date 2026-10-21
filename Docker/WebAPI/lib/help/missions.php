@@ -2,6 +2,8 @@
 // Help panel partial, included by portal/help.php. Not directly reachable
 // (nginx denies /lib/).
 declare(strict_types=1);
+
+require_once __DIR__ . '/../vm_phase.php';
 ?>
     <div class="stack" id="panel-missions" role="tabpanel" aria-labelledby="tab-missions" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -72,18 +74,31 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('help_missions.status_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.status_p1')); ?></p>
-            <?php // The one sentence that makes the list readable: a stage names the
-                  // last report that arrived, not the work that is done. Without it
-                  // "5/5" reads as "finished", which is what it used to promise. ?>
+            <?php // The one sentence that makes the list readable: a phase names the
+                  // last report that arrived, not the work that is done. ?>
             <p><?php echo h(__t('help_missions.status_p2')); ?></p>
-            <?php // The column header "Status (MECM-Schnittstelle)" names these values; this sentence says why they stay English. ?>
-            <p><?php echo h(__t('help_missions.status_wire')); ?></p>
+            <?php // The phase keys are built from the closed phase order of lib/vm_phase.php. ?>
             <ul>
-                <li><?php echo h(__t('help_missions.status_1')); ?></li>
-                <li><?php echo h(__t('help_missions.status_2')); ?></li>
-                <li><?php echo h(__t('help_missions.status_3')); ?></li>
-                <li><?php echo h(__t('help_missions.status_4')); ?></li>
-                <li><?php echo h(__t('help_missions.status_5')); ?></li>
+                <?php foreach (VIRTUSPHERE_VM_PHASES as $phase) { ?>
+                    <li><?php echo h(__t('help_missions.status_phase_' . $phase)); ?></li>
+                <?php } ?>
+                <li><?php echo h(__t('help_missions.status_template')); ?></li>
+            </ul>
+            <h3><?php echo h(__t('help_missions.status_technical_heading')); ?></h3>
+            <p><?php echo h(__t('help_missions.status_technical_p1')); ?></p>
+            <h3><?php echo h(__t('help_missions.status_findings_heading')); ?></h3>
+            <p><?php echo h(__t('help_missions.status_findings_p1')); ?></p>
+            <?php // The finding keys follow the closed kind table; each sentence takes only the
+                  // placeholders its own text uses. The two overdue limits come from their constants. ?>
+            <ul>
+                <?php foreach (array_keys(VIRTUSPHERE_VM_FINDINGS) as $kind) { ?>
+                    <li><?php echo h(__t('help_missions.status_finding_' . $kind, [
+                        'hours' => $kind === VIRTUSPHERE_VM_FINDING_OS_INSTALL_OVERDUE
+                            ? intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)
+                            : intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
+                        'minutes' => intdiv(VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS, 60),
+                    ])); ?></li>
+                <?php } ?>
             </ul>
             <h3><?php echo h(__t('help_missions.status_axes_heading')); ?></h3>
             <p><?php echo h(__t('help_missions.status_axes_p1')); ?></p>

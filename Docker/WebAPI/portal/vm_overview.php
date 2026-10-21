@@ -7,6 +7,8 @@ require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/vm_overview.php';
 require_once __DIR__ . '/../lib/vm_overview_page.php';
+require_once __DIR__ . '/../lib/vm_phase.php';
+require_once __DIR__ . '/../lib/repo/vm_evidence.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -21,6 +23,16 @@ $page = vm_overview_page_number(request_string($_GET, 'page', '1'));
 $snapshot = vm_overview_snapshot(request_string($_GET, 'counted', ''), request_string($_GET, 'expected', ''));
 
 $listing = repo_vm_overview_page($connection, $filter, $sort, $dir, $page, VIRTUSPHERE_VM_OVERVIEW_PER_PAGE);
+
+// The same derived phase and findings as the VM list, from one evidence batch
+// for the page (lib/repo/vm_evidence.php); a template row is marked by its mission.
+$vmEvidence = repo_vm_evidence($connection, $listing['rows']);
+foreach ($listing['rows'] as &$row) {
+    $evidence = repo_vm_evidence_for_vm($vmEvidence, $row, mission_name_is_template((string) $row['mission_name']));
+    $row['phase'] = virtusphere_vm_phase($row, $evidence);
+    $row['findings'] = virtusphere_vm_findings($row, $evidence);
+}
+unset($row);
 
 layout_header(vm_overview_title($filter), $user, 'dashboard', 'overview', 'help-dashboard-counts');
 ?>
