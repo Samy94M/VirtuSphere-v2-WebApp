@@ -1,7 +1,7 @@
 # Every stage uses the same digest-pinned PHP 8.4 base. Build dependencies live
 # only in extension-builder; the long-lived services use runtime, while Composer
 # and VCS/archive tools are available only in the explicitly built tooling stage.
-FROM php:8.4-fpm@sha256:1071b5609d16d60674f78eea8cf9bd7e9e79169ecb566d015c931c5ee789bb13 AS extension-builder
+FROM php:8.4-fpm@sha256:cc7cdfe4da7d46f6e69ac653e3d3396590bf51d6d6731854d01449d0b32b704c AS extension-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     linux-libc-dev \
@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-ext-install gd ldap mysqli pcntl zip \
     && rm -rf /var/lib/apt/lists/*
 
-FROM php:8.4-fpm@sha256:1071b5609d16d60674f78eea8cf9bd7e9e79169ecb566d015c931c5ee789bb13 AS runtime
+FROM php:8.4-fpm@sha256:cc7cdfe4da7d46f6e69ac653e3d3396590bf51d6d6731854d01449d0b32b704c AS runtime
 
 # Shared libraries only. Compilers, headers, Composer, git and archive tools
 # stay out of this stage. libfcgi-bin carries cgi-fcgi for the FPM healthcheck.
