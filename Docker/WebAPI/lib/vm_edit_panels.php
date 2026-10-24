@@ -15,13 +15,15 @@ declare(strict_types=1);
 /** @var string $error */
 /** @var array<string, string> $fieldErrors */
 /** @var array<string, array<string, mixed>|null> $clientPhaseSummary */
-/** @var array<int, array<string, mixed>> $clientEvents */
+/** @var string $vmPhase */
+/** @var list<array<string, mixed>> $vmFindings */
+/** @var array<string, mixed>|null $vmInventory */
+/** @var array{entries:list<array<string,mixed>>,truncated:bool} $timeline */
 /** @var array<int, array<string, mixed>> $packageRuns */
 /** @var array<int, array<string, mixed>> $oses */
 /** @var array<int, array<string, mixed>> $vlans */
 /** @var array<int, array<string, mixed>> $packages */
 /** @var array<string, string> $packageUpgradeHints */
-/** @var array<int, array<string, mixed>> $statusEvents */
 /** @var list<int> $selectedPackages */
 /** @var array{credential_count:int, eligible_count:int, exact:bool, buckets:array<int,array<string,mixed>>, groups:array<int,array<string,mixed>>, names:array<int,string>, name_set:array<string,true>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>} $vmDatacenterOptions */
 /** @var array{credential_count:int, eligible_count:int, exact:bool, buckets:array<int,array<string,mixed>>, groups:array<int,array<string,mixed>>, names:array<int,string>, name_set:array<string,true>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>} $vmDatastoreOptions */
@@ -67,7 +69,7 @@ declare(strict_types=1);
     </section>
 
     <?php if ($showProgressWatch) { ?>
-        <section class="panel stack" aria-labelledby="vm-progress-watch-heading">
+        <section class="panel stack" id="vm-progress-watch" aria-labelledby="vm-progress-watch-heading">
             <div class="actions">
                 <h2 id="vm-progress-watch-heading"><?php echo h(__t('vm_edit.progress_heading')); ?></h2>
                 <?php echo portal_badge($progressAttention !== null ? 'warning' : 'info', $progressAttention !== null
@@ -109,7 +111,7 @@ declare(strict_types=1);
         </section>
     <?php } ?>
 
-    <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_status_panel($vm, $clientPhaseSummary, $clientEvents); } ?>
+    <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_status_panel($vm, $vmPhase, $vmFindings, $clientPhaseSummary, $vmInventory, $missionId, $workContext); } ?>
     <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_package_reports($packageRuns, $missionId, $vmId, $workContext); } ?>
 
     <?php if ($error !== '') { ?>
@@ -373,5 +375,5 @@ declare(strict_types=1);
         <?php } ?>
     </form>
 
-    <?php render_vm_status_history($statusEvents); ?>
+    <?php render_vm_status_history($timeline, $missionId, $vmId, $workContext); ?>
 </div>

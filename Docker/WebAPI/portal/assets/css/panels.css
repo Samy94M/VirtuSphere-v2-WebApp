@@ -432,6 +432,15 @@ a.card:hover {
     margin: 0;
 }
 
+.vm-finding-list {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    margin: 0 0 14px;
+    padding: 0;
+}
+
 /* Client deploy phases as a numbered progress track: each step is its own tile
    with a state-colored left rail, so the four phases read at a glance instead of
    wrapping into one cramped row. */

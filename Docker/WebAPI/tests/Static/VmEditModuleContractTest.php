@@ -28,6 +28,8 @@ final class VmEditModuleContractTest extends TestCase
         'vm_guest_os_option_label',
         'vm_edit_render_status_panel',
         'render_vm_status_history',
+        'vm_edit_finding_href',
+        'vm_edit_inventory_text',
         'vm_edit_identity_fields',
         'vm_edit_ram_from_post',
         'render_vm_ram_field',

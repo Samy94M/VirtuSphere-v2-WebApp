@@ -48,6 +48,19 @@ if ($vmId > 0 && !$isTemplate) {
     $clientEvents = repo_client_events_for_vm($connection, $vmId, 20);
     $packageRuns = repo_package_runs_for_vm($connection, $vmId);
 }
+// The derived phase, findings and inventory reading of the stored VM (plan ST-2),
+// read before the POST merge so a rejected save cannot change what the page explains.
+$vmPhase = '';
+$vmFindings = [];
+$vmInventory = null;
+$timelineJobs = [];
+if ($vmId > 0 && !$isTemplate) {
+    $vmEvidence = repo_vm_evidence_for_vm(repo_vm_evidence($connection, [(array) $vm]), (array) $vm, false);
+    $vmPhase = virtusphere_vm_phase((array) $vm, $vmEvidence);
+    $vmFindings = virtusphere_vm_findings((array) $vm, $vmEvidence);
+    $vmInventory = is_array($vmEvidence['inventory'] ?? null) ? $vmEvidence['inventory'] : null;
+    $timelineJobs = repo_vm_timeline_jobs($connection, $vmId);
+}
 
 $error = '';
 $fieldErrors = [];
@@ -146,6 +159,7 @@ $packages = repo_packages_for_picker($connection, $selectedPackages);
 $packageUpgradeHints = $vmId > 0 ? repo_vm_package_upgrade_hints($connection, $vmId) : [];
 // The transition history (B11 rest): nine writers had no reader until Etappe 8.
 $statusEvents = $vmId > 0 ? repo_vm_status_events($connection, $vmId) : [];
+$timeline = virtusphere_vm_timeline($statusEvents, $timelineJobs, $packageRuns, $clientEvents);
 // Location overrides: empty means "inherit from the mission" (ansible_effective_*).
 // The mission value is only shown, never prefilled: a prefill would be saved back
 // as a real override and pin the VM to a value that later goes stale. A <select>

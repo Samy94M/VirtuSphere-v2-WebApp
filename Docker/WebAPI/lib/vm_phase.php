@@ -24,6 +24,7 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_create_constants.php';
 require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/vm_progress.php';
+require_once __DIR__ . '/vm_inventory_observation.php';
 
 // --- Phases (rank = index in VIRTUSPHERE_VM_PHASES plus one) -----------------
 const VIRTUSPHERE_VM_PHASE_CREATED = 'created';
@@ -297,16 +298,14 @@ function virtusphere_vm_findings(array $vm, array $evidence = [], ?int $now = nu
         ] : [], $terminal ? $jobLink : ['target' => VIRTUSPHERE_VM_FINDING_LINK_DEPLOY]);
     }
 
-    // 3 and 8: fresh, answered inventory of the bound access (a stale pull is
-    // not evidence; it produces neither finding).
+    // 3 and 8: the reading of the bound access (lib/vm_inventory_observation.php);
+    // a stale or unanswered pull is not evidence and produces neither finding.
     $inventory = is_array($evidence['inventory'] ?? null) ? $evidence['inventory'] : null;
-    $inventoryCurrent = $inventory !== null && !empty($inventory['fresh']) && !empty($inventory['answered']) && virtusphere_vm_is_bound($vm);
-    $inventoryVms = $inventoryCurrent ? (array) ($inventory['vms'] ?? []) : [];
-    $uuid = (string) ($vm['vm_instance_uuid'] ?? '');
-    if ($inventoryCurrent && !array_key_exists($uuid, $inventoryVms)) {
+    $observation = virtusphere_vm_inventory_observation($vm, $inventory);
+    if ($observation['state'] === VIRTUSPHERE_VM_INVENTORY_MISSING) {
         $add(VIRTUSPHERE_VM_FINDING_MISSING_FROM_INVENTORY, [
             'host' => (string) ($vm['vm_bound_esxi_host'] ?? ''),
-            'time' => virtusphere_vm_finding_time((string) ($inventory['fresh_at'] ?? ''), $current),
+            'time' => virtusphere_vm_finding_time($observation['time'], $current),
         ], ['target' => VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_ESXI]);
     }
 
@@ -344,11 +343,11 @@ function virtusphere_vm_findings(array $vm, array $evidence = [], ?int $now = nu
     $watching = $watchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $watchSince !== '';
 
     // 8: the inventory says powered off while MECM or Windows should be working.
-    if ($inventoryCurrent && array_key_exists($uuid, $inventoryVms)
-        && (string) ($inventoryVms[$uuid] ?? '') === VIRTUSPHERE_VM_INVENTORY_POWERED_OFF
+    if ($observation['state'] === VIRTUSPHERE_VM_INVENTORY_PRESENT
+        && $observation['power'] === VIRTUSPHERE_VM_INVENTORY_POWERED_OFF
         && (in_array($phase, [VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM, VIRTUSPHERE_VM_PHASE_WINDOWS_REPORTS], true) || $watching)
     ) {
-        $add(VIRTUSPHERE_VM_FINDING_POWERED_OFF, ['time' => virtusphere_vm_finding_time((string) ($inventory['fresh_at'] ?? ''), $current)], ['target' => VIRTUSPHERE_VM_FINDING_LINK_VM_EDITOR]);
+        $add(VIRTUSPHERE_VM_FINDING_POWERED_OFF, ['time' => virtusphere_vm_finding_time($observation['time'], $current)], ['target' => VIRTUSPHERE_VM_FINDING_LINK_VM_EDITOR]);
     }
 
     if ($watchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING) {

@@ -114,6 +114,7 @@ require_once __DIR__ . '/../vm_phase.php';
                 <li><?php echo h(__t('help_missions.status_stuck_1')); ?> <a href="<?php echo h('deploy.php'); ?>"><?php echo h(__t('help_missions.link_deploy')); ?></a></li>
                 <li><?php echo h(__t('help_missions.status_stuck_2', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)])); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('help_missions.link_system_status')); ?></a></li>
                 <li><?php echo h(__t('help_missions.status_stuck_3', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)])); ?></li>
+                <li><?php echo h(__t('help_missions.status_stuck_4')); ?></li>
             </ul>
         </section>
 

@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
  * The raw `vm_status` (the x/5 MECM value) is not a label an operator should
  * read as a phase. It stays rendered only where its role is the raw value
  * itself: the VM editor's status panel (lib/vm_edit_status.php, whose technical
- * block follows in ST-2), the technical tooltip of the phase badge (the one
+ * block lists the stored values), the technical tooltip of the phase badge (the one
  * place the list keeps it, plan section 5) and the CSV exports, where the raw
  * value may be a column but never a badge. The machine API lives at the WebAPI
  * root (mecm-*.php) and is not scanned here.

@@ -21,6 +21,7 @@ require_once __DIR__ . '/../deploy_create_constants.php';
 require_once __DIR__ . '/../deploy_stored_mode.php';
 require_once __DIR__ . '/../esxi_inventory_evidence.php';
 require_once __DIR__ . '/../status_evidence.php';
+require_once __DIR__ . '/../vm_timeline.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/settings.php';
 
@@ -281,4 +282,37 @@ function repo_vm_evidence_inventory(mysqli $db, array $credentialIds, int $now):
     }
 
     return $inventory;
+}
+
+/**
+ * The deploy jobs that touched this VM (journal deploy_job_vm_states, index (vm_id, id)),
+ * newest journal row first, for the timeline. The payload stays in the job table; only
+ * the stored mode is read from it, through the predicate repo_vm_evidence_jobs() uses.
+ *
+ * @return list<array{id:int,status:string,mode:?string,created_at:?string,started_at:?string,updated_at:?string}>
+ */
+function repo_vm_timeline_jobs(mysqli $db, int $vmId, int $limit = VIRTUSPHERE_VM_TIMELINE_LIMIT): array
+{
+    $limit = max(1, min(100, $limit));
+    $stmt = $db->prepare(
+        'SELECT j.id, j.status, j.payload_json, j.created_at, j.started_at, j.updated_at'
+        . ' FROM deploy_job_vm_states s INNER JOIN deploy_jobs j ON j.id = s.job_id'
+        . ' WHERE s.vm_id = ? ORDER BY s.id DESC LIMIT ?'
+    );
+    $stmt->bind_param('ii', $vmId, $limit);
+    $stmt->execute();
+
+    $jobs = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $jobs[] = [
+            'id' => (int) $row['id'],
+            'status' => (string) $row['status'],
+            'mode' => deploy_job_stored_mode(json_decode((string) ($row['payload_json'] ?? ''), true)),
+            'created_at' => $row['created_at'] ?? null,
+            'started_at' => $row['started_at'] ?? null,
+            'updated_at' => $row['updated_at'] ?? null,
+        ];
+    }
+
+    return $jobs;
 }

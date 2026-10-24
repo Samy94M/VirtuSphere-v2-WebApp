@@ -65,9 +65,7 @@ final class StatusWriterContractTest extends TestCase
     private const STAGE_CLAIMS = [
         // The technical sentence names the stage 1/5, which no writer stores; it is shown only as an axis value.
         'help_missions.status_technical_p1' => [1],
-        'help_missions.status_stuck_1' => [2],
-        'help_missions.status_stuck_2' => [3],
-        'help_missions.status_stuck_3' => [4, 5],
+        // status_stuck_1..3 name phases and findings since ST-2, not x/5 stages, so they are no longer pinned.
         'help_stack.stack_a6_p3' => [4],
         'help_stack.stack_a7_p3' => [5],
         'help_stack.stack_a11_li1' => [3],

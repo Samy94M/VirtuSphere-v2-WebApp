@@ -182,6 +182,35 @@ final class VmEvidenceReaderTest extends TestCase
         self::assertNotNull($run['completed_received_at']);
     }
 
+    /**
+     * The timeline's job source (plan ST-2, section 2): every job that touched
+     * the VM, newest journal row first, only this VM's rows, the mode read from
+     * the stored payload, and no payload in the result.
+     */
+    public function testTheJobsThatTouchedAVmAreListedNewestJournalRowFirstWithoutPayload(): void
+    {
+        $vm = $this->insertVm('timeline-a', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $other = $this->insertVm('timeline-b', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $first = $this->insertJob('succeeded', ['mode' => 'create']);
+        $second = $this->insertJob('failed', ['mode' => 'export']);
+        $unrelated = $this->insertJob('running', ['mode' => 'start']);
+        $this->journal($first, $vm, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $this->journal($second, $vm, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $this->journal($unrelated, $other, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+
+        $jobs = repo_vm_timeline_jobs($this->db, $vm);
+
+        self::assertSame([$second, $first], array_column($jobs, 'id'), 'the newest journal row comes first and the other VM is not listed');
+        self::assertSame(['export', 'create'], array_column($jobs, 'mode'), 'the mode is read from the stored payload');
+        self::assertSame(['failed', 'succeeded'], array_column($jobs, 'status'));
+        foreach ($jobs as $job) {
+            self::assertArrayNotHasKey('payload_json', $job, 'the payload stays in the job table');
+            self::assertEqualsCanonicalizing(['id', 'status', 'mode', 'created_at', 'started_at', 'updated_at'], array_keys($job));
+        }
+        self::assertSame([$second], array_column(repo_vm_timeline_jobs($this->db, $vm, 1), 'id'), 'the limit cuts the list');
+        self::assertSame([$unrelated], array_column(repo_vm_timeline_jobs($this->db, $other), 'id'));
+    }
+
     /** @return array<string,mixed> */
     private function vmRow(int $vmId): array
     {
