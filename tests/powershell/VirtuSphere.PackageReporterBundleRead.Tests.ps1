@@ -94,24 +94,31 @@ Describe 'T4 wrapper reads only a complete bound reporter generation' {
                 Set-Item -Path function:Get-VsPackageVerifiedReporterBundle -Value {
                     param([string]$PackageRoot)
                     [IO.File]::WriteAllText((Join-Path $PackageRoot 'verifier-pid.txt'), [string]$PID)
-                    Start-Sleep -Seconds 30
+                    Start-Sleep -Seconds 60
                 }
                 # The deadline must be long enough for the child to reach the stuck
                 # stub even on a loaded host; a shorter one tests the start timeout
                 # instead and leaves no PID to prove the kill (release lane 28.09.).
+                $timeoutMs = 6000
                 $clock = [Diagnostics.Stopwatch]::StartNew()
-                Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 6000 |
-                    Should -BeNullOrEmpty
+                $bundle = Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs $timeoutMs
                 $clock.Stop()
-                $clock.ElapsedMilliseconds | Should -BeLessThan 7000
+                $bundle | Should -BeNullOrEmpty
                 $pidFile = Join-Path $script:fixture.Root 'verifier-pid.txt'
                 Test-Path -LiteralPath $pidFile | Should -BeTrue -Because 'the child must have reached the stuck verifier before its deadline'
+                # The stuck child never answers, so only the deadline can end the
+                # wait; a wait without deadline lasts until the 60 s stub ends. The
+                # upper bound sits between both and leaves room for a stalled host:
+                # under foreign load the test took 14.7 s while the wrapper spent
+                # under 5 ms after its deadline and the child was gone within 50 ms (T1, 25.10.).
+                $clock.ElapsedMilliseconds | Should -BeGreaterOrEqual ($timeoutMs - 100) -Because 'the stuck child never answers before the deadline'
+                $clock.ElapsedMilliseconds | Should -BeLessThan 20000 -Because 'the wrapper returns on its deadline, not when the 60 s stub ends'
                 $childId = [int](Get-Content -LiteralPath $pidFile -Raw)
                 $endClock = [Diagnostics.Stopwatch]::StartNew()
-                while ((Get-Process -Id $childId -ErrorAction SilentlyContinue) -and $endClock.ElapsedMilliseconds -lt 1000) {
+                while ((Get-Process -Id $childId -ErrorAction SilentlyContinue) -and $endClock.ElapsedMilliseconds -lt 5000) {
                     Start-Sleep -Milliseconds 25
                 }
-                Get-Process -Id $childId -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+                Get-Process -Id $childId -ErrorAction SilentlyContinue | Should -BeNullOrEmpty -Because 'closing the job kills the stuck child long before its stub ends'
             } finally {
                 Set-Item -Path function:Get-VsPackageVerifiedReporterBundle -Value $original
             }
