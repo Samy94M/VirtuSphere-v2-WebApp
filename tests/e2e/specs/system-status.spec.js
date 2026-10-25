@@ -4,6 +4,7 @@
 const { test, expect } = require('@playwright/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
+const { submitAndWaitForNavigation } = require('../lib/navigation');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -535,10 +536,9 @@ echo 'JSON' . json_encode(['cert' => $pem, 'key' => $keyPem]) . 'JSON';
   const submitConfirmed = async (button) => {
     await button.click();
     await expect(dialog, 'the action asks first').toBeVisible();
-    await Promise.all([
-      page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
-      dialog.locator('[data-confirm-accept]').click(),
-    ]);
+    // Wait for the redirect page to load, not only for the POST answer: a
+    // following page.goto would otherwise race the redirect (B1).
+    await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'settings.php');
   };
   try {
     restore('');

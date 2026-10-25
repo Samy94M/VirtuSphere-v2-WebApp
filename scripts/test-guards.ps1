@@ -405,6 +405,23 @@ $cases = @(
         Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Erstpasswort liegt in ``Docker/WebAPI/logs/$phantom``.`n`n## Schritt 3: Backup")
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phantom-path\]'
     } }
+    @{ Name = 'doc-semantics.phantom-path-ignored-decoy'; Body = {
+        # Befund G1 (Release 2026.10.1): Im Hauptbaum nannten gitignorierte
+        # Audit-Notizen unter qa-artifacts/ den Phantomnamen, und der Scan las
+        # sie als Erzeuger. Ein ignorierter Koeder im echten Baum darf den Fund
+        # nicht verdecken. Der Koeder liegt nur fuer diesen Fall dort.
+        $phantom = 'initial-admin' + '-password' + '.txt'
+        $decoyDir = Join-Path $repoRoot ('qa-artifacts/guard-decoy-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force $decoyDir | Out-Null
+        try {
+            Set-Content -Encoding utf8 -Path (Join-Path $decoyDir 'note.md') -Value ("Audit-Notiz nennt $phantom")
+            $fx = New-Fixture $docSemFixtureFiles
+            Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Erstpasswort liegt in ``Docker/WebAPI/logs/$phantom``.`n`n## Schritt 3: Backup")
+            Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phantom-path\]'
+        } finally {
+            Remove-Item -Recurse -Force $decoyDir -Confirm:$false
+        }
+    } }
     @{ Name = 'doc-semantics.phantom-path-removal-note'; Body = {
         # Gegenrichtung: eine Loeschungsnotiz ("entfernt X") darf NICHT rot
         # werden, sonst waere jede historische Aussage in aktiver Doku ein Befund

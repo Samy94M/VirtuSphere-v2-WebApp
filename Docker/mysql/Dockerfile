@@ -7,10 +7,11 @@
 # the current Go toolchain; the module has no semver tags, so the pin is the
 # exact pseudo-version. The Go toolchain comes from the builder digest, so a
 # new Go stdlib fix means bumping that digest (2026-10-14: Go 1.27.1 to 1.27.2,
-# three High findings). CGO_ENABLED=0 is load-bearing and not a habit: a
+# three High findings; 2026-10-25: Go 1.27.2 to 1.27.3, CVE-2026-111943 in
+# crypto/x509). CGO_ENABLED=0 is load-bearing and not a habit: a
 # cgo-linked build from Alpine would be musl-linked and unusable in the
 # glibc-based Oracle Linux stage below.
-FROM golang:1-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS gosu
+FROM golang:1-alpine@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS gosu
 ENV CGO_ENABLED=0
 RUN go install -trimpath -ldflags="-s -w" \
         github.com/tianon/gosu@v0.0.0-20260606051551-40506998e34a

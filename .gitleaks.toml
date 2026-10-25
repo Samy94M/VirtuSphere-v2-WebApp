@@ -18,7 +18,9 @@
 [extend]
 useDefault = true
 
-[allowlist]
+# Globale Eintraege fuer alle Regeln (ohne targetRules; condition OR wie beim
+# frueheren [allowlist], das gitleaks neben [[allowlists]] nicht mehr laedt).
+[[allowlists]]
 description = "dokumentierte Test-Fixtures, Vendor-Format-Templates und der historische Dev-Key"
 paths = [
     # HTTPS-Test-Fixtures: absichtlich eingecheckte Wegwerf-Schluessel, die nur
@@ -41,3 +43,30 @@ stopwords = [
     "Rbac-Smuggle",
     "ADR-0018-Semantik",
 ]
+
+# Erfundene Testwerte in Redaktionstests (Release 2026.10.1, Befund S1). Jeder
+# Eintrag gilt nur fuer eine Regel, nur fuer genau die genannten Dateien und nur
+# fuer genau den Testwert (condition AND): ein echtes Secret in derselben Datei
+# oder derselbe Wert in einer anderen Datei bleibt ein Fund.
+#
+# LogRedactionTest (Commit 6090ddfc, AL-2) prueft, dass ein PEM-Block im Log
+# geschwaerzt wird. Der "Schluessel" ist ein abgeschnittener Kopf plus die
+# PHP-Verkettung mit dem Testgeheimnis ($s), kein Schluesselmaterial.
+[[allowlists]]
+description = "PEM-Attrappe im Redaktionstest (S1)"
+targetRules = ["private-key"]
+condition = "AND"
+paths = ['''^Docker/WebAPI/tests/Unit/LogRedactionTest\.php$''']
+regexes = ['''MIIEpAIBAAKCAQEA" \. \$s \. "''']
+
+# Die beiden Deploy-Tests (Commit 2cc528c7) setzen ein erfundenes ESXi-Passwort
+# und pruefen, dass es in keinem gespeicherten Fehlertext ueberlebt.
+[[allowlists]]
+description = "erfundenes ESXi-Passwort in Deploy-Redaktionstests (S1)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+    '''^Docker/WebAPI/tests/Integration/DeployCreateErrorDetailRedactionTest\.php$''',
+    '''^Docker/WebAPI/tests/Unit/DeployWorkerStepFailureTest\.php$''',
+]
+regexes = ['''^Esxi-Secret-4711$''']

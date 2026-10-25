@@ -4,6 +4,8 @@ Ab dem ersten Release gliedert sich dieses Changelog nach Release-Nummern (`JJJJ
 
 ## Noch in keinem Release
 
+- **Das MySQL-Image baut `gosu` mit Go 1.27.3 (25.10.2026).** Das Image `mysql:8.4-virtusphere` übersetzt sein Werkzeug `gosu` mit einem neuen `golang`-Builder; das schließt CVE-2026-111943 (HIGH, `crypto/x509`). MySQL selbst und seine Daten bleiben unverändert. Ein Update mit diesem Stand lädt das neue MySQL-Image und startet den Datenbankcontainer neu.
+
 ## 2026.10.1 (25.10.2026)
 
 Erstes Release mit Nummer, Update vom Prod-Stand `c89c01f`. Keine Migration (Schema bleibt 0064), keine neuen `.env`-Schlüssel. Neu ist das PHP-Image `virtusphere-php:8.4-runtime` (PHP 8.4.27) für php, deploy-worker und maintenance-worker. Einträge „wirksam mit dem nächsten MECM-Serverupdate“ brauchen `install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly` aus dem MECM-Paket dieses Release, Einträge „wirksam erst mit dem Client-Cutover“ bleiben bis dahin inaktiv.

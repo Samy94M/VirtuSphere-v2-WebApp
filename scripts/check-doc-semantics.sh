@@ -199,17 +199,34 @@ claimed_paths=$(grep -hE "$path_pattern" $doc_path_scope 2>/dev/null \
   | grep -viE 'entfern|removes|removed|geloescht|gel.scht|retired|stillgelegt|nicht mehr' \
   | grep -oE "$path_pattern" \
   | tr -d '`' | LC_ALL=C sort -u || true)
+# Erzeuger sind nur versionierte Dateien. Ein Scan ueber den Arbeitsbaum las im
+# Hauptbaum auch das gitignorierte qa-artifacts/ mit, dessen Audit-Notizen den
+# Phantomnamen nennen, und meldete einen echten Phantompfad dort nicht
+# (Release 2026.10.1, Befund G1). Was ignoriert ist, haengt vom Rechner ab.
+# Ohne lesbare Dateiliste gibt es keinen belastbaren Scan, also rot statt still.
+#
+# Erzeuger/Leser: irgendeine Nennung ausserhalb von docs/. Auf dem Basisnamen,
+# weil Code den Pfad selten als ganzen String traegt (er baut ihn aus einem
+# Verzeichnis plus Dateinamen zusammen). *.log faellt heraus: eine Logzeile, die
+# den Namen zufaellig enthaelt, ist kein Erzeuger. Ein Durchlauf fuer alle
+# Basisnamen; gesammelt wird, welche davon irgendwo vorkommen.
+found_bases=''
+if [ -n "$claimed_paths" ]; then
+  if git -C "$real_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    set --
+    for path in $claimed_paths; do set -- "$@" -e "$(basename "$path")"; done
+    found_bases=$(git -C "$real_root" ls-files -z 2>/dev/null \
+      | grep -zvE '(^|/)(docs|vendor|node_modules|dist)/|\.log$' \
+      | (cd "$real_root" && xargs -0 -r grep -ohsIF "$@" 2>/dev/null) \
+      | LC_ALL=C sort -u || true)
+  else
+    fail phantom-path "die versionierte Dateiliste von '$real_root' ist nicht lesbar (git ls-files); ohne sie laesst sich kein Erzeuger nachweisen."
+    claimed_paths=''
+  fi
+fi
 for path in $claimed_paths; do
   base=$(basename "$path")
-  # Erzeuger/Leser: irgendeine Nennung ausserhalb von docs/. Auf dem Basisnamen,
-  # weil Code den Pfad selten als ganzen String traegt (er baut ihn aus einem
-  # Verzeichnis plus Dateinamen zusammen).
-  # --exclude=*.log: eine Logzeile, die den Namen zufaellig enthaelt, ist kein
-  # Erzeuger. Laufzeitlogs liegen im Arbeitsbaum (gitignored) und wuerden die
-  # Regel abhaengig davon machen, was der Stack heute geschrieben hat.
-  if ! grep -rqI --exclude-dir=docs --exclude-dir=.git --exclude-dir=vendor \
-       --exclude-dir=node_modules --exclude-dir=dist --exclude='*.log' \
-       -- "$base" "$real_root" 2>/dev/null; then
+  if ! printf '%s\n' "$found_bases" | grep -qxF -- "$base"; then
     fail phantom-path "aktive Doku nennt '$path', aber nichts ausserhalb von docs/ erzeugt oder liest '$base'; ein Pfad, der nur in der Doku existiert, schickt den Leser ins Leere."
   fi
 done
