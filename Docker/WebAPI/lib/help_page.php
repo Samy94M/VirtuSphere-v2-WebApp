@@ -23,6 +23,9 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     'help-dashboard-counts' => 'overview',
     'help-effective-values' => 'missions',
     'help-work-context' => 'missions',
+    // The path of a VM as a drawing: the derived phases in rank order. The
+    // status section below it explains each phase and finding in words.
+    'help-vm-path' => 'missions',
     'help-status-overview' => 'system-status',
     'help-status-deploy' => 'system-status',
     'help-status-directory' => 'system-status',

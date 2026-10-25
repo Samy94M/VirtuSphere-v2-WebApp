@@ -4,11 +4,28 @@ Dieses Glossar verwendet die Begriffe so, wie Portal, Maschinen-API, Ansible und
 
 ## VM-Statusstufen
 
-- **1/5 Initializing:** wird nie gespeichert, erscheint aber als Rückfallanzeige im Legacy-Statusstring, wenn keine spätere Stufe zutrifft (zum Beispiel Lebenszyklus initializing, deploying oder failed).
-- **2/5 Registered:** Portal-Datensatz existiert. Auf ESXi muss noch keine VM vorhanden sein.
-- **3/5 Deployed:** der scoped MAC-Rückruf des Ansible-Hosts wurde angenommen. MECM hat noch keine ResourceID bestätigt.
-- **4/5 OS Installing:** MECM Device-Sync hat ResourceID und Zuordnung zurückgemeldet. Die VM kann per PXE in die Task Sequence gehen.
-- **5/5 OS Installed:** `client_getinfo` hat seine Registry-Daten vollständig geschrieben und den Client-Ready-ACK bestätigt bekommen. Das ist kein Beweis, dass Hostname, statische IP und Datenträgerphasen bereits beendet sind; dafür gelten die Client-Phasen im VM-Editor.
+Der Stufenwert x/5 (`vm_status`) ist das Wire-Feld der MECM-Schnittstelle. Er hat zwei Quellen: die gespeicherte Spalte, die nur die unten genannten Schreiber setzen, und den Wert, den die Maschinen-API bei jeder Abfrage aus Lebenszyklus und MECM-Abgleich berechnet (`virtusphere_legacy_status_from_states()`). Die Übergänge des Workers (markieren, Vorzustand, Fehler) ändern nur die beiden Achsen. Das Portal zeigt den gespeicherten Wert als Tooltip der Phase und im Block „Technisch“ des VM-Editors; der Device-Sync liest den berechneten. Die Abläufe zeichnet [Lebenszyklus einer VM](operations/vm-lifecycle.md).
+
+- **1/5 Initializing:** wird nie gespeichert. Die Maschinen-API liefert ihn, wenn keine spätere Stufe zutrifft (Lebenszyklus `initializing`, `deploying` oder `failed` ohne MECM `pending` oder `registered`); das Portal zeigt für dieselbe VM den gespeicherten Wert, etwa 2/5.
+- **2/5 Registered:** gespeichert beim Anlegen, beim Import und beim Kopieren aus einer Vorlage. Der Portal-Datensatz existiert; auf ESXi muss noch keine VM vorhanden sein.
+- **3/5 Deployed:** gespeichert, wenn der scoped MAC-Rückruf des Ansible-Hosts angenommen wurde oder „MECM-ID zurücksetzen“ die VM neu vorgemerkt hat. MECM hat noch keine ResourceID bestätigt.
+- **4/5 OS Installing:** gespeichert, wenn der MECM Device-Sync ResourceID und Zuordnung zurückgemeldet hat. Die VM kann per PXE in die Task Sequence gehen.
+- **5/5 OS Installed:** gespeichert, wenn `client_getinfo` seine Registry-Daten vollständig geschrieben und den Client-Ready-ACK bestätigt bekommen hat. Das ist kein Beweis, dass Hostname, statische IP und Datenträgerphasen bereits beendet sind; dafür gelten die Client-Phasen im VM-Editor.
+
+### Phasen
+
+Die Spalte „Phase“ in VM-Liste, VM-Übersicht und VM-Editor wird beim Lesen abgeleitet und nie gespeichert oder übertragen. Geprüft wird von oben nach unten; es gilt die erste Phase, deren Beleg vorliegt. Ein fehlgeschlagener Auftrag setzt die Phase nicht zurück, sondern erscheint als Befund.
+
+| Phase | Gilt, wenn | Stufenwert auf der Leitung |
+|---|---|---|
+| Client fertig | Lebenszyklus `os_installed` und jede Clientphase hat zuletzt `finished` gemeldet | 5/5 |
+| Windows meldet sich | Lebenszyklus `os_installed` | 5/5 |
+| An MECM übergeben | Lebenszyklus `os_installing` oder MECM `registered` | 4/5 |
+| MAC bekannt | Lebenszyklus `deployed` oder MECM `pending` | 3/5 |
+| Auf ESXi | Instanz-UUID gebunden | 2/5, nach einem Fehler 1/5 |
+| In Arbeit | Lebenszyklus `deploying` | 1/5 |
+| Angelegt | alles andere | 2/5, nach einem Fehler 1/5 |
+| Vorlage | VM einer Vorlagen-Mission | wird nicht übertragen |
 
 ## Auftragsstatus
 

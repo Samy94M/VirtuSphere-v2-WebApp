@@ -93,4 +93,23 @@
     .capacity-fill {
         border: 1px solid CanvasText;
     }
+
+    /* The VM path figure is drawn with SVG paint, which forced colors does not
+       replace on its own: shapes and words take the system colours. */
+    .vm-path-box,
+    .vm-path-num-ring {
+        fill: Canvas;
+        stroke: CanvasText;
+    }
+
+    .vm-path-num,
+    .vm-path-label,
+    .vm-path-caption,
+    .vm-path-arrowhead {
+        fill: CanvasText;
+    }
+
+    .vm-path-connector {
+        stroke: CanvasText;
+    }
 }

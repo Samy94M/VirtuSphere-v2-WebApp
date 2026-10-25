@@ -1021,3 +1021,78 @@ a.tab {
 .faq details p {
     margin: 10px 0 0;
 }
+
+/* "Der Weg einer VM" in the missions help (lib/help/vm_path_svg.php). The
+   step colour is the phase badge colour from virtusphere_vm_phase_meta(); the
+   shapes take it through currentColor, so the theme tokens switch light and
+   dark without a second palette. */
+.vm-path {
+    margin: var(--space-3) 0 0;
+}
+
+.vm-path-svg {
+    display: block;
+    width: 100%;
+    max-width: 26rem;
+    height: auto;
+}
+
+.vm-path-step {
+    color: var(--muted);
+}
+
+.vm-path-step-neutral {
+    color: var(--muted);
+}
+
+.vm-path-step-warning {
+    color: var(--warning);
+}
+
+.vm-path-step-info {
+    color: var(--info);
+}
+
+.vm-path-step-success {
+    color: var(--success);
+}
+
+.vm-path-box {
+    fill: var(--surface-muted);
+    stroke: currentColor;
+    stroke-width: 1.5;
+}
+
+.vm-path-num-ring {
+    fill: var(--surface);
+    stroke: currentColor;
+    stroke-width: 1.5;
+}
+
+.vm-path-num {
+    fill: currentColor;
+    font-size: 13px;
+    font-weight: 700;
+    text-anchor: middle;
+    dominant-baseline: central;
+}
+
+.vm-path-label {
+    fill: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.vm-path-caption {
+    fill: var(--muted);
+    font-size: 13px;
+}
+
+.vm-path-connector {
+    stroke: var(--muted);
+    stroke-width: 1.5;
+}
+
+.vm-path-arrowhead {
+    fill: var(--muted);
+}

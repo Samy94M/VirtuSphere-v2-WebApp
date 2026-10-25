@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../vm_phase.php';
+require_once __DIR__ . '/../help_vm_path.php';
 ?>
     <div class="stack" id="panel-missions" role="tabpanel" aria-labelledby="tab-missions" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -69,6 +70,12 @@ require_once __DIR__ . '/../vm_phase.php';
             <p><?php echo h(__t('help_missions.rollout_p2')); ?></p>
             <p><?php echo h(__t('help_missions.rollout_p3')); ?></p>
             <p><?php echo h(__t('help_missions.rollout_p4')); ?></p>
+        </section>
+
+        <section class="panel" id="help-vm-path">
+            <h2><?php echo h(__t('help_vm_path.heading')); ?></h2>
+            <p><?php echo h(__t('help_vm_path.intro', ['section' => __t('help_missions.status_heading')])); ?></p>
+            <?php echo help_vm_path_figure(); ?>
         </section>
 
         <section class="panel">

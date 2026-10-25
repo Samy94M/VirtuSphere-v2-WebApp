@@ -5,6 +5,7 @@ VirtuSphere rendert das Portal in PHP, speichert Aufträge in MySQL und lässt d
 | Thema | Dokument |
 |---|---|
 | Einreihen, Worker und Playbooks | [Bereitstellung: Abläufe](deploy-flows.md) |
+| Phasen, Lebenszyklus und MECM-Abgleich einer VM | [Lebenszyklus einer VM](vm-lifecycle.md) |
 | Statusprüfungen | [Systemstatus: Prüfungen](system-status-checks.md) |
 | Serveraufgaben in MECM | [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md) |
 | SSH-/SFTP-Vertrauensanker zum Ubuntu-Host | [Verbindungen und Vertrauensanker](trust-flows.md) |
