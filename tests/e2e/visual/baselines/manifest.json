@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "updatedAt": "2026-09-05T08:36:36.542Z",
-  "reason": "Etappe 17: Sollbaselines nach dem Slate-/Indigo-Refresh; light/deploy-desktop neu aufgenommen, weil die Erstaufnahme als einzige von fuenf Sitzungen 14 Subpixel an den runden Ecken des Session-Buttons abwich",
+  "updatedAt": "2026-10-25T15:04:51.113Z",
+  "reason": "Schriftwechsel Segoe UI 2026-10, UX02-Sollbilder und Umbau der Bereitstellungsseite seit 08.09.2026",
   "runner": {
     "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
     "platform": "win32",
@@ -16,15 +16,15 @@
     "fonts": [
       {
         "file": "segoeui.ttf",
-        "sha256": "8134dbcd09e7b123c9a7f229d49cffbcb01352cc72ea5e1076b65d0dca9f73cd"
+        "sha256": "704eada12961a27fd271f7d3b09e2066520e758390c1776744eff430fee30f6e"
       },
       {
         "file": "seguisb.ttf",
-        "sha256": "2d9b22d71f72de2823fee5d9c8bc1b0fc32b2577c4c27b9ec6abdbb8df0e1731"
+        "sha256": "6c3fd894b19950b10c34bf64069ef821eaf2f58f959146306fee5b367472e501"
       },
       {
         "file": "segoeuib.ttf",
-        "sha256": "aeb9e4a6ec5cc59f4d72df8189032d7dbb28f45161cf1552174818b5465dac4e"
+        "sha256": "b169e636719880976a97e94e3b1cb3dbe5f4a38eabc037bf9f2a9165154c3ad2"
       }
     ],
     "locale": "de-DE",
@@ -71,6 +71,51 @@
       {
         "name": "deploy",
         "url": "deploy.php?mission_id=:missionId"
+      },
+      {
+        "name": "system-status",
+        "url": "system_status.php",
+        "captureSelector": ".status-overview",
+        "fixture": {
+          "overviewBadges": [
+            {
+              "href": "system_status.php#deploy-service",
+              "className": "badge badge-danger",
+              "text": "Manuelle Klärung nötig"
+            },
+            {
+              "href": "system_status.php#mecm",
+              "className": "badge badge-success",
+              "text": "Aktiv"
+            },
+            {
+              "href": "system_status.php#ansible",
+              "className": "badge badge-neutral",
+              "text": "Nicht geprüft"
+            },
+            {
+              "href": "system_status.php#esxi",
+              "className": "badge badge-warning",
+              "text": "Nicht geprüft"
+            },
+            {
+              "href": "system_status.php#deviations",
+              "className": "badge badge-warning",
+              "text": "12 Abweichungen"
+            },
+            {
+              "href": "system_status.php#internal-services",
+              "className": "badge badge-success",
+              "text": "Aktiv"
+            },
+            {
+              "href": "system_status.php#directory-status",
+              "className": "badge badge-warning",
+              "text": "Eingeschränkt",
+              "optional": true
+            }
+          ]
+        }
       }
     ],
     "masks": [
@@ -82,17 +127,23 @@
     "maskColor": "#ff00ff"
   },
   "files": {
-    "dark/deploy-desktop.png": "7d49535da7b18eb576a76fe55bb2f41024bd10d532413adf28ea5554868b0469",
-    "dark/deploy-mobile.png": "0c606b07c245c90190cb9c2f7e94e8986d5eff71785b2fefffc28389757c6425",
-    "dark/deploy-wrap.png": "9cecff17de3ea05478ea74ccf0fca8288b55edabcd7e1a28926f9775c4ef4440",
+    "dark/deploy-desktop.png": "670b6bb52f3b90aa78f50eb103cdfbc92384e3808f31c0adcd85a15d97236b0c",
+    "dark/deploy-mobile.png": "334da4e0bcd1009ace4f6c43ef17df75f130c237ef29c1f06d4ef0123310dd56",
+    "dark/deploy-wrap.png": "1ee2512fa9d5e4ad254dc124282bbfab670b3ff510d3976b718c938ceef774a6",
     "dark/missions-desktop.png": "bbf5e7b4d7aaf28c87e52aa13282eb4f00b171fbbe727df2b3b4b6e4f922082c",
     "dark/missions-mobile.png": "608cb7d8feb96fdbf026de33369a3ac20e632f655d9818526bb1cc9623f51a86",
     "dark/missions-wrap.png": "aa9f890240fbb9be21b722c39f19d368d5697d904c6ff35962d015f973af7aee",
-    "light/deploy-desktop.png": "9608ed3d952c8f4a89d1f8254282e0d1d515b39bd6be82d8d640a1bca9cae2ea",
-    "light/deploy-mobile.png": "391a0f3370e6b5dce6bea96c494aed7161f421be2ac94f719a5848ca41f64695",
-    "light/deploy-wrap.png": "a6cf397ef9387ce93b7446adc7b7a519c026c07ed9ba777226732c6eea32e143",
+    "dark/system-status-desktop.png": "95c48e1c1d87775e0c9afe0b2636c8c21eea22013565573da3e2866801356aea",
+    "dark/system-status-mobile.png": "766d8e2d20d01af4850d6493ea1a1f9cdd392dd9d672374f709e5ba3b72f0d92",
+    "dark/system-status-wrap.png": "1f46a964596285f9dd6ac03a724c189192592445e05287bbbacf654e1470bc79",
+    "light/deploy-desktop.png": "f441c95e1194980e095d51912aa487631915c43bdb3a4a81cb7be85de242b0e8",
+    "light/deploy-mobile.png": "f19337e687331df816f295cf4235c1020cdf9d4e9f641f0e0f89deb9749b1297",
+    "light/deploy-wrap.png": "50928b0135310af26657efbeb4b48a987a496d0dd51676611473cc8df50afe4c",
     "light/missions-desktop.png": "8cfb9ef5c7f90b4b72851adcc925375e0cdcf4791409a3c522249929377013aa",
     "light/missions-mobile.png": "631bf9c5bde3d25aaa4d60dc3a71880aa67a4d382911508bb6307f3316009c13",
-    "light/missions-wrap.png": "df2236f1b26a8149a5fcaa53c81548d75edc4adccf3abf810618b1dcc7c094f6"
+    "light/missions-wrap.png": "df2236f1b26a8149a5fcaa53c81548d75edc4adccf3abf810618b1dcc7c094f6",
+    "light/system-status-desktop.png": "36aef5f37957616f815a72539ead514ab30b62851d8c137dbf1e27afb29814b3",
+    "light/system-status-mobile.png": "4b70c53e1434541fe6d49ef343442b805dca366698bfc577102c4b6d971139f9",
+    "light/system-status-wrap.png": "b6ddfd973f3900872990cb045ca9ed717f88027efcd62aeb4f152ab2f912fbb2"
   }
 }
