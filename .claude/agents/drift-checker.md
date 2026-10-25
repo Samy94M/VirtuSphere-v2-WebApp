@@ -2,7 +2,7 @@
 name: drift-checker
 description: Check assigned SSoT mirrors and document constraints using relevant canonical gates and valid existing evidence.
 model: haiku
-effort: low
+effort: medium
 color: yellow
 tools: Read, Grep, Glob, Bash
 ---

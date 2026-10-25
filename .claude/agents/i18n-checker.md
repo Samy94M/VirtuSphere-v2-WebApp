@@ -2,7 +2,7 @@
 name: i18n-checker
 description: Check changed DE/EN portal text, call sites and display-only locale with the canonical language gate.
 model: haiku
-effort: low
+effort: medium
 color: blue
 tools: Read, Grep, Glob, Bash
 ---
