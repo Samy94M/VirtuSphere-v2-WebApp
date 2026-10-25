@@ -13,7 +13,6 @@ return [
     'title_edit' => 'VM bearbeiten',
     'title_add' => 'VM hinzufügen',
     'back_to_vms' => 'Zurück zu VMs',
-    'back_to_overview' => 'Zurück zu „:list"',
     'mission_details' => 'Missionsdetails',
     'context_mission' => 'Gehört zur Mission: :name',
     'heading_vm' => 'VM',

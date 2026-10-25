@@ -22,17 +22,20 @@ const VIRTUSPHERE_WORK_CONTEXT_KEYS = [
     'work_ov_sort',
     'work_ov_dir',
     'work_ov_page',
+    'work_ov_vm',
 ];
 
 /**
  * The VM overview origin (UX03, F05). Its owner is vm_overview_work_context(); it
- * travels to the VM editor and the editor's own round trips only.
+ * travels to the VM editor and the editor's own round trips, and with the row VM
+ * (work_ov_vm) only to the back button of the mission details.
  */
 const VIRTUSPHERE_WORK_CONTEXT_OVERVIEW_KEYS = [
     'work_ov_filter',
     'work_ov_sort',
     'work_ov_dir',
     'work_ov_page',
+    'work_ov_vm',
 ];
 
 /** @return array<string,string> */

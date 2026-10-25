@@ -90,7 +90,7 @@ final class VmOverviewContractTest extends TestCase
     {
         self::assertStringContainsString("'vm_overview.php?'", $this->source('lib/vm_overview.php'));
         $page = $this->source('lib/vm_overview_page.php');
-        self::assertStringContainsString('mission_details_url(', $page, 'mission links use the shared helper');
+        self::assertStringContainsString('mission_details_url_from_overview(', $page, 'mission links use the shared helper with the row view (UX03-b)');
         self::assertStringContainsString('vm_edit_url(', $page, 'VM links use the shared helper');
         self::assertStringNotContainsString('mission_details.php?id=', $page);
         self::assertStringNotContainsString('vm_edit.php?', $page);

@@ -32,6 +32,15 @@ function vm_overview_title(string $filter): string
         : __t('vm_overview.title_all');
 }
 
+/**
+ * Back label of the VM editor and the mission details opened from this list: it
+ * names the list the operator came from.
+ */
+function vm_overview_back_label(string $filter): string
+{
+    return __t('vm_overview.back_to_list', ['list' => vm_overview_title($filter)]);
+}
+
 function vm_overview_intro(string $filter): string
 {
     return $filter === VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING
@@ -97,7 +106,8 @@ function vm_overview_render_change_notice(?array $snapshot, int $total): void
  *
  * Each row owns the fragment vm-<id>; its VM link carries this list's view (filter,
  * sort, direction, page) to the editor, which returns here after saving or going
- * back (UX03).
+ * back (UX03). Its mission link carries the same view and the row VM, so the
+ * details' back button returns to the row (UX03-b).
  *
  * @param list<array<string,mixed>> $rows
  * @param array{counted:int,expected:int}|null $snapshot
@@ -133,7 +143,7 @@ function vm_overview_render_table(array $rows, string $filter, string $sort, str
                 ?>
                 <tr id="vm-<?php echo h((string) $row['id']); ?>">
                     <td>
-                        <a href="<?php echo h(mission_details_url($missionId)); ?>"><?php echo h($missionName); ?></a>
+                        <a href="<?php echo h(mission_details_url_from_overview($missionId, vm_overview_mission_context($filter, $sort, $dir, $page, (int) $row['id']))); ?>"><?php echo h($missionName); ?></a>
                         <?php if (mission_name_is_template($missionName)) { echo portal_badge('neutral', __t('vm_overview.template_badge')); } ?>
                     </td>
                     <td><?php echo h((string) $row['vm_name']); ?></td>

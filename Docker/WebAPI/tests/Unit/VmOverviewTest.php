@@ -130,7 +130,7 @@ final class VmOverviewTest extends TestCase
         vm_overview_render_table($rows, 'mecm_pending', 'mission', 'asc', null);
         $html = (string) ob_get_clean();
 
-        self::assertStringContainsString('href="mission_details.php?id=3"', $html);
+        self::assertStringContainsString('href="mission_details.php?id=3&amp;work_ov_filter=mecm_pending&amp;work_ov_vm=7"', $html, 'the mission link carries the view and the row VM');
         self::assertStringContainsString('href="vm_edit.php?mission_id=3&amp;vm_id=7&amp;work_ov_filter=mecm_pending"', $html, 'the VM link carries the list view; defaults stay out');
         self::assertStringContainsString('<tr id="vm-7">', $html, 'the row owns the fragment the editor returns to');
         self::assertStringContainsString(h(__t('vm_overview.template_badge')), $html);
@@ -157,7 +157,7 @@ final class VmOverviewTest extends TestCase
         $html = (string) ob_get_clean();
 
         self::assertStringNotContainsString(h(__t('vm_overview.template_badge')), $html);
-        self::assertStringContainsString('href="mission_details.php?id=4"', $html);
+        self::assertStringContainsString('href="mission_details.php?id=4&amp;work_ov_filter=all&amp;work_ov_sort=name&amp;work_ov_vm=8"', $html);
         self::assertStringContainsString('href="vm_edit.php?mission_id=4&amp;vm_id=8&amp;work_ov_filter=all&amp;work_ov_sort=name"', $html);
     }
 
@@ -186,7 +186,8 @@ final class VmOverviewTest extends TestCase
 
         self::assertStringContainsString('href="vm_edit.php?mission_id=5&amp;vm_id=9&amp;work_ov_filter=all&amp;work_ov_sort=status&amp;work_ov_dir=desc&amp;work_ov_page=4"', $html);
         self::assertStringNotContainsString('vm_edit.php?mission_id=5&amp;vm_id=9&amp;counted', $html);
-        self::assertStringContainsString('href="mission_details.php?id=5"', $html, 'the mission link stays mission-scoped');
+        self::assertStringContainsString('href="mission_details.php?id=5&amp;work_ov_filter=all&amp;work_ov_sort=status&amp;work_ov_dir=desc&amp;work_ov_page=4&amp;work_ov_vm=9"', $html, 'the mission link carries the same view and the row VM');
+        self::assertStringNotContainsString('mission_details.php?id=5&amp;counted', $html, 'the tile snapshot never reaches the mission link');
     }
 
     public function testPaginationLinksOnlyToExistingPagesOtherThanTheCurrentOne(): void
@@ -222,5 +223,18 @@ final class VmOverviewTest extends TestCase
         $html = (string) ob_get_clean();
 
         self::assertSame('', $html);
+    }
+
+    public function testTheBackLabelNamesTheListOfTheFilter(): void
+    {
+        self::assertSame(
+            __t('vm_overview.back_to_list', ['list' => __t('vm_overview.title_mecm_pending')]),
+            vm_overview_back_label('mecm_pending')
+        );
+        self::assertSame(
+            __t('vm_overview.back_to_list', ['list' => __t('vm_overview.title_all')]),
+            vm_overview_back_label('all')
+        );
+        self::assertNotSame(vm_overview_back_label('mecm_pending'), vm_overview_back_label('all'));
     }
 }

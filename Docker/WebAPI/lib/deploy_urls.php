@@ -44,6 +44,24 @@ function mission_details_url(int $missionId, array $workContext = []): string
     return portal_work_context_append_url(sprintf('mission_details.php?id=%d', $missionId), portal_work_context_mission_scope($workContext));
 }
 
+/**
+ * Mission link of an overview row: the row's VM travels with the overview view, so
+ * the details' back button can return to that row. Without a row VM this is the
+ * plain mission link. The mission-list keys of the input are never carried.
+ *
+ * @param array<string,string> $overviewContext
+ */
+function mission_details_url_from_overview(int $missionId, array $overviewContext): string
+{
+    $url = mission_details_url($missionId);
+    $context = vm_overview_work_context($overviewContext);
+    if (!isset($context['work_ov_vm'])) {
+        return $url;
+    }
+
+    return portal_work_context_append_url($url, $context);
+}
+
 const VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG = 'job_log';
 
 /**

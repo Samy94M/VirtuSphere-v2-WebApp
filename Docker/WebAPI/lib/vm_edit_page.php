@@ -33,7 +33,7 @@ if ($vmId > 0 && ($vm === null || (int) $vm['mission_id'] !== $missionId)) {
 $vmListUrl = portal_work_context_vm_list_url($missionId, $workContext, $vmId > 0 ? $vmId : null);
 $backUrl = vm_overview_return_url($workContext, $vmId > 0 ? $vmId : null) ?? $vmListUrl;
 $backLabel = $overviewReturnUrl !== null
-    ? __t('vm_edit.back_to_overview', ['list' => vm_overview_title($workContext['work_ov_filter'] ?? '')])
+    ? vm_overview_back_label($workContext['work_ov_filter'] ?? '')
     : __t('vm_edit.back_to_vms');
 $missionDetailsUrl = mission_details_url($missionId, $workContext);
 $vmEditorUrl = $vmId > 0

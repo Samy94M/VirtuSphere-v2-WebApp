@@ -17,6 +17,7 @@ return [
     'empty_all' => 'Keine VM in einer echten Mission gefunden.',
     'empty_mecm_pending' => 'Zurzeit wartet keine VM auf eine MECM-Übernahme.',
     'back_dashboard' => 'Zurück zum Dashboard',
+    'back_to_list' => 'Zurück zu „:list"',
     'pagination_label' => 'Seiten der Liste',
     'previous' => 'Vorherige Seite',
     'next' => 'Nächste Seite',

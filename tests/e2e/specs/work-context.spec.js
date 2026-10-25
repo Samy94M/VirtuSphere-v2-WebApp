@@ -171,3 +171,99 @@ echo 'QUEUED';
   expect(await page.getByRole('link', { name: 'Back to VMs' }).getAttribute('href'))
     .toBe(`vms.php?mission_id=${ids.template.id}&work_list_type=templates#vm-${ids.template.vm}`);
 });
+
+test('mission and template details opened from a VM overview row return to the same list view', async ({ page }) => {
+  const ids = seed();
+  // Fifty-one queued template VMs fill page 1 of the MECM-pending list (50 rows, name descending)
+  // and push the first one, t-00, onto page 2. The mission VM is renamed so that it sorts first
+  // in the all-VMs list, which leaves out template missions.
+  const { target } = phpJson(`
+$db = db();
+$missionId = ${ids.template.id};
+$missionVmId = ${ids.mission.vm};
+$missionVmName = 'zzz-${MARK}-m-vm';
+$stmt = $db->prepare('UPDATE deploy_vms SET vm_name = ? WHERE id = ?');
+$stmt->bind_param('si', $missionVmName, $missionVmId);
+$stmt->execute();
+$os = '${MARK}-os';
+$ram = 2048;
+$targetId = 0;
+for ($i = 0; $i <= 50; $i++) {
+    $vmName = sprintf('zzz-${MARK}-t-%02d', $i);
+    $hostname = sprintf('E2EWCTXT%02d', $i);
+    $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os, vm_cpu, vm_ram) VALUES (?, ?, ?, ?, 2, ?)");
+    $stmt->bind_param('isssi', $missionId, $vmName, $hostname, $os, $ram);
+    $stmt->execute();
+    if ($i === 0) {
+        $targetId = (int) $db->insert_id;
+    }
+}
+$stmt = $db->prepare('UPDATE deploy_vms SET updated = 1 WHERE mission_id = ?');
+$stmt->bind_param('i', $missionId);
+$stmt->execute();
+echo 'JSON' . json_encode(['target' => $targetId]) . 'JSON';
+`);
+
+  // Template details, reached from page 2 of the MECM-pending list.
+  await page.goto('vm_overview.php?filter=mecm_pending&sort=name&dir=desc&page=2');
+  const templateRow = page.locator(`#vm-${target}`);
+  await expect(templateRow).toBeVisible();
+  await templateRow.getByRole('link', { name: ids.template.name }).click();
+  await expect(page).toHaveURL(/mission_details\.php/);
+  const templateDetails = new URL(page.url());
+  expect(templateDetails.searchParams.get('work_ov_filter')).toBe('mecm_pending');
+  expect(templateDetails.searchParams.get('work_ov_sort')).toBe('name');
+  expect(templateDetails.searchParams.get('work_ov_dir')).toBe('desc');
+  expect(templateDetails.searchParams.get('work_ov_page')).toBe('2');
+  expect(templateDetails.searchParams.get('work_ov_vm')).toBe(String(target));
+  expect(templateDetails.searchParams.get('counted')).toBeNull();
+
+  const templateBack = page.getByRole('link', { name: 'Back to "MECM pending"' });
+  expect(await templateBack.getAttribute('href'))
+    .toBe(`vm_overview.php?filter=mecm_pending&sort=name&dir=desc&page=2#vm-${target}`);
+  const overviewLeaks = await page.$$eval('a[href], form[action]', (elements) => elements
+    .map((element) => element.getAttribute('href') ?? element.getAttribute('action') ?? '')
+    .filter((value) => value.includes('work_ov_')));
+  expect(overviewLeaks).toEqual([]);
+
+  await templateBack.click();
+  await expect(page).toHaveURL(new RegExp(`vm_overview\\.php\\?filter=mecm_pending&sort=name&dir=desc&page=2#vm-${target}$`));
+  await expect(page.locator(`#vm-${target}`)).toBeFocused();
+
+  // Mission details, reached from the all-VMs list.
+  await page.goto('vm_overview.php?filter=all&sort=name&dir=desc');
+  await page.locator(`#vm-${ids.mission.vm}`).getByRole('link', { name: ids.mission.name }).click();
+  await expect(page).toHaveURL(/mission_details\.php/);
+  const missionBack = page.getByRole('link', { name: 'Back to "VMs in missions"' });
+  expect(await missionBack.getAttribute('href'))
+    .toBe(`vm_overview.php?filter=all&sort=name&dir=desc#vm-${ids.mission.vm}`);
+
+  // The mission's own tabs leave the overview behind: the VMs tab and the editor it opens.
+  await page.locator('nav.tab-list').getByRole('link', { name: 'VMs', exact: true }).click();
+  await expect(page).toHaveURL(/vms\.php/);
+  expect(new URL(page.url()).search).not.toContain('work_ov_');
+  await page.locator(`#vm-${ids.mission.vm}`).getByRole('link', { name: 'Edit' }).click();
+  await expect(page).toHaveURL(/vm_edit\.php/);
+  await expect(page.getByRole('link', { name: 'Back to VMs' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to "VMs in missions"' })).toHaveCount(0);
+
+  // Opened again from the overview, the row returns there after going back.
+  await page.goto('vm_overview.php?filter=all&sort=name&dir=desc');
+  await page.locator(`#vm-${ids.mission.vm}`).getByRole('link', { name: ids.mission.name }).click();
+  await expect(page).toHaveURL(/mission_details\.php/);
+  await page.getByRole('link', { name: 'Back to "VMs in missions"' }).click();
+  await expect(page).toHaveURL(new RegExp(`vm_overview\\.php\\?filter=all&sort=name&dir=desc#vm-${ids.mission.vm}$`));
+  await expect(page.locator(`#vm-${ids.mission.vm}`)).toBeFocused();
+
+  // Direct entry names no overview row, so the back link is the normal mission list.
+  await page.goto(`mission_details.php?id=${ids.mission.id}&work_ov_filter=all`);
+  expect(await page.getByRole('link', { name: 'Back', exact: true }).getAttribute('href'))
+    .toBe(`missions.php?type=missions#mission-${ids.mission.id}`);
+  await page.goto(`mission_details.php?id=${ids.mission.id}&work_ov_filter=all&work_ov_vm=abc`);
+  expect(await page.getByRole('link', { name: 'Back', exact: true }).getAttribute('href'))
+    .toBe(`missions.php?type=missions#mission-${ids.mission.id}`);
+
+  // A missing mission returns to the overview list, without a row fragment.
+  await page.goto('mission_details.php?id=2147480000&work_ov_filter=all&work_ov_vm=5');
+  await expect(page).toHaveURL(/vm_overview\.php\?filter=all$/);
+});

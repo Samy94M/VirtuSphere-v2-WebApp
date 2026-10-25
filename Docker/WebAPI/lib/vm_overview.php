@@ -119,6 +119,10 @@ function vm_overview_url(string $filter, array $state = []): string
  * the editor keeps its mission parent. Values are this list's own whitelist;
  * defaults are left out like everywhere else in the work context.
  *
+ * The row VM (work_ov_vm) is the row a mission link came from, so the mission
+ * details can return to it. It is a canonical positive id: no sign, no leading
+ * zero and no overflow, so the string round-trips through (int).
+ *
  * @return array<string,string>
  */
 function vm_overview_work_context(array $input): array
@@ -142,6 +146,10 @@ function vm_overview_work_context(array $input): array
     if ($page > 1) {
         $context['work_ov_page'] = (string) $page;
     }
+    $vm = $scalar('work_ov_vm');
+    if (ctype_digit($vm) && $vm[0] !== '0' && (string) (int) $vm === $vm) {
+        $context['work_ov_vm'] = $vm;
+    }
 
     return $context;
 }
@@ -164,6 +172,23 @@ function vm_overview_editor_context(string $filter, string $sort, string $dir, i
 }
 
 /**
+ * The work context of the mission link of an overview row: the list's view plus
+ * the row's VM, so the mission details can return to that row. Without a row VM
+ * (vmId <= 0) it is the plain view.
+ *
+ * @return array<string,string>
+ */
+function vm_overview_mission_context(string $filter, string $sort, string $dir, int $page, int $vmId): array
+{
+    $context = vm_overview_editor_context($filter, $sort, $dir, $page);
+    if ($vmId > 0) {
+        $context['work_ov_vm'] = (string) $vmId;
+    }
+
+    return vm_overview_work_context($context);
+}
+
+/**
  * Where the editor returns when it was opened from the overview: the same list,
  * with the VM's row as fragment. Null without an overview origin. The list clamps
  * the page itself (repo_vm_overview_page()), so a list that shrank in the meantime
@@ -182,4 +207,22 @@ function vm_overview_return_url(array $context, ?int $focusVmId = null): ?string
     ]);
 
     return $url . ($focusVmId !== null && $focusVmId > 0 ? '#vm-' . $focusVmId : '');
+}
+
+/**
+ * Where the mission details' back button returns when they were opened from an
+ * overview row: the same list, with that row as fragment unless $focus is off (a
+ * missing mission gets no false focus). Null without a row VM, so the back button
+ * keeps the mission list.
+ *
+ * @param array<string,string> $context
+ */
+function vm_overview_details_return_url(array $context, bool $focus = true): ?string
+{
+    $context = vm_overview_work_context($context);
+    if (!isset($context['work_ov_vm'])) {
+        return null;
+    }
+
+    return vm_overview_return_url($context, $focus ? (int) $context['work_ov_vm'] : null);
 }

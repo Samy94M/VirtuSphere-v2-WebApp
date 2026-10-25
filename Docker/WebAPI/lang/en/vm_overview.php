@@ -17,6 +17,7 @@ return [
     'empty_all' => 'No VM in a real mission found.',
     'empty_mecm_pending' => 'No VM is waiting for a MECM takeover right now.',
     'back_dashboard' => 'Back to dashboard',
+    'back_to_list' => 'Back to ":list"',
     'pagination_label' => 'Pages of the list',
     'previous' => 'Previous page',
     'next' => 'Next page',

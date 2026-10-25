@@ -18,16 +18,23 @@ require_once __DIR__ . '/../lib/vm_network_contract.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/mission_nav.php';
 require_once __DIR__ . '/../lib/mission_details_page.php';
+require_once __DIR__ . '/../lib/vm_overview_page.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
 $user = portal_require_user($connection);
 $workContext = portal_work_context($_GET);
+// UX03-b: details opened from a VM overview row return there with that row in focus. Only the back
+// button keeps this origin; every other way out of the details stays mission-scoped.
+$overviewBackUrl = vm_overview_details_return_url($workContext);
+$overviewListUrl = vm_overview_details_return_url($workContext, false);
+$overviewFilter = (string) ($workContext['work_ov_filter'] ?? '');
+$workContext = portal_work_context_mission_scope($workContext);
 $missionId = request_int($_GET, 'id');
 $mission = repo_get_mission($connection, $missionId);
 if ($mission === null) {
     flash_set('error', __t('portal.mission_not_found'));
-    redirect_to(portal_work_context_mission_list_url($workContext));
+    redirect_to($overviewListUrl ?? portal_work_context_mission_list_url($workContext));
 }
 $isTemplate = mission_name_is_template((string) $mission['mission_name']);
 if (!isset($workContext['work_list_type'])) {
@@ -204,7 +211,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
               // the list is a different move and stays one. ?>
         <?php echo mission_detail_nav($missionId, $isTemplate, 'details', $workContext); ?>
         <div class="actions">
-            <a class="button button-secondary" href="<?php echo h($missionListUrl); ?>"><?php echo h(__t('common.back')); ?></a>
+            <a class="button button-secondary" href="<?php echo h($overviewBackUrl ?? $missionListUrl); ?>"><?php echo h($overviewBackUrl !== null ? vm_overview_back_label($overviewFilter) : __t('common.back')); ?></a>
             <?php if (!$isTemplate && can('deploy.run', $user)) { ?><a class="button button-secondary" href="<?php echo h(deploy_mission_url($missionId)); ?>"><?php echo h(__t('mission_details.open_deploy')); ?></a><?php } ?>
             <form class="inline-form" method="post" action="<?php echo h($detailsUrl); ?>">
                 <?php echo csrf_field(); ?>
