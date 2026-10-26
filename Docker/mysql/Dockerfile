@@ -2,7 +2,8 @@
 # (`exec gosu mysql ...`, its only call site). Oracle ships it built against Go
 # 1.24.6, which trivy reports with 22 fixable Critical/High stdlib findings, and
 # the newest published mysql:8.4 build still carries that same binary: measured
-# 2026-09-07, docker.io/library/mysql:8.4 resolves to the digest pinned below.
+# 2026-09-07 and again 2026-10-25 on the 8.4.13 build pinned below (gosu 1.19,
+# go1.24.6), which docker.io/library/mysql:8.4 resolved to on that day.
 # So the fix has to come from here. This stage rebuilds gosu from source against
 # the current Go toolchain; the module has no semver tags, so the pin is the
 # exact pseudo-version. The Go toolchain comes from the builder digest, so a
@@ -21,7 +22,13 @@ RUN go install -trimpath -ldflags="-s -w" \
 # entrypoint and VirtuSphere use mysql/mysqladmin instead. Removing its RPM also
 # removes the bundled Python runtime whose cryptography dependency cannot be
 # upgraded to the fixed major without breaking the bundled OCI/pyOpenSSL pins.
-FROM mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+#
+# trivy reads the RPM database, so a MySQL server release with security fixes
+# that Oracle publishes only as a new image reaches us through a digest bump.
+# 2026-10-25: 8.4.11 to 8.4.13 (three 8.4.13 security notes without CVE IDs,
+# newer bundled libraries). A patch step inside 8.4 LTS needs no
+# migration; the server upgrades its system tables on the first start.
+FROM mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69
 
 # The RPM leaves generated, unowned __pycache__ files behind.
 RUN microdnf update -y \

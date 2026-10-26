@@ -2,7 +2,17 @@
 # makes the base of every rebuild byte-identical. 1.31 is nginx mainline: the
 # 1.27 tag stopped being rebuilt (37 fixable CVEs frozen in), and even the
 # stable 1.28 tag lagged behind on Alpine package fixes.
-FROM nginx:1.31-alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3
+#
+# trivy reads Alpine packages, not the nginx binary itself, so a new nginx
+# release with security fixes reaches this image only through a digest bump:
+# check https://nginx.org/en/security_advisories.html against NGINX_VERSION.
+# 2026-10-25: 1.31.5 to 1.31.8. 1.31.7 fixed, among others, CVE-2026-97629
+# (session forgery with automatic TLS session ticket key rotation, which the
+# generated HTTPS block enables through `ssl_session_cache shared:` without a
+# ticket key file) and CVE-2026-93479 (overflow while evaluating strings with
+# variables, as in our log format). Both applied to 1.31.5; with the fixed
+# binary the ticket configuration stays as it is.
+FROM nginx:1.31-alpine@sha256:a3554c0d0b48177b1413c26e01f695334428020d9df01243fbae3e11cfd17417
 
 # The digest fixes the upstream filesystem; consume all Alpine security
 # updates during the controlled rebuild.

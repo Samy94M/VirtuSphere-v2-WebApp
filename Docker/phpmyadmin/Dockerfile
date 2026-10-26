@@ -1,14 +1,23 @@
 # phpMyAdmin remains an opt-in tools-profile service. It bundles its own vendor
-# tree, and upstream stopped releasing: as of 2026-09-07 the tags latest, 5.2
-# and 5.2.3 all resolve to the digest pinned below, still shipping twig 3.11.3
-# (9 fixable Critical/High findings, four of them Critical) and symfony/cache
-# 5.4.46 (one more). A digest bump cannot answer that, so this stage updates
-# exactly those two packages against phpMyAdmin's own constraint
-# (`twig/twig: ^3.3.5`) and copies only the result forward. Composer, git and
-# unzip stay in the builder: the shipped image gets the vendor tree, not the
-# toolchain that produced it. The tree is handed on read-only again, the way
-# the base image ships it.
-FROM phpmyadmin:5.2.3@sha256:3a8a8d6b5289091f959ba0293f21163b3a2fc5741991a53de70b3497fe8d31db AS vendor
+# tree. Upstream publishes no new phpMyAdmin release, but it does rebuild the
+# image for its PHP base: on 2026-10-21 the tags latest, 5.2 and 5.2.3 moved to
+# the digest pinned below, which carries PHP 8.3.36 instead of 8.3.33 and so
+# the fix for the critical CVE-2026-109618 and CVE-2026-109619 (php-src
+# GHSA-w8hw-w9fx-j79w and GHSA-6wmf-4rv5-p3rp, fixed in 8.3.36). trivy cannot
+# report those: PHP is compiled from source, not a Debian package, so the PHP
+# version of this base has to be checked by hand on every bump
+# (`docker image inspect`, PHP_VERSION). Measured on both digests: the
+# phpMyAdmin tree, its configuration, entrypoint, PHP ini files and vendor tree
+# are byte-identical; only PHP and the Debian packages changed.
+#
+# The rebuilt tree still ships twig 3.11.3 (9 fixable Critical/High findings,
+# four of them Critical) and symfony/cache 5.4.46 (one more). A digest bump
+# cannot answer that, so this stage updates exactly those two packages against
+# phpMyAdmin's own constraint (`twig/twig: ^3.3.5`) and copies only the result
+# forward. Composer, git and unzip stay in the builder: the shipped image gets
+# the vendor tree, not the toolchain that produced it. The tree is handed on
+# read-only again, the way the base image ships it.
+FROM phpmyadmin:5.2.3@sha256:62a50b1419fe55b9b4c3cd6f5aed03a18f8f5b4a236f24735d76400bea75a5ff AS vendor
 COPY --from=composer:2@sha256:d8f6343d3fae98107426bc49163ccad46ef85aabd4a27d80a74401fab4aba332 /usr/bin/composer /usr/local/bin/composer
 WORKDIR /var/www/html
 RUN set -eux; \
@@ -23,7 +32,7 @@ RUN set -eux; \
 # Debian security updates for the installed packages and leaves no package
 # index in the artifact. It named four packages until 2026-10-14, when the
 # release gate found curl, perl, pcre2, sqlite, gzip and libssh2 besides them.
-FROM phpmyadmin:5.2.3@sha256:3a8a8d6b5289091f959ba0293f21163b3a2fc5741991a53de70b3497fe8d31db
+FROM phpmyadmin:5.2.3@sha256:62a50b1419fe55b9b4c3cd6f5aed03a18f8f5b4a236f24735d76400bea75a5ff
 
 RUN apt-get update \
     && apt-get upgrade -y \

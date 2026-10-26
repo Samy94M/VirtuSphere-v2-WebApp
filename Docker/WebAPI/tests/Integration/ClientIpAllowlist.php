@@ -58,11 +58,22 @@ trait ClientIpAllowlist
     private function ensureClientIpNotAllowlisted(mysqli $db): void
     {
         $ip = $this->ownClientIp();
+        // A test that allowlisted itself in setUp and then removes the entry
+        // again must not record its own temporary row as a pre-existing one:
+        // restore would put it back, and the leftover role-less entry made the
+        // System status page show an extra warning for every later lane step
+        // (V1, release 2026.10.1). ensureClientIpAllowlisted() inserts only when
+        // no row for the IP exists, so such a row is never an original one.
+        $ownTemporary = in_array($ip, $this->allowlistInserted, true);
+        $this->allowlistInserted = array_values(array_diff($this->allowlistInserted, [$ip]));
         $stmt = $db->prepare('SELECT ipAddress, description, role FROM deploy_accessToWebAPI WHERE ipAddress = ?');
         $stmt->bind_param('s', $ip);
         $stmt->execute();
         $result = $stmt->get_result();
         foreach ($result->fetch_all(MYSQLI_ASSOC) as $row) {
+            if ($ownTemporary && $row['description'] === 'phpunit wire temp') {
+                continue;
+            }
             $this->allowlistRemoved[] = [
                 'ip' => (string) $row['ipAddress'],
                 'description' => (string) $row['description'],

@@ -4,7 +4,9 @@ Ab dem ersten Release gliedert sich dieses Changelog nach Release-Nummern (`JJJJ
 
 ## Noch in keinem Release
 
-- **Das MySQL-Image baut `gosu` mit Go 1.27.3 (25.10.2026).** Das Image `mysql:8.4-virtusphere` übersetzt sein Werkzeug `gosu` mit einem neuen `golang`-Builder; das schließt CVE-2026-111943 (HIGH, `crypto/x509`). MySQL selbst und seine Daten bleiben unverändert. Ein Update mit diesem Stand lädt das neue MySQL-Image und startet den Datenbankcontainer neu.
+- **Das MySQL-Image läuft mit MySQL 8.4.13 und baut `gosu` mit Go 1.27.3 (25.10.2026).** Das Image `mysql:8.4-virtusphere` übersetzt sein Werkzeug `gosu` mit einem neuen `golang`-Builder; das schließt CVE-2026-111943 (HIGH, `crypto/x509`). Die Basis steigt von MySQL 8.4.11 auf 8.4.13 (Sicherheitskorrekturen von Oracle ohne CVE-Nummer, neuere Bibliotheken). Keine Migration, das Schema bleibt; beim ersten Start aktualisiert MySQL seine Systemtabellen selbst. Ein Update mit diesem Stand lädt das neue MySQL-Image und startet den Datenbankcontainer neu, vorher wie immer ein Backup nach Runbook.
+- **Der Webserver läuft mit nginx 1.31.8 (25.10.2026).** Das Webserver-Image steigt von nginx 1.31.5 auf 1.31.8. Das schließt unter anderem CVE-2026-97629 (gefälschte TLS-Sitzungen bei automatischer Rotation der Ticket-Schlüssel, betraf das im Portal eingerichtete HTTPS) und CVE-2026-93479 (Pufferüberlauf beim Auswerten von Variablen, etwa im Logformat). Die Konfiguration bleibt unverändert. Ein Update mit diesem Stand lädt das neue Webserver-Image und erzeugt den Webserver-Container neu.
+- **phpMyAdmin läuft mit PHP 8.3.36 (25.10.2026).** Das optionale Image `phpmyadmin:5.2.3-virtusphere` (Profil `tools`) baut auf dem neuen Upstream-Build von phpMyAdmin 5.2.3 auf, der PHP 8.3.36 statt 8.3.33 mitbringt; das schließt die kritischen PHP-Lücken CVE-2026-109618 und CVE-2026-109619. phpMyAdmin selbst bleibt 5.2.3. Betrifft nur Installationen, die phpMyAdmin nutzen: dort nach dem Update das Teilbundle mit `sh tools/install.sh` laden (Update-Runbook, Schritt 4); das Skript erzeugt den Container mit dem neuen Image neu. Der Kernbetrieb lädt phpMyAdmin weiterhin nicht.
 
 ## 2026.10.1 (25.10.2026)
 
