@@ -212,7 +212,18 @@ test('same-session peer proceeds while live blockers wait and the locale persist
         timeout: 10000,
       }).toBe(true);
     } catch (error) {
-      throw new Error(`VM wait observation: ${JSON.stringify(observation)}; blocker settled: ${blockerSettled}`, { cause: error });
+      // A blocker request that settled without ever waiting on the lock left
+      // no trace of why (twice in the 2026.10.2 release lane, never in five
+      // isolated runs). Its answer is the missing evidence: a 401/403 points at
+      // the session, a 200 at a read path that skipped the locked relation.
+      let answer = '';
+      if (blockerSettled) {
+        const response = await blockerPromise.catch((settleError) => settleError);
+        answer = response && typeof response.status === 'function'
+          ? `; blocker answered HTTP ${response.status()}: ${(await response.text().catch(() => '')).slice(0, 400)}`
+          : `; blocker request failed: ${response}`;
+      }
+      throw new Error(`VM wait observation: ${JSON.stringify(observation)}; blocker settled: ${blockerSettled}${answer}`, { cause: error });
     }
 
     const ping = await peerApi.post('session_ping.php', {

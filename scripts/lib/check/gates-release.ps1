@@ -71,7 +71,23 @@ function Register-ReleaseCheckGates {
                 return New-InfraResult ('kein ' + $engine + ' fuer Playwright: npx playwright install ' + $engine)
             }
         }
-        Invoke-PlaywrightSuite @('firefox', 'webkit') 'Playwright-Suite gruen auf Firefox und WebKit (QA-Stack)' 'Browser-Matrix rot'
+        # Eine Playwright-Ausfuehrung je Engine, nicht beide in einer: das
+        # setup-Projekt meldet sich je Ausfuehrung einmal an, und die Portal-
+        # sitzung endet absolut 3600 s nach der Anmeldung (Navigation
+        # verlaengert sie nicht). Unter Fremdlast dauerten beide Engines
+        # zusammen 67 bis 75 Minuten; jede WebKit-Spec nach der Stunde scheiterte
+        # am Dialog zum Sitzungsablauf, der jeden Klick abfaengt (M1, 26.10.2026).
+        $engineResults = @()
+        foreach ($engine in @('firefox', 'webkit')) {
+            $engineResults += Invoke-PlaywrightSuite @($engine) ('Playwright-Suite gruen auf ' + $engine) ('Playwright-Suite rot auf ' + $engine)
+        }
+        $output = @()
+        foreach ($result in $engineResults) { $output += @($result.output) }
+        $details = ($engineResults | ForEach-Object { $_.detail }) -join '; '
+        if (@($engineResults | Where-Object { $_.class -eq 'fail' }).Count -gt 0) { return New-FailResult ('Browser-Matrix rot: ' + $details) $output }
+        $notPassed = @($engineResults | Where-Object { $_.class -ne 'pass' })
+        if ($notPassed.Count -gt 0) { return $notPassed[0] }
+        New-PassResult 'Playwright-Suite gruen auf Firefox und WebKit (QA-Stack)' $output
     }
 
     Add-Gate -Name 'e2e-msedge' -Lanes @('Release') -Kind 'windows-only' -Network $true -Body {
