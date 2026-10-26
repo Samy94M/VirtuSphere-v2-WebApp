@@ -95,7 +95,7 @@ final class InventoryQueryVocabularyContractTest extends TestCase
         // a locale uses is house style, not contract.
         foreach (self::statesOperatorsLookUp() as $state) {
             self::assertMatchesRegularExpression(
-                '/[„"]' . preg_quote($state, '/') . '"/u',
+                '/[„"]' . preg_quote($state, '/') . '[“"]/u',
                 $source,
                 sprintf('No %s help catalog explains the query state "%s" that the job log prints.', $locale, $state)
             );

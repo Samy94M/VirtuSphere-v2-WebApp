@@ -144,11 +144,55 @@ foreach (array_keys($modules) as $module) {
     }
 }
 
-$failed = $fileErrors !== [] || $gaps !== [] || $placeholderDrifts !== [];
+/**
+ * German quote form (i18n R11, Welle A2): a DE value quotes with the German pair
+ * U+201E ... U+201C only. A straight ASCII quote or an English closing U+201D is a
+ * finding, and so is a pair that is not closed, closed twice or opened twice. Text
+ * inside <code>...</code> and <pre>...</pre> is a literal and is not checked. The
+ * values come from the `require` above, so PHP comments never reach this check.
+ *
+ * @var array<int, array{key: string, detail: string}> $quoteMixes
+ */
+$quoteMixes = [];
+$quoteProblemOf = static function (string $text): ?string {
+    $text = (string) preg_replace('~<code\b[^>]*>.*?</code>|<pre\b[^>]*>.*?</pre>~su', '', $text);
+    if (str_contains($text, '"')) {
+        return 'straight ASCII quote, use the German pair U+201E/U+201C';
+    }
+    if (str_contains($text, "\u{201D}")) {
+        return 'English closing quote U+201D, close with U+201C';
+    }
+    $open = false;
+    foreach (preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $character) {
+        if ($character === "\u{201E}") {
+            if ($open) {
+                return 'U+201E opened again before the previous pair was closed';
+            }
+            $open = true;
+        } elseif ($character === "\u{201C}") {
+            if (!$open) {
+                return 'U+201C closes without an opening U+201E';
+            }
+            $open = false;
+        }
+    }
+
+    return $open ? 'U+201E is never closed with U+201C' : null;
+};
+foreach ($catalog['de'] ?? [] as $module => $entries) {
+    foreach ($entries as $key => $text) {
+        $problem = $quoteProblemOf($text);
+        if ($problem !== null) {
+            $quoteMixes[] = ['key' => $module . '.' . $key, 'detail' => $problem];
+        }
+    }
+}
+
+$failed = $fileErrors !== [] || $gaps !== [] || $placeholderDrifts !== [] || $quoteMixes !== [];
 
 if ($mode === 'quiet') {
     if ($failed) {
-        fwrite(STDERR, 'Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . " placeholder drift(s).\n");
+        fwrite(STDERR, 'Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . ' placeholder drift(s), ' . count($quoteMixes) . " quote mix(es).\n");
         exit(1);
     }
     exit(0);
@@ -156,7 +200,7 @@ if ($mode === 'quiet') {
 
 if ($mode === 'ci') {
     if ($failed) {
-        fwrite(STDERR, '::error::Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . " placeholder drift(s).\n");
+        fwrite(STDERR, '::error::Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . ' placeholder drift(s), ' . count($quoteMixes) . " quote mix(es).\n");
         foreach ($fileErrors as $error) {
             fwrite(STDERR, "  - [lang-audit.file-error] {$error}\n");
         }
@@ -165,6 +209,9 @@ if ($mode === 'ci') {
         }
         foreach ($placeholderDrifts as $drift) {
             fwrite(STDERR, '  - [lang-audit.placeholder-drift] ' . $drift['key'] . ' ' . $drift['detail'] . "\n");
+        }
+        foreach ($quoteMixes as $mix) {
+            fwrite(STDERR, '  - [lang-audit.quote-mix] ' . $mix['key'] . ' ' . $mix['detail'] . "\n");
         }
         exit(1);
     }
@@ -188,6 +235,10 @@ foreach ($gaps as $gap) {
 echo 'Placeholder drifts: ' . count($placeholderDrifts) . "\n";
 foreach ($placeholderDrifts as $drift) {
     echo 'DRIFT [lang-audit.placeholder-drift] ' . $drift['key'] . ' ' . $drift['detail'] . "\n";
+}
+echo 'Quote mixes (de): ' . count($quoteMixes) . "\n";
+foreach ($quoteMixes as $mix) {
+    echo 'QUOTE [lang-audit.quote-mix] ' . $mix['key'] . ' ' . $mix['detail'] . "\n";
 }
 
 exit($failed ? 1 : 0);

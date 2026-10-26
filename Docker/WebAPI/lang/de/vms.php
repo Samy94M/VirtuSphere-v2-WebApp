@@ -17,7 +17,7 @@ return [
     'th_status' => 'Phase',
     'th_finding' => 'Befund',
     'rollout_diverged' => 'wartet auf Reset',
-    'rollout_diverged_title' => 'Dieser Rollout läuft weiter unter „:current". Der geänderte Name gilt erst nach dem Löschen des alten MECM-Geräts und „MECM-ID zurücksetzen".',
+    'rollout_diverged_title' => 'Dieser Rollout läuft weiter unter „:current“. Der geänderte Name gilt erst nach dem Löschen des alten MECM-Geräts und „MECM-ID zurücksetzen“.',
     'th_os' => 'OS',
     'th_cpu' => 'CPU',
     'th_ram' => 'RAM',

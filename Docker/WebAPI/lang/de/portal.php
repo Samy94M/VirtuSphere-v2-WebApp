@@ -28,7 +28,7 @@ return [
     // Hostnamenfeld, und ein serverseitig gerenderter Name würde dort einen Wert
     // behaupten, den der Bearbeiter gerade überschrieben, aber noch nicht
     // gespeichert hat. Dort sagt die Frage deshalb, was gilt, statt welchen Wert.
-    'vm_mecm_reset_confirm' => 'MECM-ID für VM :name zurücksetzen? Der nächste Rollout meldet sie als „:hostname" bei MECM an. Das alte MECM-Gerät wird nicht automatisch gelöscht.',
+    'vm_mecm_reset_confirm' => 'MECM-ID für VM :name zurücksetzen? Der nächste Rollout meldet sie als „:hostname“ bei MECM an. Das alte MECM-Gerät wird nicht automatisch gelöscht.',
     'vm_mecm_reset_confirm_editing' => 'MECM-ID für VM :name zurücksetzen? Aktiviert wird der zuletzt GESPEICHERTE Windows-Hostname, nicht eine ungespeicherte Änderung im Feld. Das alte MECM-Gerät wird nicht automatisch gelöscht.',
     'vm_mecm_reset_template_blocked' => 'Templates können nicht für MECM eingereiht werden.',
     'vm_mecm_reset_no_mac' => 'MECM-ID zurücksetzen nicht möglich: Die VM hat noch keine importierte MAC-Adresse.',
@@ -36,8 +36,8 @@ return [
     // wirksam wird. Jeder Erfolgstext nennt den Namen, der jetzt scharf ist, und
     // wiederholt die unveraenderte Betreiberpflicht: VirtuSphere loescht in MECM
     // nichts.
-    'vm_mecm_reset_success' => 'MECM-ID zurückgesetzt. Der nächste Rollout meldet die VM als „:hostname" an MECM an. Das alte MECM-Gerät wird nicht automatisch gelöscht; bitte in der MECM-Konsole entfernen.',
-    'vm_mecm_reset_already_pending' => 'Es war nichts zu tun: „:hostname" wartet bereits als nächster Rolloutname und die VM ist für MECM eingereiht.',
+    'vm_mecm_reset_success' => 'MECM-ID zurückgesetzt. Der nächste Rollout meldet die VM als „:hostname“ an MECM an. Das alte MECM-Gerät wird nicht automatisch gelöscht; bitte in der MECM-Konsole entfernen.',
+    'vm_mecm_reset_already_pending' => 'Es war nichts zu tun: „:hostname“ wartet bereits als nächster Rolloutname und die VM ist für MECM eingereiht.',
     'vm_mecm_reset_already_pending_reason' => 'bereits eingereiht',
     'vm_mecm_reset_active_job' => 'MECM-ID zurücksetzen nicht möglich: Für diese Mission läuft gerade ein Deploy-Job. Warten Sie, bis er beendet ist.',
     'vm_mecm_reset_invalid_hostname' => 'MECM-ID zurücksetzen nicht möglich: Der Windows-Hostname taugt nicht als Gerätename in MECM. Zulässig sind höchstens :max Zeichen, nur Buchstaben, Ziffern und innenliegende Bindestriche, kein Punkt. Bitte zuerst im VM-Editor korrigieren.',
@@ -52,5 +52,5 @@ return [
     // dieselbe Maschine benennen, ist die kompakte Anzeige die Wahrheit.
     'vm_rollout_current_label' => 'Aktueller Rolloutname',
     'vm_rollout_next_label' => 'Nächster Rolloutname',
-    'vm_rollout_frozen_hint' => 'Diese VM wurde bereits als „:current" an MECM übergeben. Der geänderte Name gilt erst für den nächsten Rollout: altes Gerät in MECM löschen, dann „MECM-ID zurücksetzen".',
+    'vm_rollout_frozen_hint' => 'Diese VM wurde bereits als „:current“ an MECM übergeben. Der geänderte Name gilt erst für den nächsten Rollout: altes Gerät in MECM löschen, dann „MECM-ID zurücksetzen“.',
 ];

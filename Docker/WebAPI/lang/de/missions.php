@@ -39,7 +39,7 @@ return [
     'empty_template' => 'Noch keine Vorlage angelegt.',
     'empty_create_link' => 'Oben anlegen.',
     'import_heading' => 'Mission importieren',
-    'import_hint' => 'Stellt eine Mission aus einer JSON-Datei wieder her, die auf der Detailseite einer Mission über "Als JSON exportieren" erstellt wurde. Der Import legt eine neue Mission mit allen enthaltenen VMs an; MAC-Adressen und MECM-IDs dieser VMs werden nie übernommen. Höchstgröße der Datei: :max.',
+    'import_hint' => 'Stellt eine Mission aus einer JSON-Datei wieder her, die auf der Detailseite einer Mission über „Als JSON exportieren“ erstellt wurde. Der Import legt eine neue Mission mit allen enthaltenen VMs an; MAC-Adressen und MECM-IDs dieser VMs werden nie übernommen. Höchstgröße der Datei: :max.',
     'import_file_label' => 'Missions-Datei (JSON)',
     'import_preview_btn' => 'Vorschau',
     'import_preview_busy' => 'Wird geprüft…',

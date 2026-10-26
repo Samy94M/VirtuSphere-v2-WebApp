@@ -515,6 +515,21 @@ $cases = @(
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_ph' => 'value :minimum',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.placeholder-drift\].*zz_guard_ph'
     } }
+    # i18n R11 (Welle A2): the German pair only. The fixture value is a PHP
+    # double-quoted string with \u{...} escapes, so this file stays ASCII and the
+    # fixture bytes do not depend on the encoding Edit-Fixture writes.
+    @{ Name = 'lang-audit.quote-mix'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_quote' => `"Reiter \u{201E}Probe\`" offen`",`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_quote' => 'Tab Probe open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_quote'
+    } }
+    @{ Name = 'lang-audit.quote-unclosed'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_open' => `"Reiter \u{201E}Probe offen`",`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_open' => 'Tab Probe open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_open.*never closed'
+    } }
 
     @{ Name = 'bounds-sync.green'; Body = {
         Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci')) @(0)

@@ -67,7 +67,7 @@ return [
     'phase_state_unconfirmed' => 'Ausgeführt, Bestätigung ausstehend',
     'phase_state_finished' => 'Abgeschlossen',
     'phase_state_failed' => 'Fehlgeschlagen',
-    'hostname_legacy_warning' => 'Achtung: Dieser Hostname erfüllt die Windows-Regeln nicht (max. 15 Zeichen, keine Punkte). Der Client würde ihn beim Deploy zu ":preview" ändern. Bitte beim nächsten Speichern korrigieren.',
+    'hostname_legacy_warning' => 'Achtung: Dieser Hostname erfüllt die Windows-Regeln nicht (max. 15 Zeichen, keine Punkte). Der Client würde ihn beim Deploy zu „:preview“ ändern. Bitte beim nächsten Speichern korrigieren.',
     'package_retired_suffix' => '(zurückgezogen)',
     'package_update_available' => 'Update verfügbar: Diese VM ist mit „:old“ verknüpft, im Katalog ist „:new“ aktiv.',
     'package_retired_selected' => '„:name“ ist zurückgezogen und in MECM nicht mehr vorhanden. Wird die VM mit diesem Haken gespeichert und an MECM übertragen, bleibt sie in der Warteschlange, weil ihre Collection in MECM fehlt. Haken entfernen oder durch die aktuelle Version ersetzen.',
@@ -95,7 +95,7 @@ return [
     'location_not_in_inventory' => 'nicht im aktuellen Inventar',
     'location_hint' => 'Leer erbt die VM den Wert der Mission; er steht in der leeren Auswahloption. Ein abweichender Datastore wirkt nur beim Erstellen der VM, eine bereits vorhandene VM zieht dadurch nicht um.',
     'location_host_choice_hint' => 'Der Zielhost wird erst beim Bereitstellen gewählt. Die Liste zeigt die Werte aller ESXi-Zugänge, und ein Wert kann auf dem später gewählten Host fehlen.',
-    'location_bucket_hint' => 'Die Gruppen sagen, auf wie vielen Zugängen ein Wert vorhanden ist: „Auf allen ESXi-Zugängen vorhanden" übersteht jede Host-Wahl, „Nur auf …" legt sie fest.',
+    'location_bucket_hint' => 'Die Gruppen sagen, auf wie vielen Zugängen ein Wert vorhanden ist: „Auf allen ESXi-Zugängen vorhanden“ übersteht jede Host-Wahl, „Nur auf …“ legt sie fest.',
     'location_never_pulled_hint' => 'Mindestens ein ESXi-Zugang wurde noch nie abgerufen. Was es nur dort gibt, steht hier nicht zur Auswahl und lässt sich auch nicht eintippen; ein Abruf ergänzt es.',
     'location_status_link' => 'Inventar im Systemstatus abrufen',
     'effective_heading' => 'Wirksame Sollwerte',
@@ -125,7 +125,7 @@ return [
     // Ohne diesen Satz verlaesst der Bearbeiter die Seite in dem Glauben, die
     // Umbenennung sei wirksam, und merkt erst beim naechsten Rollout, dass sie
     // es nicht war.
-    'flash_rollout_frozen' => 'Der neue Windows-Hostname ist gespeichert, gilt aber erst für den nächsten Rollout: Diese VM wurde bereits als „:hostname" an MECM übergeben. Für einen neuen Rollout das alte Gerät in MECM löschen und danach „MECM-ID zurücksetzen" ausführen.',
+    'flash_rollout_frozen' => 'Der neue Windows-Hostname ist gespeichert, gilt aber erst für den nächsten Rollout: Diese VM wurde bereits als „:hostname“ an MECM übergeben. Für einen neuen Rollout das alte Gerät in MECM löschen und danach „MECM-ID zurücksetzen“ ausführen.',
     // AV-R12: Speichern überträgt eine registrierte VM an MECM. Weicht das Betriebssystem
     // ab, fragt der Editor vorher, weil eine Übertragung eine Neuinstallation auslösen kann.
     'flash_mecm_queued' => 'Gespeichert und für die Übertragung an MECM vorgemerkt. :changes',
@@ -181,7 +181,7 @@ return [
     'hotplug_hint' => 'Erlaubt das Hinzufügen von CPU und RAM im laufenden Betrieb. Wirkt nur bei der Erzeugung der VM. Ein erneuter Create-Lauf schickt die Einstellung zwar auch an eine vorhandene VM, ob ESXi sie dort übernimmt, liest das Portal aber nicht zurück. Deshalb ist das kein verlässlicher Weg, die Einstellung zu ändern. Das Gast-Betriebssystem muss Hot-Add unterstützen.',
     'autostart_heading' => 'Autostart',
     'autostart_enabled' => 'Diese VM beim Hochfahren des Hosts starten',
-    'autostart_hint' => 'Bleiben die Verzögerungen leer, gelten die Standardwerte der Mission; eine spätere Änderung dort wirkt dann automatisch mit. Eine 0 bedeutet „ohne Wartezeit" und ist nicht dasselbe wie leer. Die Reihenfolge der VMs ergibt sich aus den Startverzögerungen.',
+    'autostart_hint' => 'Bleiben die Verzögerungen leer, gelten die Standardwerte der Mission; eine spätere Änderung dort wirkt dann automatisch mit. Eine 0 bedeutet „ohne Wartezeit“ und ist nicht dasselbe wie leer. Die Reihenfolge der VMs ergibt sich aus den Startverzögerungen.',
     'autostart_mission_off_subject' => 'Autostart der Mission ist aus',
     'autostart_mission_off' => 'Deshalb sind diese Felder gesperrt: der Schalter der Mission entscheidet, ob der Host überhaupt einen Autostart führt. Ein bereits gesetzter Wert bleibt erhalten und wirkt, sobald die Mission den Autostart einschaltet.',
     'autostart_mission_link' => 'Zur Mission',
