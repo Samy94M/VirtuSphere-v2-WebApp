@@ -42,7 +42,15 @@ async function signIn(page, role) {
  * language choice, but the specs assume the same starting point everywhere.
  */
 async function refreshStorageState(browser, baseURL, role) {
-  const context = await browser.newContext({ baseURL, locale: 'en-US' });
+  // Inside a test, Playwright hands the spec's `use` options to every
+  // browser.newContext(), storageState included. Without the empty state the
+  // renewal context started signed in, login.php forwarded to the dashboard,
+  // and the username field never appeared (first matrix run, 2026-10-26).
+  const context = await browser.newContext({
+    baseURL,
+    locale: 'en-US',
+    storageState: { cookies: [], origins: [] },
+  });
   // A context from browser.newContext() does not inherit the config's `use`
   // timeouts, and Playwright's own action default is unlimited. Bound every
   // step so a slow portal fails this renewal instead of the whole test.
