@@ -64,6 +64,11 @@ echo 'CLEANED';
 // e2e-covers-cancel: settings.php:save_https_redirect
 // e2e-covers: settings.php:save_https_hsts
 test('HTTPS flow: refusals without material, upload, overwrite guard, toggles, disable', async ({ page }) => {
+  // Eight steps with nine settings POSTs, two certificate generations and a
+  // webserver reload share one test budget. Firefox needed 28.8 s of the
+  // default 30 s and WebKit timed out at 31.1 s in the same run (2026-10-26),
+  // so the budget, not the flow, decided the outcome under load.
+  test.setTimeout(90000);
   const initial = httpsState();
   test.skip(
     initial.material || initial.enabled === '1',
