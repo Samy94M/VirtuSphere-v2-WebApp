@@ -43,6 +43,11 @@ async function signIn(page, role) {
  */
 async function refreshStorageState(browser, baseURL, role) {
   const context = await browser.newContext({ baseURL, locale: 'en-US' });
+  // A context from browser.newContext() does not inherit the config's `use`
+  // timeouts, and Playwright's own action default is unlimited. Bound every
+  // step so a slow portal fails this renewal instead of the whole test.
+  context.setDefaultTimeout(15000);
+  context.setDefaultNavigationTimeout(15000);
   try {
     const page = await context.newPage();
     await signIn(page, role);
