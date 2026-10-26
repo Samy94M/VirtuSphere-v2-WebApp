@@ -5,7 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 /**
- * LG-09 / LG-10 / HA-13 / HA-23 / HA-24 / HA-14: the state change of a listed action and
+ * LG-09 / LG-10 / HA-13 / HA-23 / HA-24 / HA-14 / AL-1: the state change of a listed action and
  * the audit row that records it are one transaction, and that row is written with
  * audit_event_required(). An unchecked audit_event() after the commit is how a change
  * ends up applied with no trail when the insert is the thing that fails.
@@ -33,6 +33,8 @@ final class AuditTransactionOwnershipContractTest extends TestCase
             'VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CREATE_RELEASED',
         ],
         'lib/vm_save_service.php' => ['VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED'],
+        // AL-1: create, update, strict activation and delete of a credential.
+        'lib/credentials_actions.php' => ['VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED'],
     ];
 
     private function code(string $relative): string

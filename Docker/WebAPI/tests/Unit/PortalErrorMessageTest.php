@@ -181,6 +181,9 @@ final class PortalErrorMessageTest extends TestCase
             // Two operators editing the same VM: the second save is rejected by
             // the optimistic-locking guard in repo_save_vm.
             'vm edit conflict' => ['VM was changed by another user. Reload before saving.'],
+            // A stale credentials page: another operator deleted the row (AL-1).
+            'credential deleted meanwhile' => ['Credential not found.'],
+            'esxi credential deleted meanwhile' => ['ESXi credential not found.'],
         ];
     }
 

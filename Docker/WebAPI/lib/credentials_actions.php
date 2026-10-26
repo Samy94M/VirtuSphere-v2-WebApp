@@ -185,64 +185,71 @@ function credentials_handle_post(mysqli $connection, array $user): string
         ];
         $secret = request_string($_POST, 'secret');
 
+        // AL-1 (R19): each write below and its audit row commit or roll back together; the
+        // flash and the fail-soft inventory pull of credentials_after_esxi_save() follow the commit.
         if ($action === 'create') {
-            $createdId = repo_create_credential($connection, $payload, $secret, (int) $user['id']);
-            // The stored mode, read back: a verifying choice and 'none' end up in different modes.
-            $createdRow = repo_credential($connection, $createdId) ?? [];
-            // HA-24: the name and the host, so the row says which credential it is (never a secret).
-            $createdContext = array_filter(
-                ['action' => 'created', 'name' => (string) ($createdRow['name'] ?? ''), 'host' => (string) ($createdRow['host'] ?? '')],
-                static fn (string $value): bool => $value !== ''
-            );
-            if ((string) ($createdRow['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
-                $createdContext['trust_mode'] = credential_esxi_trust_mode($createdRow);
-            }
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $createdContext, (int) $user['id']);
+            $createdId = repo_transaction($connection, static function () use ($connection, $payload, $secret, $user): int {
+                $createdId = repo_create_credential($connection, $payload, $secret, (int) $user['id']);
+                // The stored mode, read back: a verifying choice and 'none' end up in different modes.
+                $createdRow = repo_credential($connection, $createdId) ?? [];
+                // HA-24: the name and the host, so the row says which credential it is (never a secret).
+                $createdContext = array_filter(
+                    ['action' => 'created', 'name' => (string) ($createdRow['name'] ?? ''), 'host' => (string) ($createdRow['host'] ?? '')],
+                    static fn (string $value): bool => $value !== ''
+                );
+                if ((string) ($createdRow['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+                    $createdContext['trust_mode'] = credential_esxi_trust_mode($createdRow);
+                }
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $createdContext, (int) $user['id']);
+                return $createdId;
+            });
             flash_set('success', __t('credentials.flash_created'));
             credentials_after_esxi_save($connection, (string) $payload['type'], $createdId, (int) $user['id']);
         } elseif ($action === 'update') {
-            // Pre-update row for the diff; the secret is never read back here and a
-            // rotation is reported as "secret: changed", not with its value.
-            $before = repo_credential($connection, $id, true) ?? [];
-            $preflightCleared = false;
-            $trustChange = ['before' => null, 'after' => null];
-            repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null, $preflightCleared, $trustChange);
-            // Verification switched off on a strict ESXi row: the downgrade gets its own audit row and warning.
-            $verificationDisabled = ($trustChange['before'] ?? null) === VIRTUSPHERE_ESXI_TRUST_STRICT
-                && ($trustChange['after'] ?? null) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
-            // Certificate material is public, not a secret, but a PEM block is
-            // still bulk configuration data that must not flood the audit log.
-            $credentialDiff = audit_change_summary($before, $payload, ['esxi_certificate_pem']);
-            if ($secret !== '') {
-                $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'credential material: changed']));
-            }
-            // The stored preflight result proved the OLD host/account; an edit
-            // invalidates it. ESXi gets a fresh pull below, Ansible honestly
-            // drops back to "not tested" until someone clicks Test again. The
-            // reset rides the update's own audit line rather than adding a
-            // second entry for a deterministic consequence.
-            if ($preflightCleared) {
-                $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'ansible preflight state: reset']));
-            }
-            if ((string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
-                && (string) $payload['type'] !== VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
-                && esxi_inventory_clear_ansible_selection_if_matches($connection, $id)
-            ) {
-                $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'inventory ansible selection: cleared']));
-            }
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'updated',
-                'changes' => $credentialDiff === '' ? 'no field changes' : $credentialDiff,
-            ], (int) $user['id']);
-            if ($verificationDisabled) {
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'trust_mode_changed',
-                    'trust_mode' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
+            $verificationDisabled = repo_transaction($connection, static function () use ($connection, $id, $payload, $secret, $user): bool {
+                // Pre-update row for the diff; the secret is never read back here and a
+                // rotation is reported as "secret: changed", not with its value.
+                $before = repo_credential($connection, $id, true) ?? [];
+                $preflightCleared = false;
+                $trustChange = ['before' => null, 'after' => null];
+                repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null, $preflightCleared, $trustChange);
+                // Verification switched off on a strict ESXi row: the downgrade gets its own audit row and warning.
+                $verificationDisabled = ($trustChange['before'] ?? null) === VIRTUSPHERE_ESXI_TRUST_STRICT
+                    && ($trustChange['after'] ?? null) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
+                // Certificate material is public, not a secret, but a PEM block is
+                // still bulk configuration data that must not flood the audit log.
+                $credentialDiff = audit_change_summary($before, $payload, ['esxi_certificate_pem']);
+                if ($secret !== '') {
+                    $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'credential material: changed']));
+                }
+                // The stored preflight result proved the OLD host/account; an edit invalidates it.
+                // ESXi gets a fresh pull after the commit, Ansible drops back to "not tested". The
+                // reset rides the update's own audit line, not a second entry for a consequence.
+                if ($preflightCleared) {
+                    $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'ansible preflight state: reset']));
+                }
+                if ((string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                    && (string) $payload['type'] !== VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                    && esxi_inventory_clear_ansible_selection_if_matches($connection, $id)
+                ) {
+                    $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'inventory ansible selection: cleared']));
+                }
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'changes' => $credentialDiff === '' ? 'no field changes' : $credentialDiff,
                 ], (int) $user['id']);
-                flash_set('warning', __t('credentials.flash_verification_disabled'));
-            } else {
-                flash_set('success', __t('credentials.flash_updated'));
-            }
+                if ($verificationDisabled) {
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'trust_mode_changed',
+                        'trust_mode' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
+                    ], (int) $user['id']);
+                }
+                return $verificationDisabled;
+            });
+            flash_set(
+                $verificationDisabled ? 'warning' : 'success',
+                __t($verificationDisabled ? 'credentials.flash_verification_disabled' : 'credentials.flash_updated')
+            );
             credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
         } elseif ($action === 'confirm_host_identity') {
             // replace_pin is only ever sent by the second step after a deviating value (UX-HK).
@@ -283,26 +290,36 @@ function credentials_handle_post(mysqli $connection, array $user): string
                     ?? __t('credentials.remote_secret_reason_required', ['min' => VIRTUSPHERE_REMOTE_SECRET_REASON_MIN_CHARS]));
             }
         } elseif ($action === 'activate_strict') {
-            repo_activate_esxi_strict_trust($connection, $id);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'trust_mode_changed',
-                'trust_mode' => 'strict',
-            ], (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $id, $user): void {
+                if (!repo_activate_esxi_strict_trust($connection, $id)) {
+                    // The row went away or stopped being ESXi between its read and the write.
+                    throw new RuntimeException(__t('credentials.err_not_found'));
+                }
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'trust_mode_changed',
+                    'trust_mode' => 'strict',
+                ], (int) $user['id']);
+            });
             flash_set('success', __t('credentials.flash_strict_activated'));
             // Same follow-up as a save: the pull that shows the activated mode on the status page.
             credentials_after_esxi_save($connection, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, $id, (int) $user['id']);
         } elseif ($action === 'delete') {
-            $before = repo_credential($connection, $id) ?? [];
-            repo_delete_credential($connection, $id);
-            $selectionCleared = (string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
-                && esxi_inventory_clear_ansible_selection_if_matches($connection, $id);
-            // HA-24: the name and the host of the deleted credential, read before the delete (never a secret).
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, array_filter([
-                'action' => 'deleted',
-                'name' => (string) ($before['name'] ?? ''),
-                'host' => (string) ($before['host'] ?? ''),
-                'selection_cleared' => $selectionCleared,
-            ], static fn (mixed $value): bool => $value !== ''), (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $id, $user): void {
+                $before = repo_credential($connection, $id) ?? [];
+                // A missing row is an error, not a "deleted" line for nothing.
+                if (!repo_delete_credential($connection, $id)) {
+                    throw new RuntimeException(__t('credentials.err_not_found'));
+                }
+                $selectionCleared = (string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                    && esxi_inventory_clear_ansible_selection_if_matches($connection, $id);
+                // HA-24: the name and the host of the deleted credential, read before the delete (never a secret).
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, array_filter([
+                    'action' => 'deleted',
+                    'name' => (string) ($before['name'] ?? ''),
+                    'host' => (string) ($before['host'] ?? ''),
+                    'selection_cleared' => $selectionCleared,
+                ], static fn (mixed $value): bool => $value !== ''), (int) $user['id']);
+            });
             flash_set('success', __t('credentials.flash_deleted'));
         } elseif ($action === 'test') {
             $credential = repo_credential($connection, $id, true);

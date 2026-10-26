@@ -776,7 +776,8 @@ while ($true) {
                                     change = [string]$journalEntry.change
                                 })
                             }
-                            Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $replayBody | Out-Null
+                            $replayResponse = Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $replayBody
+                            Assert-VsPortalSuccess -Response $replayResponse -Operation 'reportMembership'
                             $acknowledgedOperationIds = @([string]$journalEntry.operation_id)
                             if ([string]$journalEntry.change -eq 'added' -and $replaySuppressedRemovals.ContainsKey([string]$journalEntry.collection_id)) {
                                 $acknowledgedOperationIds += @($replaySuppressedRemovals[[string]$journalEntry.collection_id])
@@ -1032,7 +1033,8 @@ while ($true) {
                             memberships = @($membershipReport | Select-Object collection_id, collection_name, type, change)
                         }
                         if ($rolloutRevision) { $membershipBody['rollout_revision'] = [int]$rolloutRevision }
-                        Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $membershipBody | Out-Null
+                        $membershipResponse = Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body $membershipBody
+                        Assert-VsPortalSuccess -Response $membershipResponse -Operation 'reportMembership'
                         Remove-VsMembershipJournalEntries -Path $membershipJournalPath -OperationIds @($membershipReport | ForEach-Object { [string]$_.operation_id })
                     } catch {
                         # 409 heisst: dieser Scan arbeitet mit einem veralteten
@@ -1081,7 +1083,8 @@ while ($true) {
                     # 0 ist ein gueltiger Zaehlerstand; nur ein fehlendes Feld
                     # (Portal vor AV-P0) bleibt weg.
                     if ($null -ne $transferGeneration -and "$transferGeneration" -ne '') { $updateBody['transfer_generation'] = [long]$transferGeneration }
-                    Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=updateDevice' -Method POST -Body $updateBody | Out-Null
+                    $updateResponse = Invoke-VsApi -Config $config -Path '/mecm_updateid.php?action=updateDevice' -Method POST -Body $updateBody
+                    Assert-VsPortalSuccess -Response $updateResponse -Operation 'updateDevice'
                 } catch {
                     $isStale = ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 409)
                     $cause = if ($isStale) { 'stale_rollout_revision' } else { 'resource_update_failed' }

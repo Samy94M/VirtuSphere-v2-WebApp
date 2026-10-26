@@ -59,6 +59,8 @@ final class MessageLinkContractTest extends TestCase
         'Strict ESXi certificate verification must pass a connection test before activation.' => 'The test button is on the same credential form.',
         'ESXi certificate is required.' => 'The fix is a field of the same credential form.',
         'VM was changed by another user. Reload before saving.' => 'The fix is reloading the same page.',
+        'Credential not found.' => 'The credential was deleted meanwhile; the redirect reloads the credentials page, which no longer lists it.',
+        'ESXi credential not found.' => 'The credential was deleted meanwhile; the redirect reloads the credentials page, which no longer lists it.',
     ];
 
     public function testEveryMessageThatNamesAPageIsRenderedNextToALink(): void

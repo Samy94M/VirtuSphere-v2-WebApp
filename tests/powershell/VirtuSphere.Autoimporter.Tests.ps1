@@ -1606,16 +1606,38 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
             }, $true))
             if ($function.Count -ne 1) { throw "Funktion $FunctionName ist nicht eindeutig." }
             $fields = New-Object System.Collections.Generic.List[string]
+            $guardNames = New-Object System.Collections.Generic.List[string]
+            $cfgMembers = { param($node) @($node.FindAll({ param($m)
+                $m -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                $m.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $m.Expression.VariablePath.UserPath -eq 'cfg'
+            }, $true)) | ForEach-Object { [string]$_.Member.Value } }
+            $variables = { param($node) @($node.FindAll({ param($m)
+                $m -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                $m.VariablePath.UserPath -notin @('cfg', '_', 'null', 'true', 'false')
+            }, $true)) | ForEach-Object { [string]$_.VariablePath.UserPath } }
             foreach ($guard in @($function[0].Body.FindAll({ param($n)
                 $n -is [System.Management.Automation.Language.IfStatementAst] -and
                 $n.Clauses[0].Item2.Extent.Text -match '(?m)^\s*return \$null\s*$'
             }, $true))) {
-                foreach ($member in @($guard.Clauses[0].Item1.FindAll({ param($m)
-                    $m -is [System.Management.Automation.Language.MemberExpressionAst] -and
-                    $m.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                    $m.Expression.VariablePath.UserPath -eq 'cfg'
-                }, $true))) { $fields.Add([string]$member.Member.Value) }
+                foreach ($field in @(& $cfgMembers $guard.Clauses[0].Item1)) { $fields.Add($field) }
+                foreach ($name in @(& $variables $guard.Clauses[0].Item1)) { if (-not $guardNames.Contains($name)) { $guardNames.Add($name) } }
             }
+            # Wie beim Wrapper zaehlt auch ein Feld, das ueber Hilfsvariablen in
+            # die Bedingung kommt ($canonical <- $behavior <- $cfg.X, H01-3).
+            # Bis zum Fixpunkt, weil der Server zwei Stufen braucht.
+            $assignments = @($function[0].Body.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $n.Left -is [System.Management.Automation.Language.VariableExpressionAst]
+            }, $true))
+            do {
+                $before = $guardNames.Count
+                foreach ($assignment in $assignments) {
+                    if (-not $guardNames.Contains([string]$assignment.Left.VariablePath.UserPath)) { continue }
+                    foreach ($field in @(& $cfgMembers $assignment.Right)) { $fields.Add($field) }
+                    foreach ($name in @(& $variables $assignment.Right)) { if (-not $guardNames.Contains($name)) { $guardNames.Add($name) } }
+                }
+            } while ($guardNames.Count -gt $before)
             return @($fields | Sort-Object -Unique)
         }
     }
@@ -1722,6 +1744,62 @@ Describe 'Package_Vorlage: config.json wird vor der ersten Skriptausfuehrung gep
         $wrapperValues.Count | Should -BeGreaterThan 0 -Because 'der -notin-Vergleich des Wrappers ist nicht gefunden'
         $serverValues = @(Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsPackageErrorActions })
         (($wrapperValues | Sort-Object) -join ',') | Should -Be (($serverValues | Sort-Object) -join ',')
+    }
+
+    It 'H01-3: erlaubt im Wrapper und im Server dieselben InstallationBehaviorType-Werte mit demselben Standard' {
+        # Gegenstueck zum ErrorAction-Zwilling: der Wrapper prueft mit -notin
+        # gegen ein Literal, der Server gegen $script:VsInstallationBehaviorTypes.
+        $guards = @($script:TemplateAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+            "$($n.Operator)" -match '(?i)notin' -and
+            $n.Left.Extent.Text -match '(?i)installationBehavior'
+        }, $true))
+        $guards.Count | Should -Be 1 -Because 'genau ein -notin-Vergleich prueft den InstallationBehaviorType'
+        $wrapperValues = @($guards[0].Right.FindAll({ param($m)
+            $m -is [System.Management.Automation.Language.ConstantExpressionAst] -and $m.Value -is [string]
+        }, $true) | ForEach-Object { [string]$_.Value })
+        $serverValues = @(Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsInstallationBehaviorTypes })
+        $serverValues.Count | Should -BeGreaterThan 0
+        (($wrapperValues | Sort-Object) -join ',') | Should -Be (($serverValues | Sort-Object) -join ',')
+
+        # Der Standard fuer ein leeres Feld: die Zuweisung im then-Zweig der
+        # IsNullOrWhiteSpace-Pruefung, beim Server der erste Listeneintrag.
+        $default = Get-IfByCondition -Path $script:Template -ConditionText 'IsNullOrWhiteSpace($installationBehavior)'
+        $default | Should -Not -BeNullOrEmpty -Because 'der Wrapper muss ein leeres Feld auf den Standard setzen'
+        $defaultValue = @($default.Clauses[0].Item2.FindAll({ param($m)
+            $m -is [System.Management.Automation.Language.StringConstantExpressionAst]
+        }, $true) | ForEach-Object { [string]$_.Value })
+        $defaultValue | Should -Be @($serverValues[0])
+    }
+
+    It 'H01-3: bricht bei einem unbekannten InstallationBehaviorType ab, bevor Registry oder Log etwas tun' {
+        # Statisch, ohne Prozesslauf: ein echter Lauf der Vorlage schriebe nach
+        # ProgramData und HKLM.
+        $exits = @($script:TemplateAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.IfStatementAst] -and
+            $n.Clauses[0].Item1.Extent.Text -match '(?i)\$installationBehavior\s+-notin' -and
+            @($n.Clauses[0].Item2.FindAll({ param($m)
+                $m -is [System.Management.Automation.Language.ExitStatementAst] -and $m.Pipeline.Extent.Text -eq '1'
+            }, $true)).Count -eq 1
+        }, $true))
+        $exits.Count | Should -Be 1 -Because 'der Guard endet mit exit 1'
+        $guardEnd = $exits[0].Extent.EndOffset
+
+        $effects = @($script:TemplateAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $n.Left.VariablePath.UserPath -in @('registryPath', 'logDirectory')
+        }, $true))
+        $effects.Count | Should -BeGreaterThan 1 -Because 'sonst prueft dieser Test die falsche Stelle'
+        foreach ($effect in $effects) {
+            $effect.Extent.StartOffset | Should -BeGreaterThan $guardEnd -Because ('{0} entsteht erst nach dem Guard' -f $effect.Left.Extent.Text)
+        }
+        $payloadLoop = @($script:TemplateAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.ForEachStatementAst] -and
+            $n.Extent.Text -match '^foreach\s*\(\s*\$scriptFile\s+in\s+\$dir_script\s*\)'
+        }, $true))
+        $payloadLoop.Count | Should -Be 1
+        $payloadLoop[0].Extent.StartOffset | Should -BeGreaterThan $guardEnd
     }
 }
 

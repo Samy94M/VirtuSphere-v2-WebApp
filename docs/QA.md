@@ -392,6 +392,17 @@ Two changes address it without hiding anything:
   projects set no per-project override. Navigation has its own 15 s limit.
   Retries stay at zero on purpose: a retry
   turns a genuine intermittent defect green and tells nobody.
+  One named exception exists, and it is reported, not silent (BK-N12, Welle A2,
+  26.10.2026): `deploy-blocker-session.spec.js` sends its blocker GET at most
+  twice, and only when the first attempt ended without any HTTP answer with a
+  transport error (`socket hang up`, `ECONNRESET`, `ECONNREFUSED`, `EPIPE`)
+  before it reached the deliberately locked read. The trace of the failure on
+  25.10.2026 showed the connection closed right after sending with no status, so
+  the request never reached PHP and says nothing about the session release the
+  spec proves. Every HTTP answer and every timeout stays red, the second attempt
+  must pass every assertion, and a retry that happened is a `transport-retry`
+  annotation in the HTML report plus a `[transport-retry]` warning in the gate
+  log. No other spec and no Playwright `retries` setting follows from it.
 - Each Playwright gate writes its HTML report into its own folder
   (`VIRTUSPHERE_E2E_REPORT_DIR`, set from the project list in
   `Invoke-PlaywrightSuite`). All three gates used to share one folder, so the

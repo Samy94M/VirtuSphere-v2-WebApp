@@ -48,6 +48,10 @@ function portal_error_message(Throwable $exception): string
         // repo_save_vm rejects the second save. Reachable by construction, so it
         // must speak the operator's language, not raw English.
         'VM was changed by another user. Reload before saving.' => 'vm_edit.err_conflict',
+        // A credential another operator deleted meanwhile: the row buttons of a
+        // stale credentials page (save, delete, activate) reach the repo guards.
+        'Credential not found.' => 'credentials.err_not_found',
+        'ESXi credential not found.' => 'credentials.err_not_found',
     ];
     if (isset($operatorReachableErrors[$message])) {
         return __t($operatorReachableErrors[$message]);

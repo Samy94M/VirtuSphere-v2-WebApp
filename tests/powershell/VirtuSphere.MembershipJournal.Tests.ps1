@@ -180,3 +180,60 @@ Describe 'Device sync journal ordering contract' {
         $source | Should -Match 'rollout_or_resource_changed'
     }
 }
+
+Describe 'H01-2 portal acknowledgement before the journal is cleared' {
+    BeforeAll {
+        $script:CommonPath = Join-Path (Split-Path $script:JournalModule -Parent) 'VirtuSphere-Common.ps1'
+        function Invoke-WithPortalAnswer {
+            param($Answer)
+            & {
+                param($commonPath, $answer)
+                . $commonPath
+                $script:portalAnswer = $answer
+                function Invoke-RestMethod { param($Uri, $Method, $TimeoutSec, $Headers, $Body, $ContentType) $script:portalAnswer }
+                $cfg = [pscustomobject]@{ WebApi = 'host:1'; Scheme = 'http'; ReportToken = '' }
+                $response = Invoke-VsApi -Config $cfg -Path '/mecm_updateid.php?action=reportMembership' -Method POST -Body @{ deviceid = 1 }
+                Assert-VsPortalSuccess -Response $response -Operation 'reportMembership'
+                'acknowledged'
+            } $script:CommonPath $Answer
+        }
+    }
+
+    It 'accepts only the portal success envelope as an acknowledgement' {
+        Invoke-WithPortalAnswer -Answer ([pscustomobject]@{ success = 'Data updated successfully' }) | Should -Be 'acknowledged'
+        Invoke-WithPortalAnswer -Answer @{ success = 'Data updated successfully' } | Should -Be 'acknowledged'
+    }
+
+    It 'refuses a 2xx answer without success: <Name>' -ForEach @(
+        @{ Name = 'HTML page of a wrong target or proxy'; Answer = '<html><body>Login</body></html>' }
+        @{ Name = 'empty body'; Answer = $null }
+        @{ Name = 'empty string'; Answer = '' }
+        @{ Name = 'JSON without success'; Answer = [pscustomobject]@{ message = 'ok' } }
+        @{ Name = 'blank success'; Answer = [pscustomobject]@{ success = ' ' } }
+    ) {
+        { Invoke-WithPortalAnswer -Answer $Answer } | Should -Throw '*reportMembership nicht bestaetigt*'
+    }
+
+    It 'checks the answer before every journal removal of the device sync' {
+        # Abgeleitet, nicht aufgezaehlt: jede Stelle, die Journaleintraege
+        # loescht, muss zwischen ihrem reportMembership-Aufruf und dem Loeschen
+        # die Antwort pruefen. Null Treffer waere ein leerer Scan, kein Gruen.
+        $source = Get-Content -LiteralPath $script:DeviceSyncPath -Raw
+        $removals = [regex]::Matches($source, 'Remove-VsMembershipJournalEntries\s+-Path\s+\$membershipJournalPath')
+        $removals.Count | Should -BeGreaterOrEqual 2
+        foreach ($removal in $removals) {
+            $before = $source.Substring(0, $removal.Index)
+            $report = $before.LastIndexOf("Invoke-VsApi -Config `$config -Path '/mecm_updateid.php?action=reportMembership'")
+            $report | Should -BeGreaterThan -1
+            $between = $before.Substring($report)
+            $between | Should -Match 'Assert-VsPortalSuccess\s+-Response\s+\$\w+\s+-Operation\s+''reportMembership'''
+            $between | Should -Not -Match '\|\s*Out-Null'
+        }
+    }
+
+    It 'checks the ResourceID update answer as well' {
+        $source = Get-Content -LiteralPath $script:DeviceSyncPath -Raw
+        $source | Should -Not -Match "action=updateDevice'[^\r\n]*\|\s*Out-Null"
+        $source | Should -Match "Assert-VsPortalSuccess -Response \`$updateResponse -Operation 'updateDevice'"
+    }
+}

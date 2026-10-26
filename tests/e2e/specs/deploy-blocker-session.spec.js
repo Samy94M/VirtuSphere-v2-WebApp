@@ -10,6 +10,29 @@ const { phpJson, runPhp, PHP_CONTAINER } = require('../lib/php');
 
 const PREFIX = 'e2e_u13_session_';
 
+// BK-N12: the lock helper holds the relation at most this long. The blocker read
+// needs it held through two attempts, the peer ping and the release.
+const LOCK_HOLD_SECONDS = 45;
+const BLOCKER_TIMEOUT_MS = 40000;
+const BLOCKER_WAIT_OBSERVATION_MS = 10000;
+// One retry, only for a blocker GET that lost its connection without any HTTP
+// answer before it reached the lock. The trace of the 2026-10-25 failure shows the
+// connection closed 6 ms after the request was sent, with no status: the request
+// never reached PHP, so it says nothing about the session release under test.
+// Every HTTP answer (200, 401, 500 ...) and every timeout stays red.
+const BLOCKER_ATTEMPTS = 2;
+const TRANSPORT_FAILURE = /socket hang up|ECONNRESET|ECONNREFUSED|EPIPE/;
+
+function isTransportFailure(error) {
+  return error instanceof Error
+    && typeof error.message === 'string'
+    && TRANSPORT_FAILURE.test(error.message);
+}
+
+function firstLine(text) {
+  return String(text).split('\n')[0].slice(0, 300);
+}
+
 function seedMission() {
   return phpJson(`
 $prefix = '${PREFIX}';
@@ -74,6 +97,23 @@ echo 'JSON' . json_encode(['waiting' => $waiting, 'candidates' => $candidates]) 
 `);
 }
 
+// Polls until the blocker read waits on the lock, and stops at once when the
+// request settles instead: a settled request will never start waiting.
+async function observeBlockerWait(vmId, isSettled) {
+  const deadline = Date.now() + BLOCKER_WAIT_OBSERVATION_MS;
+  let observation;
+  for (;;) {
+    observation = blockerVmQueryIsWaiting(vmId);
+    if (observation.waiting) {
+      return { waiting: true, observation };
+    }
+    if (isSettled() || Date.now() >= deadline) {
+      return { waiting: false, observation };
+    }
+    await new Promise((resolve) => { setTimeout(resolve, 250); });
+  }
+}
+
 function startVmTableLock() {
   const code = [
     "require_once '/var/www/html/lib/db.php';",
@@ -87,7 +127,9 @@ function startVmTableLock() {
     "echo \"READY\\n\";",
     'flush();',
     '$read = [STDIN]; $write = null; $except = null;',
-    'if (stream_select($read, $write, $except, 15) > 0) { fgets(STDIN); }',
+    // The hold limit only bounds a forgotten helper; release() ends it normally.
+    // Running into the limit is reported, never mistaken for a release.
+    `if (stream_select($read, $write, $except, ${LOCK_HOLD_SECONDS}) > 0) { fgets(STDIN); echo "RELEASED\\n"; } else { echo "EXPIRED\\n"; }`,
     "$db->query('UNLOCK TABLES');",
   ].join(' ');
   const child = spawn('docker', ['exec', '-i', PHP_CONTAINER, 'php', '-r', code], {
@@ -96,6 +138,8 @@ function startVmTableLock() {
   let stdout = '';
   let stderr = '';
   let readinessFinished = false;
+  let releaseRequested = false;
+  let endedEarly = null;
   child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
   child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
   child.stdin.on('error', (error) => { stderr += `stdin: ${error.message}`; });
@@ -103,6 +147,14 @@ function startVmTableLock() {
   const exited = new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', (codeValue) => {
+      // An end after readiness that release() did not ask for means the lock is
+      // gone while the test still relies on it: its own failure, not a pass.
+      if (readinessFinished && !releaseRequested) {
+        endedEarly = new Error(
+          `VM table-lock helper ended before release() (exit ${codeValue}, `
+          + `${stdout.includes('EXPIRED') ? `hold limit of ${LOCK_HOLD_SECONDS} s reached` : 'no expiry reported'}): ${stderr || stdout}`,
+        );
+      }
       if (codeValue === 0) {
         resolve();
       } else {
@@ -111,8 +163,17 @@ function startVmTableLock() {
     });
   });
 
+  // Throws when the lock ended before release(); called before each assertion
+  // that relies on the relation still being locked.
+  const assertHeld = () => {
+    if (endedEarly) {
+      throw endedEarly;
+    }
+  };
+
   let releasePromise;
   const release = () => {
+    releaseRequested = true;
     if (!releasePromise) {
       if (!child.stdin.destroyed && !child.stdin.writableEnded) {
         child.stdin.end("release\n");
@@ -122,8 +183,8 @@ function startVmTableLock() {
           'VM table-lock helper exit was not confirmed; stop this QA run and resolve the helper before reusing the stack',
         )), 10000);
         exited.then(
-          () => { clearTimeout(exitTimeout); resolveExit(); },
-          (error) => { clearTimeout(exitTimeout); rejectExit(error); },
+          () => { clearTimeout(exitTimeout); if (endedEarly) { rejectExit(endedEarly); } else { resolveExit(); } },
+          (error) => { clearTimeout(exitTimeout); rejectExit(endedEarly || error); },
         );
       });
     }
@@ -152,7 +213,7 @@ function startVmTableLock() {
       if (!readinessFinished && stdout.includes('READY')) {
         readinessFinished = true;
         clearTimeout(timeout);
-        resolve({ release });
+        resolve({ release, assertHeld });
       }
     };
     child.stdout.on('data', inspect);
@@ -165,6 +226,9 @@ function startVmTableLock() {
 }
 
 test('same-session peer proceeds while live blockers wait and the locale persists', async ({ browser, playwright }, testInfo) => {
+  // Lock hold, up to two blocker attempts and the release fit in this budget,
+  // not in the global 30 s.
+  test.setTimeout(90000);
   const fixture = seedMission();
   const browserContext = await browser.newContext({
     baseURL: testInfo.project.use.baseURL,
@@ -194,37 +258,53 @@ test('same-session peer proceeds while live blockers wait and the locale persist
     expect(peerSessionIds[0] === sessionIds[0], 'peer request uses the same fresh browser session').toBe(true);
 
     tableLock = await startVmTableLock();
-    let blockerSettled = false;
-    blockerPromise = blockerApi
-      .get(`deploy_blockers.php?mission_id=${Number(fixture.mission_id)}&mode=export&lang=en`, { timeout: 20000 })
-      .finally(() => { blockerSettled = true; });
-    // Observe early rejection while the test is still waiting on the peer;
-    // the original promise remains awaited below and still fails the test.
-    void blockerPromise.catch(() => {});
+    const blockerUrl = `deploy_blockers.php?mission_id=${Number(fixture.mission_id)}&mode=export&lang=en`;
+    let blockerState = { settled: false };
+    for (let attempt = 1; ; attempt += 1) {
+      const startedAt = Date.now();
+      const state = { settled: false };
+      blockerPromise = blockerApi
+        .get(blockerUrl, { timeout: BLOCKER_TIMEOUT_MS })
+        .finally(() => { state.settled = true; });
+      // Observe early rejection while the test is still waiting on the peer;
+      // the promise of the attempt that reached the lock is awaited below.
+      void blockerPromise.catch(() => {});
 
-    let observation;
-    try {
-      await expect.poll(() => {
-        observation = blockerVmQueryIsWaiting(fixture.vm_id);
-        return observation.waiting;
-      }, {
-        message: 'the live blocker request reached the deliberately blocked VM relation read',
-        timeout: 10000,
-      }).toBe(true);
-    } catch (error) {
+      const { waiting, observation } = await observeBlockerWait(fixture.vm_id, () => state.settled);
+      if (waiting) {
+        blockerState = state;
+        break;
+      }
+      tableLock.assertHeld();
       // A blocker request that settled without ever waiting on the lock left
       // no trace of why (twice in the 2026.10.2 release lane, never in five
       // isolated runs). Its answer is the missing evidence: a 401/403 points at
       // the session, a 200 at a read path that skipped the locked relation.
+      const elapsed = Date.now() - startedAt;
       let answer = '';
-      if (blockerSettled) {
-        const response = await blockerPromise.catch((settleError) => settleError);
-        answer = response && typeof response.status === 'function'
-          ? `; blocker answered HTTP ${response.status()}: ${(await response.text().catch(() => '')).slice(0, 400)}`
-          : `; blocker request failed: ${response}`;
+      let transportFailure = null;
+      if (state.settled) {
+        const outcome = await blockerPromise.then((response) => ({ response }), (error) => ({ error }));
+        if (outcome.response) {
+          answer = `; blocker answered HTTP ${outcome.response.status()}: ${(await outcome.response.text().catch(() => '')).slice(0, 400)}`;
+        } else {
+          answer = `; blocker request failed: ${firstLine(outcome.error && outcome.error.message ? outcome.error.message : outcome.error)}`;
+          transportFailure = isTransportFailure(outcome.error) ? outcome.error : null;
+        }
       }
-      throw new Error(`VM wait observation: ${JSON.stringify(observation)}; blocker settled: ${blockerSettled}${answer}`, { cause: error });
+      if (transportFailure && attempt < BLOCKER_ATTEMPTS) {
+        const description = `blocker attempt ${attempt}/${BLOCKER_ATTEMPTS} lost its connection without an HTTP answer `
+          + `after ${elapsed} ms (${firstLine(transportFailure.message)}); retrying once`;
+        testInfo.annotations.push({ type: 'transport-retry', description });
+        console.warn(`[transport-retry] ${testInfo.title}: ${description}`);
+        continue;
+      }
+      throw new Error(
+        `blocker attempt ${attempt}/${BLOCKER_ATTEMPTS} after ${elapsed} ms did not reach the locked VM relation read: `
+        + `VM wait observation: ${JSON.stringify(observation)}; blocker settled: ${state.settled}${answer}`,
+      );
     }
+    tableLock.assertHeld();
 
     const ping = await peerApi.post('session_ping.php', {
       form: { _csrf: csrf },
@@ -234,7 +314,7 @@ test('same-session peer proceeds while live blockers wait and the locale persist
     expect(await ping.json()).toMatchObject({ ok: true });
     expect(blockerVmQueryIsWaiting(fixture.vm_id).waiting,
       'the same scoped DB read is still waiting after the peer write').toBe(true);
-    expect(blockerSettled, 'the DB read must still be in flight when the same-session write completes').toBe(false);
+    expect(blockerState.settled, 'the DB read must still be in flight when the same-session write completes').toBe(false);
 
     await tableLock.release();
     tableLock = null;

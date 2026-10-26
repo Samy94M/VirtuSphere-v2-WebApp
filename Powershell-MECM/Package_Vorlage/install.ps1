@@ -1114,6 +1114,22 @@ if ([string]$ErrorAction -notin @('Stop', 'Continue')) {
     exit 1
 }
 
+# InstallationBehaviorType wie der Autoimporter (Read-VsPackageConfig): leer
+# heisst InstallForSystem, ein unbekannter Wert bricht ab, bevor Registry, Log
+# oder Teilskripte etwas tun (H01-3). Frueher lief jeder Wert ausser
+# InstallForUser still als Systeminstallation; nach einer von Hand geaenderten
+# config.json suchte die beim Import gesetzte Detection dann woanders, als das
+# Skript schrieb. Literal gespiegelt aus $script:VsInstallationBehaviorTypes
+# (VirtuSphere-Common.ps1, ADR-0029); ein Test haelt beide Listen gleich.
+$installationBehavior = [string]$config.InstallationBehaviorType
+if ([string]::IsNullOrWhiteSpace($installationBehavior)) {
+    $installationBehavior = 'InstallForSystem'
+}
+if ($installationBehavior -notin @('InstallForSystem', 'InstallForUser')) {
+    Write-Host "config.json: InstallationBehaviorType '$installationBehavior' ist unbekannt (erlaubt: InstallForSystem, InstallForUser). Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
+
 # Registrierungspfad je nach Installationstyp setzen
 # Erlaubt sind genau zwei Werte (SSoT: $script:VsInstallationBehaviorTypes in
 # VirtuSphere-Common.ps1, das diese Datei nie sieht - sie wird allein in den

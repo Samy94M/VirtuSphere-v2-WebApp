@@ -14,6 +14,16 @@ BeforeAll {
         . ([scriptblock]::Create($script:DispositionFunction.Extent.Text))
     }
     $script:DispositionParseErrors = @($parseErrors)
+    # H01-2: the replay checks the portal answer with the real helper from Common
+    # before it removes journal entries; only that function is loaded, not the library.
+    $commonPath = Join-Path (Split-Path $script:DeviceSyncPath -Parent) 'VirtuSphere-Common.ps1'
+    $commonAst = [System.Management.Automation.Language.Parser]::ParseFile($commonPath, [ref]$tokens, [ref]$parseErrors)
+    $script:PortalSuccessFunction = $commonAst.Find(
+        { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-VsPortalSuccess' },
+        $true)
+    if ($script:PortalSuccessFunction) {
+        . ([scriptblock]::Create($script:PortalSuccessFunction.Extent.Text))
+    }
     $script:StaleOwnedLoop = @($ast.FindAll({
         param($node)
         $node -is [System.Management.Automation.Language.ForEachStatementAst] -and $node.Extent.Text -match '\$plan\.stale_owned'
@@ -56,9 +66,9 @@ BeforeAll {
     }
 
     function Invoke-MembershipReplayBlock {
-        param([array]$Entries, [hashtable]$MembershipStates = @{})
+        param([array]$Entries, [hashtable]$MembershipStates = @{}, $PortalAnswer = [pscustomobject]@{ success = 'Data updated successfully' })
         & {
-            param($givenEntries, $states, $ifText)
+            param($givenEntries, $states, $ifText, $portalAnswer)
             $journalEntries = @($givenEntries)
             $rolloutRevision = 3
             $resourceId = '9001'
@@ -79,6 +89,8 @@ BeforeAll {
             function Invoke-VsApi {
                 param($Config, $Path, $Method, $Body)
                 [void]$apiBodies.Add($Body)
+                # The portal's committed answer (mecm_updateid.php), unless a case overrides it.
+                $portalAnswer
             }
             function Remove-VsMembershipJournalEntries {
                 param($Path, $OperationIds)
@@ -101,7 +113,7 @@ BeforeAll {
                 ack_groups = $ackGroups.ToArray()
                 state_changes = $stateChanges.ToArray()
             }
-        } $Entries $MembershipStates $script:ReplayIf.Extent.Text
+        } $Entries $MembershipStates $script:ReplayIf.Extent.Text $PortalAnswer
     }
 }
 
@@ -198,6 +210,17 @@ Describe 'Device sync membership apply contract (D-01)' {
         @($result.api_bodies).Count | Should -Be 2
         (@($result.api_bodies | ForEach-Object { $_.memberships[0].collection_id }) -join ',') | Should -BeExactly 'VS100001,VS100002'
         @($result.ack_groups).Count | Should -Be 2
+    }
+
+    It 'H01-2: keeps the journal entry when a 2xx answer carries no success' {
+        # A wrong target or proxy answering 200 with an HTML page: before H01-2 the
+        # replay removed the entry although the portal had stored nothing.
+        $entry = [pscustomobject]@{ operation_id = 'add-op'; vm_id = 17; rollout_revision = 3; resource_id = '9001'; collection_id = 'VS100001'; collection_name = 'Package A'; type = 'package'; change = 'added'; state = 'remote_confirmed' }
+        $result = Invoke-MembershipReplayBlock -Entries @($entry) -MembershipStates @{ VS100001 = 'present' } -PortalAnswer '<html><body>Proxy</body></html>'
+
+        $script:PortalSuccessFunction | Should -Not -BeNullOrEmpty -Because 'the replay must use the real helper from Common'
+        @($result.api_bodies).Count | Should -Be 1
+        @($result.ack_groups).Count | Should -Be 0
     }
 
     It 'marks an orphan removal uncertain while the exact remote membership is present' {
