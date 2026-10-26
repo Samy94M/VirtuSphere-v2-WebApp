@@ -42,6 +42,7 @@ return [
     'job_failed' => 'Failed',
     'job_cancelled' => 'Cancelled',
     'job_partial' => 'Partially succeeded',
+    'job_outcome_unknown' => 'Outcome unknown',
     'job_unknown' => 'Unknown status',
 
     // Deploy modes. The six postable ones are the technical set in
@@ -84,6 +85,7 @@ return [
     'finding_create_uncertain' => 'Create unresolved (job :job_id, unit :position)',
     'finding_job_failed' => 'Job failed: :mode, :time',
     'finding_job_failed_unknown' => 'Job failed',
+    'finding_job_outcome_unknown' => 'Job outcome unknown: :mode, :time',
     'finding_missing_from_inventory' => 'No longer in the inventory (:host, as of :time)',
     'finding_missing_from_inventory_no_host' => 'No longer in the inventory (as of :time)',
     'finding_job_running' => 'Job running since :since (:mode)',

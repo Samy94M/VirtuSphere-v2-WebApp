@@ -38,6 +38,7 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
             $status === VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => $mac === null ? 'deploy.result_partial' : 'deploy.result_partial_counts',
             $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED => 'deploy.result_failed',
             $status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'deploy.result_cancelled',
+            $status === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => 'deploy.result_outcome_unknown',
         };
         $counts = $mac['counts'] ?? [];
         $result = [

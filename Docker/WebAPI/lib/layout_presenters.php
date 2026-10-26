@@ -202,6 +202,9 @@ function deploy_job_status_badge_class(string $status): string
         // Same variant as the default, pinned on purpose: partial is a terminal
         // per-VM verdict, not a transient state that merely lacks a mapping.
         VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'warning',
+        // Pinned for the same reason: the reaper saw silence, not a failure, so
+        // red would claim what nobody observed (WK-04/WK-07 A).
+        VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => 'warning',
         default => 'warning',
     };
 }

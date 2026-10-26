@@ -88,7 +88,8 @@ final class MaintenanceReapTest extends TestCase
         maintenance_worker_reap_deploy_jobs($this->db);
 
         $job = $this->row('SELECT status, locked_by FROM deploy_jobs WHERE id = ' . $jobId);
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
+        // WK-04/WK-07 A: the reaper saw silence, not the remote run.
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $job['status']);
         self::assertNull($job['locked_by']);
 
         // The committed import is the truth and survives the reap; only the

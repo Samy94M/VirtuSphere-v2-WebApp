@@ -22,6 +22,7 @@ function system_status_ansible_job_badge(string $status): string
     $key = match ($status) {
         VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => 'ansible_job_succeeded',
         VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'ansible_job_partial',
+        VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => 'ansible_job_outcome_unknown',
         VIRTUSPHERE_DEPLOY_STATUS_FAILED => 'ansible_job_failed',
         VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'ansible_job_cancelled',
         default => 'ansible_job_unknown',

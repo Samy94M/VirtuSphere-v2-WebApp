@@ -55,7 +55,7 @@ final class DeployReaperCreateBatchTest extends TestCase
         $reaped = repo_reap_stale_deploy_jobs($this->db, 600);
 
         self::assertSame([$plain, $running, $cancelling], array_map('intval', array_column($reaped, 'id')));
-        self::assertSame(['failed', 'failed', 'cancelled'], array_column($reaped, 'reaped_to'));
+        self::assertSame(['outcome_unknown', 'outcome_unknown', 'cancelled'], array_column($reaped, 'reaped_to'));
         $after = repo_deploy_create_results($this->db, $running);
         self::assertSame(['succeeded', 'failed', 'skipped', 'pending', 'uncertain', 'uncertain', 'uncertain'], array_column($after, 'status'));
         foreach ([0, 1, 2, 3, 6] as $index) {
@@ -70,7 +70,7 @@ final class DeployReaperCreateBatchTest extends TestCase
         self::assertSame($cancelLogs, $this->logs($cancelling), 'Reaping never appends after an accepted cancellation.');
         foreach ([$plain, $running, $cancelling] as $jobId) {
             $job = repo_deploy_job($this->db, $jobId);
-            self::assertSame($jobId === $cancelling ? 'cancelled' : 'failed', $job['status']);
+            self::assertSame($jobId === $cancelling ? 'cancelled' : 'outcome_unknown', $job['status']);
             foreach (['locked_by', 'lock_token', 'worker_epoch', 'heartbeat_at'] as $field) {
                 self::assertNull($job[$field]);
             }
@@ -162,7 +162,7 @@ final class DeployReaperCreateBatchTest extends TestCase
         $reaped = repo_reap_stale_deploy_jobs($this->db, 600);
 
         self::assertContains($jobId, array_map('intval', array_column($reaped, 'id')));
-        self::assertSame('failed', repo_deploy_job($this->db, $jobId)['status']);
+        self::assertSame('outcome_unknown', repo_deploy_job($this->db, $jobId)['status']);
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vmId));
     }
 
@@ -205,7 +205,7 @@ final class DeployReaperCreateBatchTest extends TestCase
             self::assertSame([$second, $first], array_map('intval', array_column($reaped, 'id')), 'Observation order still follows heartbeat age.');
             self::assertSame(2, $observations->count, 'Both real VM-convergence boundaries must be observed.');
             foreach ([$first, $second] as $jobId) {
-                self::assertSame('failed', repo_deploy_job($this->db, $jobId)['status']);
+                self::assertSame('outcome_unknown', repo_deploy_job($this->db, $jobId)['status']);
                 self::assertSame('uncertain', repo_deploy_create_results($this->db, $jobId)[0]['status']);
             }
         } finally {

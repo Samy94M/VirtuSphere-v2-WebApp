@@ -18,6 +18,7 @@ const VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED = 'succeeded';
 const VIRTUSPHERE_DEPLOY_STATUS_FAILED = 'failed';
 const VIRTUSPHERE_DEPLOY_STATUS_CANCELLED = 'cancelled';
 const VIRTUSPHERE_DEPLOY_STATUS_PARTIAL = 'partial';
+const VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN = 'outcome_unknown';
 
 // Active = the job still owns its mission (delete/enqueue blocks, the
 // one-job-per-mission and one-pull-per-credential guards). Cancelling belongs
@@ -28,23 +29,23 @@ const VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_CANCELLING,
 ];
 
-// What the cancel button (and a cancel POST) may act on. Deliberately NOT the
-// active set: a cancelling job is active but already has its wish recorded; a
-// second cancel is idempotent in the repo and pointless in the UI.
+// What the cancel button (and a cancel POST) may act on; NOT the active set: a
+// cancelling job already has its wish recorded, a second cancel is pointless.
 const VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
     VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
 ];
 
-// `partial` is terminal: the sequence ended and the per-VM result is durable in
-// result_json. Membership here also opts partial jobs into the retention purges
-// (repo_purge_deploy_job_logs / repo_purge_finished_system_jobs), which is
-// intended - a partial job ages like any finished job.
+// `partial` (durable per-VM result_json) and `outcome_unknown` (only the reaper
+// writes it, after a silent heartbeat: WK-04/WK-07 A, migration 0065) are
+// terminal. Membership also opts them into the retention purges, intended: they
+// age like any finished job (repo_purge_deploy_job_logs, ..._finished_system_jobs).
 const VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES = [
     VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
     VIRTUSPHERE_DEPLOY_STATUS_FAILED,
     VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
     VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
+    VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN,
 ];
 
 require_once __DIR__ . '/deploy_terminal_constants.php';

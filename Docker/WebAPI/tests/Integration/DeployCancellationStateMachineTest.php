@@ -332,14 +332,17 @@ final class DeployCancellationStateMachineTest extends TestCase
         self::assertNull($this->job($cancellingId)['last_error']);
         self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CANCEL_CONVERGED, (string) $this->job($cancellingId)['terminal_reason_code']);
         self::assertSame(1, $this->cancelLogCount($cancellingId));
-        // ...while a stale plain running job keeps its failed verdict.
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $this->job($runningId)['status']);
+        // ...while a stale plain running job ends with an unknown remote outcome:
+        // the reaper saw silence, not a failure (WK-04/WK-07 A).
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, (string) $this->job($runningId)['status']);
         self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT, (string) $this->job($runningId)['terminal_reason_code']);
         // LG-07: each reaped job writes exactly one outcome row, and it names the reaper's reason.
         self::assertSame(1, $this->outcomeRows($cancellingId));
         self::assertSame(1, $this->outcomeRows($runningId));
         self::assertSame('stale_heartbeat', $this->outcomeContext($runningId)['reason'] ?? null);
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->outcomeContext($runningId)['status'] ?? null);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $this->outcomeContext($runningId)['status'] ?? null);
+        // Unknown is not a failure, and success would be a guess.
+        self::assertSame(VIRTUSPHERE_AUDIT_RESULT_WARNING, $this->outcomeResult($runningId));
     }
 
     // --- protective effects stay while cancelling ----------------------------
@@ -478,7 +481,7 @@ final class DeployCancellationStateMachineTest extends TestCase
 
             deploy_worker_reap_stale_jobs($this->db);
 
-            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, (string) $this->job($jobId)['status']);
+            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, (string) $this->job($jobId)['status']);
             self::assertSame(VIRTUSPHERE_DEPLOY_CLAIM_PAUSED, $this->claimRow()['claim_state']);
         } finally {
             $this->restoreClaimRow($previous);
@@ -548,6 +551,19 @@ final class DeployCancellationStateMachineTest extends TestCase
         $stmt->execute();
 
         return (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
+    }
+
+    private function outcomeResult(int $jobId): ?string
+    {
+        $stmt = $this->db->prepare('SELECT result FROM deploy_logs WHERE event_code = ? AND object_type = ? AND object_id = ? ORDER BY id DESC LIMIT 1');
+        $event = VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME;
+        $type = 'deploy_job';
+        $id = (string) $jobId;
+        $stmt->bind_param('sss', $event, $type, $id);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+
+        return is_array($row) && $row['result'] !== null ? (string) $row['result'] : null;
     }
 
     /** @return array<string, mixed> The context of the newest outcome row of the job. */

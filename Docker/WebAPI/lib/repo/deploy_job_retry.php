@@ -215,6 +215,14 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
     }
     $networkReady = $networkBlockers === [];
 
+    // WK-04/WK-07 A: the reaper ended the source job without seeing its remote
+    // run. That is history to confirm, not a block: a new job from the start
+    // form is possible anyway, and the dangerous cases (an open remote handle,
+    // an unresolved Create unit, identity, network) block above on their own.
+    if ((string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN) {
+        $findings[] = deploy_retry_finding('external', 'retry_remote_outcome_unknown', false);
+    }
+
     $externalConfirmation = false;
     if ($result !== null) {
         foreach ((array) $result['errors'] as $error) {

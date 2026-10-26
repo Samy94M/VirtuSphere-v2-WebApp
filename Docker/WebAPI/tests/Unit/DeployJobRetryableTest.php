@@ -22,7 +22,7 @@ require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
  */
 final class DeployJobRetryableTest extends TestCase
 {
-    public function testOnlyFailedCancelledAndPartialMissionJobsAreRetryable(): void
+    public function testOnlyFailedCancelledPartialAndOutcomeUnknownMissionJobsAreRetryable(): void
     {
         $expected = [
             VIRTUSPHERE_DEPLOY_STATUS_QUEUED => false,
@@ -34,7 +34,17 @@ final class DeployJobRetryableTest extends TestCase
             VIRTUSPHERE_DEPLOY_STATUS_FAILED => true,
             VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => true,
             VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => true,
+            // WK-04/WK-07 A: retryable like failed; the evaluation adds the
+            // confirmable history finding, the dialog names what to check.
+            VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => true,
         ];
+        // The matrix covers every status the job can have, so a new one cannot
+        // pass here unnoticed.
+        $all = array_merge(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES);
+        sort($all);
+        $covered = array_keys($expected);
+        sort($covered);
+        self::assertSame($all, $covered);
         foreach ($expected as $status => $retryable) {
             self::assertSame(
                 $retryable,
@@ -100,6 +110,30 @@ final class DeployJobRetryableTest extends TestCase
             );
             self::assertSame(['mode' => 'export', 'vm_ids' => [7, 8], 'scope' => 'original_selection'], $plan, $outcome);
         }
+    }
+
+    /**
+     * WK-04/WK-07 A: an outcome_unknown job is planned like a failed one. A MAC
+     * result that is not a plain failure means the import committed before the
+     * silence, so only the export of the original selection repeats; without
+     * one the old payload is re-queued.
+     */
+    public function testOutcomeUnknownJobIsPlannedLikeAFailedOne(): void
+    {
+        foreach (['success', 'partial'] as $outcome) {
+            $plan = deploy_job_retry_plan(
+                VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN,
+                $this->decoded($outcome, successful: [7], failed: $outcome === 'partial' ? [8] : []),
+                [7, 8]
+            );
+            self::assertSame(['mode' => 'export', 'vm_ids' => [7, 8], 'scope' => 'original_selection'], $plan, $outcome);
+        }
+        self::assertNull(deploy_job_retry_plan(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, null, [1]));
+        self::assertNull(deploy_job_retry_plan(
+            VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN,
+            $this->decoded('failed', successful: [], failed: [1]),
+            [1]
+        ));
     }
 
     /** The pre-existing branch: plain failed/cancelled retries re-queue the old payload. */

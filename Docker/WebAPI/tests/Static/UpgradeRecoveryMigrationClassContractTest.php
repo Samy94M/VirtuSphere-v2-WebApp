@@ -40,15 +40,20 @@ final class UpgradeRecoveryMigrationClassContractTest extends TestCase
     public function testGuardDetectsUnclassifiedDuplicatedPhantomAndMissingRows(): void
     {
         $doc = (string) file_get_contents(dirname(__DIR__, 4) . '/docs/operations/upgrade-recovery.md');
-        $all = array_map(static fn (int $n): string => sprintf('%04d', $n), range(1, 64));
+        // The newest registered migration, derived: a fixed "0064" broke this
+        // self-test with the next migration (0065) although the table was right.
+        preg_match_all("/^\s*'([0-9]{4})_[a-z0-9_]+'\s*=>/m", (string) file_get_contents(dirname(__DIR__, 2) . '/lib/migrate.php'), $registered);
+        self::assertNotSame([], $registered[1]);
+        $last = max($registered[1]);
+        $all = array_map(static fn (int $n): string => sprintf('%04d', $n), range(1, (int) $last));
 
         self::assertSame([], $this->problems($doc, $all, $all), 'the real table must be clean before the mutations mean anything');
 
         $mutations = [
-            'unclassified 0064' => str_replace(', 0064 |', ' |', $doc),
+            'unclassified ' . $last => str_replace(', ' . $last . ' |', ' |', $doc),
             'listed in two classes' => str_replace('| 0028, 0034,', '| 0001, 0028, 0034,', $doc),
             'listed twice in one class' => str_replace('| 0003, 0008,', '| 0003, 0003, 0008,', $doc),
-            'phantom 0099' => str_replace(', 0064 |', ', 0064, 0099 |', $doc),
+            'phantom 9999' => str_replace(', ' . $last . ' |', ', ' . $last . ', 9999 |', $doc),
             'class N row removed' => (string) preg_replace('/^\| N — .*\n/m', '', $doc),
             'non-numeric cell' => str_replace('| 0001, 0002,', '| 0001 bis 0002,', $doc),
         ];

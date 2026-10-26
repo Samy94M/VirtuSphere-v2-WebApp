@@ -11,8 +11,8 @@ final class MigrationPartialResultsContractTest extends TestCase
         $constants = $this->webApiSource('lib/deploy_constants.php');
         $migration = $this->webApiSource('lib/migrate.php');
         // The CURRENT mirror set (in-place mirror rule, check-enum-sync):
-        // 'cancelling' arrived with 0031 and the historical literals follow.
-        $enum = "ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial')";
+        // 'cancelling' arrived with 0031, 'outcome_unknown' with 0065.
+        $enum = "ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial','outcome_unknown')";
 
         self::assertStringContainsString("VIRTUSPHERE_DEPLOY_STATUS_PARTIAL = 'partial'", $constants);
         self::assertStringContainsString($enum, $migration);

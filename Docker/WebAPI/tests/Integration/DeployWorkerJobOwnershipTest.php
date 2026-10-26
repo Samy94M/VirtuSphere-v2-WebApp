@@ -97,9 +97,9 @@ final class DeployWorkerJobOwnershipTest extends TestCase
 
     public function testAReapedJobStopsTheWorker(): void
     {
-        // What repo_reap_stale_deploy_jobs() leaves behind: a failed job with its
+        // What repo_reap_stale_deploy_jobs() leaves behind: an outcome_unknown job with its
         // own verdict already written.
-        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_FAILED, self::WORKER);
+        $jobId = $this->insertJob(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, self::WORKER);
 
         try {
             deploy_worker_assert_job_is_ours($this->db, $jobId, self::WORKER);

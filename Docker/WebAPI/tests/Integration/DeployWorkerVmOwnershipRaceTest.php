@@ -73,7 +73,7 @@ final class DeployWorkerVmOwnershipRaceTest extends TestCase
             $before = $this->state();
             self::assertSame([(int) $job['id']], array_map('intval', array_column(repo_reap_stale_deploy_jobs($this->db, 60), 'id')));
             self::assertSame($before, $this->state());
-            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, repo_deploy_job($this->db, (int) $job['id'])['status']);
+            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, repo_deploy_job($this->db, (int) $job['id'])['status']);
         } finally {
             $second->close();
         }

@@ -139,10 +139,11 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
     $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
     $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
     $failed = VIRTUSPHERE_DEPLOY_STATUS_FAILED;
+    $outcomeUnknown = VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN;
     $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
     $suffix = $cause === '' ? '' : ' ' . $cause;
 
-    return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $cancelling, $failed, $cancelled, $suffix): array {
+    return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $cancelling, $failed, $outcomeUnknown, $cancelled, $suffix): array {
         $stmt = $db->prepare('SELECT id, mission_id FROM deploy_jobs WHERE status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC');
         $stmt->bind_param('ssi', $running, $cancelling, $staleAfterSeconds);
         $stmt->execute();
@@ -200,7 +201,16 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
             // reaped-from status travels with the row so the caller's VM
             // convergence can phrase its note truthfully.
             $wasCancelling = (string) $job['status'] === $cancelling;
-            $job['reaped_to'] = $wasCancelling ? $cancelled : $failed;
+            $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
+            // WK-04/WK-07 A: a silent running job ends as outcome_unknown, because
+            // the reaper never sees the remote run. The one exception is a
+            // mission-less system job of a read-only playbook (the ESXi inventory
+            // pull): it changes nothing on ESXi, so a silent one is simply a
+            // failed attempt, as its inventory state records it below.
+            $readOnlySystemJob = ($job['mission_id'] ?? null) === null
+                && is_array($payload)
+                && isset(VIRTUSPHERE_SYSTEM_PLAYBOOKS[(string) ($payload['mode'] ?? '')]);
+            $job['reaped_to'] = $wasCancelling ? $cancelled : ($readOnlySystemJob ? $failed : $outcomeUnknown);
             $observation = deploy_job_reap_observation(
                 $jobId,
                 (string) ($job['locked_by'] ?? ''),
@@ -223,7 +233,6 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 $message .= ' ' . $converged . ' create unit(s) of this job had not finished and are now recorded as unresolved. '
                     . 'Their VMs may or may not exist on ESXi; check the host before running this mission again.';
             }
-            $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
             $note = $wasCancelling
                 ? 'deploy job ' . $jobId . ' cancelled; converged by the reaper after a stale heartbeat'
                 : 'deploy job ' . $jobId . ' reaped after stale heartbeat';
@@ -240,7 +249,12 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT;
                 $reasonDetail = deploy_terminal_reason_detail($message);
                 $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
-                $stmt->bind_param('ssssis', $failed, $message, $reasonCode, $reasonDetail, $jobId, $running);
+                // last_error keeps the reaper's account for outcome_unknown too:
+                // it is the diagnosis that outlives the log retention. The
+                // presenter shows "Last error" only for failed; for the unknown
+                // outcome the same text is the reason detail.
+                $reapedTo = (string) $job['reaped_to'];
+                $stmt->bind_param('ssssis', $reapedTo, $message, $reasonCode, $reasonDetail, $jobId, $running);
             }
             $stmt->execute();
             if ($stmt->affected_rows === 1) {

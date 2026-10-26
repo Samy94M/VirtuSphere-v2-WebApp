@@ -137,7 +137,8 @@ const FILE_SIZE_ALLOWANCES = [
     // the versioning stage moved the settings link registry to
     // lib/settings_constants.php (732 -> 697), and the three run-error
     // categories journal_blocked, portal_rejected and source_changing (AV-F30,
-    // PS-21, PS-26) added their constants, reasons and list entries.
+    // PS-21, PS-26) added their constants, reasons and list entries (portal
+    // side; the server scripts send them since release 2026.10.1, Block 2a).
     // --- Deliberate, open-ended exceptions: splitting these by line count would
     // --- scatter an ordered registry or a frozen surface across files.
     // U11 adds the require and ordered registry entry for migration 0053; its body stays separate.
@@ -146,8 +147,11 @@ const FILE_SIZE_ALLOWANCES = [
     // IDR-P02 adds the two registry lines for migration 0057; its column and
     // check live in lib/migrations/0057_create_replaced_identity.php.
     // K21 adds the two registry lines for migration 0064; its table lives in lib/migrations/0064_remote_secret_files.php.
+    // WK-04/WK-07 A (1255 -> 1252, ratchet follows the file): migration 0065 adds its
+    // two registry lines, and the status preflight now derives its set instead of
+    // listing seven values; the body lives in lib/migrations/0065_deploy_outcome_unknown.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1255,
+        'lines' => 1252,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

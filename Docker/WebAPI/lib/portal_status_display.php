@@ -135,9 +135,13 @@ function portal_vm_finding_text(array $finding): string
             'job_id' => (int) ($params['job_id'] ?? 0),
             'position' => (int) ($params['position'] ?? 0),
         ]),
-        VIRTUSPHERE_VM_FINDING_JOB_FAILED => $text('time') !== '' && $text('mode') !== ''
-            ? __t('status.finding_job_failed', ['mode' => deploy_mode_label($text('mode')), 'time' => $time('time')])
-            : __t('status.finding_job_failed_unknown'),
+        VIRTUSPHERE_VM_FINDING_JOB_FAILED => match (true) {
+            !empty($params['outcome_unknown']) && $text('time') !== '' && $text('mode') !== ''
+                => __t('status.finding_job_outcome_unknown', ['mode' => deploy_mode_label($text('mode')), 'time' => $time('time')]),
+            $text('time') !== '' && $text('mode') !== ''
+                => __t('status.finding_job_failed', ['mode' => deploy_mode_label($text('mode')), 'time' => $time('time')]),
+            default => __t('status.finding_job_failed_unknown'),
+        },
         VIRTUSPHERE_VM_FINDING_MISSING_FROM_INVENTORY => $text('host') !== ''
             ? __t('status.finding_missing_from_inventory', ['host' => $text('host'), 'time' => $time('time')])
             : __t('status.finding_missing_from_inventory_no_host', ['time' => $time('time')]),

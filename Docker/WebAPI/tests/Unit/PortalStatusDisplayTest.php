@@ -20,16 +20,41 @@ require_once dirname(__DIR__, 2) . '/lib/vm_phase.php';
  */
 final class PortalStatusDisplayTest extends TestCase
 {
-    /** Every deploy-job status the portal can be asked to render. */
-    private const JOB_STATUSES = [
-        VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
-        VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
-        VIRTUSPHERE_DEPLOY_STATUS_CANCELLING,
-        VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
-        VIRTUSPHERE_DEPLOY_STATUS_FAILED,
-        VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
-        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
-    ];
+    /**
+     * Every deploy-job status the portal can be asked to render, derived from
+     * the active and terminal sets: a hand list of seven values silently missed
+     * outcome_unknown until it was rewritten (WK-04/WK-07 A).
+     *
+     * @return list<string>
+     */
+    private static function jobStatuses(): array
+    {
+        return array_values(array_unique(array_merge(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES)));
+    }
+
+    /** The derived set is exactly what the constants file declares, so no status hides outside both sets. */
+    public function testTheJobStatusWalkCoversEveryDeclaredStatus(): void
+    {
+        $declared = array_values(array_filter(
+            get_defined_constants(),
+            static fn (mixed $value, string $name): bool => str_starts_with($name, 'VIRTUSPHERE_DEPLOY_STATUS_'),
+            ARRAY_FILTER_USE_BOTH
+        ));
+        self::assertNotSame([], $declared);
+        $walked = self::jobStatuses();
+        sort($declared);
+        sort($walked);
+        self::assertSame($declared, $walked);
+    }
+
+    public function testAnUnknownOutcomeIsAWarningAndNamedInBothLocales(): void
+    {
+        self::assertSame('warning', deploy_job_status_badge_class(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN));
+        Lang::load('de');
+        self::assertSame('Ausgang unbekannt', deploy_job_status_label(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN));
+        Lang::load('en');
+        self::assertSame('Outcome unknown', deploy_job_status_label(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN));
+    }
 
     protected function tearDown(): void
     {
@@ -44,7 +69,7 @@ final class PortalStatusDisplayTest extends TestCase
         return [
             'lifecycle' => [VIRTUSPHERE_LIFECYCLE_STATES, portal_lifecycle_label(...), 'status.lifecycle_unknown'],
             'mecm sync' => [VIRTUSPHERE_MECM_SYNC_STATES, portal_mecm_sync_label(...), 'status.mecm_unknown'],
-            'job status' => [self::JOB_STATUSES, deploy_job_status_label(...), 'status.job_unknown'],
+            'job status' => [self::jobStatuses(), deploy_job_status_label(...), 'status.job_unknown'],
             // The six postable modes come from the technical SSoT itself, so a
             // mode added there without a label fails here instead of shipping
             // its payload token as a name. `inventory` is appended because the

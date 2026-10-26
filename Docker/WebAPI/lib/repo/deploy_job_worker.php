@@ -174,6 +174,11 @@ function repo_finish_deploy_job(
     if (!in_array($status, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
         throw new InvalidArgumentException('Deploy job finish status must be terminal.');
     }
+    // Only the stale-job reaper may conclude a job as outcome_unknown: a worker
+    // that is alive to call this knows how its run ended (WK-04/WK-07 A).
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN) {
+        throw new InvalidArgumentException('A worker never concludes a deploy job with an unknown outcome.');
+    }
 
     $reasonCode ??= match ($status) {
         VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_COMPLETED,

@@ -279,6 +279,7 @@ return [
     'ansible_job_partial' => 'Partially succeeded',
     'ansible_job_failed' => 'Failed',
     'ansible_job_cancelled' => 'Cancelled',
+    'ansible_job_outcome_unknown' => 'Outcome unknown',
     'ansible_job_unknown' => 'Unknown outcome',
     'ansible_failed_component' => 'Failed at: :component',
     'ansible_allowlist_detail' => 'Host and toolchain are fine, but the host IP is missing from the machine API IP allowlist or listed there without the role Ansible host; jobs with a MAC export are refused before any VM is changed. Allow it with the role Ansible host under Settings, Machine API.',

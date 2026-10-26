@@ -77,6 +77,9 @@ final class PortalConfirmNamingContractTest extends TestCase
     /** Confirms with no single target, and why naming one would be wrong. */
     private const NO_TARGET = [
         'deploy.confirm_cancel_group' => 'cancels a whole staggered batch; the batch is the target, not a row',
+        // WK-04/WK-07 A: never shown alone. deploy_retry_confirmation() puts it in front of the
+        // plan's own retry question, which is in ROW_ACTIONS and names the mission.
+        'deploy.confirm_retry_outcome_unknown' => 'a warning sentence prefixed to the named retry question of the same dialog, which already names the mission',
         'system_status.reassign_confirm' => 'the target field (vlan_from) is an editable input, so a name rendered server-side would state a value the operator may have changed since',
         'system_status.service_confirm_pause' => 'a global switch on the one deploy service, not a row; naming the running job would also be wrong, because the pause applies to every job after it',
         'settings.api_base_url_reset_confirm' => 'the one stored API base URL, not a row',

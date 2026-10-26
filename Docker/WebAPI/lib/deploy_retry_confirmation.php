@@ -34,5 +34,24 @@ function deploy_retry_confirmation(array $evaluation, string $name): string
         $retryConfirm .= ' ' . deploy_host_move_message($hostMoves);
     }
 
+    // WK-04/WK-07 A: the source job's remote outcome is unknown. The warning
+    // comes first, the question about the evaluated plan follows unchanged; the
+    // dialog informs, it never authorizes (deploy_retry_blockers() decides).
+    if (deploy_retry_has_outcome_unknown_finding($evaluation)) {
+        $retryConfirm = __t('deploy.confirm_retry_outcome_unknown') . ' ' . $retryConfirm;
+    }
+
     return $retryConfirm;
+}
+
+/** Whether the evaluation carries the outcome_unknown history finding. */
+function deploy_retry_has_outcome_unknown_finding(array $evaluation): bool
+{
+    foreach ((array) ($evaluation['findings'] ?? []) as $finding) {
+        if (is_array($finding) && (string) ($finding['code'] ?? '') === 'retry_remote_outcome_unknown') {
+            return true;
+        }
+    }
+
+    return false;
 }

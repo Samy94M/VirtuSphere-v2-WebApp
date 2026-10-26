@@ -29,6 +29,7 @@ require_once __DIR__ . '/migrations/0061_vm_host_binding.php';
 require_once __DIR__ . '/migrations/0062_deploy_job_started_at.php';
 require_once __DIR__ . '/migrations/0063_machine_api_roles.php';
 require_once __DIR__ . '/migrations/0064_remote_secret_files.php';
+require_once __DIR__ . '/migrations/0065_deploy_outcome_unknown.php';
 function migrator_acquire_schema_lock(mysqli $db): void
 {
     $row = migrator_query_row($db, "SELECT GET_LOCK('virtusphere_schema_migration', 30) AS locked", 'schema migration lock');
@@ -184,15 +185,10 @@ function migrator_preflight_deploy_job_statuses(mysqli $db): void
     }
 
     require_once __DIR__ . '/deploy_constants.php';
-    $allowed = [
-        VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
-        VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
-        VIRTUSPHERE_DEPLOY_STATUS_CANCELLING,
-        VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
-        VIRTUSPHERE_DEPLOY_STATUS_FAILED,
-        VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
-        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
-    ];
+    // Derived, never listed: a hand list missed the next status (0065) silently.
+    // A stored value this code does not know (e.g. outcome_unknown after a
+    // return to older code) blocks the run before any DDL could coerce it.
+    $allowed = array_merge(VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES);
     $invalid = [];
     $result = $db->query('SELECT status, COUNT(*) AS c FROM deploy_jobs GROUP BY status ORDER BY status');
     while ($row = $result->fetch_assoc()) {
@@ -372,7 +368,7 @@ $migrations = [
             -- Value set is the CURRENT one (same rule as lifecycle_state above):
             -- 'cancelling' arrived in 0031; a fresh install creates the final
             -- shape here and 0031's MODIFY is a no-op.
-            status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued',
+            status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial','outcome_unknown') NOT NULL DEFAULT 'queued',
             locked_at TIMESTAMP NULL,
             locked_by VARCHAR(191) NULL,
             heartbeat_at TIMESTAMP NULL,
@@ -688,7 +684,7 @@ $migrations = [
         if (migrator_table_exists($db, 'deploy_jobs') && migrator_column_exists($db, 'deploy_jobs', 'status')) {
             $sql = <<<'SQL'
 ALTER TABLE deploy_jobs
-MODIFY COLUMN status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued'
+MODIFY COLUMN status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial','outcome_unknown') NOT NULL DEFAULT 'queued'
 SQL;
             $db->query($sql);
         }
@@ -956,7 +952,7 @@ SQL;
         // needed because no existing row can carry the new value yet, and
         // MODIFY with a superset never truncates.
         $db->query("ALTER TABLE deploy_jobs
-            MODIFY COLUMN status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial') NOT NULL DEFAULT 'queued'");
+            MODIFY COLUMN status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial','outcome_unknown') NOT NULL DEFAULT 'queued'");
         // cancel_requested_by is the historical user id, deliberately without
         // FK: a deleted account must not erase who asked, and the job log
         // names the user anyway.
@@ -1207,6 +1203,7 @@ SQL;
     '0062_deploy_job_started_at' => migrate_0062_deploy_job_started_at(...),
     '0063_machine_api_roles' => migrate_0063_machine_api_roles(...),
     '0064_remote_secret_files' => migrate_0064_remote_secret_files(...),
+    '0065_deploy_outcome_unknown' => migrate_0065_deploy_outcome_unknown(...),
 ];
 try {
     $db = db();

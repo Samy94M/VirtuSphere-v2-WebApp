@@ -136,12 +136,15 @@ function deploy_job_payload_has_explicit_empty_scope(array $payload): bool
 }
 
 /**
- * Only failed, cancelled and partial jobs can be re-queued: re-running a
- * succeeded job is the start form's business (it walks the readiness preview),
- * and active jobs are cancelled, not retried. A partial job is terminal with a
- * durable result. The shared evaluation distinguishes a partial Create section
- * from the export-only follow-up of a MAC result. Mission-less system jobs (the ESXi inventory pulls)
- * are scheduled by the worker, never retried by hand.
+ * Only failed, cancelled, partial and outcome_unknown jobs can be re-queued:
+ * re-running a succeeded job is the start form's business (it walks the
+ * readiness preview), and active jobs are cancelled, not retried. A partial job
+ * is terminal with a durable result. The shared evaluation distinguishes a
+ * partial Create section from the export-only follow-up of a MAC result. An
+ * outcome_unknown job is retryable like a failed one; deploy_retry_blockers()
+ * adds a non-blocking finding and the confirmation asks the operator to check
+ * ESXi first (WK-04/WK-07 A). Mission-less system jobs (the ESXi inventory
+ * pulls) are scheduled by the worker, never retried by hand.
  */
 function deploy_job_is_retryable(string $status, ?int $missionId): bool
 {
@@ -153,6 +156,7 @@ function deploy_job_is_retryable(string $status, ?int $missionId): bool
         VIRTUSPHERE_DEPLOY_STATUS_FAILED,
         VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
         VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
+        VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN,
     ], true);
 }
 
@@ -171,7 +175,10 @@ function deploy_job_is_retryable(string $status, ?int $missionId): bool
  *   malformed or names no failed VM - the export is repeated for the
  *   ORIGINAL selection, never widened to the full deploy.
  * Cancelled jobs keep the plain re-queue: a cancellation makes no outcome
- * claim, so there is nothing to diverge from.
+ * claim, so there is nothing to diverge from. An outcome_unknown job is read
+ * like a failed one: a stored MAC result that is not a plain failure means the
+ * import committed something before the silence, so only the export of the
+ * original selection repeats.
  *
  * @param array{outcome:string, successful_vm_ids:list<int>, failed_vm_ids:list<int>}|null $result decoded result_json (mac_import_decode_result)
  * @param int[] $originalVmIds the old payload's vm_ids ([] = whole mission)
@@ -187,7 +194,8 @@ function deploy_job_retry_plan(string $status, ?array $result, array $originalVm
         return ['mode' => 'export', 'vm_ids' => array_values($originalVmIds), 'scope' => 'original_selection'];
     }
 
-    if ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED && $result !== null && $result['outcome'] !== 'failed') {
+    if (in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN], true)
+        && $result !== null && $result['outcome'] !== 'failed') {
         return ['mode' => 'export', 'vm_ids' => array_values($originalVmIds), 'scope' => 'original_selection'];
     }
 

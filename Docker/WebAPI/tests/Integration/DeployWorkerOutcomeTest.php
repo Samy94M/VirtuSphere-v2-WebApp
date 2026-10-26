@@ -242,7 +242,7 @@ final class DeployWorkerOutcomeTest extends TestCase
 
         deploy_worker_reap_stale_jobs($this->db);
 
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $this->jobStatus($jobId));
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
         self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($stuck));
     }

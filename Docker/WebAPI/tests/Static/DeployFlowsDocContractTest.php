@@ -104,6 +104,15 @@ final class DeployFlowsDocContractTest extends TestCase
             $exceptions['Terminalgrund'] ?? [],
             'Terminalgrund'
         ));
+        // Every terminal job status a worker can reach appears in the worker
+        // chart; one written only outside it (outcome_unknown, the reaper) needs
+        // a reasoned exception (WK-04/WK-07 A).
+        self::assertSame([], self::closedVocabularyProblems(
+            VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES,
+            self::mermaidBlocks($workerChunk),
+            $exceptions['Auftragsstatus'] ?? [],
+            'Auftragsstatus'
+        ));
 
         $systemExceptions = self::documentedVocabularyExceptions($system);
         self::assertSame([], self::closedVocabularyProblems(
@@ -388,7 +397,7 @@ final class DeployFlowsDocContractTest extends TestCase
     {
         $section = self::between($doc, '## Diagrammausnahmen für geschlossene Werte', '## Playbooks');
         $exceptions = [];
-        preg_match_all('/^\| (Create-Fehler|Terminalgrund|Ampelzustand) \| `([^`]+)` \| ([^|]+) \|$/m', $section, $rows, PREG_SET_ORDER);
+        preg_match_all('/^\| (Create-Fehler|Terminalgrund|Auftragsstatus|Ampelzustand) \| `([^`]+)` \| ([^|]+) \|$/m', $section, $rows, PREG_SET_ORDER);
         foreach ($rows as $row) {
             $exceptions[$row[1]][$row[2]] = trim($row[3]);
         }

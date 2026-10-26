@@ -42,6 +42,7 @@ return [
     'job_failed' => 'Fehlgeschlagen',
     'job_cancelled' => 'Abgebrochen',
     'job_partial' => 'Teilweise erfolgreich',
+    'job_outcome_unknown' => 'Ausgang unbekannt',
     'job_unknown' => 'Unbekannter Status',
 
     // Bereitstellungsmodi. Die sechs postbaren Modi stehen technisch in
@@ -88,6 +89,7 @@ return [
     'finding_create_uncertain' => 'Create ungeklärt (Auftrag :job_id, Einheit :position)',
     'finding_job_failed' => 'Auftrag fehlgeschlagen: :mode, :time',
     'finding_job_failed_unknown' => 'Auftrag fehlgeschlagen',
+    'finding_job_outcome_unknown' => 'Ausgang des Auftrags unbekannt: :mode, :time',
     'finding_missing_from_inventory' => 'Nicht mehr im Inventar (:host, Stand :time)',
     'finding_missing_from_inventory_no_host' => 'Nicht mehr im Inventar (Stand :time)',
     'finding_job_running' => 'Auftrag läuft seit :since (:mode)',

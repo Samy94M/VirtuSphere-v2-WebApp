@@ -97,6 +97,8 @@ function deploy_worker_write_outcome_audit(mysqli $db, array $job, string $statu
  * The closed audit result of a terminal deploy status. A partial run is a
  * warning, not a failure: the mission did change, just not completely, and
  * flattening the two would hide that difference from whoever reads the log.
+ * An outcome_unknown job (the reaper saw only silence) is a warning too: it is
+ * not a known failure, and success would be a guess (WK-04/WK-07 A).
  * Unknown statuses cannot slip through as "success": the default is failure,
  * and the registry refuses a result it does not know.
  */
@@ -104,7 +106,7 @@ function deploy_worker_outcome_audit_result(string $status): string
 {
     return match ($status) {
         VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => VIRTUSPHERE_AUDIT_RESULT_WARNING,
+        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => VIRTUSPHERE_AUDIT_RESULT_WARNING,
         default => VIRTUSPHERE_AUDIT_RESULT_FAILURE,
     };
 }

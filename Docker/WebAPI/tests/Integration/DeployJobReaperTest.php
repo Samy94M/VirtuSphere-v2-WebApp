@@ -33,7 +33,7 @@ final class DeployJobReaperTest extends TestCase
         $this->deleteTestMissions();
     }
 
-    public function testReapStaleDeployJobsMarksOnlyStaleRunningJobsFailed(): void
+    public function testReapStaleDeployJobsConcludesOnlyStaleRunningJobsWithAnUnknownOutcome(): void
     {
         $this->skipWhenForeignRunningJobsExist();
 
@@ -47,7 +47,7 @@ final class DeployJobReaperTest extends TestCase
         self::assertSame([$staleJobId], array_map(static fn (array $job): int => (int) $job['id'], $reaped));
 
         $stale = $this->job($staleJobId);
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $stale['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $stale['status']);
         self::assertNull($stale['locked_by']);
         self::assertNull($stale['heartbeat_at']);
         self::assertStringContainsString('limit 600 s', (string) $stale['last_error']);
@@ -78,7 +78,7 @@ final class DeployJobReaperTest extends TestCase
         repo_reap_stale_deploy_jobs($this->db, 600, $observation);
 
         $job = $this->job($jobId);
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $job['status']);
         self::assertStringContainsString('limit 600 s', (string) $job['last_error'], 'the observation stays');
         self::assertStringContainsString($observation, (string) $job['last_error'], 'and the caller\'s note joins it');
         self::assertSame(1, $this->systemLogCount($jobId, '%' . $observation . '%'), 'the job log carries the same sentence');
@@ -105,7 +105,7 @@ final class DeployJobReaperTest extends TestCase
         self::assertStringContainsString('Job ' . $jobId . ':', $lastError, 'the job it is about');
         self::assertStringContainsString('lock held by worker-gone', $lastError, 'who held it');
         self::assertStringContainsString('limit 600 s', $lastError, 'against which limit');
-        self::assertStringContainsString('running -> failed', $lastError, 'and the transition that follows');
+        self::assertStringContainsString('running -> outcome_unknown', $lastError, 'and the transition that follows');
         self::assertMatchesRegularExpression('/last heartbeat \d+ s ago/', $lastError);
 
         // No cause is claimed anywhere in it.
@@ -129,6 +129,22 @@ final class DeployJobReaperTest extends TestCase
         self::assertNull($job['heartbeat_at']);
     }
 
+    /** A worker alive to conclude its job knows how it ended: only the reaper writes outcome_unknown. */
+    public function testAWorkerCannotConcludeAJobWithAnUnknownOutcome(): void
+    {
+        $missionId = $this->insertMission($this->prefix . '_nounknown');
+        $jobId = $this->insertRunningJob($missionId, 'worker-a', 0);
+
+        try {
+            repo_finish_deploy_job($this->db, $jobId, 'worker-a', VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN);
+            self::fail('outcome_unknown must be refused for a worker conclusion');
+        } catch (InvalidArgumentException) {
+        }
+        $job = $this->job($jobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_RUNNING, $job['status']);
+        self::assertSame('worker-a', $job['locked_by']);
+    }
+
     public function testReapedInventoryJobBecomesAWorkerFailureWithItsExactLogPointer(): void
     {
         $this->skipWhenForeignRunningJobsExist();
@@ -136,6 +152,13 @@ final class DeployJobReaperTest extends TestCase
         $jobId = $this->insertRunningInventoryJob($credentialId, 'worker-gone', 700);
 
         repo_reap_stale_deploy_jobs($this->db, 600);
+
+        // A read-only inventory pull changes nothing on ESXi, so its silence
+        // leaves nothing unknown there: it stays a failed attempt (WK-04/WK-07 A).
+        $job = $this->job($jobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT, (string) $job['terminal_reason_code']);
+        self::assertStringContainsString('running -> failed', (string) $job['last_error']);
 
         $state = repo_esxi_inventory_state($this->db, $credentialId);
         self::assertIsArray($state);
@@ -147,8 +170,10 @@ final class DeployJobReaperTest extends TestCase
 
     /**
      * WK-07: the reaper cannot see whether the remote run finished before the
-     * heartbeat went silent. The terminal detail says so, in the existing English
-     * vocabulary, so a retry is never read as a clean, known failure.
+     * heartbeat went silent. Since WK-04/WK-07 A the status itself says so
+     * (`outcome_unknown`), the reason still names the observation
+     * (`stale_heartbeat`) and the detail keeps the existing English account, so
+     * neither filter, badge nor audit reads the job as a known failure.
      */
     public function testAReapedJobRecordsItsRemoteOutcomeAsUnknown(): void
     {
@@ -157,10 +182,11 @@ final class DeployJobReaperTest extends TestCase
         $missionId = $this->insertMission($this->prefix . '_unknown');
         $jobId = $this->insertRunningJob($missionId, 'worker-silent', 700);
 
-        repo_reap_stale_deploy_jobs($this->db, 600);
+        $reaped = repo_reap_stale_deploy_jobs($this->db, 600);
 
+        self::assertSame([VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN], array_column($reaped, 'reaped_to'));
         $job = $this->job($jobId);
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $job['status']);
         self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT, (string) $job['terminal_reason_code']);
         self::assertStringContainsString('Remote outcome unknown', (string) $job['terminal_reason_detail']);
         self::assertStringContainsString('Remote outcome unknown', (string) $job['last_error']);

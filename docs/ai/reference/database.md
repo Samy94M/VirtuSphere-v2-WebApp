@@ -14,7 +14,7 @@ ESXi object-name columns use binary collation because case and raw Unicode are o
 
 ## R3 PHP constants in Docker/WebAPI/lib/ are the SSoT for ENUM value sets; the struktur.sql and migr
 
-PHP constants in `Docker/WebAPI/lib/` are the SSoT for ENUM value sets; the `struktur.sql` and `migrate.php` ENUM columns are order-exact mirrors. Run `sh scripts/check-enum-sync.sh` after touching a mirrored ENUM or its constants (ADR-0016); it also runs quietly at session start.
+PHP constants in `Docker/WebAPI/lib/` are the SSoT for ENUM value sets; the `struktur.sql` and `migrate.php` ENUM columns are order-exact mirrors. Run `sh scripts/check-enum-sync.sh` after touching a mirrored ENUM or its constants (ADR-0016); it also runs quietly at session start. The `deploy_jobs.status` mirrors in `migrate.php` (0001, 0019, 0031) carry the current set; migration 0065 added `outcome_unknown` and its `stale_heartbeat` CHECK branch. The status preflight derives its allowed set from `VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES` and `VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES`, so older code stops before any DDL once a row carries a value it does not know.
 
 ## R4 The effective MECM rollout hostname is globally unique through deploy_vm_hostname_claims, not t
 

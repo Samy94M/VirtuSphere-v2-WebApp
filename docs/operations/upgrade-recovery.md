@@ -55,7 +55,7 @@ bewiesene konsistente Restorestand verwendet.
 |---|---|---|
 | A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052, 0054, 0055, 0061, 0062 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
 | N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
-| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060, 0063, 0064 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
+| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060, 0063, 0064, 0065 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
 
 Migration 0034 entfernt das Legacy-Tokenschema ausdrücklich. Die Migrationen
 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049 und 0050 führen
@@ -73,6 +73,8 @@ Migration 0061 ergänzt an der VM-Bindung den ESXi-Zugang und dessen Host zum Bi
 Migration 0063 gibt jedem Eintrag der Machine-API-Freigabeliste eine optionale Rolle, die die erreichbaren Endpunkte begrenzt. Alter Code kennt die Rolle nicht und öffnet jedem freigegebenen Eintrag wieder jeden Endpunkt; eine Rückkehr hebt also die vom Administrator gesetzten Grenzen still auf.
 
 Migration 0064 führt den dauerhaften Merker für ESXi-Zugangsdateien auf dem Ansible-Host ein (`deploy_remote_secret_files`) und die Sperre, das Ziel eines Ansible-Zugangs bei offenem Merker zu ändern. Alter Code lädt die Datei ohne Merker hoch und kennt die Sperre nicht: Eine in seiner Laufzeit liegengebliebene Datei sieht weder der Systemstatus noch das Aufräumen beim nächsten Kontakt. Für 0063 und 0064 gilt deshalb dieselbe Grenze wie für 0059: kein gemischter Betrieb, Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore.
+
+Migration 0065 ergänzt den Auftragsstatus `outcome_unknown` („Ausgang unbekannt“), den der Reaper für einen laufenden Auftrag einer Mission ohne Herzschlag schreibt, und erlaubt den Abschlussgrund `stale_heartbeat` auch dafür. Alte Zeilen werden nicht umgeschrieben. Alter Code kennt den Wert nicht: Seine Anzeige fiele auf „Unbekannter Status“ zurück, seine Wiederholung und Bereinigung behandelten den Auftrag nicht als beendet, und sein Reaper schriebe wieder `failed`. Sobald eine Zeile den Wert trägt, bricht der Status-Preflight jedes älteren Migrationslaufs vor jeder DDL ab. Das ist gewollt; Rückkehr deshalb nur als zusammengehöriger Source- und Schemarestore wie bei 0059.
 
 ## Upgradefolge
 

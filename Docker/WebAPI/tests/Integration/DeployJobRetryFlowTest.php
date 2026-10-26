@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/deploy_create_results.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_retry_confirmation.php';
 
 /**
  * The repo half of the retry matrix: repo_retry_deploy_job() must turn the
@@ -133,6 +134,43 @@ final class DeployJobRetryFlowTest extends TestCase
         // can compare the live UUID against real evidence rather than a claim.
         self::assertNotNull($rows[0]['resumed_from_result_id']);
         self::assertNull($rows[1]['resumed_from_result_id']);
+    }
+
+    /**
+     * WK-04/WK-07 A: a job the reaper concluded as outcome_unknown is retryable
+     * like a failed one. The evaluation carries one non-blocking external
+     * finding, the confirmation leads with what to check, and the source job
+     * keeps its status: no action turns it into a success or a failure.
+     */
+    public function testAnOutcomeUnknownJobIsRetryableWithAConfirmableFinding(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('unknown', 2);
+        $jobId = $this->insertTerminalJob(
+            $missionId,
+            VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN,
+            VIRTUSPHERE_DEPLOY_MODE_FULL,
+            $vmIds,
+            null,
+            [VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED, VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED]
+        );
+
+        $evaluation = deploy_retry_blockers($this->db, $jobId);
+        self::assertTrue($evaluation['allowed']);
+        $unknown = array_values(array_filter(
+            $evaluation['findings'],
+            static fn (array $finding): bool => $finding['code'] === 'retry_remote_outcome_unknown'
+        ));
+        self::assertSame([['kind' => 'external', 'code' => 'retry_remote_outcome_unknown', 'blocking' => false]], $unknown);
+        self::assertStringStartsWith(__t('deploy.confirm_retry_outcome_unknown'), deploy_retry_confirmation($evaluation, 'M'));
+
+        $newJobId = repo_retry_deploy_job($this->db, $jobId, $this->userId);
+
+        self::assertGreaterThan($jobId, $newJobId);
+        self::assertSame($vmIds, $this->jobPayload($newJobId)['vm_ids']);
+        self::assertSame(
+            VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN,
+            (string) repo_scalar($this->db, 'SELECT status FROM deploy_jobs WHERE id = ?', 'i', [$jobId])
+        );
     }
 
     /**

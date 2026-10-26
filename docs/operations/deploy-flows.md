@@ -224,6 +224,7 @@ Der Vokabular-Wächter leitet Werte aus den Code-Listen ab. Ein Wert ohne Knoten
 | Terminalgrund | `stale_heartbeat` | Der Wartungsdienst beendet veraltete Aufträge; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
 | Terminalgrund | `cancel_converged` | Der Wartungsdienst konvergiert eine bereits angeforderte Abbrechung; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
 | Terminalgrund | `ownership_lost` | Das Token steht im geschlossenen Terminalgrund-Array, hat im Produktionscode derzeit keinen Writer; ein neuer Writer muss den passenden Ablauf ergänzen. |
+| Auftragsstatus | `outcome_unknown` | Nur der Wartungsdienst schreibt diesen Status, für einen laufenden Auftrag einer Mission ohne Herzschlag; der Worker weist ihn ab (`repo_finish_deploy_job()`). Der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
 
 ## Playbooks
 

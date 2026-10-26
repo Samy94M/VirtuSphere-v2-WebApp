@@ -183,8 +183,8 @@ final class DeployWorkerDbChannelRecoveryTest extends TestCase
 
         // The reaper (or another worker) converged the job meanwhile. This is
         // what that leaves behind: terminal, unlocked, with its own account.
-        $foreignError = 'Reaped stale deploy job. Job ' . $jobId . ': last heartbeat 700 s ago, limit 600 s; lock held by worker-a; running -> failed.';
-        $this->concludeJobElsewhere($jobId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $foreignError);
+        $foreignError = 'Reaped stale deploy job. Job ' . $jobId . ': last heartbeat 700 s ago, limit 600 s; lock held by worker-a; running -> outcome_unknown.';
+        $this->concludeJobElsewhere($jobId, VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $foreignError);
 
         $this->ops->writesFail = false;
         $this->clock += VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MIN_SECONDS + 1;
@@ -204,7 +204,7 @@ final class DeployWorkerDbChannelRecoveryTest extends TestCase
         self::assertFalse(repo_finish_deploy_job($connection, $jobId, 'worker-a', VIRTUSPHERE_DEPLOY_STATUS_FAILED));
 
         $job = $this->job($jobId);
-        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $job['status']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $job['status']);
         self::assertSame($foreignError, (string) $job['last_error'], 'the established account survives untouched');
     }
 

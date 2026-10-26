@@ -291,11 +291,12 @@ function virtusphere_vm_findings(array $vm, array $evidence = [], ?int $now = nu
     // when it is terminal. The job is the display, never a second writer.
     if ($lifecycle === VIRTUSPHERE_LIFECYCLE_FAILED) {
         $terminal = $job !== null && in_array((string) ($job['status'] ?? ''), VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true);
+        // A reaped job's outcome is unknown, not failed (WK-04/WK-07 A); the text says so.
         $add(VIRTUSPHERE_VM_FINDING_JOB_FAILED, $terminal ? [
             'job_id' => $jobId,
             'mode' => (string) ($job['mode'] ?? ''),
             'time' => virtusphere_vm_finding_time((string) ($job['updated_at'] ?? ''), $current),
-        ] : [], $terminal ? $jobLink : ['target' => VIRTUSPHERE_VM_FINDING_LINK_DEPLOY]);
+        ] + ((string) ($job['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN ? ['outcome_unknown' => true] : []) : [], $terminal ? $jobLink : ['target' => VIRTUSPHERE_VM_FINDING_LINK_DEPLOY]);
     }
 
     // 3 and 8: the reading of the bound access (lib/vm_inventory_observation.php);

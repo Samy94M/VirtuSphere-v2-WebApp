@@ -279,6 +279,7 @@ return [
     'ansible_job_partial' => 'Teilweise erfolgreich',
     'ansible_job_failed' => 'Fehlgeschlagen',
     'ansible_job_cancelled' => 'Abgebrochen',
+    'ansible_job_outcome_unknown' => 'Ausgang unbekannt',
     'ansible_job_unknown' => 'Unbekannter Ausgang',
     'ansible_failed_component' => 'Fehlgeschlagen an: :component',
     'ansible_allowlist_detail' => 'Host und Toolchain in Ordnung, aber die Host-IP fehlt in den Machine-API IP-Freigaben oder steht dort nicht mit der Rolle Ansible-Host; Aufträge mit MAC-Export werden vor jeder VM-Änderung abgewiesen. Mit der Rolle Ansible-Host freigeben unter Einstellungen, Machine-API.',

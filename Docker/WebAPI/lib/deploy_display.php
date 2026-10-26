@@ -20,7 +20,7 @@ require_once __DIR__ . '/deploy_mode_labels.php';
 /**
  * The human name of a deploy-job status.
  *
- * The seven values are exactly the active and terminal sets; an eighth value
+ * The eight values are exactly the active and terminal sets; a ninth value
  * would be a schema change, and it lands on the neutral fallback rather than in
  * front of an operator as a raw token.
  */
@@ -34,6 +34,7 @@ function deploy_job_status_label(string $status): string
         VIRTUSPHERE_DEPLOY_STATUS_FAILED => __t('status.job_failed'),
         VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => __t('status.job_cancelled'),
         VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => __t('status.job_partial'),
+        VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => __t('status.job_outcome_unknown'),
         default => __t('status.job_unknown'),
     };
 }

@@ -214,3 +214,34 @@ connection, and an outcome the wait gave up on is never written afterwards as a
 guess; the reaper records the remote outcome as unknown instead.
 `DeployWorkerOutcomeTest`, `DeployCancellationStateMachineTest`,
 `DeployJobReaperTest` and `DeployWorkerDbChannelTest` cover these rules.
+
+## Amendment (2026-10-26): a silent running job ends as `outcome_unknown`
+
+The reaper observes silence, never the remote run. Since migration 0065 a
+stale `running` job of a mission therefore ends with the terminal status
+`outcome_unknown` instead of `failed` (WK-04/WK-07 A). The reason stays
+`stale_heartbeat`, which is now valid for both statuses: `failed` remains for
+rows reaped before 0065 (no backfill) and for a stale mission-less inventory
+pull, whose playbook only reads and is recorded as a failed fetch attempt. A
+stale `cancelling` job still converges to `cancelled` (decision 4: the
+operator's wish wins).
+
+- Only the reaper writes the status; `repo_finish_deploy_job()` refuses it,
+  because a worker alive to conclude its job knows how it ended.
+- It is terminal and releases the mission like any other end. Badge and the
+  `deploy.outcome` audit result are `warning`: unknown is not a failure, and
+  success would be a guess.
+- It is retryable like `failed`. `deploy_retry_blockers()` adds the
+  non-blocking external finding `retry_remote_outcome_unknown`; the
+  confirmation leads with what to check on ESXi. Every existing block (open
+  remote handle, unresolved Create unit, identity, network) applies unchanged,
+  and no action rewrites the old job to success or failure.
+- VM convergence is unchanged (the journal decides per VM, contract A49).
+- Returning to code without the status fails at the migration status preflight
+  once a row carries it: intended, because older code would mistake it for an
+  unknown value. Return only through the consistent restore of
+  `docs/operations/upgrade-recovery.md`.
+
+A worker that is alive but loses its SSH session in the middle of a step still
+writes `failed` with `timeout` or `execution_failed`; whether that case also
+deserves the unknown outcome (U-01) is a separate follow-up.
