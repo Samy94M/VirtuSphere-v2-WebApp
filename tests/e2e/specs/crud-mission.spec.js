@@ -5,7 +5,7 @@
 // delete confirm dialog: Cancel must leave the row in the DB, Confirm must remove
 // it everywhere.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { execFileSync } = require('node:child_process');

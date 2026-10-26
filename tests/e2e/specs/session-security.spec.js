@@ -9,7 +9,7 @@
 //   - the absolute session lifetime is enforced server-side, so a client that
 //     never runs the countdown is still forced back to the login.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp } = require('../lib/php');
 

@@ -8,7 +8,7 @@
 // selectors, so a failure names what to fix rather than just that something is
 // wrong.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 const { PORTAL_PAGES, pageUrl, pageLabel } = require('../lib/pages');
 const { ROLES } = require('../lib/auth');

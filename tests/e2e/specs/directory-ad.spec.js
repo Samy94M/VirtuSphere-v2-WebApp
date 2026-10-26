@@ -18,7 +18,7 @@
 // like DirectoryLdapFixtureFailoverTest.php's PHPUnit-level fixture setup.
 
 const tls = require('node:tls');
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { runPhp, phpJson } = require('../lib/php');

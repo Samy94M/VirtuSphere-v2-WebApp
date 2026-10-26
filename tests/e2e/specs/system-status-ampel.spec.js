@@ -9,7 +9,7 @@
 // compares the two rendered pages against each other, which is the only place
 // that drift was ever visible.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

@@ -3,7 +3,7 @@
 // activating does not, per portal.md), the role change and password reset prove
 // their Cancel branches, and clear_lock runs on a genuinely locked account.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { runPhp, phpJson } = require('../lib/php');

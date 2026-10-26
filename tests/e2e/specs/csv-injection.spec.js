@@ -5,7 +5,7 @@
 // input validators), must arrive in the actual downloaded CSV bytes with a
 // leading apostrophe so a spreadsheet cannot execute it on open.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

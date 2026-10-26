@@ -4,7 +4,7 @@
 // still holds, so this rejection is one click away and has to read like a
 // sentence, not like a stack trace.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { execFileSync } = require('node:child_process');
 

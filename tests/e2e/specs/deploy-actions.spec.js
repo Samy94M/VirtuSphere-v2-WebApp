@@ -4,7 +4,7 @@
 // cancel/cancel_group deterministic. Only the retry test creates a job the
 // worker may claim; its assertions do not depend on the job's later fate.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

@@ -3,7 +3,7 @@
 // its deep link opens it, that each row answers the release question, and that
 // the help section explains it. It writes nothing.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 
 test.use({ storageState: ROLES.admin.storageState });

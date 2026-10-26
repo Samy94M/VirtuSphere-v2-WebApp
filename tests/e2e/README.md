@@ -26,7 +26,7 @@ npm run test:matrix   # Firefox + WebKit + installed Windows Edge
 npm run report        # open the last HTML report
 ```
 
-The `setup` project seeds the `e2e_user` account (role `user`) through the PHP container and logs in once per role, caching `storageState` under `.auth/`. Specs reuse those sessions.
+The `setup` project seeds the `e2e_user` account (role `user`) through the PHP container and logs in once per role, caching `storageState` under `.auth/`. Specs reuse those sessions. A portal session ends 3600 s after login, so specs import `test` from `lib/test.js` instead of `@playwright/test`: it signs both roles in again at the start of every browser project and every 20 minutes, which keeps a long `test:matrix` run off the session-expiry dialog (M1). `tests/spec-imports.test.js` enforces the import.
 
 ## What it covers
 

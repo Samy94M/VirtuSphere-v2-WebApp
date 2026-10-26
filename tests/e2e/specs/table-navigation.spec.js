@@ -7,7 +7,7 @@
 // scrolls under it, that it stays opaque over the cell it covers, or that it
 // lets go on a narrow viewport. Those are measured here.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

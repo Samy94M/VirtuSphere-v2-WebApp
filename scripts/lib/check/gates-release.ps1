@@ -77,6 +77,9 @@ function Register-ReleaseCheckGates {
         # verlaengert sie nicht). Unter Fremdlast dauerten beide Engines
         # zusammen 67 bis 75 Minuten; jede WebKit-Spec nach der Stunde scheiterte
         # am Dialog zum Sitzungsablauf, der jeden Klick abfaengt (M1, 26.10.2026).
+        # Die eigentliche Behebung liegt in tests/e2e/lib/test.js (neue Anmeldung
+        # je Browserprojekt); die Trennung haelt zusaetzlich die Befunde einer
+        # Engine von denen der anderen getrennt.
         $engineResults = @()
         foreach ($engine in @('firefox', 'webkit')) {
             $engineResults += Invoke-PlaywrightSuite @($engine) ('Playwright-Suite gruen auf ' + $engine) ('Playwright-Suite rot auf ' + $engine)

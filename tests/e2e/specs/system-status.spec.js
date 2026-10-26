@@ -1,7 +1,7 @@
 // System-status acceptance coverage for the MECM result reports and site
 // status, fixed-clock overview, compact ESXi cards and role-safe repair actions.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 const { submitAndWaitForNavigation } = require('../lib/navigation');

@@ -7,7 +7,7 @@
 // external check appends rather than replaces. None of that depends on the
 // remote path being enabled, and all of it would silently rot without a proof.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

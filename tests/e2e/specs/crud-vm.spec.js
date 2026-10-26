@@ -3,7 +3,7 @@
 // seeded VM carries an interface row with one. The bulk buttons stay disabled
 // until a checkbox is ticked, which the specs exercise implicitly.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

@@ -3,7 +3,7 @@
 // the deploy form's live describedby changes and one screen-reader description
 // sample. The page-wide negative reference scan lives in accessibility.spec.js.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
 const { formReferenceProblems } = require('../lib/form-accessibility');

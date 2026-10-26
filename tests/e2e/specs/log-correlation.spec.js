@@ -7,7 +7,7 @@
 // behaviour - the clipboard write, the confirmation, the field error on a
 // partial id - and none of it is visible to a source scan.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

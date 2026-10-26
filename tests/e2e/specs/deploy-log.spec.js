@@ -1,4 +1,4 @@
-const { test, expect, request } = require('@playwright/test');
+const { test, expect, request } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

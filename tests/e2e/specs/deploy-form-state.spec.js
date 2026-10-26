@@ -8,7 +8,7 @@
 // controls and lib/deploy_form_state.php reads them back, so every automated
 // check stays green while the form empties itself.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

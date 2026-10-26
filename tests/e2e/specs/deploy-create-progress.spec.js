@@ -13,7 +13,7 @@
 // of the rendered anchor, not of any function: it was a `<button type="button">`
 // for three stages while the endpoint accepted the cursor the whole time.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

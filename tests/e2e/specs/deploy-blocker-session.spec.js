@@ -3,7 +3,7 @@
 // lock below holds the interface relation read; a same-PHPSESSID session_ping must be
 // able to acquire the session and answer the CSRF-protected ping successfully.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { spawn } = require('node:child_process');
 const { ROLES } = require('../lib/auth');
 const { phpJson, runPhp, PHP_CONTAINER } = require('../lib/php');

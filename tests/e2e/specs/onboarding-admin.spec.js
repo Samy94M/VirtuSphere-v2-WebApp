@@ -1,7 +1,7 @@
 // Etappe 10 exit proof: a freshly seeded admin must be able to follow the
 // operator-first path from forced password change through every setup area.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { runPhp } = require('../lib/php');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
 

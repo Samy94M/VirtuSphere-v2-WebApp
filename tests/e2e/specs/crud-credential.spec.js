@@ -3,7 +3,7 @@
 // both dialog branches; the connection test runs against a closed local port so
 // it fails fast, deterministically and without leaving the air gap.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { runPhp, phpJson } = require('../lib/php');

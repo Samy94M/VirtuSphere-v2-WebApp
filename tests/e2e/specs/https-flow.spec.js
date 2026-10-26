@@ -6,7 +6,7 @@
 // this very HTTP session to a TLS listener with a self-signed certificate and
 // lock the remaining steps out.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

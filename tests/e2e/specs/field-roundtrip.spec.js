@@ -10,7 +10,7 @@
 // nothing about persistence, so every check reads the *stored* row: MySQL
 // directly for bytes, a fresh GET for each render context.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
 const { execFileSync } = require('node:child_process');

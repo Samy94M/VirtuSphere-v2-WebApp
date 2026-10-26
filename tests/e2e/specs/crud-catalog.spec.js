@@ -3,7 +3,7 @@
 // these pages; both prove the Cancel branch by DB state. The VLAN delete only
 // renders on retired rows, so the seed retires its row up front.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

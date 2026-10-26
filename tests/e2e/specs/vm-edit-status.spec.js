@@ -3,7 +3,7 @@
 // without a click. There is no action here, so no e2e-covers marker. The suite
 // renders EN; the checks accept the DE wording as well.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

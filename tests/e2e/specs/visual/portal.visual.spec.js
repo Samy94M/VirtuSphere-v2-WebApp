@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../../lib/test');
 const { ROLES } = require('../../lib/auth');
 const { cleanupVisualFixtures, seedVisualFixtures } = require('../../lib/visual-seed');
 const contract = require('../../visual/runner-contract.json');

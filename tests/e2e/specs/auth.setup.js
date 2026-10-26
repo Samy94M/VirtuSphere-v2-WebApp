@@ -1,11 +1,12 @@
 // Auth setup project (ADR-0028): seed the plain-user account, then log in once
 // per role and persist storageState for the specs to reuse. Runs before the
-// chromium project via the config's project dependency.
+// chromium project via the config's project dependency. lib/test.js renews the
+// logins per browser project; the seeding happens only here.
 
 const { test, expect } = require('@playwright/test');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
-const { ROLES, AUTH_DIR } = require('../lib/auth');
+const { ROLES, AUTH_DIR, signIn } = require('../lib/auth');
 
 const PHP_CONTAINER = process.env.VIRTUSPHERE_PHP_CONTAINER || 'virtusphere-v2-webapp-php-1';
 
@@ -49,25 +50,16 @@ function phpString(value) {
   return "'" + String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 }
 
-async function signIn(page, role) {
-  await page.goto('login.php');
-  await page.locator('#username').fill(role.username);
-  await page.locator('#password').fill(role.password);
-  await Promise.all([
-    page.waitForURL(/dashboard\.php/, { timeout: 15000 }),
-    page.locator('button[type="submit"]').click(),
-  ]);
-  // The dashboard proves the session is real, not just a 302 target.
-  await expect(page).toHaveURL(/dashboard\.php/);
-}
-
 test('seed and authenticate the user role', async ({ page }) => {
   seedUser(ROLES.user);
   await signIn(page, ROLES.user);
+  // The dashboard proves the session is real, not just a 302 target.
+  await expect(page).toHaveURL(/dashboard\.php/);
   await page.context().storageState({ path: ROLES.user.storageState });
 });
 
 test('authenticate the admin role', async ({ page }) => {
   await signIn(page, ROLES.admin);
+  await expect(page).toHaveURL(/dashboard\.php/);
   await page.context().storageState({ path: ROLES.admin.storageState });
 });

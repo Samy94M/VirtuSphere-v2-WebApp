@@ -21,4 +21,35 @@ const ROLES = {
   },
 };
 
-module.exports = { ROLES, AUTH_DIR };
+/**
+ * Logs `role` in on `page` and waits for the dashboard. Shared by the setup
+ * project and the per-project refresh in lib/test.js, so both sign in the same
+ * way.
+ */
+async function signIn(page, role) {
+  await page.goto('login.php');
+  await page.locator('#username').fill(role.username);
+  await page.locator('#password').fill(role.password);
+  await Promise.all([
+    page.waitForURL(/dashboard\.php/, { timeout: 15000 }),
+    page.locator('button[type="submit"]').click(),
+  ]);
+}
+
+/**
+ * Signs `role` in through a throwaway context of `browser` and rewrites its
+ * storageState file. English like the setup project: the login stores no
+ * language choice, but the specs assume the same starting point everywhere.
+ */
+async function refreshStorageState(browser, baseURL, role) {
+  const context = await browser.newContext({ baseURL, locale: 'en-US' });
+  try {
+    const page = await context.newPage();
+    await signIn(page, role);
+    await context.storageState({ path: role.storageState });
+  } finally {
+    await context.close();
+  }
+}
+
+module.exports = { ROLES, AUTH_DIR, signIn, refreshStorageState };

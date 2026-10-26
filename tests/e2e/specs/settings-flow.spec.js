@@ -5,7 +5,7 @@
 // browser: the redirect must land in the tab the form lives in, or sticky
 // field errors render into a hidden panel.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 

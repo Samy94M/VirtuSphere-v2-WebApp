@@ -4,7 +4,7 @@
 // (danger: it rewrites every stored assignment), and proves its Cancel branch
 // by DB state.
 
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 
