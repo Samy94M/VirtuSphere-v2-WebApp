@@ -71,7 +71,7 @@ Vor jeder SSH-/SFTP-Anmeldung prüft der gemeinsame [Hostidentitäts-Guard](trus
 
 ```mermaid
 flowchart TD
-  L["Worker-Schleife: veraltete Aufträge ernten, nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist; keine Verfallszeit, der erste Claim speichert den tatsächlichen Start und nennt einen verspäteten Termin"]
+  L["Worker-Schleife: veraltete Aufträge ernten (Abschnitt Aufsicht), nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist; keine Verfallszeit, der erste Claim speichert den tatsächlichen Start und nennt einen verspäteten Termin"]
   L --> I{"Systemmodus inventory?"}
   I -->|ja| INV["Inventarpfad: Playbook inventoryESXi (Abschnitt Playbooks)"]
   I -->|nein| J["Claim speichert den Vorzustand pro Auftrag und VM; keine Rückfüllung alter Jobs"] --> K["Collection-Sperre (requirements.yml) lokal lesen"]
@@ -140,6 +140,116 @@ flowchart TD
   EMX --> Z
   Z --> FIN["Ab den vorbereiteten Dateien, auf jedem Weg (finally): accounts.yml auf dem Ansible-Host entfernen; Arbeitsverzeichnisse dort und lokal löschen, außer ein Schritt läuft dort noch"]
 ```
+
+## Auftragszustände
+
+Ein Auftrag hat genau einen Status. `queued`, `running` und `cancelling` sind aktiv: Der Auftrag besitzt seine Mission, sperrt Löschen und einen zweiten Missionsauftrag und behält Sperre und Herzschlag. Die übrigen fünf sind Endzustände; aus ihnen führt kein Übergang heraus, eine Wiederholung legt einen neuen Auftrag an. `DeployJobStatesDocContractTest` leitet die Status aus `VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES` und `VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES` ab, die Knotennamen aus `lang/de/status.php` und die Abschlussgründe aus `VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES`.
+
+```mermaid
+flowchart TD
+    queued["In Warteschlange"] -->|Worker beansprucht den fälligen Auftrag| running["Läuft"]
+    queued -->|Abbruch oder Gruppenabbruch durch den Bediener| cancelled["Abgebrochen"]
+    running -->|Bediener fordert den Abbruch an| cancelling["Abbruch angefordert"]
+    running -->|alle Schritte mit Exitcode 0, MAC-Ergebnis vollständig oder nicht verlangt| succeeded["Erfolgreich"]
+    running -->|MAC-Ergebnis teilweise| partial["Teilweise erfolgreich"]
+    running -->|Sperre, Schrittfehler, Zeitbudget, kein MAC-Ergebnis; veralteter Herzschlag nur beim Inventarabruf| failed["Fehlgeschlagen"]
+    running -->|veralteter Herzschlag; nur die Aufsicht schreibt diesen Status| outcome_unknown["Ausgang unbekannt"]
+    cancelling -->|Worker bestätigt an der Schrittgrenze, oder die Aufsicht konvergiert| cancelled
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class queued,running,cancelling,succeeded,partial,cancelled step;
+    class failed,outcome_unknown blocked;
+```
+
+Beanspruchen (`repo_claim_next_deploy_job()`) nimmt nur einen fälligen, nicht abgebrochenen Auftrag, solange die Annahme nicht pausiert ist und die Mission keinen laufenden Auftrag hat; Systemaufträge ohne Mission folgen nach den Missionsaufträgen. Jeder Endzustand entsteht in einer Transaktion mit seinem Abschlussgrund und nur unter dem eigenen Besitz (`repo_finish_deploy_job()`, `repo_confirm_deploy_job_cancelled()`): Ein Worker, der seinen Besitz verloren hat, schreibt nichts mehr. `outcome_unknown` weist `repo_finish_deploy_job()` ab, weil ein Worker, der noch schreiben kann, weiß, wie sein Lauf endete; diesen Status schreibt nur die [Aufsicht](#aufsicht-verwaiste-aufträge). Ein Abbruch, der während des letzten Schritts ankommt, gewinnt gegen den Erfolg; der Auftrag endet dann `cancelled`, und das Abschlussdetail sagt, ob der laufende Schritt noch zu Ende lief (`deploy_worker_finish_job()`, `deploy_worker_conclude_cancel_after_sequence()`). Derselbe Wechsel bestätigt eine angeforderte Pause der Auftragsannahme (`repo_deploy_confirm_claim_pause()`).
+
+| Abschlussgrund | Status | Geschrieben von |
+|---|---|---|
+| `completed` | `succeeded` | `repo_finish_deploy_job()`, Standard für einen Erfolg aus `deploy_worker_conclude_sequence()` |
+| `partial_result` | `partial` | `deploy_worker_conclude_sequence()` bei einem MAC-Teilergebnis; `deploy_worker_conclude_create_section()`, wenn nur ein Teil der Create-Einheiten gelang |
+| `execution_failed` | `failed` | `deploy_worker_handle_failure()`, Standard für einen Schritt- oder Ergebnisfehler |
+| `timeout` | `failed` | `deploy_terminal_reason_for_exception()` bei überschrittenem SSH-Transportbudget |
+| `stale_heartbeat` | `failed`, `outcome_unknown` | `repo_reap_stale_deploy_jobs()` (Abschnitt „Aufsicht: verwaiste Aufträge“): `outcome_unknown` für einen laufenden Auftrag; `failed` nur für einen Inventarabruf und für Zeilen, die vor Migration 0065 geerntet wurden |
+| `ownership_lost` | `failed` | im Produktionscode kein Schreiber |
+| `configuration_blocked` | `failed` | `deploy_worker_process_job()` für eine Sperre vor jeder Remote-Arbeit (`DeployWorkerConfigurationBlocked`: Netzvertrag, freie Lizenz, Host-Version, IP-Freigabe, unlesbarer Auftrag) |
+| `operator_cancelled` | `cancelled` | `repo_cancel_deploy_job()` und `repo_cancel_deploy_group()` für wartende Aufträge, `repo_confirm_deploy_job_cancelled()` für laufende |
+| `cancel_converged` | `cancelled` | `repo_reap_stale_deploy_jobs()` für einen abbrechenden Auftrag ohne Herzschlag |
+
+## Aufsicht: verwaiste Aufträge
+
+Ein Auftrag, dessen Worker sich nicht mehr meldet, darf nicht ewig `running` stehen: Er sperrt seine Mission. Dieselbe Funktion `deploy_worker_reap_stale_jobs()` läuft am Anfang jeder Schleife des Bereitstellungsdienstes und als Job `deploy-job-reap` im [Wartungsdienst](maintenance-flows.md); so bleibt sie wirksam, auch wenn der einzige Bereitstellungsdienst selbst hängt. Was das Abschlussdetail sagt und wie man es liest, steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat). Das erste Diagramm zeigt, welche Aufträge die Aufsicht beurteilt, das zweite, wie sie einen davon beendet.
+
+```mermaid
+flowchart TD
+    call["Aufruf: Schleifenstart des Bereitstellungsdienstes oder Job deploy-job-reap"] --> blind{"Dieser Prozess erst seit weniger als VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS verbunden?"}
+    blind -->|ja| hold["Nicht urteilen; eine Zeile je Verbindung im Containerlog"]
+    blind -->|nein| scan["Aufträge in running oder cancelling ohne Herzschlag seit VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS"]
+    scan --> lock{"Mission und Auftrag sperrbar und unter Sperre noch veraltet?"}
+    lock -->|nein| skip["Überspringen; ein anderer Prozess hält die Zeile"]
+    lock -->|ja| units["Offene Create-Einheiten schließen: ohne Startabsicht failed, sonst uncertain, beide mit ownership_lost"]
+    units --> vms["VM-Journalentscheidung anwenden: unberührt zurück, angefasst fehlgeschlagen, ungeklärter Create-Ausgang bleibt offen"]
+    vms --> conclude["Auftrag beenden (nächstes Diagramm)"]
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class call,scan,units,vms,conclude step;
+    class blind,lock decision;
+    class hold,skip blocked;
+```
+
+```mermaid
+flowchart TD
+    decided["Verwaister Auftrag gesperrt, Create-Einheiten und VMs entschieden"] --> was{"Stand der Auftrag auf cancelling?"}
+    was -->|ja| converged["cancelled mit cancel_converged, ohne letzten Fehler"]
+    was -->|nein| readonly{"Systemauftrag ohne Mission mit lesendem Playbook (Inventarabruf)?"}
+    readonly -->|ja| reaped["failed mit stale_heartbeat; zählt als Fehlversuch des Zugangs"]
+    readonly -->|nein| unknown["outcome_unknown mit stale_heartbeat; das Detail nennt die Beobachtung und dass der Ausgang des Remote-Laufs unbekannt ist"]
+    converged --> after["In derselben Transaktion: Annahmepause bestätigen, Ergebnis-Audit"]
+    reaped --> after
+    unknown --> after
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class decided,converged,after step;
+    class was,readonly decision;
+    class reaped,unknown blocked;
+```
+
+Die Beobachtungsfrist schützt vor einem Fehlurteil nach einem Datenbankausfall: Während die Datenbank weg war, konnte niemand einen Herzschlag schreiben, und ein frisch verbundener Prozess sähe jeden laufenden Auftrag als verwaist (`deploy_reap_observer_is_blind()`). `deploy_worker.php --once` liegt deshalb immer in seiner eigenen Frist und beendet nie einen fremden Auftrag. Der Reaper sperrt in der Reihenfolge Mission, Auftrag, Laufzeit, Create-Ergebnisse, VM (`repo_reap_stale_deploy_jobs()`); jede Zeile, die ein anderer Prozess hält, überspringt er und prüft sie beim nächsten Aufruf. Offene Create-Einheiten schließt `repo_deploy_create_converge_reaped()`, bevor der Auftrag endet; eine `uncertain`-Einheit sperrt jede Wiederholung, bis ein Inventarabruf oder die Freigabe unten sie klärt.
+
+Die Aufsicht sieht nur die Stille, nie den Remote-Lauf: Ob die Schritte vor dem Verstummen mit Exitcode 0 endeten, weiß sie nicht. Ein laufender Auftrag endet deshalb `outcome_unknown`, nicht `failed`. Nur ein Inventarabruf ohne Mission endet `failed`, weil sein Playbook auf ESXi nichts ändert; er zählt als Fehlversuch des Zugangs, ein abgebrochener Inventarabruf nicht. Ein abbrechender Auftrag endet so, wie der Bediener es verlangt hat. Zeilen, die vor Migration 0065 geerntet wurden, behalten `failed`. VMs, die nach dem Ende ihres Auftrags noch `deploying` stehen, holt der [Konvergenzlauf des Wartungsdienstes](maintenance-flows.md#hängengebliebene-vms) ein.
+
+## Wiederholen und Freigeben
+
+„Erneut ausführen“ im Auftragsprotokoll legt einen neuen Auftrag an, nie einen zweiten Lauf desselben. Erlaubt ist es nur für beendete Missionsaufträge in `failed`, `cancelled`, `partial` oder `outcome_unknown` (`deploy_job_is_retryable()`); Inventarabrufe plant allein der Dienst. Seite, Bestätigungsdialog und Schreiben werten dieselbe Prüfung aus (`deploy_retry_blockers()`), das Schreiben unter Sperre noch einmal (`repo_retry_deploy_job()`).
+
+```mermaid
+flowchart TD
+    ask["Erneut ausführen im Auftragsprotokoll"] --> kind{"Beendeter Missionsauftrag in failed, cancelled, partial oder outcome_unknown?"}
+    kind -->|nein| no["Keine Wiederholung angeboten"]
+    kind -->|ja| block{"Sperrbefund: Remote-Lauf offen, Ergebnis unlesbar, Create-Einheit ungeklärt oder fehlend, Identitätskonflikt, MAC-Befund mit Sperre, Netzvertrag?"}
+    block -->|ja| refused["Abgelehnt mit Befund und Verweis auf die Stelle, die ihn behebt; nichts eingereiht"]
+    refused -.->|Create-Einheit uncertain| release["Freigabe durch einen Administrator nach geprüftem Inventar: Einheit failed mit operator_released; danach erneut fragen"]
+    block -->|nein; bei outcome_unknown nennt der Dialog zuerst, was auf ESXi zu prüfen ist| plan{"Was belegt der alte Auftrag?"}
+    plan -->|MAC-Teilergebnis mit Liste der gescheiterten VMs| export_failed["export nur für die gescheiterten VMs"]
+    plan -->|MAC-Ergebnis widerspricht dem Status oder Teilergebnis ohne Liste| export_all["export für die ursprüngliche Auswahl"]
+    plan -->|Create-Einheiten vorhanden| create_retry["gleicher Modus; früher bestätigte VMs als verify_skip, übrige neu anlegen"]
+    plan -->|sonst| same["alter Auftrag mit unverändertem Umfang"]
+    export_failed --> queued["Neuer Auftrag queued unter neuer Korrelations-ID; das Protokoll verweist auf den alten Auftrag; alle Einreihsperren gelten erneut"]
+    export_all --> queued
+    create_retry --> queued
+    same --> queued
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class ask,export_failed,export_all,create_retry,same,queued,release step;
+    class kind,block,plan decision;
+    class no,refused blocked;
+```
+
+Die Reihenfolge der Befunde ist fest: zuerst der Remote-Lauf (eine offene Wiederherstellung oder eine fremde Laufzeitgeneration), dann die Lesbarkeit des Ergebnisses, die Create-Einheiten des alten Auftrags, die aktuelle Identität des Umfangs, MAC-Befunde, die nur ein Mensch klären kann, und der Netzvertrag. MAC-Befunde, die eine Prüfung außerhalb des Portals verlangen, sperren nicht; der Bestätigungsdialog nennt sie (`external_confirmation`). Ebenso sperrt ein Ausgangsauftrag in `outcome_unknown` nicht: Er trägt die Feststellung `retry_remote_outcome_unknown`, und der Bestätigungsdialog stellt voran, was auf ESXi zu prüfen ist (`deploy_retry_confirmation()`). Die gefährlichen Fälle (offener Remote-Lauf, ungeklärte Create-Einheit, Identität, Netz) sperren über ihre eigenen Befunde. Würde die Wiederholung gebundene VMs auf einem anderen Host neu anlegen, warnt sie wie das Formular, ohne zu sperren. `deploy_job_retry_plan()` legt den Exportumfang fest, `repo_deploy_create_materialize_retry()` die Create-Einheiten des neuen Auftrags.
+
+Eine Create-Einheit im Zustand `uncertain` sperrt jede Wiederholung der Mission, weil die VM auf ESXi entstanden sein kann. Ein Administrator kann sie im Auftragsprotokoll freigeben (`create_unit_release`, `deploy_handle_create_unit_release()`): Er braucht `system.config`, `deploy.run` und `vms.write`, muss bestätigen, die „Recent Tasks“ des Hosts geprüft zu haben, und eine Begründung angeben. Unter Sperre entscheidet `deploy_create_release_blockers()` neu: Die Einheit muss noch `uncertain` sein, Auftrag und Mission dürfen nicht aktiv sein, und ein Inventarabruf nach dem Ergebnis der Einheit muss die VM-Liste vollständig beantwortet haben und weder den Namen noch die gespeicherte UUID kennen. Erst dann schreibt `repo_deploy_create_release_unit()` die Begründung als unveränderlichen Nachweis und setzt die Einheit auf `failed` mit `operator_released`. An der VM und am alten Auftragsprotokoll ändert die Freigabe nichts; sie beendet nur den Zustand, in dem eine Wiederholung verboten war. Die beiden übrigen Wiederherstellungsaktionen in `VIRTUSPHERE_DEPLOY_RECOVERY_ACTIONS` (`remote_cleanup_retry`, `remote_review_document`) zeigt das Protokoll nur zu einem Datensatz des vorbereiteten Remote-Vertrags (`deploy_log_render_recovery()`), den der aktive Worker nicht schreibt; auch sie schreiben nur in die Datenbank.
 
 ## Create je VM
 
@@ -219,12 +329,7 @@ Der Vokabular-Wächter leitet Werte aus den Code-Listen ab. Ein Wert ohne Knoten
 
 | Vokabular | Wert | Ausnahmegrund |
 |---|---|---|
-| Create-Fehler | `ownership_lost` | Gespeichert wird es nur von der Ablaufbereinigung: `repo_deploy_create_converge_reaped()` schließt die offenen Einheiten eines Auftrags, dessen Worker sich nicht mehr meldet (siehe [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat)). Im Worker ist es nur der Stoppgrund bei verlorenem Besitz und wird nicht an die Einheit geschrieben. |
-| Create-Fehler | `operator_released` | Dieses Token entsteht nur durch die explizite Operatorfreigabe einer ungeklärten Create-Einheit; die Freigabe liegt in der Wiederholungs-/Verwaltungsaktion, nicht im Worker-Ablauf. |
-| Terminalgrund | `stale_heartbeat` | Der Wartungsdienst beendet veraltete Aufträge; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
-| Terminalgrund | `cancel_converged` | Der Wartungsdienst konvergiert eine bereits angeforderte Abbrechung; der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
 | Terminalgrund | `ownership_lost` | Das Token steht im geschlossenen Terminalgrund-Array, hat im Produktionscode derzeit keinen Writer; ein neuer Writer muss den passenden Ablauf ergänzen. |
-| Auftragsstatus | `outcome_unknown` | Nur der Wartungsdienst schreibt diesen Status, für einen laufenden Auftrag einer Mission ohne Herzschlag; der Worker weist ihn ab (`repo_finish_deploy_job()`). Der Ablauf steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat), außerhalb des normalen Worker-Flusses. |
 
 ## Playbooks
 

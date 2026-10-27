@@ -88,9 +88,20 @@ final class DeployFlowsDocContractTest extends TestCase
         self::assertNotSame('', $deploy);
         self::assertNotSame('', $system);
 
-        $createChunk = self::between($deploy, '## Create je VM', '## Diagrammausnahmen für geschlossene Werte')
-            . self::between($deploy, '## Playbooks', '### powercycleVMs');
-        $workerChunk = self::between($deploy, '## Worker: ein Auftrag', '## Create je VM');
+        // The supervision and retry sections draw what used to be an exception:
+        // the reaper's Create errors and terminal reasons, outcome_unknown and
+        // the operator release (FC4/FC3, Welle B1). Sections are read by name,
+        // so the job-state chart, which names every status by construction,
+        // never satisfies the worker vocabulary on its own.
+        $supervision = self::sectionBody($deploy, 'Aufsicht: verwaiste Aufträge');
+        $retry = self::sectionBody($deploy, 'Wiederholen und Freigeben');
+        self::assertNotSame('', $supervision, 'deploy-flows.md has no supervision section.');
+        self::assertNotSame('', $retry, 'deploy-flows.md has no retry section.');
+        $createChunk = self::sectionBody($deploy, self::CREATE_TOKEN)
+            . self::between($deploy, '## Playbooks', '### powercycleVMs')
+            . $supervision
+            . $retry;
+        $workerChunk = self::sectionBody($deploy, 'Worker: ein Auftrag') . $supervision;
         $exceptions = self::documentedVocabularyExceptions($deploy);
         self::assertSame([], self::closedVocabularyProblems(
             VIRTUSPHERE_CREATE_ERROR_CODES,
@@ -104,9 +115,9 @@ final class DeployFlowsDocContractTest extends TestCase
             $exceptions['Terminalgrund'] ?? [],
             'Terminalgrund'
         ));
-        // Every terminal job status a worker can reach appears in the worker
-        // chart; one written only outside it (outcome_unknown, the reaper) needs
-        // a reasoned exception (WK-04/WK-07 A).
+        // Every terminal job status appears in the worker or supervision chart;
+        // outcome_unknown is written only by the reaper (WK-04/WK-07 A). A status
+        // drawn in neither needs a reasoned exception.
         self::assertSame([], self::closedVocabularyProblems(
             VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES,
             self::mermaidBlocks($workerChunk),

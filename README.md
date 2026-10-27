@@ -10,7 +10,7 @@ Für einen neuen Betreiber ist die Lesereihenfolge bewusst betrieblich, nicht na
 
 1. [Go-live](docs/operations/go-live.md): erste produktive Inbetriebnahme und Reihenfolge der Entscheidungen.
 2. [Störungsdiagnose](docs/operations/troubleshooting.md): vom Symptom zur Portal-Seite, Log-Kategorie und ersten Maßnahme.
-3. [Bereitstellungskette](docs/operations/deploy-chain.md): Übergaben und Rückkanäle von Portal über Ansible/ESXi und MECM bis zum Client. Die [Ablauf-Landkarte](docs/operations/flows.md) verlinkt die Teilabläufe: [Bereitstellungsmodi und Playbooks](docs/operations/deploy-flows.md), [Systemstatus-Prüfungen](docs/operations/system-status-checks.md), [Verbindungen und Vertrauensanker](docs/operations/trust-flows.md) und [Lebenszyklus einer VM](docs/operations/vm-lifecycle.md).
+3. [Bereitstellungskette](docs/operations/deploy-chain.md): Übergaben und Rückkanäle von Portal über Ansible/ESXi und MECM bis zum Client. Die [Ablauf-Landkarte](docs/operations/flows.md) verlinkt die Teilabläufe: [Bereitstellungsmodi und Playbooks](docs/operations/deploy-flows.md), [Systemstatus-Prüfungen](docs/operations/system-status-checks.md), [Verbindungen und Vertrauensanker](docs/operations/trust-flows.md), [Lebenszyklus einer VM](docs/operations/vm-lifecycle.md), [Maschinen-API](docs/operations/machine-api-flows.md), [Clientabläufe](docs/operations/client-flows.md) und [Wartungsdienst](docs/operations/maintenance-flows.md).
 4. [Glossar](docs/GLOSSARY.md): Statusstufen, Auftragszustände, MECM-Provenienz, VM-Identität und Korrelations-ID.
 
 Danach führen die spezialisierten Betriebshandbücher weiter:

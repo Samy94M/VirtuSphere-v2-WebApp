@@ -4,10 +4,13 @@ VirtuSphere rendert das Portal in PHP, speichert Aufträge in MySQL und lässt d
 
 | Thema | Dokument |
 |---|---|
-| Einreihen, Worker und Playbooks | [Bereitstellung: Abläufe](deploy-flows.md) |
+| Einreihen, Worker, Auftragszustände, Aufsicht, Wiederholen und Playbooks | [Bereitstellung: Abläufe](deploy-flows.md) |
 | Phasen, Lebenszyklus und MECM-Abgleich einer VM | [Lebenszyklus einer VM](vm-lifecycle.md) |
 | Statusprüfungen | [Systemstatus: Prüfungen](system-status-checks.md) |
 | Serveraufgaben in MECM | [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md) |
+| Endpunkte, Rollout-Fence und Rückkanäle der Maschinen-API | [Maschinen-API: Abläufe](machine-api-flows.md) |
+| Clientphasen, Paketwrapper und Reporter | [Clientabläufe](client-flows.md) |
+| Jobs, Takt und Aufbewahrung des Wartungsdienstes | [Wartungsdienst: Abläufe](maintenance-flows.md) |
 | SSH-/SFTP-Vertrauensanker zum Ubuntu-Host | [Verbindungen und Vertrauensanker](trust-flows.md) |
 | ESXi-Inventar und Zertifikatsvertrauen | [ESXi-Inventar](esxi-inventory.md) |
 

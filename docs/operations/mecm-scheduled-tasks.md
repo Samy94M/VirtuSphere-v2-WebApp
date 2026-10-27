@@ -11,7 +11,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer den Ablauf eines der vier
 | VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | 60 s, 30 bis 3600 | `ImporterIntervalSeconds` | `JJJJ-MM-TT_autoimporter.log` |
 | VirtuSphere MECM Site Health | `mecm_site-health.ps1` | 300 s, 60 bis 3600 | `SiteHealthIntervalSeconds` | `JJJJ-MM-TT_site-health.log` |
 
-Die Tageslogs liegen unter dem Registry-Wert `LogRoot` (Standard `C:\Program Files\VirtuSphere\Logs`) und bleiben 30 Tage. Jede Aufgabe meldet ihren Lauf an `mecm_report.php?action=reportRun`; das Portal zeigt ihn unter Systemstatus.
+Die Tageslogs liegen unter dem Registry-Wert `LogRoot` (Standard `C:\Program Files\VirtuSphere\Logs`) und bleiben 30 Tage. Jede Aufgabe meldet ihren Lauf an `mecm_report.php?action=reportRun`; das Portal zeigt ihn unter Systemstatus. Was der Endpunkt mit dem Bericht tut, steht im [Berichtskanal](machine-api-flows.md#berichtskanal).
 
 ## Gemeinsamer Rahmen
 
@@ -80,7 +80,7 @@ flowchart TD
 
 ## Packages Sync
 
-Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach `VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` Tagen und nur, wenn keine VM sie mehr nutzt und ihre Zuweisungen nie umgehängt wurden; ein Paket, dessen Zuweisungen einmal automatisch auf eine höhere Version umgehängt wurden (heute nur bei Vorlagen-VMs, früher auch bei VMs), bleibt dauerhaft stehen. Echte VMs hängt das Portal seit AV-R08 nie selbst um.
+Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach `VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` Tagen und nur, wenn keine VM sie mehr nutzt und ihre Zuweisungen nie umgehängt wurden; ein Paket, dessen Zuweisungen einmal automatisch auf eine höhere Version umgehängt wurden (heute nur bei Vorlagen-VMs, früher auch bei VMs), bleibt dauerhaft stehen. Echte VMs hängt das Portal seit AV-R08 nie selbst um. Wie das Portal die Lieferung annimmt, zeigt der [Paketkatalog](machine-api-flows.md#paketkatalog) der Maschinen-API.
 
 ```mermaid
 flowchart TD
