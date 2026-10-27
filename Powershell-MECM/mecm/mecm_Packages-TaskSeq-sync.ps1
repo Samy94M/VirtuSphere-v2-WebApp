@@ -136,6 +136,13 @@ while ($true) {
                     $phase = 'portal'
                     try {
                         $response = Invoke-VsApi -Config $config -Path '/mecm_packages.php' -Method POST -Body $payload
+                        # Zwilling zu H01-2: mecm_packages.php antwortet 2xx nur mit
+                        # success nach dem Commit. Eine andere 2xx-Antwort (HTML
+                        # eines falschen Ziels oder Proxys) ist keine Quittung: kein
+                        # Hash, der Wurf geht ueber den aeusseren catch (Phase portal,
+                        # ohne HTTP-Status also portal_unreachable), der naechste
+                        # Lauf sendet erneut.
+                        Assert-VsPortalSuccess -Response $response -Operation 'mecm_packages.php'
                         $lastPayloadHash = $hash
                         $lastFullSync = Get-Date
                         $sent = 1

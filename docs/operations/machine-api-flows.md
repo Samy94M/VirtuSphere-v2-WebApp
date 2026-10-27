@@ -147,7 +147,7 @@ flowchart TD
     brake -->|nein| write["Eine Transaktion: Fehlende zurückziehen, neue und wieder aufgetauchte aktiv; eine nicht gelieferte Art bleibt unberührt"]
     write --> templates["Vorlagen-VMs folgen einer in dieser Lieferung neu erschienenen höheren Version; echte VMs nie"]
     templates --> audits["Auditzeilen in derselben Transaktion: noch zugewiesene Rückzüge, Umhängungen, Zähler je Katalog"]
-    audits --> ok["200 mit der Zahl der Pakete und Task Sequences"]
+    audits --> ok["200 mit success und der Zahl der Pakete und Task Sequences; nur diese Antwort gilt dem Packages Sync als Quittung"]
     write -.->|Fehler, auch eine nicht speicherbare Auditzeile| failed["500 und Auditzeile machine_api.internal_failure; alles zurückgerollt"]
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;

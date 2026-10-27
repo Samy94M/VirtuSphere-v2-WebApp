@@ -67,11 +67,11 @@ flowchart TD
     SE -->|ja| RD{"Mitgliedschaften lesbar?"}
     RD -->|nein| RD1["Keine Änderung, VM bleibt in der Warteschlange (membership_query_failed)"]
     RD -->|ja| AP["Fehlende Direktregeln hinzufügen, eigene, nicht mehr gewünschte entfernen; jede Änderung steht vorher im Journal; fehlt eine Collection: collection_missing"]
-    AP --> RM["Änderungen melden (reportMembership); abgelehnt: VM bleibt in der Warteschlange"]
+    AP --> RM["Änderungen melden (reportMembership); nur eine Antwort mit success quittiert und löscht den Journaleintrag; abgelehnt oder ohne success (etwa die HTML-Seite eines falschen Ziels oder Proxys mit Status 200): Eintrag bleibt, VM bleibt in der Warteschlange"]
     RM --> OK{"Alle Zuweisungen gesetzt?"}
     OK -->|nein| OK1["ResourceID nicht melden, VM bleibt in der Warteschlange"]
     OK -->|ja| UD["ResourceID und Übertragungszähler melden (updateDevice): das Portal bindet die ResourceID, setzt „registriert“ und nimmt die VM aus der Warteschlange; wurde sie während des Laufs erneut übertragen, bleibt sie für den nächsten Lauf drin"]
-    UD -.->|abgelehnt| UD1["Warnung resource_update_failed, bei überholter Rollout-Revision stale_rollout_revision; VM bleibt in der Warteschlange"]
+    UD -.->|abgelehnt oder Antwort ohne success| UD1["Warnung resource_update_failed, bei überholter Rollout-Revision stale_rollout_revision; VM bleibt in der Warteschlange"]
   end
   UD --> CU["Aktualisierung geänderter Collections anstoßen"]
   CU --> R["„completed“ melden (empfangen, importiert, Fehler, Warnungen); Pause = Takt (Standard 10 s)"]
@@ -93,11 +93,12 @@ flowchart TD
   E -->|nein| U{"Unverändert und letzter Versand unter einer Stunde?"}
   U -->|ja| U1["Nichts senden, Ergebnis „ok“ (unverändert)"] --> R
   U -->|nein| P["Katalog an mecm_packages.php senden"]
+  P -.->|2xx ohne success, etwa die HTML-Seite eines falschen Ziels oder Proxys| P1["Keine Quittung: Katalogstand nicht merken, Ergebnis „fail“ mit portal_unreachable; der nächste Lauf sendet erneut"] --> R
   P --> T{"Portal: mindestens VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE aktive Einträge, und fehlen mehr als die eingestellte Schwelle (5 bis 90 %, Standard 30 %)?"}
   T -->|ja| T1["Portal lehnt ab (409), Warnung catalog_conflict; der nächste Lauf sendet erneut"] --> R
   T -->|nein| RT["Portal: fehlende Einträge „zurückgezogen“, neue und wieder aufgetauchte aktiv"]
   RT --> RL["Portal: echte VMs nie umhängen; Vorlagen-VMs folgen einer höheren Version einmal, wenn sie in diesem Katalog zum ersten Mal erscheint; Rückzug einer noch zugewiesenen Version protokollieren; der VM-Editor zeigt „Update verfügbar“"]
-  RL --> H["Gesendeten Katalogstand für den nächsten Vergleich merken"]
+  RL --> H["Antwort 200 mit success: gesendeten Katalogstand für den nächsten Vergleich merken"]
   H --> R["„completed“ melden (Pakete, Task Sequences, gesendet); Pause = Takt (Standard 60 s)"]
   R -.->|nächster Lauf| S
 ```

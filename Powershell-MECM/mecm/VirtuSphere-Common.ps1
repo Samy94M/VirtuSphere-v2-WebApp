@@ -429,7 +429,8 @@ function Invoke-VsApi {
 # solche schreibt. mecm_updateid.php antwortet nur nach dem Commit mit
 # {"success": "..."}; Invoke-RestMethod laesst aber jede 2xx-Antwort durch, auch
 # die HTML-Seite eines falschen Ziels oder Proxys. Wer danach lokal etwas
-# loescht (die Membership-Journaleintraege), prueft vorher hier. Ohne
+# loescht (die Membership-Journaleintraege) oder sich einen gesendeten Stand
+# merkt (der Katalog-Hash im Packages-Sync), prueft vorher hier. Ohne
 # success-Feld wirft die Funktion, damit der catch-Zweig des Aufrufers greift.
 # Gleiche Pruefung wie der Client-Ready-ACK in clients/VirtuSphere-Client-Common.ps1.
 function Assert-VsPortalSuccess {

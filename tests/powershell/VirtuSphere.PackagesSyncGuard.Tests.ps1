@@ -2,6 +2,8 @@
 # 2026-09-28, Mutant M8). Ein leerer Katalog darf nicht an das Portal gehen: der
 # Lauf meldet dann warning/source_missing. Ohne den Guard saehe derselbe Lauf als
 # fail/portal_unreachable aus, weil das Portal den leeren Payload ablehnt.
+# Zweiter Teil (Zwilling zu H01-2): nur eine Antwort mit success ist eine
+# Quittung; sonst bleibt der Katalogstand ungemerkt und der Lauf meldet fail.
 #
 # Der Hauptschleifenkoerper wird aus dem AST des Skripts uebernommen und genau
 # einmal ausgefuehrt. MECM, Portal und Berichtsweg sind Stubs; die Schleife selbst
@@ -38,7 +40,7 @@ BeforeAll {
     $script:LoopBody = $source.Substring($statements[0].Extent.StartOffset, $statements[-1].Extent.EndOffset - $statements[0].Extent.StartOffset)
 
     function Invoke-PackagesSyncOnce {
-        param([Parameter(Mandatory)][ValidateSet('empty-catalog', 'folder-missing', 'one-package')][string]$Scenario)
+        param([Parameter(Mandatory)][ValidateSet('empty-catalog', 'folder-missing', 'one-package', 'html-200', 'json-no-success')][string]$Scenario)
         Invoke-InFileScope -Path $script:CommonPath -Arguments @($Scenario, $script:LoopBody) -Body {
             param($scenario, $loopText)
             $apiCalls = New-Object System.Collections.Generic.List[string]
@@ -52,7 +54,7 @@ BeforeAll {
             function Send-VsRunReport {
                 param($Config, $Source, $RunEvent, $RunId, $IntervalSeconds, $Outcome, $ErrorCategory, $DurationMs, $Detail, $Summary, $ScriptVersion)
                 if ($RunEvent -eq 'completed') {
-                    [void]$completed.Add([pscustomobject]@{ Outcome = $Outcome; ErrorCategory = $ErrorCategory; Summary = $Summary })
+                    [void]$completed.Add([pscustomobject]@{ Outcome = $Outcome; ErrorCategory = $ErrorCategory; Detail = $Detail; Summary = $Summary })
                 }
             }
             function Get-CMFolder {
@@ -62,7 +64,7 @@ BeforeAll {
             }
             function Get-CimInstance {
                 param($Namespace, $Query, $ErrorAction)
-                if ($scenario -eq 'one-package') { return @([pscustomobject]@{ Name = 'Agent-1.0' }) }
+                if ($scenario -in @('one-package', 'html-200', 'json-no-success')) { return @([pscustomobject]@{ Name = 'Agent-1.0' }) }
                 return @()
             }
             function Get-CMTaskSequence {
@@ -72,7 +74,13 @@ BeforeAll {
             function Invoke-VsApi {
                 param($Config, $Path, $Method, $Body)
                 [void]$apiCalls.Add([string]$Path)
-                return [pscustomobject]@{ packages = 1; task_sequences = 0 }
+                # Invoke-RestMethod liefert eine HTML-Seite als String, JSON als Objekt.
+                switch ($scenario) {
+                    'html-200' { return '<!DOCTYPE html><html><body>Proxy-Anmeldung</body></html>' }
+                    'json-no-success' { return [pscustomobject]@{ packages = 1; task_sequences = 0 } }
+                }
+                # Die Erfolgshuelle von mecm_packages.php.
+                return [pscustomobject]@{ success = 'Daten erfolgreich empfangen'; packages = 1; task_sequences = 0 }
             }
             # Nach einem Durchlauf stoppt das Sleep die Endlosschleife.
             function Start-Sleep {
@@ -100,6 +108,8 @@ BeforeAll {
             }
             [pscustomobject]@{
                 Stopped = $stopped
+                LastPayloadHash = $lastPayloadHash
+                LastFullSync = $lastFullSync
                 ApiCalls = $apiCalls.ToArray()
                 Completed = $completed.ToArray()
                 Logs = $logs.ToArray()
@@ -138,5 +148,39 @@ Describe 'Packages-Sync T-05: der Sende-Guard fuer einen leeren Katalog ist gete
         $r.ApiCalls.Count | Should -Be 1
         $r.Completed[0].Outcome | Should -Be 'ok'
         $r.Completed[0].ErrorCategory | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Packages-Sync: nur eine Antwort mit success quittiert den Katalog' {
+    It 'eine gueltige Antwort merkt den Katalogstand und meldet ok mit sent=1' {
+        $r = Invoke-PackagesSyncOnce -Scenario 'one-package'
+        $r.ApiCalls.Count | Should -Be 1
+        $r.LastPayloadHash | Should -Not -BeNullOrEmpty
+        $r.LastFullSync | Should -BeGreaterThan ([datetime]::MinValue)
+        $r.Completed[0].Outcome | Should -Be 'ok'
+        $r.Completed[0].Summary.sent | Should -Be 1
+        ($r.Logs -join "`n") | Should -Match 'Katalog gesendet: 1 Pakete'
+    }
+
+    It 'eine HTML-Seite mit Status 200 (falsches Ziel, Proxy) setzt keinen Hash und meldet fail/portal_unreachable' {
+        $r = Invoke-PackagesSyncOnce -Scenario 'html-200'
+        $r.Stopped | Should -BeTrue
+        $r.ApiCalls.Count | Should -Be 1
+        $r.LastPayloadHash | Should -BeNullOrEmpty -Because 'sonst haelt der naechste Lauf den Katalog fuer gesendet'
+        $r.LastFullSync | Should -Be ([datetime]::MinValue)
+        $r.Completed[0].Outcome | Should -Be 'fail'
+        $r.Completed[0].ErrorCategory | Should -Be 'portal_unreachable'
+        $r.Completed[0].Summary.sent | Should -Be 0
+        $r.Completed[0].Detail | Should -Match '^portal_unreachable: .*success'
+    }
+
+    It 'JSON ohne success setzt keinen Hash und meldet fail/portal_unreachable' {
+        $r = Invoke-PackagesSyncOnce -Scenario 'json-no-success'
+        $r.ApiCalls.Count | Should -Be 1
+        $r.LastPayloadHash | Should -BeNullOrEmpty
+        $r.Completed[0].Outcome | Should -Be 'fail'
+        $r.Completed[0].ErrorCategory | Should -Be 'portal_unreachable'
+        $r.Completed[0].Summary.sent | Should -Be 0
+        ($r.Logs -join "`n") | Should -Match 'success'
     }
 }
