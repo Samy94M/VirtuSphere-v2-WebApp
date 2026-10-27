@@ -580,7 +580,7 @@ while ($true) {
                 # Alle MACs, die das Portal fuer diese VM kennt (getDeviceList
                 # liefert jedes Interface mit MAC). Sie gelten nur fuer die
                 # Pruefung einer GEBUNDENEN ResourceID (MECM-ID1); Import und
-                # Erstbindung bleiben bei der DHCP-MAC.
+                # Erstbindung nehmen die PXE-MAC der WDS-Karte von oben.
                 $knownMacs = @($device.interfaces | Select-Object -ExpandProperty mac -ErrorAction SilentlyContinue)
 
                 if ([string]::IsNullOrWhiteSpace($missionName)) {
