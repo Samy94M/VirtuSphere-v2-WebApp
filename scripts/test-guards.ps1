@@ -530,6 +530,20 @@ $cases = @(
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_open' => 'Tab Probe open',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_open.*never closed'
     } }
+    # i18n R12: English quotes with the straight pair. Same ASCII-only fixture
+    # technique as above for the typographic marks.
+    @{ Name = 'lang-audit.quote-en-typographic'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_en_quote' => 'Reiter Probe offen',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_en_quote' => `"Tab \u{201C}Probe\u{201D} open`",`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_en_quote en: typographic quote mark U\+201C'
+    } }
+    @{ Name = 'lang-audit.quote-en-unclosed'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_en_open' => 'Reiter Probe offen',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_en_open' => 'Tab `"Probe open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_en_open en: straight quote " is never closed'
+    } }
 
     @{ Name = 'bounds-sync.green'; Body = {
         Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci')) @(0)

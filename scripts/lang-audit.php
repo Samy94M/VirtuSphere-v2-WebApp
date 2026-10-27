@@ -179,11 +179,35 @@ $quoteProblemOf = static function (string $text): ?string {
 
     return $open ? 'U+201E is never closed with U+201C' : null;
 };
-foreach ($catalog['de'] ?? [] as $module => $entries) {
-    foreach ($entries as $key => $text) {
-        $problem = $quoteProblemOf($text);
-        if ($problem !== null) {
-            $quoteMixes[] = ['key' => $module . '.' . $key, 'detail' => $problem];
+/**
+ * English quote form (i18n R12): an EN value quotes with the straight ASCII pair
+ * "..." and writes the apostrophe as a straight ', so a quoted literal the portal
+ * or the job log prints reads the same as the value itself. Any typographic,
+ * German or French mark is a finding, and so is an odd number of straight quotes
+ * (a pair that is never closed). Same literal exemption as the German check.
+ */
+$quoteProblemOfEnglish = static function (string $text): ?string {
+    $text = (string) preg_replace('~<code\b[^>]*>.*?</code>|<pre\b[^>]*>.*?</pre>~su', '', $text);
+    $marks = [
+        "\u{201C}" => '201C', "\u{201D}" => '201D', "\u{2018}" => '2018', "\u{2019}" => '2019',
+        "\u{201E}" => '201E', "\u{201A}" => '201A', "\u{00AB}" => '00AB', "\u{00BB}" => '00BB',
+    ];
+    foreach ($marks as $mark => $codepoint) {
+        if (str_contains($text, $mark)) {
+            return 'en: typographic quote mark U+' . $codepoint . ', use the straight form " or \'';
+        }
+    }
+
+    return substr_count($text, '"') % 2 === 1 ? 'en: straight quote " is never closed' : null;
+};
+$quoteChecks = ['de' => $quoteProblemOf, 'en' => $quoteProblemOfEnglish];
+foreach ($quoteChecks as $locale => $check) {
+    foreach ($catalog[$locale] ?? [] as $module => $entries) {
+        foreach ($entries as $key => $text) {
+            $problem = $check($text);
+            if ($problem !== null) {
+                $quoteMixes[] = ['key' => $module . '.' . $key, 'detail' => $problem];
+            }
         }
     }
 }
@@ -236,7 +260,7 @@ echo 'Placeholder drifts: ' . count($placeholderDrifts) . "\n";
 foreach ($placeholderDrifts as $drift) {
     echo 'DRIFT [lang-audit.placeholder-drift] ' . $drift['key'] . ' ' . $drift['detail'] . "\n";
 }
-echo 'Quote mixes (de): ' . count($quoteMixes) . "\n";
+echo 'Quote mixes (de, en): ' . count($quoteMixes) . "\n";
 foreach ($quoteMixes as $mix) {
     echo 'QUOTE [lang-audit.quote-mix] ' . $mix['key'] . ' ' . $mix['detail'] . "\n";
 }

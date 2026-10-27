@@ -42,7 +42,7 @@ return [
     'failure_step' => 'Step :step: :script',
     'child_exit' => 'Child process exit code',
     'detail_log' => 'Detail log path on client',
-    'check_step_log' => 'Next check: inspect this step’s detail log on the client, if available. The path may have been cleaned up.',
+    'check_step_log' => 'Next check: inspect this step\'s detail log on the client, if available. The path may have been cleaned up.',
     'check_wrapper_reporting' => 'Next check: inspect the wrapper and reporting logs on the client. A missing completion does not prove an installation failure.',
     'wrapper_log' => 'Wrapper log path on client',
     'reporting_log' => 'Reporting log path on client',

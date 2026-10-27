@@ -92,7 +92,7 @@ return [
     'err_search_base' => 'The user search base is not a valid base DN.',
     'err_controller_required' => 'Select a controller for the required test.',
     'err_config_first' => 'Save the base configuration first.',
-    'err_host' => 'Enter the controller’s complete DNS name; IP addresses are not allowed.',
+    'err_host' => 'Enter the controller\'s complete DNS name; IP addresses are not allowed.',
     'err_port' => 'The LDAPS port is invalid.',
     'err_controller_missing' => 'The selected controller was not found.',
     'err_controller_retest' => 'Test the controller with the current configuration first.',

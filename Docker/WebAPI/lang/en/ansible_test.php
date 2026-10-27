@@ -3,7 +3,7 @@ declare(strict_types=1);
 return [
     'title' => 'Automatic Ansible full test',
     'interval' => 'Test interval (hours, 0 = off)',
-    'hint' => 'Checks every registered Ansible credential using the same full test as “Run full test now”: SSH, tools, SFTP and, when an API return URL is configured, portal connectivity. Default: :default hours. Whole hours up to :max are allowed; 0 disables automation.',
+    'hint' => 'Checks every registered Ansible credential using the same full test as "Run full test now": SSH, tools, SFTP and, when an API return URL is configured, portal connectivity. Default: :default hours. Whole hours up to :max are allowed; 0 disables automation.',
     'behaviour' => 'The deployment service starts due tests in the background when it is idle and accepting jobs. The interval starts at the last test attempt, including failures and interruptions. Manual tests also move the next due time. Changes apply to future tests; they do not cancel a test already running.',
     'invalid' => 'Enter a whole number of hours between :min and :max.',
     'status_link' => 'Open Ansible system status',

@@ -5,6 +5,7 @@ Ab dem ersten Release gliedert sich dieses Changelog nach Release-Nummern (`JJJJ
 ## Noch in keinem Release
 
 - **Der MECM-Paketabgleich merkt sich einen gesendeten Katalog nur nach einer echten Quittung des Portals (27.10.2026).** Bisher galt jede Antwort mit Status 2xx als angenommen, auch die HTML-Seite eines falschen Ziels oder Proxys: Das Skript merkte sich den Katalogstand, meldete den Lauf als „ok“ und sendete denselben Katalog erst mit dem stündlichen Vollabgleich erneut. Jetzt muss die Antwort von `mecm_packages.php` das Feld `success` tragen; sonst bleibt der Stand ungemerkt, der Lauf meldet „fail“ mit „Portal nicht erreichbar“ und der nächste Lauf sendet erneut. Gleiche Prüfung wie im Geräteabgleich (H01-2). Die Maschinenschnittstelle ist unverändert. Wirksam mit dem nächsten MECM-Serverupdate.
+- **Englische Texte setzen Anführungszeichen einheitlich gerade als "…" (27.10.2026).** 63 typografische Paare “…” und 2 typografische Apostrophe in 15 Katalogdateien sind jetzt gerade Zeichen, wie schon die übrigen 381 Paare; drei Absätze der Bereitstellungshilfe und eine Zertifikatsmeldung mischten vorher beide Formen. Der Sprachcheck meldet typografische, deutsche und französische Zeichen sowie ein nicht geschlossenes `"` in englischen Texten jetzt als `[lang-audit.quote-mix]`. Deutsche Texte sind unverändert.
 
 ## 2026.10.3 (27.10.2026)
 

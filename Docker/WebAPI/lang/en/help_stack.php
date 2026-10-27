@@ -113,6 +113,6 @@ return [
     'ops_backup_stale' => 'State "Stale": the expected run did not happen, grace window included; check the cron entry and test the script manually once.',
     'ops_backup_disk_low' => 'State "Low disk space": the backup volume is filling up; check retention or disk space.',
     'ops_backup_unknown' => 'State "Unknown" after an update: the status mount is missing or the script never ran; check the mount and start a backup.',
-    'ops_backup_unencrypted' => 'Note “Backups unencrypted”: no certificate is stored; generate a key pair offline and store the certificate in the settings. If the card says the last run is not encrypted with the stored certificate, wait for the next run.',
+    'ops_backup_unencrypted' => 'Note "Backups unencrypted": no certificate is stored; generate a key pair offline and store the certificate in the settings. If the card says the last run is not encrypted with the stored certificate, wait for the next run.',
     'ops_backup_more' => 'Details and the full troubleshooting table are in the project directory on the server (not reachable inside the portal): docs/operations/backup.md.',
 ];
