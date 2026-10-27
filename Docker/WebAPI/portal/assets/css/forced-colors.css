@@ -112,4 +112,27 @@
     .vm-path-connector {
         stroke: CanvasText;
     }
+
+    /* The deploy help figures, the same way: system colours for every shape and
+       word; the dashes of a conditional step stay, they carry the meaning. */
+    .help-fig-box,
+    .help-fig-ring {
+        fill: Canvas;
+        stroke: CanvasText;
+    }
+
+    .help-fig-num,
+    .help-fig-heading,
+    .help-fig-label,
+    .help-fig-legend-text,
+    .help-fig-caption,
+    .help-fig-dot,
+    .help-fig-arrowhead {
+        fill: CanvasText;
+    }
+
+    .help-fig-connector,
+    .help-fig-edge {
+        stroke: CanvasText;
+    }
 }

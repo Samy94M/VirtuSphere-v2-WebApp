@@ -6,6 +6,9 @@ require_once __DIR__ . '/../deploy_late_start.php';
 // The hardware versions shown in the create text come from their owner, not from a typed number (R9).
 require_once __DIR__ . '/../esxi_create_compatibility.php';
 require_once __DIR__ . '/../settings_page.php';
+// The two figures of this panel: what each mode runs, and the states of a job.
+require_once __DIR__ . '/../help_deploy_modes.php';
+require_once __DIR__ . '/../help_deploy_job_states.php';
 ?>
     <div class="stack" id="panel-deploy" role="tabpanel" aria-labelledby="tab-deploy" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -20,6 +23,9 @@ require_once __DIR__ . '/../settings_page.php';
             <p><?php echo h(__t('help_deploy.network_contract_p2', deploy_network_contract_mode_lists())); ?></p>
             <p><?php echo h(__t('help_deploy.network_contract_p3')); ?></p>
             <p><?php echo h(__t('help_deploy.network_contract_p4', ['vms' => VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS, 'nics' => VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM])); ?></p>
+            <h3 id="help-deploy-modes" tabindex="-1"><?php echo h(__t('help_deploy_figures.modes_heading')); ?></h3>
+            <p><?php echo h(__t('help_deploy_figures.modes_intro')); ?></p>
+            <?php echo help_deploy_modes_figure(); ?>
             <p><?php echo h(__t('help_deploy.deploy_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_deploy.deploy_mode_full')); ?></li>
@@ -51,6 +57,9 @@ require_once __DIR__ . '/../settings_page.php';
                 'days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
             ])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_preflight_output_p1')); ?></p>
+            <h3 id="help-deploy-job-states" tabindex="-1"><?php echo h(__t('help_deploy_figures.job_states_heading')); ?></h3>
+            <p><?php echo h(__t('help_deploy_figures.job_states_intro')); ?></p>
+            <?php echo help_deploy_job_states_figure(); ?>
             <h3><?php echo h(__t('help_deploy.deploy_terminal_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_terminal_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_terminal_p2')); ?></p>

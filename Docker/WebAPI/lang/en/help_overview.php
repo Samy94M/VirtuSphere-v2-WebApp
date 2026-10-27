@@ -34,7 +34,7 @@ return [
     'glossary_client_ready_ack' => 'Client-ready ACK: the reply from the Windows client that its device information has been written completely. The portal accepts it only for the revision it belongs to.',
     'glossary_best_effort' => 'Best-effort telemetry: phase reports from the client that may arrive but need not. A missing report is therefore only a hint, not proof.',
     'glossary_name_semantics' => 'Name semantics v2: the current rule by which the inventory compares names. Only findings under this rule count as current; older ones appear in System status as diagnostics only.',
-    'glossary_gast_ip_dhcp' => 'Guest IP mode DHCP: the setting of a network adapter whose address the guest system obtains by DHCP. The MECM import takes the MAC of the first adapter with this mode.',
+    'glossary_gast_ip_dhcp' => 'Guest IP mode DHCP: the setting of a network adapter whose address the guest system obtains by DHCP. It does not decide the MECM import, which takes the MAC of the one adapter on the mission\'s WDS port group.',
     'glossary_reaper' => 'Reaper: the cleanup run that ends the jobs of a worker that no longer reports. Untouched VMs return to their previous state in the process.',
     'glossary_sweep' => 'Sweep: the maintenance service run that closes VMs in the state "Deploying" that have no running job. Untouched VMs return to their previous state; VMs with an ESXi attempt count as failed.',
     'glossary_cleanup' => 'Cleanup of a job: the step of the deploy or maintenance service that completes a requested cancellation when the worker failed before confirming it.',

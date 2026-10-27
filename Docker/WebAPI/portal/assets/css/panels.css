@@ -1022,7 +1022,7 @@ a.tab {
     margin: 10px 0 0;
 }
 
-/* "Der Weg einer VM" in the missions help (lib/help/vm_path_svg.php). The
+/* "Der Weg einer VM" in the missions help (lib/help_vm_path.php). The
    step colour is the phase badge colour from virtusphere_vm_phase_meta(); the
    shapes take it through currentColor, so the theme tokens switch light and
    dark without a second palette. */
@@ -1094,5 +1094,111 @@ a.tab {
 }
 
 .vm-path-arrowhead {
+    fill: var(--muted);
+}
+
+/* The two figures of the deploy help (lib/help_deploy_modes.php,
+   lib/help_deploy_job_states.php), framed by lib/help_figure.php. Shapes take
+   their colour through currentColor, so the theme tokens switch light and dark
+   without a second palette; a job state uses the tone of its status badge. */
+.help-fig {
+    margin: var(--space-3) 0 0;
+}
+
+.help-fig-svg {
+    display: block;
+    width: 100%;
+    max-width: 28rem;
+    height: auto;
+}
+
+.help-fig-legend,
+.help-fig-row,
+.help-fig-step,
+.help-fig-node {
+    color: var(--muted);
+}
+
+/* A finished job is drawn with a heavier frame than an active one. */
+.help-fig-node-terminal .help-fig-box {
+    stroke-width: 2.5;
+}
+
+.help-fig-step-on,
+.help-fig-step-cond {
+    color: var(--info);
+}
+
+.help-fig-tone-success {
+    color: var(--success);
+}
+
+.help-fig-tone-info {
+    color: var(--info);
+}
+
+.help-fig-tone-warning {
+    color: var(--warning);
+}
+
+.help-fig-tone-danger {
+    color: var(--danger);
+}
+
+.help-fig-box {
+    fill: var(--surface-muted);
+    stroke: currentColor;
+    stroke-width: 1.5;
+}
+
+.help-fig-ring {
+    fill: var(--surface);
+    stroke: currentColor;
+    stroke-width: 1.5;
+}
+
+.help-fig-step-cond .help-fig-ring,
+.help-fig-connector-cond {
+    stroke-dasharray: 4 3;
+}
+
+.help-fig-dot {
+    fill: var(--muted);
+}
+
+.help-fig-num {
+    fill: currentColor;
+    font-size: 12px;
+    font-weight: 700;
+    text-anchor: middle;
+    dominant-baseline: central;
+}
+
+.help-fig-heading,
+.help-fig-label {
+    fill: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.help-fig-legend-text {
+    fill: var(--text);
+    font-size: 13px;
+    dominant-baseline: central;
+}
+
+.help-fig-caption {
+    fill: var(--muted);
+    font-size: 12px;
+}
+
+.help-fig-connector,
+.help-fig-edge {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 1.5;
+}
+
+.help-fig-arrowhead {
     fill: var(--muted);
 }

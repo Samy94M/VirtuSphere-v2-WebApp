@@ -46,6 +46,11 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // sit inside a card that a reader opens to count VMs.
     'help-create-progress' => 'deploy',
     'help-action-outcomes' => 'deploy',
+    // Two drawings in the deploy help: the steps each mode runs (from
+    // ansible_playbooks_for_mode()) and the states of a job (from the status
+    // sets; the Mermaid twin is in docs/operations/deploy-flows.md).
+    'help-deploy-modes' => 'deploy',
+    'help-deploy-job-states' => 'deploy',
     // The APP_KEY error texts of the directory page link here (R11). The
     // rotation steps themselves live in the operations document.
     'help-app-key' => 'stack',

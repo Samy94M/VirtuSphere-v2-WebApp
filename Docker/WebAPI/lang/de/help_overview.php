@@ -34,7 +34,7 @@ return [
     'glossary_client_ready_ack' => 'Client-Ready-ACK: die Rückmeldung des Windows-Clients, dass seine Geräteinfos vollständig geschrieben sind. Das Portal akzeptiert sie nur für die Revision, zu der sie gehört.',
     'glossary_best_effort' => 'Best-effort-Telemetrie: Phasenmeldungen des Clients, die ankommen können, aber nicht müssen. Eine fehlende Meldung ist deshalb nur ein Hinweis, kein Beweis.',
     'glossary_name_semantics' => 'Namenssemantik v2: die aktuelle Regel, nach der das Inventar Namen vergleicht. Nur Belege dieser Regel gelten als aktuell; ältere zeigt der Systemstatus nur als Diagnose.',
-    'glossary_gast_ip_dhcp' => 'Gast-IP-Modus DHCP: die Einstellung einer Netzwerkkarte, deren Adresse das Gastsystem per DHCP bezieht. Der MECM-Import nimmt die MAC der ersten Karte mit diesem Modus.',
+    'glossary_gast_ip_dhcp' => 'Gast-IP-Modus DHCP: die Einstellung einer Netzwerkkarte, deren Adresse das Gastsystem per DHCP bezieht. Für den MECM-Import zählt er nicht: Der nimmt die MAC der einen Karte auf der WDS-Portgruppe der Mission.',
     'glossary_reaper' => 'Reaper: der Bereinigungslauf, der Aufträge eines Workers beendet, der nicht mehr meldet. Unberührte VMs gehen dabei in ihren Vorzustand zurück.',
     'glossary_sweep' => 'Sweep: der Lauf des Wartungsdienstes, der VMs im Status „Wird bereitgestellt“ ohne laufenden Auftrag abschließt. Unberührte VMs gehen in ihren Vorzustand zurück; VMs mit einem ESXi-Arbeitsversuch gelten als fehlgeschlagen.',
     'glossary_cleanup' => 'Ablaufbereinigung: der Schritt des Bereitstellungs- oder Wartungsdienstes, der einen angeforderten Abbruch abschließt, wenn der Worker vor seiner Bestätigung ausgefallen ist.',
