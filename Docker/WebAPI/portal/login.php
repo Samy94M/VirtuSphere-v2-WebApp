@@ -7,20 +7,28 @@ require_once __DIR__ . '/../lib/layout.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
+$isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
+// The page that sent the sign-in here (require_login(), the countdown sign-out); only
+// login_return_validate() decides it, and a pending password change wins (QL-04 A).
+$returnTarget = login_return_validate(request_string($isPost ? $_POST : $_GET, VIRTUSPHERE_LOGIN_RETURN_FIELD));
 if (current_user($connection) !== null) {
-    redirect_to(!empty($_SESSION['must_change_password']) ? 'account.php' : 'dashboard.php');
+    redirect_to(login_return_after_sign_in($returnTarget, !empty($_SESSION['must_change_password'])));
 }
 
 $error = '';
 $username = '';
-// require_login() sends an ended session here with ?reason=session_expired; there is no return URL yet (QL-04).
-$sessionEnded = request_string($_GET, 'reason') === 'session_expired';
+$sessionEnded = request_string($_GET, VIRTUSPHERE_LOGIN_REASON_FIELD) === VIRTUSPHERE_LOGIN_REASON_SESSION_EXPIRED;
+$inputDiscarded = request_string($_GET, VIRTUSPHERE_LOGIN_DISCARDED_FIELD) === '1';
+$notices = array_filter([
+    $sessionEnded ? __t('login.session_expired') : ($returnTarget !== null && !$isPost ? __t('login.sign_in_to_continue') : ''),
+    $inputDiscarded ? __t('login.input_not_saved') : '',
+], static fn (string $notice): bool => $notice !== '');
 $directoryEnabled = directory_is_enabled($connection);
 $directoryLoginAvailable = $directoryEnabled && virtusphere_is_request_secure();
 $source = $directoryLoginAvailable
     ? VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY
     : VIRTUSPHERE_AUTH_SOURCE_LOCAL;
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($isPost) {
     if (!csrf_verify($_POST['_csrf'] ?? null)) {
         // Not portal_reject_csrf(): a stale token on the sign-in form is a normal
         // consequence of a page left open, and the user is sent back to a fresh
@@ -30,14 +38,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'page' => 'login.php',
         ]);
         flash_set('error', __t('login.session_expired'));
-        redirect_to('login.php');
+        redirect_to(login_return_login_url($returnTarget));
     }
 
     $username = request_trimmed($_POST, 'username');
     $source = request_string($_POST, 'auth_source', VIRTUSPHERE_AUTH_SOURCE_LOCAL);
     $result = login($username, request_string($_POST, 'password'), $connection, $source);
     if ($result['ok'] ?? false) {
-        redirect_to(!empty($result['must_change_password']) ? 'account.php' : 'dashboard.php');
+        redirect_to(login_return_after_sign_in($returnTarget, !empty($result['must_change_password'])));
     }
 
     $error = match ($result['reason'] ?? '') {
@@ -79,11 +87,12 @@ $nonce = h(virtusphere_csp_nonce());
     <h1>VirtuSphere</h1>
     <p class="login-tagline"><?php echo h(__t('login.tagline')); ?></p>
     <?php foreach (flash_messages() as $flash) { echo flash_alert_html(is_array($flash) ? $flash : []); } ?>
-    <?php if ($sessionEnded) { ?><div class="alert alert-warning"><?php echo h(__t('login.session_expired')); ?></div><?php } ?>
+    <?php if ($notices !== []) { ?><div class="alert <?php echo $sessionEnded || $inputDiscarded ? 'alert-warning' : 'alert-info'; ?>"><?php echo h(implode(' ', $notices)); ?></div><?php } ?>
     <?php if ($error !== '') { ?><div class="alert alert-error"><?php echo h($error); ?></div><?php } ?>
     <?php if ($directoryEnabled && !$directoryLoginAvailable) { ?><div class="alert alert-warning"><?php echo h(__t('login.directory_requires_https')); ?></div><?php } ?>
     <form class="stack" method="post" action="login.php">
         <?php echo csrf_field(); ?>
+        <?php if ($returnTarget !== null) { ?><input type="hidden" name="<?php echo h(VIRTUSPHERE_LOGIN_RETURN_FIELD); ?>" value="<?php echo h($returnTarget); ?>"><?php } ?>
         <?php if ($directoryLoginAvailable) { ?>
         <label for="auth_source"><?php echo h(__t('login.auth_source')); ?><select id="auth_source" name="auth_source"><option value="active_directory"<?php echo $source === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY ? ' selected' : ''; ?>><?php echo h(__t('login.source_directory')); ?></option><option value="local"<?php echo $source === VIRTUSPHERE_AUTH_SOURCE_LOCAL ? ' selected' : ''; ?>><?php echo h(__t('login.source_local')); ?></option></select></label>
         <?php } else { ?><input type="hidden" name="auth_source" value="local"><?php } ?>

@@ -10,6 +10,7 @@ require_once __DIR__ . '/auth_schema.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/headers.php';
+require_once __DIR__ . '/login_return.php';
 require_once __DIR__ . '/permissions.php';
 require_once __DIR__ . '/repo/helpers.php';
 
@@ -351,7 +352,7 @@ function require_login(?mysqli $db = null): array
     $wasSignedIn = (int) ($_SESSION['user_id'] ?? 0) > 0; // read before current_user(), whose logout() wipes an expired session (QL-04)
     $user = current_user($db);
     if ($user === null) {
-        header('Location: login.php' . ($wasSignedIn ? '?reason=session_expired' : ''));
+        header('Location: ' . login_return_login_url_for_request($_SERVER, $wasSignedIn)); // returns here after the sign-in (QL-04 A)
         exit;
     }
 
@@ -368,11 +369,10 @@ function can(string $permission, ?array $user = null): bool
     return role_has_permission((string) ($user['role'] ?? VIRTUSPHERE_ROLE_USER), $permission);
 }
 
-// No require_admin() wrapper: every page pairs portal_require_user() with its
-// own can() gate, so the permission a page enforces is the permission its
-// buttons check. A wrapper that hardcoded 'users.manage' invited a second,
-// coarser answer to that question. A denial still goes through portal_forbid(),
-// which localizes it and writes the auth audit line a bare exit() never did.
+// No require_admin() wrapper: every page pairs portal_require_user() with its own can() gate,
+// so the permission a page enforces is the permission its buttons check. A wrapper that
+// hardcoded 'users.manage' invited a second, coarser answer to that question. A denial
+// goes through portal_forbid(), which localizes it and writes the auth audit line.
 
 function change_own_password(mysqli $db, int $userId, string $currentPassword, string $newPassword): bool
 {

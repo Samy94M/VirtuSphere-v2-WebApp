@@ -13,6 +13,7 @@ require_once __DIR__ . '/layout_modals.php';
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/help_page.php';
+require_once __DIR__ . '/layout_pages.php';
 
 // A double submit must not stack the same alert twice, and a queue that is
 // never rendered (redirect chains) must not grow without bound.
@@ -83,32 +84,10 @@ function layout_asset_version(string $fullPath): string
  * and every URL is cache-busted through layout_asset_url(). The registry tests
  * reject an unclassified page, an unowned file, a missing file, a hand-written
  * link and an @import that would bypass both versioning and the registry.
+ * The pages are VIRTUSPHERE_LAYOUT_PAGES (lib/layout_pages.php).
+ *
+ * @return array<string, list<string>> ordered path => pages (`*` means every page)
  */
-const VIRTUSPHERE_LAYOUT_PAGES = [
-    'account.php',
-    'credentials.php',
-    'dashboard.php',
-    'deploy.php',
-    'deploy_log.php',
-    'help.php',
-    'login.php',
-    'logs.php',
-    'mission_details.php',
-    'missions.php',
-    'os.php',
-    'package_run.php',
-    'package_reports.php',
-    'packages.php',
-    'settings.php',
-    'system_status.php',
-    'users.php',
-    'vlans.php',
-    'vm_edit.php',
-    'vm_overview.php',
-    'vms.php',
-];
-
-/** @return array<string, list<string>> ordered path => pages (`*` means every page) */
 function layout_style_registry(): array
 {
     $tablePages = [

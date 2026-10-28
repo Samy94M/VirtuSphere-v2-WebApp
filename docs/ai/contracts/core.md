@@ -80,3 +80,5 @@ Read the sections relevant to the current change. Paths below are relative to Do
   cascade/script order; `core.js` and the shared theme/layout sheets remain
   common, while tables, System-status rules and feature scripts name their
   actual consumers. Login uses the same registry with its explicit page id.
+  The page list lives in the dependency-free `lib/layout_pages.php`; sign-in
+  return targets derive from it (A70).

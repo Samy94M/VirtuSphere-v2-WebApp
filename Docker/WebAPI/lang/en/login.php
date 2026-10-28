@@ -10,6 +10,8 @@ return [
     'error_directory_unavailable' => 'Active Directory is temporarily unavailable. Use a local emergency account if necessary.',
     'error_invalid' => 'Invalid username or password.',
     'session_expired' => 'Your session expired. Please log in again.',
+    'sign_in_to_continue' => 'Please log in to continue.',
+    'input_not_saved' => 'Your input was not saved.',
     'username' => 'Username',
     'password' => 'Password',
     'auth_source' => 'Sign-in method',

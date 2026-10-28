@@ -222,12 +222,52 @@ final class PortalQolMarkupContractTest extends TestCase
         self::assertIsInt($read);
         self::assertIsInt($check);
         self::assertLessThan($check, $read, 'the session must be read before current_user() can log it out');
-        self::assertStringContainsString("'?reason=session_expired'", $body);
+        self::assertStringContainsString("header('Location: ' . login_return_login_url_for_request(\$_SERVER, \$wasSignedIn));", $body);
 
         $login = self::source('portal/login.php');
-        self::assertStringContainsString("request_string(\$_GET, 'reason') === 'session_expired'", $login);
-        self::assertStringContainsString("alert alert-warning\"><?php echo h(__t('login.session_expired'))", $login);
+        self::assertStringContainsString('request_string($_GET, VIRTUSPHERE_LOGIN_REASON_FIELD) === VIRTUSPHERE_LOGIN_REASON_SESSION_EXPIRED', $login);
+        self::assertStringContainsString("\$sessionEnded ? __t('login.session_expired')", $login);
+        self::assertStringContainsString('<?php echo h(implode(\' \', $notices)); ?>', $login);
         self::texts('login', 'session_expired');
+    }
+
+    /** QL-04 A: the sign-in returns to the page that asked for it, only through the owner. */
+    public function testQl04TheSignInReturnsOnlyThroughLoginReturn(): void
+    {
+        $login = self::source('portal/login.php');
+        self::assertStringContainsString('$returnTarget = login_return_validate(request_string($isPost ? $_POST : $_GET, VIRTUSPHERE_LOGIN_RETURN_FIELD));', $login);
+        self::assertSame(1, preg_match_all('/request_string\([^;]*VIRTUSPHERE_LOGIN_RETURN_FIELD/', $login), 'login.php reads the target once');
+        preg_match_all('/redirect_to\((.*)\);/', $login, $redirects);
+        self::assertCount(3, $redirects[1], 'signed in already, stale token, successful sign-in');
+        foreach ($redirects[1] as $argument) {
+            self::assertMatchesRegularExpression('/^login_return_(after_sign_in|login_url)\(\$returnTarget\b/', $argument, 'login.php redirects only through the owner');
+        }
+        self::assertStringNotContainsString('header(', $login);
+        self::assertStringNotContainsString("'dashboard.php'", $login);
+        self::assertStringNotContainsString("'account.php'", $login);
+        self::assertStringContainsString('name="<?php echo h(VIRTUSPHERE_LOGIN_RETURN_FIELD); ?>" value="<?php echo h($returnTarget); ?>"', $login);
+
+        // The countdown form carries the page; logout.php sends it on only through the owner.
+        $modals = self::source('lib/layout_modals.php');
+        $form = substr($modals, (int) strpos($modals, 'data-session-logout-form'));
+        self::assertStringContainsString('login_return_target_from_request($_SERVER)', substr($form, 0, (int) strpos($form, '</form>')));
+        $logout = self::source('portal/logout.php');
+        self::assertStringContainsString('$signIn = login_return_login_url(request_string($_POST, VIRTUSPHERE_LOGIN_RETURN_FIELD));', $logout);
+        preg_match_all('/header\(([^;]*)\);/', $logout, $headers);
+        self::assertSame(["'Location: ' . \$signIn", "'Location: ' . \$signIn"], $headers[1]);
+
+        // No second builder of a sign-in URL with parameters anywhere in the portal code.
+        $root = str_replace('\\', '/', self::root());
+        $files = array_merge(glob($root . '/portal/*.php') ?: [], glob($root . '/lib/*.php') ?: [], glob($root . '/lib/*/*.php') ?: []);
+        self::assertGreaterThan(100, count($files));
+        foreach ($files as $file) {
+            if (!str_ends_with($file, '/lib/login_return.php')) {
+                self::assertDoesNotMatchRegularExpression('/login\.php\?/', (string) file_get_contents($file), $file . ' builds a sign-in URL; use login_return_login_url()');
+            }
+        }
+
+        self::texts('login', 'sign_in_to_continue');
+        self::texts('login', 'input_not_saved');
     }
 
     public function testSd03bTheBadgeHelpersReturnTheBareVariant(): void

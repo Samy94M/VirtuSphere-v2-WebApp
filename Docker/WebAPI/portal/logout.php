@@ -9,13 +9,16 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit(__t('portal.invalid_request'));
 }
 
+// Only the countdown form carries a target; the sign-in returns there (QL-04 A).
+$signIn = login_return_login_url(request_string($_POST, VIRTUSPHERE_LOGIN_RETURN_FIELD)); // validates the target
+
 if (!csrf_verify($_POST['_csrf'] ?? null)) {
     // No session left: the token is stale because the session already went away.
     // Finish the sign-out quietly instead of refusing it; there is nothing to
     // protect and nothing worth recording.
     if (empty($_SESSION['user_id'])) {
         logout();
-        header('Location: login.php');
+        header('Location: ' . $signIn);
         exit;
     }
 
@@ -28,5 +31,5 @@ audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT, 'user', $userId > 
     'source' => (string) ($_SESSION['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL),
 ], $userId > 0 ? $userId : null);
 logout();
-header('Location: login.php');
+header('Location: ' . $signIn);
 exit;

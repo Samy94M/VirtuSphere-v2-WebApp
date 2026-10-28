@@ -68,6 +68,8 @@ function layout_session_modal(): void
 </dialog>
 <form method="post" action="logout.php" data-session-logout-form hidden>
     <?php echo csrf_field(); ?>
+    <?php $returnTarget = login_return_target_from_request($_SERVER); // the next sign-in returns here (QL-04 A)
+    if ($returnTarget !== null) { ?><input type="hidden" name="<?php echo h(VIRTUSPHERE_LOGIN_RETURN_FIELD); ?>" value="<?php echo h($returnTarget); ?>"><?php } ?>
 </form>
 <script type="application/json" data-i18n-session nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php
     echo json_encode(['countdown_html' => __t('layout.session_countdown_html')], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);

@@ -10,6 +10,8 @@ return [
     'error_directory_unavailable' => 'Active Directory ist vorübergehend nicht erreichbar. Verwenden Sie bei Bedarf ein lokales Notfallkonto.',
     'error_invalid' => 'Benutzername oder Passwort ungültig.',
     'session_expired' => 'Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.',
+    'sign_in_to_continue' => 'Bitte melden Sie sich an, um fortzufahren.',
+    'input_not_saved' => 'Ihre Eingaben wurden nicht gespeichert.',
     'username' => 'Benutzername',
     'password' => 'Passwort',
     'auth_source' => 'Anmeldeart',

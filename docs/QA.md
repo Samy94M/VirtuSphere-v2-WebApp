@@ -214,7 +214,7 @@ committed synthetic certificate fixtures.
 
 `VIRTUSPHERE_LAYOUT_PAGES`, `layout_style_registry()` and
 `layout_script_registry()` form a closed page-to-asset mapping in
-`lib/layout.php`. `PortalPageAssetSelectionTest` pins the exact stylesheet and
+`lib/layout.php` (the page list in `lib/layout_pages.php`). `PortalPageAssetSelectionTest` pins the exact stylesheet and
 script subsequence for every rendered entrypoint and rejects an unclassified
 page. The existing bidirectional registry tests still compare every file on
 disk, forbid hand-written tags/imports and preserve deploy-module/cascade
