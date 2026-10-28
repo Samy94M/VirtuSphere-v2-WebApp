@@ -2603,3 +2603,33 @@ Paket-Session auf `41ee82a5` (Release 2026.10.3), Inventar, Nutzerfrage und Ents
 - **Wächter:** `[lang-audit.quote-mix]` mit EN-Profil in `scripts/lang-audit.php` (typografische, deutsche und französische Zeichen; ungerade Zahl gerader `"`), Guard-Harness-Fälle `lang-audit.quote-en-typographic` und `lang-audit.quote-en-unclosed`, i18n R12. Kein Test und kein Sollbild musste sich ändern: die beiden Pins mit englischem Wortlaut nutzten schon gerade Zeichen, die Sollbilder rendern Deutsch.
 - **Gates (28.10., unter `heavy-run.ps1`, Logs `04-gates.log` und `05-restore-guards.log`):** php-lint, phpunit-unit ohne Skips, lang-parity, doc-hygiene, doc-semantics grün; nach dem Rebase auf `5a8f14d2` (Konflikte nur im CHANGELOG und am Registerende, beide Seiten behalten) lang-parity, doc-hygiene und doc-semantics wiederholt. guard-harness 126 von 127 bewiesen, darunter die zwei neuen Fälle. Neun `infra`-Fälle des ersten Laufs lagen an Images, die das Docker-Aufräumen am 28.10. entfernt hatte; nach `docs/QA.md` wiederhergestellt (Werkzeugimages per Digest, `virtusphere-qa-ansible:latest` gebaut). Rot bleibt `hooks.php-lint.blocks-syntax-error`, vorbestehend und umgebungsbedingt: `.claude/hooks/php-lint.sh` und der `.codex`-Zwilling linten ohne Host-PHP mit `virtusphere-v2-webapp-php`, Compose baut den php-Dienst aber seit `ae554938` (20.09.2026) als `virtusphere-php:8.4-runtime`; das alte Image ist seit dem Aufräumen weg, der Hook überspringt still. Push nach Entscheidung der Koordination (E10 bis E12 in `decisions.md`).
 - **Folgepunkt:** php-lint-Hook leitet den Image-Namen aus compose/tool-lock ab, statt `virtusphere-v2-webapp-php` fest zu nennen.
+
+#### Block SP/MX: Entscheidungen (28.10.2026)
+
+Block VM-Status und Portal, Koordinator-Session (Opus 5.5, Effort high) im Hauptbaum auf `f5c3338a`. Startbrief `qa-artifacts/session-handoff/waves/block-sp-mx-koordinator-brief.md`, Entwürfe `SP1-entwurf.md` bis `SP5-entwurf.md`, `MX0-entwurf.md`, `MX1-entwurf.md`, `MX2-entwurf.md` im selben Ordner (Zeilenangaben von `94c0f707`). Die Produktfragen F0 bis F18 hat der Nutzer am 28.10.2026 in der Release-Session 2026.10.3 beantwortet; Volltext in `block-sp-mx-produktfragen.md`, Abschnitt E. Übernommen nach Empfehlung, außer F4 und F8/F8a.
+
+| Frage | Entscheidung | Paket |
+|---|---|---|
+| F0 | ST-2, ST-3 und UX03-b gestrichen, ausgeliefert in 2026.10.1 (`903a1f10`, `a816b0e6`, `b657ecf4`); von UX03-b bleibt nur die Bedienabnahme UX03 bis UX06 durch den Nutzer | – |
+| F1 | Rücksprung auf dieselbe Seite per GET, Eingaben nicht gespeichert, Hinweis; nur Portalseiten aus dem Seitenregister; `must_change_password` gewinnt | SP1 |
+| F2 | Chronik gestuft: Status-, Client-, Paket- und Auftragszeilen für alle mit VM-Editor; Link ins Auftragsprotokoll nur mit `deploy.run`; Änderungsaudit nur mit `users.manage`; kein Login-, Sicherheits- oder Credential-Audit | SP3 |
+| F3 | Eigene Seite `vm_history.php` mit Filtern und Blättern; der Editor zeigt die letzten 20 und verlinkt „Ganze Chronik“ | SP3 |
+| F4 | **Abweichend:** Sammeländerungen jetzt in die VM-Chronik, mit Migration (Index der betroffenen VM-IDs je Protokollzeile, Rückfüllung aus dem JSON) | SP3 |
+| F5 | Vergleich plus „Mit meinen Eingaben weiterarbeiten“; erst das nächste Speichern schreibt; Kindtabellen nur als „vorher n, jetzt m“ | SP5 |
+| F6 | Vier Dashboard-Gruppen (MECM wartet > 2 h, OS-Installation > 6 h, Auftrag fehlgeschlagen, Create ungeklärt) mit gleichnamigem Filter; Vorlagen-VMs zählen nicht | SP4 |
+| F7 | Kurzform in Tabellen, voller Satz im `title` und im Editor | SP4 |
+| F8/F8a | **Abweichend:** eigenes Paket MX0; ein Deploy-Fehler schreibt einen eigenen Wert (etwa `deploy_failed`) statt `failed` in `mecm_sync_state`; Name, Wertliste, Altdaten und Wirkung auf `getDeviceList`/Devices Sync klärt die Vertragsprüfung vor dem Code | MX0 |
+| F9 | PXE-Aktion nicht in diesem Block, nach MX2 entscheiden | – |
+| F10 | Der Agent schreibt die Sollbilder `missions-*` nach Bildprüfung selbst, Vorher/Nachher unter `qa-artifacts/welle-sp4-<datum>/` | SP4 |
+| F11 | FM-05 mit dem nächsten Release über `-Upgrade -ServerOnly`, portal first; das Serverupdate macht der Nutzer | MX1 |
+| F12 | Eigene Aktion `reportDeviceCauses`, `reportRun` unverändert; endgültig nach Vertragsprüfung | MX1 |
+| F13 | Ursache sofort als Text, Schwere erst ab 2 h | MX1 |
+| F14 | Nur der MECM-seitige Leser (A), Task Sequences unangetastet (ADR-0020) | MX2 |
+| F15 | Der Nutzer führt die Laborprobe aus; MX2b startet erst mit `qa-artifacts/welle-mx2-<datum>/probe/result-*.json` | MX2a/b |
+| F16 | Eigene geplante Aufgabe (etwa 60 s); vorher klären, ob `-ServerOnly` eine neue Aufgabe registrieren darf | MX2b |
+| F17 | Push nach grünen Gates ohne Rückfrage (ohne Tag, ohne Force) für alle Pakete des Blocks; Prod- und MECM-Serverupdate bleiben beim Nutzer | alle |
+| F18 | Reihenfolge SP1, SP2, SP3, SP4, SP5, MX0, MX1, MX2a, MX2b; MX0 vor MX1, weil beide auf den Devices Sync wirken | – |
+
+- **Kette:** Signaldateien `<Paket>.done` oder `<Paket>.blocked` in `qa-artifacts/session-handoff/waves/` wie bei den Wellen A1 bis B2; jede Paket-Session wartet zusätzlich auf einen freien QA-Stack `virtusphere-qa`. Ein `.blocked` hält nur abhängige Nachfolger an: SP2 an SP1, SP5 an SP3, MX1 an MX0, MX2 an MX1.
+- **Start:** Paket-Sessions nur auf ein Wort des Nutzers in der Koordinator-Session, frisch, im eigenen Worktree, Effort high, mit den geltenden Entscheidungen wörtlich im Startbrief. Nach drei bis vier Paketen löst eine frische Koordinator-Session aus einer kompakten Übergabedatei ab.
+- **Vorbestehend:** Guard-Fall `hooks.php-lint.blocks-syntax-error` ist rot (Hook nennt das veraltete Image `virtusphere-v2-webapp-php`, siehe Abschnitt „EN-Anführungszeichen“); gehört nicht zum Block, Pakete vermerken ihn und beheben ihn nicht.
