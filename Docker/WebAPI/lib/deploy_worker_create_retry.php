@@ -233,7 +233,7 @@ function deploy_worker_create_requeue_unit(mysqli $db, array $claim, array $fenc
             . ' first_error_code = COALESCE(first_error_code, error_code),'
             . ' first_error_detail = COALESCE(first_error_detail, error_detail),'
             . ' first_async_jid = COALESCE(first_async_jid, async_jid),'
-            . ' error_code = NULL, error_detail = NULL, async_jid = NULL, async_deadline_at = NULL, finished_at = NULL,'
+            . ' error_code = NULL, error_detail = NULL, error_detail_from_host = NULL, async_jid = NULL, async_deadline_at = NULL, finished_at = NULL,'
             . ' existed_before = NULL, precheck_moid = NULL, precheck_instance_uuid = NULL, replaced_instance_uuid = NULL'
             . ' WHERE id = ? AND status = ? AND attempt = ?'
         );

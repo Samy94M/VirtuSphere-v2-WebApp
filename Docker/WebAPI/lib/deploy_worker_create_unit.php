@@ -254,11 +254,15 @@ function deploy_worker_create_terminate_unit(
     array $unit,
     string $status,
     string $errorCode,
-    string $detail
+    string $detail,
+    ?bool $detailFromHost = null
 ): array {
     $detail = $channel->redact(trim($detail));
     if ($detail === '') {
         $detail = 'No further detail was established.';
+        // B8: the worker's own words are never the host's, whatever the
+        // caller claimed about the empty text it passed.
+        $detailFromHost = $detailFromHost === null ? null : false;
     }
     $written = repo_deploy_create_transition(
         $channel->connection(),
@@ -266,15 +270,25 @@ function deploy_worker_create_terminate_unit(
         (int) $unit['position'],
         (string) $unit['status'],
         $status,
-        ['error_code' => $errorCode, 'error_detail' => $detail],
+        [
+            'error_code' => $errorCode,
+            'error_detail' => $detail,
+            'error_detail_from_host' => $detailFromHost === null ? null : ($detailFromHost ? 1 : 0),
+        ],
         $fence
     );
     if (!$written) {
         return ['stop' => true, 'continue' => false, 'reason' => VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST, 'unit' => $unit];
     }
+    // E3: the line carries the stored, already redacted reason, so the log
+    // answers "why" where it says "failed" (prod job 1527).
     $channel->log(
         VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-        deploy_worker_create_progress_line($unit, $status === VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN ? 'HOLD' : 'FAIL', $errorCode)
+        deploy_worker_create_progress_line(
+            $unit,
+            $status === VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN ? 'HOLD' : 'FAIL',
+            deploy_worker_create_failure_progress_detail($unit, $errorCode, $detail)
+        )
     );
     $stop = $status === VIRTUSPHERE_CREATE_RESULT_STATUS_UNCERTAIN
         || in_array($errorCode, VIRTUSPHERE_CREATE_GLOBAL_STOP_ERROR_CODES, true);

@@ -70,6 +70,10 @@ function repo_deploy_job_started_at(mysqli $db, int $jobId): ?string
  * a single-character wildcard, and the difference is invisible in the result.
  *
  * @param list<string> $streams
+ * @param list<string> $anyOf fixed texts of which a line must contain at least one
+ *     (the "errors only" filter, VIRTUSPHERE_DEPLOY_LOG_SEVERITY_MARKERS). They
+ *     are compared case-sensitively, as deploy_log_line_severity() compares
+ *     them, so the highlight and the filter cannot disagree about a line.
  * @return array{logs:list<array<string,mixed>>,has_more:bool,match_count:int}
  */
 function repo_deploy_job_log_search(
@@ -79,7 +83,8 @@ function repo_deploy_job_log_search(
     array $streams,
     ?int $fromSeq = null,
     ?int $toSeq = null,
-    int $limit = VIRTUSPHERE_DEPLOY_LOG_SEARCH_LIMIT
+    int $limit = VIRTUSPHERE_DEPLOY_LOG_SEARCH_LIMIT,
+    array $anyOf = []
 ): array {
     $limit = max(1, min(VIRTUSPHERE_DEPLOY_LOG_QUERY_LIMIT_MAX, $limit));
     $where = ['job_id = ?'];
@@ -91,6 +96,13 @@ function repo_deploy_job_log_search(
         $where[] = 'line LIKE ? ESCAPE \'\\\\\'';
         $types .= 's';
         $params[] = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $needle) . '%';
+    }
+    if ($anyOf !== []) {
+        $where[] = '(' . implode(' OR ', array_fill(0, count($anyOf), 'line COLLATE utf8mb4_bin LIKE ? ESCAPE \'\\\\\'')) . ')';
+        $types .= str_repeat('s', count($anyOf));
+        foreach ($anyOf as $marker) {
+            $params[] = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $marker) . '%';
+        }
     }
     if ($streams !== []) {
         $where[] = 'stream IN (' . implode(',', array_fill(0, count($streams), '?')) . ')';

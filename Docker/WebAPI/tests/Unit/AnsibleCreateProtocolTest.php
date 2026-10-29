@@ -257,6 +257,43 @@ final class AnsibleCreateProtocolTest extends TestCase
         self::assertFalse(ansible_create_marker_matches($marker, 123, 'ATeP04-001', '111111111111.1111'));
     }
 
+    /**
+     * B8 (29.10.2026): a failure says whether its text is the host's own
+     * message. The field is optional, so a result file from before it still
+     * parses, and a present value must be a real boolean.
+     */
+    public function testTheOriginOfAFailureTextIsAnOptionalBoolean(): void
+    {
+        $failed = ['event' => 'failed', 'portal_vm_id' => 5, 'async_jid' => '747689456876.6394', 'error' => '503 Service Unavailable'];
+
+        self::assertNull(ansible_create_marker_parse($this->marker($failed))['error_from_host']);
+        self::assertTrue(ansible_create_marker_parse($this->marker($failed + ['error_from_host' => true]))['error_from_host']);
+        self::assertFalse(ansible_create_marker_parse($this->marker($failed + ['error_from_host' => false]))['error_from_host']);
+        try {
+            ansible_create_marker_parse($this->marker($failed + ['error_from_host' => 'yes']));
+            self::fail('a text is not the boolean origin');
+        } catch (CreateMarkerProtocolException) {
+            self::addToAssertionCount(1);
+        }
+        try {
+            ansible_create_marker_parse($this->marker(['event' => 'running', 'portal_vm_id' => 5, 'async_jid' => '1.2', 'error_from_host' => true]));
+            self::fail('the field belongs to the failed event only');
+        } catch (CreateMarkerProtocolException) {
+            self::addToAssertionCount(1);
+        }
+
+        // One contract in two languages: the emitter declares the same table.
+        $emitter = $this->emitterSource();
+        self::assertSame(1, preg_match('/^OPTIONAL_FIELDS = \{\R(.*?)^\}/ms', $emitter, $block), 'the emitter declares no OPTIONAL_FIELDS');
+        preg_match_all('/"(\w+)":\s*\(([^)]*)\)/', $block[1], $rows, PREG_SET_ORDER);
+        $python = [];
+        foreach ($rows as $row) {
+            preg_match_all('/"(\w+)"/', $row[2], $names);
+            $python[$row[1]] = $names[1];
+        }
+        self::assertSame(VIRTUSPHERE_CREATE_EVENT_OPTIONAL_FIELDS, $python);
+    }
+
     public function testTheEventFieldTableMatchesThePythonEmitter(): void
     {
         // The two halves are one contract. If they drift, one side emits what

@@ -242,7 +242,9 @@ function deploy_worker_create_finish_unit(
             $unit,
             VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED,
             VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED,
-            (string) $marker['error']
+            (string) $marker['error'],
+            // B8: null when an older status playbook did not say.
+            is_bool($marker['error_from_host'] ?? null) ? $marker['error_from_host'] : null
         );
         deploy_worker_create_cleanup_async($channel, $context, $unit);
 

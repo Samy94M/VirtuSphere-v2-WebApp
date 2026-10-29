@@ -32,7 +32,8 @@ final class LogCorrelationContractTest extends TestCase
 
     public function testEveryReaderRendersTheIdThroughOneHelper(): void
     {
-        foreach (['portal/logs.php', 'portal/deploy_log.php'] as $page) {
+        // The job log shows the id in its technical details (E2, 29.10.2026).
+        foreach (['portal/logs.php', 'lib/deploy_log_outcome.php'] as $page) {
             self::assertStringContainsString(
                 'portal_correlation_id(',
                 $this->source($page),

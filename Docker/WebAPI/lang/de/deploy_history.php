@@ -6,7 +6,7 @@ return [
     'started' => 'Auftrag gestartet',
     'started_hint' => 'Übernahme durch den Bereitstellungsdienst laut gespeichertem Protokoll.',
     'heading' => 'VM-Schritte',
-    'hint' => 'Gespeicherte Ergebnisse dieses Auftrags. Zeiten zeigen die Erfassung im Portal. VM-Start und MAC-Auslesen sind bisher als gemeinsame Phase protokolliert; einzelne MAC-Ergebnisse haben keinen eigenen Zeitstempel. Fehlende Zeiten sind kein Erfolgsnachweis. Ältere Protokolle können bereits gelöscht sein.',
+    'hint' => 'Ergebnis je VM und Schritt. Die Zeiten sagen, wann das Portal Beginn und Ergebnis erfahren hat. VM-Start und MAC-Auslesen sind ein gemeinsamer Schritt ohne eigene Zeit je MAC. Fehlt eine Zeit, ist der Schritt damit nicht als gelungen belegt. Ältere Protokolle können bereits gelöscht sein.',
     'vm' => 'VM',
     'step' => 'Schritt',
     'begin' => 'Beginn erfasst',

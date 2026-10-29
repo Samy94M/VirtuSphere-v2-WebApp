@@ -153,7 +153,44 @@ function deploy_create_progress_replacement_text(array $replacement): string
  */
 function deploy_create_progress_payload(mysqli $db, array $job, ?array $user = null): ?array
 {
-    return deploy_create_progress_payload_from_view(deploy_create_progress_view($db, $job), (int) ($job['mission_id'] ?? 0), $user);
+    return deploy_create_progress_payload_from_view(
+        deploy_create_progress_view($db, $job),
+        (int) ($job['mission_id'] ?? 0),
+        $user,
+        deploy_create_progress_job_is_terminal($job)
+    );
+}
+
+/** @param array<string,mixed> $job */
+function deploy_create_progress_job_is_terminal(array $job): bool
+{
+    return in_array((string) ($job['status'] ?? ''), VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true);
+}
+
+/**
+ * The headline of the card (E1, 29.10.2026). While the job runs it counts the
+ * units the worker got to ("7 of 15 processed"); once the job has ended it says
+ * what exists and what does not ("14 of 15 created, 1 failed"); "15 of 15 done"
+ * counted a failure as done. "Created" is every unit whose VM is in place (new,
+ * changed, unchanged, skipped); the other parts appear only when not zero.
+ *
+ * @param array<string,mixed> $view
+ */
+function deploy_create_progress_position_label(array $view, bool $terminal): string
+{
+    $counters = (array) $view['counters'];
+    if (!$terminal) {
+        return __t('deploy_log.position_running', ['processed' => (int) $view['processed'], 'total' => (int) $view['total']]);
+    }
+    $created = (int) $counters['created'] + (int) $counters['updated'] + (int) $counters['unchanged'] + (int) $counters['skipped'];
+    $parts = [__t('deploy_log.position_created', ['created' => $created, 'total' => (int) $view['total']])];
+    foreach (['failed', 'uncertain', 'not_started'] as $counter) {
+        if ((int) $counters[$counter] > 0) {
+            $parts[] = __t('deploy_log.position_part_' . $counter, ['count' => (int) $counters[$counter]]);
+        }
+    }
+
+    return implode(', ', $parts);
 }
 
 /**
@@ -162,7 +199,7 @@ function deploy_create_progress_payload(mysqli $db, array $job, ?array $user = n
  * @param array<string,mixed>|null $view
  * @return array<string,mixed>|null
  */
-function deploy_create_progress_payload_from_view(?array $view, int $missionId = 0, ?array $user = null): ?array
+function deploy_create_progress_payload_from_view(?array $view, int $missionId = 0, ?array $user = null, bool $terminal = false): ?array
 {
     if ($view === null) {
         return null;
@@ -176,10 +213,7 @@ function deploy_create_progress_payload_from_view(?array $view, int $missionId =
         'total' => $view['total'],
         'concluded' => $view['concluded'],
         'counters' => $view['counters'],
-        'position_label' => __t('deploy.create_progress_position', [
-            'concluded' => $view['concluded'],
-            'total' => $view['total'],
-        ]),
+        'position_label' => deploy_create_progress_position_label($view, $terminal),
         'current' => $current === null ? null : [
             'position' => (int) $current['position'],
             'vm_name' => (string) $current['vm_name'],
@@ -190,16 +224,15 @@ function deploy_create_progress_payload_from_view(?array $view, int $missionId =
                 ? null
                 : deploy_create_progress_since_label($current),
         ],
-        'findings' => array_map(
+        // Empty once the job has ended: the result block above the card then
+        // names every affected VM with its cause and action (E1), and the
+        // same list twice on one page is noise.
+        'findings' => $terminal ? [] : array_map(
             static fn(array $finding): array => [
                 'error_code' => (string) $finding['error_code'],
                 'host_detail' => $finding['host_detail'] ?? null,
-                'host_detail_label' => __t('deploy.create_progress_host_detail'),
-                'text' => __t('deploy.create_progress_finding', [
-                    'name' => (string) $finding['vm_name'],
-                    'position' => (string) (int) $finding['position'],
-                    'reason' => (string) $finding['reason_label'],
-                ]),
+                'host_detail_label' => deploy_create_progress_host_label($finding),
+                'text' => deploy_create_progress_finding_text($finding),
             ],
             $view['findings']
         ),
@@ -230,9 +263,16 @@ function deploy_create_progress_current_label(array $current): string
         default => 'deploy.create_progress_current_preparing',
     };
 
-    return __t($key, [
+    $label = __t($key, [
         'name' => (string) $current['vm_name'],
         'position' => (string) (int) $current['position'],
+    ]);
+    $attempt = (int) ($current['attempt'] ?? 1);
+
+    // From the second attempt on, the card says which one it is (in-job retry).
+    return $attempt <= 1 ? $label : $label . ' ' . __t('deploy_log.current_attempt', [
+        'attempt' => $attempt,
+        'max' => VIRTUSPHERE_CREATE_MAX_ATTEMPTS,
     ]);
 }
 
@@ -268,14 +308,15 @@ function deploy_log_render_create_progress(mysqli $db, array $job, array $user):
         return;
     }
     $current = $view['current'];
+    $terminal = deploy_create_progress_job_is_terminal($job);
+    // The same rule as the payload: once the job has ended, the result block
+    // names the affected VMs, and the card keeps only its numbers.
+    $findings = $terminal ? [] : $view['findings'];
     ?>
     <section class="panel" data-deploy-create-progress>
         <h2><?php echo h(__t('deploy.create_progress_heading')); ?></h2>
         <p>
-            <strong data-create-position><?php echo h(__t('deploy.create_progress_position', [
-                'concluded' => $view['concluded'],
-                'total' => $view['total'],
-            ])); ?></strong>
+            <strong data-create-position><?php echo h(deploy_create_progress_position_label($view, $terminal)); ?></strong>
         </p>
         <?php // Rendered even when nothing is in flight, and the two facts sit
               // in their own elements. Both are load-bearing for the poller: a
@@ -306,22 +347,16 @@ function deploy_log_render_create_progress(mysqli $db, array $job, array $user):
                 </div>
             <?php } ?>
         </dl>
-        <div data-create-findings<?php echo $view['findings'] === [] ? ' hidden' : ''; ?>>
+        <div data-create-findings<?php echo $findings === [] ? ' hidden' : ''; ?>>
             <p><strong><?php echo h(__t('deploy.create_progress_findings_heading')); ?></strong></p>
             <ul data-create-finding-list>
-                <?php foreach ($view['findings'] as $finding) { ?>
+                <?php foreach ($findings as $finding) { ?>
                     <li>
-                        <span><?php echo h(__t('deploy.create_progress_finding', [
-                            'name' => (string) $finding['vm_name'],
-                            'position' => (string) (int) $finding['position'],
-                            'reason' => (string) $finding['reason_label'],
-                        ])); ?></span>
+                        <span><?php echo h(deploy_create_progress_finding_text($finding)); ?></span>
                         <?php if ((string) $finding['error_code'] !== '') { ?>
                             <code><?php echo h((string) $finding['error_code']); ?></code>
                         <?php } ?>
-                        <?php if (($finding['host_detail'] ?? null) !== null) { ?>
-                            <br><span class="muted"><?php echo h(__t('deploy.create_progress_host_detail')); ?></span> <code class="log-line"><?php echo h((string) $finding['host_detail']); ?></code>
-                        <?php } ?>
+                        <?php echo deploy_create_progress_host_html($finding); ?>
                     </li>
                 <?php } ?>
             </ul>

@@ -265,19 +265,22 @@
                     item.appendChild(code);
                 }
                 // The host's own message (module failures only); its label
-                // arrives translated with the payload, never built here.
-                if (typeof finding.host_detail === 'string' && finding.host_detail !== ''
-                    && typeof finding.host_detail_label === 'string') {
+                // arrives translated with the payload, never built here. A
+                // label without a message is the sentence that the host gave
+                // none (B8), which stands on its own.
+                if (typeof finding.host_detail_label === 'string' && finding.host_detail_label !== '') {
                     item.appendChild(document.createElement('br'));
                     var detailLabel = document.createElement('span');
                     detailLabel.className = 'muted';
                     detailLabel.textContent = finding.host_detail_label;
                     item.appendChild(detailLabel);
-                    item.appendChild(document.createTextNode(' '));
-                    var detail = document.createElement('code');
-                    detail.className = 'log-line';
-                    detail.textContent = finding.host_detail;
-                    item.appendChild(detail);
+                    if (typeof finding.host_detail === 'string' && finding.host_detail !== '') {
+                        item.appendChild(document.createTextNode(' '));
+                        var detail = document.createElement('code');
+                        detail.className = 'log-line';
+                        detail.textContent = finding.host_detail;
+                        item.appendChild(detail);
+                    }
                 }
                 findingsList.appendChild(item);
             });
@@ -320,6 +323,20 @@
             row.appendChild(cell);
         });
         var lineCell = document.createElement('td');
+        // E1: the server decided the severity (deploy_log_line_severity());
+        // this only applies it, with the same class and visible word as the
+        // server-rendered rows, never colour alone.
+        var severity = typeof entry.severity === 'string' ? entry.severity : '';
+        var severityLabels = i18n.severity || {};
+        if (severity !== '' && typeof severityLabels[severity] === 'string') {
+            row.className = 'log-row-error';
+            row.setAttribute('data-log-severity', severity);
+            var flag = document.createElement('strong');
+            flag.className = 'log-flag';
+            flag.textContent = severityLabels[severity];
+            lineCell.appendChild(flag);
+            lineCell.appendChild(document.createTextNode(' '));
+        }
         var code = document.createElement('code');
         code.className = 'log-line';
         code.textContent = entry.line || '';
@@ -495,7 +512,12 @@
                 lastUpdatedAt = payload.job.updated_at || lastUpdatedAt;
             }
             if (typeof payload.terminal_html === 'string' && terminalBlocks) {
+                // The technical details stay open across a refresh the reader
+                // did not ask for; replacing the markup would close them.
+                var technicalOpen = !!terminalBlocks.querySelector('[data-deploy-technical][open]');
                 terminalBlocks.innerHTML = payload.terminal_html;
+                var technical = terminalBlocks.querySelector('[data-deploy-technical]');
+                if (technical && technicalOpen) { technical.open = true; }
             }
             // A second tab that cancelled this job must be able to take the
             // button away here, on the same poll that brought the new status.

@@ -88,6 +88,7 @@ return [
     // Variante ohne Zeit oder ohne Herkunft. `mecm_sync_failed` nutzt `mecm_failed`.
     'finding_create_uncertain' => 'Create ungeklärt (Auftrag :job_id, Einheit :position)',
     'finding_job_failed' => 'Auftrag fehlgeschlagen: :mode, :time',
+    'finding_create_failed' => 'Auf ESXi nicht angelegt: :mode, :time',
     'finding_job_failed_unknown' => 'Auftrag fehlgeschlagen',
     'finding_job_outcome_unknown' => 'Ausgang des Auftrags unbekannt: :mode, :time',
     'finding_missing_from_inventory' => 'Nicht mehr im Inventar (:host, Stand :time)',

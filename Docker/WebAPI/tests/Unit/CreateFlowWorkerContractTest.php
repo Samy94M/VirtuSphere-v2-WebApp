@@ -290,6 +290,30 @@ final class CreateFlowWorkerContractTest extends TestCase
         self::assertSame('[8/15] RUN create ATeP04-008', deploy_worker_create_progress_line($unit, 'RUN'));
         self::assertSame('[8/15] DONE create ATeP04-008 created', deploy_worker_create_progress_line($unit, 'DONE', 'created'));
 
+        // E3 (prod job 1527, plan 9.7 note): FAIL and HOLD carry the stored
+        // reason on the same line, one line and bounded, and from the second
+        // attempt on which attempt it was.
+        self::assertSame(
+            '[8/15] FAIL create ATeP04-008 module_failed: 503 Service Unavailable',
+            deploy_worker_create_progress_line($unit, 'FAIL', deploy_worker_create_failure_progress_detail($unit, 'module_failed', "503 Service\n  Unavailable"))
+        );
+        self::assertSame(
+            '[8/15] FAIL create ATeP04-008 module_failed; attempt 4 of 4: 503 Service Unavailable',
+            deploy_worker_create_progress_line(
+                $unit + ['attempt' => 4],
+                'FAIL',
+                deploy_worker_create_failure_progress_detail($unit + ['attempt' => 4], 'module_failed', '503 Service Unavailable')
+            )
+        );
+        $long = deploy_worker_create_failure_progress_detail($unit, 'protocol_error', str_repeat('ä', 300));
+        self::assertStringEndsWith(' ...', $long);
+        self::assertLessThanOrEqual(
+            strlen('protocol_error: ') + VIRTUSPHERE_CREATE_PROGRESS_DETAIL_MAX_BYTES + strlen(' ...'),
+            strlen($long)
+        );
+        self::assertTrue(mb_check_encoding($long, 'UTF-8'), 'the cut never splits a character');
+        self::assertSame('job_timeout', deploy_worker_create_failure_progress_detail($unit, 'job_timeout', '   '));
+
         $line = deploy_worker_create_summary_line([
             'total' => 15, 'created' => 14, 'updated' => 0, 'unchanged' => 0,
             'skipped' => 0, 'failed' => 0, 'uncertain' => 1, 'not_started' => 0,

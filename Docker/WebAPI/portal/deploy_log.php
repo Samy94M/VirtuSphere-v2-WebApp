@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
-require_once __DIR__ . '/../lib/correlation_display.php';
 require_once __DIR__ . '/../lib/deploy_display.php';
-require_once __DIR__ . '/../lib/log_filter.php';
 require_once __DIR__ . '/../lib/deploy_urls.php';
 require_once __DIR__ . '/../lib/deploy_log_panels.php';
 require_once __DIR__ . '/../lib/deploy_log_recovery.php';
@@ -14,7 +12,7 @@ require_once __DIR__ . '/../lib/deploy_log_create_release.php';
 require_once __DIR__ . '/../lib/deploy_create_progress.php';
 require_once __DIR__ . '/../lib/deploy_log_view.php';
 require_once __DIR__ . '/../lib/deploy_log_history.php';
-require_once __DIR__ . '/../lib/deploy_terminal_presenter.php';
+require_once __DIR__ . '/../lib/deploy_log_outcome.php';
 require_once __DIR__ . '/../lib/deploy_retry_confirmation.php';
 require_once __DIR__ . '/../lib/deploy_late_start.php';
 require_once __DIR__ . '/../lib/repo/deploy_jobs.php';
@@ -127,10 +125,13 @@ if ($format === 'json') {
         // rather than showing it at zero.
         'create_progress' => deploy_create_progress_payload($connection, $job, $user),
         'history_html' => deploy_log_history_html($connection, $job),
-        'phases_html' => deploy_log_phases_html(deploy_log_phase_timeline(repo_deploy_job_log_step_markers($connection, (int) $job['id']))),
+        'phases_html' => deploy_log_phases_html(
+            deploy_log_phase_timeline(repo_deploy_job_log_step_markers($connection, (int) $job['id'])),
+            in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)
+        ),
         'empty_state' => $emptyState,
         'empty_message' => deploy_job_log_empty_message($emptyState),
-        'terminal_html' => deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds, can('system.config', $user), can('deploy.run', $user)),
+        'terminal_html' => deploy_log_outcome_html($connection, $job, $retryEvaluation, $existingVmIds, $user),
         'actions' => [
             'can_cancel' => in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES, true),
         ],
@@ -271,19 +272,11 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         <?php if ($lateMinutes !== null) { ?>
             <article class="card kpi" data-deploy-late-start><span class="muted"><?php echo h(__t('deploy.kpi_started')); ?></span><span class="value value-small"><?php echo h(portal_format_timestamp((string) $job['started_at'])); ?> <?php echo portal_badge('warning', __t('deploy.late_start', ['minutes' => $lateMinutes])); ?></span></article>
         <?php } ?>
-        <?php // The trace of the portal request that enqueued this job
-              // (ADR-0032). Rendered exactly as the audit table renders it, so
-              // the id can be carried from here into the log search and back;
-              // the link goes to that search, which this page is not. It is
-              // gated on users.manage because the audit view it opens is.
-              // A job from before the id exists shows a dash, not a blank. ?>
-        <article class="card kpi"><span class="muted"><?php echo h(__t('logs.th_correlation')); ?></span><span class="value value-small"><?php echo portal_correlation_id(
-            (string) ($job['correlation_id'] ?? ''),
-            can('users.manage', $user) ? log_filter_correlation_url(VIRTUSPHERE_LOG_TAB_DEPLOY, (string) ($job['correlation_id'] ?? '')) : ''
-        ); ?></span></article>
+        <?php // The correlation id (ADR-0032) is in the technical details below
+              // (E2, 29.10.2026), rendered by the same presenter as before. ?>
     </section>
 
-    <div class="stack" data-deploy-terminal-blocks><?php echo deploy_terminal_blocks_html($job, $retryEvaluation, $existingVmIds, can('system.config', $user), can('deploy.run', $user)); ?></div>
+    <div class="stack" data-deploy-terminal-blocks><?php echo deploy_log_outcome_html($connection, $job, $retryEvaluation, $existingVmIds, $user); ?></div>
 
     <?php // Above the recovery and phase blocks on purpose: the question this
           // card answers ("which of the fifteen VMs exist") is the one the
@@ -292,7 +285,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
     <?php deploy_log_render_create_progress($connection, $job, $user); ?>
     <?php deploy_log_render_recovery($job, deploy_log_remote_execution($connection, (int) $job['id']), $user); ?>
     <?php deploy_log_render_create_release($connection, $job, $user); ?>
-    <div data-deploy-phases><?php deploy_log_render_phases($timeline); ?></div>
+    <div data-deploy-phases><?php deploy_log_render_phases($timeline, $isTerminal); ?></div>
     <?php deploy_log_render_filter((int) $job['id'], $logFilter, $view['phase_names'], count($logs), $view['match_capped']); ?>
 
     <section class="panel">
@@ -339,12 +332,16 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
         <div class="table-wrap" tabindex="0" role="log" aria-live="off" aria-label="<?php echo h(__t('deploy.output')); ?>" data-deploy-log-scroller><table>
             <thead><tr><th><?php echo h(__t('deploy.th_seq')); ?></th><th><?php echo h(__t('deploy.th_time')); ?></th><th><?php echo h(__t('deploy.th_stream')); ?></th><th><?php echo h(__t('deploy.th_line')); ?></th></tr></thead>
             <tbody data-deploy-log-body>
-            <?php foreach ($logs as $log) { ?>
-                <tr data-log-seq="<?php echo h((string) $log['seq']); ?>">
+            <?php foreach ($logs as $log) {
+                // E1: an error line carries a class AND a visible word, never
+                // colour alone; deploy_log.js marks live rows the same way.
+                $severity = deploy_log_line_severity((string) ($log['line'] ?? ''));
+                ?>
+                <tr data-log-seq="<?php echo h((string) $log['seq']); ?>"<?php echo $severity === null ? '' : ' class="log-row-error" data-log-severity="' . h($severity) . '"'; ?>>
                     <td><?php echo h((string) $log['seq']); ?></td>
                     <td><?php echo h(portal_format_timestamp($log['created_at'] ?? '')); ?></td>
                     <td><?php echo h(deploy_job_log_source_label((string) ($log['stream'] ?? ''))); ?></td>
-                    <td><code class="log-line"><?php echo h($log['line'] ?? ''); ?></code></td>
+                    <td><?php echo $severity === null ? '' : '<strong class="log-flag">' . h(__t('deploy_log.severity_' . $severity)) . '</strong> '; ?><code class="log-line"><?php echo h($log['line'] ?? ''); ?></code></td>
                 </tr>
             <?php } ?>
             <?php if ($logs === []) { ?><tr data-empty-log><td colspan="4"><?php echo h(deploy_job_log_empty_message($emptyState)); ?></td></tr><?php } ?>
@@ -369,5 +366,10 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
     'live_updated' => __t('deploy.live_state_updated'),
     'live_finished' => __t('deploy.live_state_finished'),
     'live_off' => __t('deploy.live_state_off'),
+    // E1: the word beside an error line, keyed by deploy_log_line_severity().
+    'severity' => array_combine(
+        array_keys(VIRTUSPHERE_DEPLOY_LOG_SEVERITY_MARKERS),
+        array_map(static fn (string $severity): string => __t('deploy_log.severity_' . $severity), array_keys(VIRTUSPHERE_DEPLOY_LOG_SEVERITY_MARKERS))
+    ),
 ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
 <?php layout_footer(); ?>

@@ -202,7 +202,12 @@ test('the deploy job log names its own correlation id', async ({ page }) => {
   const { jobId } = seed();
   await page.goto(`deploy_log.php?id=${jobId}`);
 
-  const card = page.locator('article.kpi', { hasText: 'Correlation ID' });
+  // E2 (29.10.2026): the id lives in the collapsed technical details, open to
+  // every reader, instead of a headline card.
+  const details = page.locator('[data-deploy-technical]');
+  await expect(details).not.toHaveAttribute('open', /.*/);
+  await details.locator('summary').click();
+  const card = details.locator('p', { hasText: 'Correlation ID' });
   await expect(card.locator('code')).toHaveText(TRACE);
   await expect(card.locator(`a[href*="correlation=${TRACE}"]`), 'the id leads to its audit trace').toHaveCount(1);
   await expect(card.locator('.copy-button')).toBeVisible();

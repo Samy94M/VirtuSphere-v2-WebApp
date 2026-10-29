@@ -6,7 +6,7 @@ return [
     'started' => 'Job started',
     'started_hint' => 'Claimed by the deployment service according to the retained log.',
     'heading' => 'VM steps',
-    'hint' => 'Stored results for this job. Times indicate when the portal recorded them. VM start and MAC retrieval are currently logged as shared phases; individual MAC results have no timestamp of their own. Missing times do not prove success. Older logs may already have been removed.',
+    'hint' => 'Result per VM and step. The times say when the portal learned of the start and the result. VM start and MAC retrieval are one shared step without a time per MAC. A missing time does not show that the step succeeded. Older logs may already have been removed.',
     'vm' => 'VM',
     'step' => 'Step',
     'begin' => 'Start recorded',

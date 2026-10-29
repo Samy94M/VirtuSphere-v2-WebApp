@@ -84,6 +84,7 @@ return [
     // origin applies. `mecm_sync_failed` reuses `mecm_failed`.
     'finding_create_uncertain' => 'Create unresolved (job :job_id, unit :position)',
     'finding_job_failed' => 'Job failed: :mode, :time',
+    'finding_create_failed' => 'Not created on ESXi: :mode, :time',
     'finding_job_failed_unknown' => 'Job failed',
     'finding_job_outcome_unknown' => 'Job outcome unknown: :mode, :time',
     'finding_missing_from_inventory' => 'No longer in the inventory (:host, as of :time)',

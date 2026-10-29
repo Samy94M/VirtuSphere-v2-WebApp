@@ -236,6 +236,7 @@ function deploy_create_summary(array $rows): array
                 'vm_name' => (string) $row['vm_name'],
                 'status' => $status,
                 'started_at' => isset($row['started_at']) ? (string) $row['started_at'] : null,
+                'attempt' => deploy_create_unit_attempt($row),
             ];
         }
     }

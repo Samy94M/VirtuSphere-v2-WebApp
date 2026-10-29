@@ -126,8 +126,9 @@ final class DeployCreateProgressTest extends TestCase
         $payload = deploy_create_progress_payload_from_view($view);
 
         self::assertNotNull($payload);
+        // While the job runs the card counts what the worker got to (E1).
         self::assertSame(
-            __t('deploy.create_progress_position', ['concluded' => 1, 'total' => 2]),
+            __t('deploy_log.position_running', ['processed' => 1, 'total' => 2]),
             $payload['position_label']
         );
         self::assertNotNull($payload['current']);

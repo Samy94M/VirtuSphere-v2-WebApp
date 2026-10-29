@@ -292,5 +292,5 @@ function deploy_worker_create_control_failure_cause(DeployWorkerStepTrace $trace
     }
     $cause = trim(deploy_worker_redact_secrets(deploy_job_output_normalize_line($cause), $secrets));
 
-    return $cause === '' ? '' : ' Cause: ' . virtusphere_bounded_utf8_bytes($cause, 1024);
+    return $cause === '' ? '' : VIRTUSPHERE_CREATE_CONTROL_CAUSE_PREFIX . virtusphere_bounded_utf8_bytes($cause, 1024);
 }

@@ -45,6 +45,16 @@ const VIRTUSPHERE_CREATE_EVENT_FIELDS = [
     VIRTUSPHERE_CREATE_EVENT_REJECTED => ['portal_vm_id', 'vm_name', 'error_code', 'error'],
 ];
 
+/**
+ * Event => the fields it MAY carry, mirroring OPTIONAL_FIELDS in
+ * emit_create_result.py. An absent optional field reads as null; a present one
+ * is checked like any other. `error_from_host` says whether `error` is the
+ * module's own message or the inspector's fallback (B8, 29.10.2026).
+ */
+const VIRTUSPHERE_CREATE_EVENT_OPTIONAL_FIELDS = [
+    VIRTUSPHERE_CREATE_EVENT_FAILED => ['error_from_host'],
+];
+
 /** Thrown for every violation; the caller turns it into protocol_error. */
 final class CreateMarkerProtocolException extends RuntimeException
 {
@@ -137,7 +147,8 @@ function ansible_create_marker_validate(array $payload): array
         throw new CreateMarkerProtocolException('Unknown create event.');
     }
     $fields = VIRTUSPHERE_CREATE_EVENT_FIELDS[$event];
-    $extra = array_diff(array_keys($payload), array_merge($fields, ['event']));
+    $optional = VIRTUSPHERE_CREATE_EVENT_OPTIONAL_FIELDS[$event] ?? [];
+    $extra = array_diff(array_keys($payload), array_merge($fields, $optional, ['event']));
     if ($extra !== []) {
         throw new CreateMarkerProtocolException('Unexpected create marker field(s): ' . implode(', ', $extra));
     }
@@ -149,6 +160,9 @@ function ansible_create_marker_validate(array $payload): array
     $result = ['event' => $event];
     foreach ($fields as $field) {
         $result[$field] = ansible_create_marker_field($field, $payload[$field]);
+    }
+    foreach ($optional as $field) {
+        $result[$field] = array_key_exists($field, $payload) ? ansible_create_marker_field($field, $payload[$field]) : null;
     }
     if (($event === VIRTUSPHERE_CREATE_EVENT_PREPARED || $event === VIRTUSPHERE_CREATE_EVENT_LAUNCHED)) {
         $hasMoid = $result['precheck_moid'] !== null;
@@ -181,7 +195,7 @@ function ansible_create_marker_field(string $field, mixed $value): mixed
         'portal_vm_id' => is_int($value) && $value > 0
             ? $value
             : throw new CreateMarkerProtocolException('portal_vm_id must be a positive integer.'),
-        'existed_before', 'changed' => is_bool($value)
+        'existed_before', 'changed', 'error_from_host' => is_bool($value)
             ? $value
             : throw new CreateMarkerProtocolException($field . ' must be a boolean.'),
         'vm_name' => ansible_create_marker_text($field, $value, 191),

@@ -176,6 +176,7 @@ final class DeployLogPhaseAndFilterTest extends TestCase
                 'streams' => [VIRTUSPHERE_DEPLOY_LOG_SYSTEM],
                 'from_seq' => 1,
                 'to_seq' => 2,
+                'any_of' => [],
             ],
             deploy_log_filter_repo_args($filter, $timeline)
         );

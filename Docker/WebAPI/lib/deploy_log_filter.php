@@ -16,8 +16,12 @@ declare(strict_types=1);
 // Ansible option, which is what deploy_job_log_source_label() already shows.
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_log_phases.php';
+require_once __DIR__ . '/deploy_log_severity.php';
 
 const VIRTUSPHERE_DEPLOY_LOG_SEARCH_MAX_LENGTH = 120;
+
+/** The id of the filter panel, the target of every jump into the log. */
+const VIRTUSPHERE_DEPLOY_LOG_FILTER_ANCHOR = 'deploy-log-filter';
 
 // The head of an Ansible failure line: `fatal: [host]: FAILED!`, `fatal:
 // [host]: UNREACHABLE!` or, for one loop item, `failed: [host] (item=x)`. The
@@ -68,7 +72,10 @@ function deploy_log_filter_sources(): array
  *
  * @param array<string,mixed> $query typically $_GET
  * @param list<string> $phaseNames the playbooks this job actually ran
- * @return array{q:string,source:string,phase:string,active:bool}
+ * `errors` is the "errors only" switch (E1): it keeps the lines
+ * deploy_log_line_severity() marks and combines with the other three.
+ *
+ * @return array{q:string,source:string,phase:string,errors:bool,active:bool}
  */
 function deploy_log_filter_from_query(array $query, array $phaseNames): array
 {
@@ -86,12 +93,14 @@ function deploy_log_filter_from_query(array $query, array $phaseNames): array
     if (!in_array($phase, $phaseNames, true)) {
         $phase = '';
     }
+    $errors = ($query['errors'] ?? null) === '1';
 
     return [
         'q' => $needle,
         'source' => $source,
         'phase' => $phase,
-        'active' => $needle !== '' || $source !== '' || $phase !== '',
+        'errors' => $errors,
+        'active' => $needle !== '' || $source !== '' || $phase !== '' || $errors,
     ];
 }
 
@@ -99,9 +108,9 @@ function deploy_log_filter_from_query(array $query, array $phaseNames): array
  * The repository arguments for a filter. One derivation, so the table and any
  * later reader cannot disagree about what was asked.
  *
- * @param array{q:string,source:string,phase:string,active:bool} $filter
+ * @param array{q:string,source:string,phase:string,errors:bool,active:bool} $filter
  * @param array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>,current:?string} $timeline
- * @return array{needle:string,streams:list<string>,from_seq:?int,to_seq:?int}
+ * @return array{needle:string,streams:list<string>,from_seq:?int,to_seq:?int,any_of:list<string>}
  */
 function deploy_log_filter_repo_args(array $filter, array $timeline): array
 {
@@ -115,7 +124,9 @@ function deploy_log_filter_repo_args(array $filter, array $timeline): array
         }
     }
 
-    return ['needle' => $filter['q'], 'streams' => $streams, 'from_seq' => $from, 'to_seq' => $to];
+    $anyOf = $filter['errors'] ? array_values(VIRTUSPHERE_DEPLOY_LOG_SEVERITY_MARKERS) : [];
+
+    return ['needle' => $filter['q'], 'streams' => $streams, 'from_seq' => $from, 'to_seq' => $to, 'any_of' => $anyOf];
 }
 
 /**
@@ -123,7 +134,7 @@ function deploy_log_filter_repo_args(array $filter, array $timeline): array
  * the reader validates. A hand-written query string is what lets a filter and
  * its link drift apart.
  *
- * @param array{q:string,source:string,phase:string,active:bool} $filter
+ * @param array{q:string,source:string,phase:string,errors?:bool,active:bool} $filter
  */
 function deploy_log_filter_url(int $jobId, array $filter): string
 {
@@ -132,6 +143,9 @@ function deploy_log_filter_url(int $jobId, array $filter): string
         if ($filter[$key] !== '') {
             $params[$key] = $filter[$key];
         }
+    }
+    if (!empty($filter['errors'])) {
+        $params['errors'] = '1';
     }
 
     return 'deploy_log.php?' . http_build_query($params);
@@ -160,4 +174,38 @@ function deploy_log_older_url(int $jobId, int $beforeSeq): string
     $params = ['id' => (string) $jobId, 'before_seq' => (string) $beforeSeq];
 
     return 'deploy_log.php?' . http_build_query($params);
+}
+
+/**
+ * The filtered view of one create unit's FAIL (or HOLD) lines, every attempt
+ * included (E1, 29.10.2026). A search link, not an anchor into the page: the
+ * line may have left the bounded window long ago, and the link works without
+ * JavaScript.
+ *
+ * @param array<string,mixed> $finding one entry of deploy_create_progress_finding()
+ */
+function deploy_log_create_unit_url(int $jobId, array $finding): string
+{
+    $filter = [
+        'q' => deploy_log_create_unit_needle((int) $finding['position'], (int) $finding['total'], (string) $finding['severity']),
+        'source' => VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+        'phase' => '',
+        'errors' => false,
+        'active' => true,
+    ];
+
+    return deploy_log_jump_url($jobId, $filter);
+}
+
+/**
+ * A link that jumps to a place in the log: the filter URL plus the anchor of
+ * the filter panel, so the reader lands on the hit count with the matching
+ * lines right below instead of at the top of a long page (browser check
+ * 29.10.2026). Plain filter links keep no anchor.
+ *
+ * @param array{q:string,source:string,phase:string,errors:bool,active:bool} $filter
+ */
+function deploy_log_jump_url(int $jobId, array $filter): string
+{
+    return deploy_log_filter_url($jobId, $filter) . '#' . VIRTUSPHERE_DEPLOY_LOG_FILTER_ANCHOR;
 }

@@ -172,7 +172,10 @@ test('terminal response with more than 500 pending lines drains to the atomic fi
   const badge = page.locator('[data-deploy-status]');
   await expect(badge).toHaveText('Succeeded', { timeout: 12000 });
   await expect(badge).not.toHaveText('succeeded');
-  await expect(page.locator('[data-deploy-terminal-blocks] code')).toContainText('completed');
+  // The stored reason code sits in the collapsed technical details (E2); a
+  // regular end adds no reason panel of its own next to the result.
+  await expect(page.locator('[data-deploy-technical]')).toContainText('completed');
+  await expect(page.locator('[data-deploy-terminal-blocks]')).not.toContainText('Completion reason');
   await expect(page.locator('[data-deploy-cancel-form]')).toHaveCount(0);
   const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
   await expect(rows).toHaveCount(606);

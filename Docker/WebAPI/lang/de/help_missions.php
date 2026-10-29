@@ -41,7 +41,7 @@ return [
     'status_findings_heading' => 'Befunde und nächster Schritt',
     'status_findings_p1' => 'Die Liste zeigt den schwersten Befund mit Link auf den nächsten Schritt und „+n“ für weitere; der VM-Editor zeigt alle. Reihenfolge ist die Schwere, nicht die Zeit.',
     'status_finding_create_uncertain' => 'Create ungeklärt: das Ergebnis einer Create-Einheit auf dem Host ist unbekannt. Nächster Schritt: Auftragsprotokoll und Create-Karte, nichts erneut anlegen.',
-    'status_finding_job_failed' => 'Auftrag fehlgeschlagen: der Lebenszyklus steht auf fehlgeschlagen; der jüngste Auftrag dieser VM nennt Modus und Zeit. Nächster Schritt: Auftragsprotokoll.',
+    'status_finding_job_failed' => 'Auftrag fehlgeschlagen: der Lebenszyklus steht auf fehlgeschlagen; der jüngste Auftrag dieser VM nennt Modus und Zeit. Ist die VM in diesem Auftrag nicht angelegt worden, heißt der Befund „Auf ESXi nicht angelegt“ und führt direkt zu ihrer Fehlerzeile im Protokoll. Nächster Schritt: Auftragsprotokoll.',
     'status_finding_missing_from_inventory' => 'Nicht mehr im Inventar: das frische Inventar des gebundenen Zugangs kennt die Instanz-UUID nicht. Nächster Schritt: ESXi-Karte im Systemstatus.',
     'status_finding_job_running' => 'Auftrag läuft: ein Auftrag arbeitet an dieser VM. Nächster Schritt: Auftragsprotokoll.',
     'status_finding_old_mecm_device' => 'Altes MECM-Gerät löschen: nach „MECM-ID zurücksetzen“ existiert das alte Gerät in MECM weiter. Nächster Schritt: in der MECM-Konsole löschen, dann die MECM-Karte im Systemstatus prüfen.',

@@ -24,7 +24,7 @@ require_once __DIR__ . '/repo/deploy_jobs.php';
  * @return array{
  *     timeline: array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>,current:?string},
  *     phase_names: list<string>,
- *     filter: array{q:string,source:string,phase:string,active:bool},
+ *     filter: array{q:string,source:string,phase:string,errors:bool,active:bool},
  *     page: array<string,mixed>,
  *     logs: list<array<string,mixed>>,
  *     match_capped: bool
@@ -61,7 +61,7 @@ function deploy_log_view_model(mysqli $db, array $job, array $query): array
     }
 
     $args = deploy_log_filter_repo_args($filter, $timeline);
-    $result = repo_deploy_job_log_search($db, $jobId, $args['needle'], $args['streams'], $args['from_seq'], $args['to_seq']);
+    $result = repo_deploy_job_log_search($db, $jobId, $args['needle'], $args['streams'], $args['from_seq'], $args['to_seq'], VIRTUSPHERE_DEPLOY_LOG_SEARCH_LIMIT, $args['any_of']);
 
     // A filtered page carries no cursor. Handing the poller an `after_seq` that
     // came from a filtered read is precisely how a follow ends up treating
@@ -168,6 +168,9 @@ function deploy_job_log_format_page(array $page): array
         $entry['seq'] = (int) $entry['seq'];
         $entry['created_at'] = portal_format_timestamp($entry['created_at'] ?? null);
         $entry['stream_label'] = deploy_job_log_source_label((string) ($entry['stream'] ?? ''));
+        // E1: the browser marks a row from this field alone, so the live rows
+        // and the server-rendered ones cannot disagree about a line.
+        $entry['severity'] = deploy_log_line_severity((string) ($entry['line'] ?? ''));
     }
     unset($entry);
 

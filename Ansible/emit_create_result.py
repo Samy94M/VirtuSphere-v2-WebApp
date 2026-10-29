@@ -84,6 +84,7 @@ FIELD_RULES = {
     "power_state": ("power_state", None),
     "error": ("str", MAX_ERROR_LENGTH),
     "error_code": ("error_code", None),
+    "error_from_host": ("bool", None),
 }
 
 EVENTS = {
@@ -93,6 +94,14 @@ EVENTS = {
     "succeeded": ("portal_vm_id", "vm_name", "async_jid", "changed", "moid", "instance_uuid", "power_state"),
     "failed": ("portal_vm_id", "async_jid", "error"),
     "rejected": ("portal_vm_id", "vm_name", "error_code", "error"),
+}
+
+# Fields an event MAY carry. A result file written by a playbook from before the
+# field existed stays valid; a present value is checked like any other.
+# `error_from_host` tells whether `error` is the module's own message or the
+# inspector's fallback.
+OPTIONAL_FIELDS = {
+    "failed": ("error_from_host",),
 }
 
 
@@ -158,7 +167,8 @@ def validate(payload):
         raise ContractError("unknown event")
 
     allowed = EVENTS[event]
-    extra = sorted(set(payload) - set(allowed) - {"event"})
+    optional = OPTIONAL_FIELDS.get(event, ())
+    extra = sorted(set(payload) - set(allowed) - set(optional) - {"event"})
     if extra:
         raise ContractError("unexpected field(s): %s" % ", ".join(extra))
     missing = [name for name in allowed if name not in payload]
@@ -171,6 +181,9 @@ def validate(payload):
     canonical = {"event": event}
     for name in allowed:
         canonical[name] = _check_field(name, payload[name])
+    for name in optional:
+        if name in payload:
+            canonical[name] = _check_field(name, payload[name])
     if event in ("prepared", "launched"):
         has_moid = canonical["precheck_moid"] is not None
         has_uuid = canonical["precheck_instance_uuid"] is not None

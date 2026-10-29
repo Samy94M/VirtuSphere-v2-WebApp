@@ -215,19 +215,77 @@ test('stored create outcomes and their failure classes stay distinguishable whil
   await expect(card.locator('[data-create-count="failed"]')).toHaveText('1');
   await expect(card.locator('[data-create-count="uncertain"]')).toHaveText('1');
 
-  const findings = card.locator('[data-create-finding-list] li');
-  await expect(findings).toHaveCount(2);
-  // The error code is the plain <code>; a module failure additionally quotes
-  // the host's own message as <code class="log-line">, every other class has
-  // none (deploy_create_progress_host_detail()).
-  await expect(findings.nth(0).locator('code:not(.log-line)')).toHaveText('module_failed');
-  await expect(findings.nth(1).locator('code:not(.log-line)')).toHaveText('async_state_missing');
-  await expect(findings.nth(0).locator('code.log-line')).toHaveText('The create module reported a failure.');
-  await expect(findings.nth(1).locator('code.log-line')).toHaveCount(0);
-  expect(await findings.nth(0).locator('span:not(.muted)').textContent()).not.toBe(
-    await findings.nth(1).locator('span:not(.muted)').textContent()
-  );
+  // After the end the card says what exists (E1) and leaves the list of
+  // affected VMs to the result block, which names cause and place in the log.
+  await expect(card.locator('[data-create-position]')).toHaveText('3 of 5 created, 1 failed, 1 unresolved');
+  await expect(card.locator('[data-create-finding-list] li')).toHaveCount(0);
+  const outcome = page.locator('[data-deploy-create-outcome] li');
+  await expect(outcome).toHaveCount(2);
+  // A module failure quotes its stored text. This row predates the recorded
+  // origin (migration 0067), so it is labelled as stored text, never as the
+  // message of the host (B8); every other class has no quoted text at all.
+  await expect(outcome.nth(0).locator('code.log-line')).toHaveText('The create module reported a failure.');
+  await expect(outcome.nth(0).locator('.muted')).toHaveText('Stored text:');
+  await expect(outcome.nth(1).locator('code.log-line')).toHaveCount(0);
+  expect(await outcome.nth(0).textContent()).not.toBe(await outcome.nth(1).textContent());
+  // Each line leads to that unit's own FAIL or HOLD lines.
+  await expect(outcome.nth(0).locator('a')).toHaveAttribute('href', /q=%5B4%2F5%5D\+FAIL\+create/);
+  await expect(outcome.nth(1).locator('a')).toHaveAttribute('href', /q=%5B5%2F5%5D\+HOLD\+create/);
+  // Codes live in the technical details, collapsed and open to every reader.
+  const technical = page.locator('[data-deploy-technical]');
+  await expect(technical).not.toHaveAttribute('open', /.*/);
+  await technical.locator('summary').click();
+  await expect(technical).toContainText('module_failed');
+  await expect(technical).toContainText('async_state_missing');
   await expect(page.locator('[data-deploy-retry-blocked]')).toBeVisible();
+});
+
+test('error lines are marked with a word, filtered on request, and a finished job runs no step', async ({ page }) => {
+  // Prod job 1527 (E1/B1): the FAIL line of the one failed VM sat unmarked in
+  // the output, and the open create step of the finished job read "running".
+  const seed = phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'create', 'fixture' => '${MARK}'], JSON_THROW_ON_ERROR);
+$status = 'partial';
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (NULL, ?, ?)');
+$stmt->bind_param('ss', $status, $payload);
+$stmt->execute();
+$job = (int) $db->insert_id;
+$lines = [
+    ansible_step_marker_line(VIRTUSPHERE_ANSIBLE_STEP_BEGIN, VIRTUSPHERE_PLAYBOOKS['create']),
+    '[1/2] RUN create ${MARK}-A',
+    '[1/2] DONE create ${MARK}-A created',
+    '[2/2] RUN create ${MARK}-B',
+    'fatal: [localhost]: FAILED! => {"msg": "503 Service Unavailable"}',
+    '[2/2] FAIL create ${MARK}-B module_failed: 503 Service Unavailable',
+];
+foreach ($lines as $index => $line) {
+    $seq = $index + 1;
+    $stmt = $db->prepare("INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES (?, ?, 'system', ?)");
+    $stmt->bind_param('iis', $job, $seq, $line);
+    $stmt->execute();
+}
+echo 'JSON' . json_encode(['job' => $job]) . 'JSON';
+`, ['lib/repo/deploy_jobs.php', 'lib/ansible_command_modes.php']);
+
+  await page.goto(`deploy_log.php?id=${seed.job}`);
+  const marked = page.locator('[data-deploy-log-body] tr.log-row-error');
+  await expect(marked).toHaveCount(2);
+  await expect(marked.nth(0).locator('.log-flag')).toHaveText('Ansible error');
+  await expect(marked.nth(1).locator('.log-flag')).toHaveText('Failed');
+
+  const phases = page.locator('[data-deploy-phases]');
+  await expect(phases).toContainText('Create VMs');
+  await expect(phases).toContainText('Not completed');
+  await expect(phases).not.toContainText('Running now');
+  await expect(phases).not.toContainText('createVMLaunch-ESXi_playbook.yml');
+
+  await page.getByLabel('Errors only').check();
+  await page.getByRole('button', { name: 'Filter', exact: true }).click();
+  await expect(page).toHaveURL(/errors=1/);
+  const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1)).toContainText('FAIL create');
 });
 
 test('a job without a create section shows no card at all', async ({ page }) => {

@@ -136,6 +136,8 @@ function portal_vm_finding_text(array $finding): string
             'position' => (int) ($params['position'] ?? 0),
         ]),
         VIRTUSPHERE_VM_FINDING_JOB_FAILED => match (true) {
+            !empty($params['create_failed']) && $text('time') !== '' && $text('mode') !== ''
+                => __t('status.finding_create_failed', ['mode' => deploy_mode_label($text('mode')), 'time' => $time('time')]),
             !empty($params['outcome_unknown']) && $text('time') !== '' && $text('mode') !== ''
                 => __t('status.finding_job_outcome_unknown', ['mode' => deploy_mode_label($text('mode')), 'time' => $time('time')]),
             $text('time') !== '' && $text('mode') !== ''

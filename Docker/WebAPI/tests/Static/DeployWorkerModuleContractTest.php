@@ -93,6 +93,8 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_create_remaining_seconds',
         'deploy_worker_create_progress_line',
         'deploy_worker_create_summary_line',
+        // E3 (29.10.2026): the FAIL/HOLD line carries the cause itself.
+        'deploy_worker_create_failure_progress_detail',
         'deploy_worker_create_job_status',
         // How a create section that did not fully succeed ends. It lives with
         // the create domain rather than with the other conclusions, because

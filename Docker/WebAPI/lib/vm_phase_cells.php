@@ -15,6 +15,7 @@ require_once __DIR__ . '/layout_presenters.php';
 require_once __DIR__ . '/vm_phase.php';
 require_once __DIR__ . '/vm_urls.php';
 require_once __DIR__ . '/deploy_urls.php';
+require_once __DIR__ . '/deploy_log_filter.php';
 require_once __DIR__ . '/system_status_urls.php';
 require_once __DIR__ . '/package_report_page.php';
 
@@ -47,7 +48,14 @@ function vm_finding_href(array $finding, int $missionId, int $vmId, array $workC
     $link = (array) ($finding['link'] ?? []);
 
     return match ((string) ($link['target'] ?? '')) {
-        VIRTUSPHERE_VM_FINDING_LINK_JOB_LOG => deploy_job_log_url((int) ($link['job_id'] ?? 0)),
+        // E1: a failed create unit opens that VM's FAIL lines, not the log top.
+        VIRTUSPHERE_VM_FINDING_LINK_JOB_LOG => (int) ($link['create_position'] ?? 0) > 0
+            ? deploy_log_create_unit_url((int) ($link['job_id'] ?? 0), [
+                'position' => (int) $link['create_position'],
+                'total' => (int) ($link['create_total'] ?? 0),
+                'severity' => VIRTUSPHERE_DEPLOY_LOG_SEVERITY_FAIL,
+            ])
+            : deploy_job_log_url((int) ($link['job_id'] ?? 0)),
         VIRTUSPHERE_VM_FINDING_LINK_DEPLOY => deploy_mission_url($missionId),
         VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_MECM => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM),
         VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_ESXI => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI),

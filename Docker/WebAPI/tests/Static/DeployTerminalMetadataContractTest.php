@@ -29,7 +29,11 @@ final class DeployTerminalMetadataContractTest extends TestCase
         $handler = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_actions.php');
         $urls = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_urls.php');
 
-        self::assertStringContainsString("'terminal_html' => deploy_terminal_blocks_html(\$job, \$retryEvaluation, \$existingVmIds, can('system.config', \$user), can('deploy.run', \$user))", $portal);
+        // The poll response and the first render share one owner (E1/E2,
+        // 29.10.2026), which hands the result block to the central presenter.
+        $outcome = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_log_outcome.php');
+        self::assertStringContainsString("'terminal_html' => deploy_log_outcome_html(\$connection, \$job, \$retryEvaluation, \$existingVmIds, \$user)", $portal);
+        self::assertStringContainsString('return deploy_terminal_blocks_html(', $outcome);
         self::assertStringContainsString("'can_cancel'", $portal);
         self::assertStringContainsString('name="origin"', $portal);
         self::assertStringContainsString('deploy_job_cancel_redirect_url', $handler);

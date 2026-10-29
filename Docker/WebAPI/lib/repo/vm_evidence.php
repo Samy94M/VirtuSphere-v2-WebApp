@@ -34,11 +34,11 @@ const VIRTUSPHERE_VM_EVIDENCE_BATCH_SIZE = 500;
  * repo_vm_evidence_for_vm() can slice it per row without another query.
  *
  * @param list<array<string,mixed>> $vms
- * @return array{jobs:array<int,array<string,mixed>>,create_uncertain:array<int,list<array{job_id:int,position:int}>>,client_phases:array<int,array<string,array<string,mixed>>>,package_runs:array<int,array<string,mixed>>,inventory:array<int,array<string,mixed>>}
+ * @return array{jobs:array<int,array<string,mixed>>,create_uncertain:array<int,list<array{job_id:int,position:int}>>,create_failed:array<int,array{job_id:int,position:int,total:int}>,client_phases:array<int,array<string,array<string,mixed>>>,package_runs:array<int,array<string,mixed>>,inventory:array<int,array<string,mixed>>}
  */
 function repo_vm_evidence(mysqli $db, array $vms, ?int $now = null): array
 {
-    $evidence = ['jobs' => [], 'create_uncertain' => [], 'client_phases' => [], 'package_runs' => [], 'inventory' => []];
+    $evidence = ['jobs' => [], 'create_uncertain' => [], 'create_failed' => [], 'client_phases' => [], 'package_runs' => [], 'inventory' => []];
     $vmIds = [];
     $credentialIds = [];
     foreach ($vms as $vm) {
@@ -54,6 +54,7 @@ function repo_vm_evidence(mysqli $db, array $vms, ?int $now = null): array
     foreach (array_chunk(array_values(array_unique($vmIds)), VIRTUSPHERE_VM_EVIDENCE_BATCH_SIZE) as $batch) {
         $evidence['jobs'] += repo_vm_evidence_jobs($db, $batch);
         $evidence['create_uncertain'] += repo_vm_evidence_create_uncertain($db, $batch);
+        $evidence['create_failed'] += repo_vm_evidence_create_failed($db, $batch);
         $evidence['client_phases'] += repo_vm_evidence_client_phases($db, $batch);
         $evidence['package_runs'] += repo_vm_evidence_package_runs($db, $batch);
     }
@@ -85,6 +86,11 @@ function repo_vm_evidence_for_vm(array $evidence, array $vm, bool $isTemplate): 
         'is_template' => $isTemplate,
         'last_job' => $evidence['jobs'][$vmId] ?? null,
         'create_uncertain' => $evidence['create_uncertain'][$vmId] ?? [],
+        // Only the failure of the job the journal names newest; an older one
+        // belongs to a job this VM has moved past.
+        'create_failed' => (int) ($evidence['create_failed'][$vmId]['job_id'] ?? 0) === (int) ($evidence['jobs'][$vmId]['id'] ?? -1)
+            ? $evidence['create_failed'][$vmId]
+            : null,
         'client_phases' => $clientPhases,
         'last_package_run' => $evidence['package_runs'][$vmId] ?? null,
         'inventory' => $credentialId > 0 ? ($evidence['inventory'][$credentialId] ?? null) : null,
@@ -161,6 +167,36 @@ function repo_vm_evidence_create_uncertain(mysqli $db, array $vmIds): array
     $units = [];
     foreach (repo_fetch_all($stmt->get_result()) as $row) {
         $units[(int) $row['vm_id']][] = ['job_id' => (int) $row['job_id'], 'position' => (int) $row['position']];
+    }
+
+    return $units;
+}
+
+/**
+ * The newest create unit per VM that ended `failed` (E1, 29.10.2026), newest
+ * job first: the job, its position and the section size, which is what the
+ * finding needs to link to that VM's FAIL lines in the job log.
+ *
+ * @param list<int> $vmIds
+ * @return array<int,array{job_id:int,position:int,total:int}>
+ */
+function repo_vm_evidence_create_failed(mysqli $db, array $vmIds): array
+{
+    if ($vmIds === []) {
+        return [];
+    }
+    [$placeholders, $types] = repo_vm_evidence_in_list($vmIds);
+    $stmt = $db->prepare(
+        'SELECT vm_id, job_id, position, total FROM deploy_create_vm_results'
+        . ' WHERE vm_id IN (' . $placeholders . ') AND status = ? ORDER BY vm_id, job_id DESC, position'
+    );
+    $params = array_merge($vmIds, [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED]);
+    $stmt->bind_param($types . 's', ...$params);
+    $stmt->execute();
+
+    $units = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $units[(int) $row['vm_id']] ??= ['job_id' => (int) $row['job_id'], 'position' => (int) $row['position'], 'total' => (int) $row['total']];
     }
 
     return $units;

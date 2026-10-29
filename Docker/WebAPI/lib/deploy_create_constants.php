@@ -160,6 +160,15 @@ const VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES = [
 const VIRTUSPHERE_CREATE_MAX_ATTEMPTS = 4;
 const VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS = [5, 15, 45];
 
+// E3 (29.10.2026): how much of the stored reason a FAIL or HOLD progress line
+// carries. One readable line in the job log; the full text stays in the row.
+const VIRTUSPHERE_CREATE_PROGRESS_DETAIL_MAX_BYTES = 200;
+
+// How a protocol_error carries the Ansible failure line a control call printed
+// before it ended without its marker. The worker appends it, the job log shows
+// the part after it; one constant so the two cannot drift apart.
+const VIRTUSPHERE_CREATE_CONTROL_CAUSE_PREFIX = ' Cause: ';
+
 // Timing. Every value is seconds, and every relation between them is pinned by
 // DeployCreateConstantsContractTest rather than by comment: a poll interval
 // above the stale limit would let the job look abandoned between two healthy

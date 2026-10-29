@@ -38,7 +38,7 @@ class InspectCreateAsyncStateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.write(directory, "123.3", {"failed": True, "changed": False, "msg": "module convergence failed"})
             self.assertEqual(
-                {"state": "failed", "error": "module convergence failed"},
+                {"state": "failed", "error": "module convergence failed", "error_from_host": True},
                 INSPECT.inspect_state(directory, "123.3"),
             )
 
@@ -74,7 +74,7 @@ class InspectCreateAsyncStateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.write(directory, "123.8", self.UNCAUGHT)
             self.assertEqual(
-                {"state": "failed", "error": "503 Service Unavailable"},
+                {"state": "failed", "error": "503 Service Unavailable", "error_from_host": True},
                 INSPECT.inspect_state(directory, "123.8"),
             )
 
@@ -82,14 +82,14 @@ class InspectCreateAsyncStateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.write(directory, "123.9", self.CHAINED)
             self.assertEqual(
-                {"state": "failed", "error": "503 Service Unavailable: [Errno 104] Connection reset by peer"},
+                {"state": "failed", "error": "503 Service Unavailable: [Errno 104] Connection reset by peer", "error_from_host": True},
                 INSPECT.inspect_state(directory, "123.9"),
             )
             unfollowed = json.loads(json.dumps(self.CHAINED))
             unfollowed["exception"]["event"]["chain"]["follow"] = False
             self.write(directory, "123.10", unfollowed)
             self.assertEqual(
-                {"state": "failed", "error": "503 Service Unavailable"},
+                {"state": "failed", "error": "503 Service Unavailable", "error_from_host": True},
                 INSPECT.inspect_state(directory, "123.10"),
             )
 
@@ -105,9 +105,15 @@ class InspectCreateAsyncStateTest(unittest.TestCase):
             ):
                 self.write(directory, jid, payload)
                 self.assertEqual(
-                    {"state": "failed", "error": "the create module reported a failure"},
+                    {"state": "failed", "error": "the create module reported a failure", "error_from_host": False},
                     INSPECT.inspect_state(directory, jid),
                 )
+
+    def test_origin_is_decided_at_the_source_not_by_the_text(self) -> None:
+        # A module that happens to say the fallback's words is still the host.
+        with tempfile.TemporaryDirectory() as directory:
+            self.write(directory, "123.15", {"failed": True, "msg": "the create module reported a failure"})
+            self.assertTrue(INSPECT.inspect_state(directory, "123.15")["error_from_host"])
 
     def test_terminal_success_keeps_changed_true_and_false(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

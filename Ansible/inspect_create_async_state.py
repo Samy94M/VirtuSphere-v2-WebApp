@@ -101,7 +101,12 @@ def inspect_state(async_dir: str, jid: str) -> dict[str, object]:
     if not isinstance(failed, bool):
         return verdict("invalid", reason="the terminal async failure flag is not boolean")
     if failed:
-        return verdict("failed", error=bounded_error(module_failure_message(payload)))
+        # `error_from_host` says at the source whether the text is the module's
+        # own message or the fallback, so the portal never has to tell the two
+        # apart by comparing text.
+        message = module_failure_message(payload)
+        from_host = isinstance(message, str) and message.strip() != ""
+        return verdict("failed", error=bounded_error(message), error_from_host=from_host)
 
     changed = payload.get("changed")
     if not isinstance(changed, bool):

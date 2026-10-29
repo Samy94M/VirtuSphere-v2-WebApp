@@ -6,6 +6,7 @@ require_once __DIR__ . '/ansible_command_create.php';
 require_once __DIR__ . '/ansible_create_protocol.php';
 require_once __DIR__ . '/ansible_command_modes.php';
 require_once __DIR__ . '/defaults.php';
+require_once __DIR__ . '/network_mac_constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/repo/deploy_create_results.php';
@@ -247,6 +248,31 @@ function deploy_worker_create_progress_line(array $unit, string $verb, string $d
     $line = '[' . (int) $unit['position'] . '/' . (int) $unit['total'] . '] ' . $verb . ' create ' . (string) $unit['vm_name'];
 
     return $detail === '' ? $line : $line . ' ' . $detail;
+}
+
+/**
+ * The tail of a FAIL or HOLD line (E3, 29.10.2026): the code, the attempt when
+ * it is not the first, and the stored reason as one bounded line.
+ *
+ * `[13/15] FAIL create VM-06572 module_failed; attempt 2 of 4: 503 Service Unavailable`
+ *
+ * The reason is the text the row stores, so it is already redacted; it is cut
+ * to VIRTUSPHERE_CREATE_PROGRESS_DETAIL_MAX_BYTES and marked with " ..." when
+ * cut. The full text stays in the row and in the job's technical details.
+ *
+ * @param array<string, mixed> $unit
+ */
+function deploy_worker_create_failure_progress_detail(array $unit, string $errorCode, string $detail): string
+{
+    $attempt = deploy_create_unit_attempt($unit);
+    $tail = $errorCode . ($attempt > 1 ? '; attempt ' . $attempt . ' of ' . VIRTUSPHERE_CREATE_MAX_ATTEMPTS : '');
+    $reason = trim((string) preg_replace('/\s+/u', ' ', $detail));
+    if ($reason === '') {
+        return $tail;
+    }
+    $bounded = virtusphere_bounded_utf8_bytes($reason, VIRTUSPHERE_CREATE_PROGRESS_DETAIL_MAX_BYTES);
+
+    return $tail . ': ' . ($bounded === $reason ? $reason : rtrim($bounded) . ' ...');
 }
 
 /**

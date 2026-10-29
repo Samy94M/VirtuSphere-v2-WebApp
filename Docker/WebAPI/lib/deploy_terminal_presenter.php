@@ -124,17 +124,25 @@ function deploy_terminal_presenter(array $job, ?array $existingVmIds = null): ar
     ];
 }
 
-function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null, ?array $existingVmIds = null, bool $canConfigure = false, bool $canCreate = false): string
+/**
+ * $resultExtraHtml goes into the result panel right under its sentence: the
+ * per-VM create outcome (lib/deploy_log_outcome.php, E1). The stored reason
+ * code and detail are not rendered here; they are in the technical details (E2).
+ */
+function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null, ?array $existingVmIds = null, bool $canConfigure = false, bool $canCreate = false, string $resultExtraHtml = ''): string
 {
     $view = deploy_terminal_presenter($job, $existingVmIds);
     $html = '';
     foreach (['result', 'reason', 'cancel'] as $name) {
         $block = $view[$name];
-        if (!is_array($block)) {
+        if (!is_array($block) || ($name === 'reason' && deploy_terminal_reason_is_self_evident($block))) {
             continue;
         }
         $html .= '<section class="panel"><h2>' . deploy_terminal_h((string) $block['title']) . '</h2>';
         $html .= '<p>' . deploy_terminal_h((string) $block['text']) . '</p>';
+        if ($name === 'result') {
+            $html .= $resultExtraHtml;
+        }
         if ($name === 'result' && (int) ($block['mac_version'] ?? 0) === VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION) {
             $html .= '<p class="muted">' . deploy_terminal_h(__t('deploy.mac_result_legacy')) . '</p>';
         }
@@ -168,17 +176,9 @@ function deploy_terminal_blocks_html(array $job, ?array $retryEvaluation = null,
         } elseif ($name === 'result' && is_array($retryEvaluation) && deploy_terminal_retry_has_network_blocker((array) ($retryEvaluation['findings'] ?? []))) {
             $html .= '<p>' . deploy_terminal_h(__t('deploy.retry_network_still_blocked')) . '</p>';
         }
-        if ($name === 'reason' && (string) ($block['code'] ?? '') !== '') {
-            $html .= '<p><span class="muted">' . deploy_terminal_h(__t('deploy.terminal_reason_code')) . '</span> '
-                . '<code>' . deploy_terminal_h((string) $block['code']) . '</code></p>';
-        }
-        if ($name === 'reason' && (string) ($block['detail'] ?? '') !== '') {
-            $html .= '<p><span class="muted">' . deploy_terminal_h(__t('deploy.terminal_reason_detail')) . '</span> '
-                . '<code class="log-line">' . deploy_terminal_h((string) $block['detail']) . '</code></p>';
-        }
         if ($name === 'reason' && is_string($block['log_needle'] ?? null)) {
-            $filter = ['q' => (string) $block['log_needle'], 'source' => VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, 'phase' => '', 'active' => true];
-            $html .= '<p><a href="' . deploy_terminal_h(deploy_log_filter_url((int) $job['id'], $filter)) . '">'
+            $filter = ['q' => (string) $block['log_needle'], 'source' => VIRTUSPHERE_DEPLOY_LOG_ANSIBLE, 'phase' => '', 'errors' => false, 'active' => true];
+            $html .= '<p><a href="' . deploy_terminal_h(deploy_log_jump_url((int) $job['id'], $filter)) . '">'
                 . deploy_terminal_h(__t('deploy.terminal_reason_detail_in_log')) . '</a></p>';
         }
         if ($name === 'cancel') {
@@ -352,6 +352,22 @@ function deploy_terminal_retry_has_network_blocker(array $findings): bool
         }
     }
     return false;
+}
+
+/**
+ * A regular end ("completed", "partial result") says nothing the result block
+ * does not already say, so its panel is left out and the code stays in the
+ * technical details. Any other reason, and one that points into the log,
+ * keeps its panel.
+ *
+ * @param array<string,mixed> $block
+ */
+function deploy_terminal_reason_is_self_evident(array $block): bool
+{
+    return in_array((string) ($block['code'] ?? ''), [
+        VIRTUSPHERE_DEPLOY_TERMINAL_REASON_COMPLETED,
+        VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT,
+    ], true) && !is_string($block['log_needle'] ?? null);
 }
 
 function deploy_terminal_h(string $value): string

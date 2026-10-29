@@ -716,6 +716,9 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
     vm_instance_uuid VARCHAR(64) NULL,
     error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
     error_detail TEXT NULL,
+    -- B8 (migration 0067): 1 when error_detail is the module's own message, 0
+    -- when it is the inspector's fallback, NULL when not recorded.
+    error_detail_from_host TINYINT(1) NULL,
     first_error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
     first_error_detail TEXT NULL,
     first_async_jid VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
@@ -775,6 +778,9 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
     CONSTRAINT deploy_create_result_attempt_check CHECK (
         (attempt = 1 AND first_error_code IS NULL AND first_error_detail IS NULL AND first_async_jid IS NULL)
         OR (attempt > 1 AND first_error_code IS NOT NULL AND first_error_detail IS NOT NULL AND first_async_jid IS NOT NULL)
+    ),
+    CONSTRAINT deploy_create_result_detail_origin_check CHECK (
+        error_detail_from_host IS NULL OR (error_detail_from_host IN (0, 1) AND error_detail IS NOT NULL)
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

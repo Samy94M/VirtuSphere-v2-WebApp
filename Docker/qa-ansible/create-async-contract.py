@@ -463,11 +463,14 @@ def main(argv: list[str]) -> int:
         ("async-core-seam", None),
         ("changed-success", ('{"failed":false,"changed":true}', {"event": "succeeded", "changed": True}, False)),
         ("unchanged-success", ('{"failed":false,"changed":false}', {"event": "succeeded", "changed": False}, False)),
-        ("terminal-module-failure", ('{"failed":true,"changed":false,"msg":"synthetic module failure"}', {"event": "failed", "error": "synthetic module failure"}, False)),
+        ("terminal-module-failure", ('{"failed":true,"changed":false,"msg":"synthetic module failure"}', {"event": "failed", "error": "synthetic module failure", "error_from_host": True}, False)),
+        # Without any host text the inspector writes its fallback and says so in
+        # the marker; the portal never shows that sentence as the host message.
+        ("terminal-module-failure-without-text", ('{"failed":true,"changed":false}', {"event": "failed", "error": "the create module reported a failure", "error_from_host": False}, False)),
         # ansible-core 2.19 writes an exception that escapes the module without
         # `msg`; the cause chain must reach the marker as Ansible prints it.
         ("terminal-module-exception", ('{"failed":true,"exception":{"event":{"msg":"503 Service Unavailable","chain":{"msg_reason":"<<< caused by >>>","traceback_reason":"The above exception was the direct cause of the following exception:","event":{"msg":"[Errno 104] Connection reset by peer","__ansible_type":"Event"},"follow":true,"__ansible_type":"EventChain"},"__ansible_type":"Event"},"__ansible_type":"ErrorSummary"}}',
-                                       {"event": "failed", "error": "503 Service Unavailable: [Errno 104] Connection reset by peer"}, False)),
+                                       {"event": "failed", "error": "503 Service Unavailable: [Errno 104] Connection reset by peer", "error_from_host": True}, False)),
         ("running", ('{"started":true,"finished":false,"ansible_job_id":"1234567890.42"}', {"event": "running"}, False)),
         ("missing", (None, {"event": "rejected", "error_code": "async_state_missing"}, False)),
         ("empty", ("", {"event": "rejected", "error_code": "protocol_error"}, False)),

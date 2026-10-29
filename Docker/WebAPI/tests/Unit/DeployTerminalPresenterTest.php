@@ -6,6 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/layout_response.php';
 require_once dirname(__DIR__, 2) . '/lib/deploy_terminal_presenter.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_log_outcome.php';
 
 final class DeployTerminalPresenterTest extends TestCase
 {
@@ -80,7 +81,9 @@ final class DeployTerminalPresenterTest extends TestCase
 
         $html = deploy_terminal_blocks_html($job);
 
-        self::assertStringContainsString('Insufficient permissions', $html);
+        // The English detail itself lives in the technical details (E2, 29.10.2026).
+        self::assertStringNotContainsString('Insufficient permissions', $html);
+        self::assertStringContainsString('Insufficient permissions', deploy_log_technical_details_html($job, [], false));
         self::assertStringContainsString(
             deploy_terminal_h('deploy_log.php?' . http_build_query(['id' => '42', 'q' => 'failed: [localhost] (item=VM-03)', 'source' => VIRTUSPHERE_DEPLOY_LOG_ANSIBLE])),
             $html
@@ -286,11 +289,14 @@ final class DeployTerminalPresenterTest extends TestCase
             foreach (array_keys(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES) as $code) {
                 self::assertNotSame('deploy.terminal_reason_' . $code, __t('deploy.terminal_reason_' . $code));
             }
-            $html = deploy_terminal_blocks_html([
+            $job = [
                 'status' => VIRTUSPHERE_DEPLOY_STATUS_FAILED,
                 'terminal_reason_code' => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_TIMEOUT,
-            ]);
-            self::assertStringContainsString('<code>timeout</code>', $html);
+            ];
+            // The visible sentence is translated; the stored code stays as it is,
+            // in the technical details (E2, 29.10.2026).
+            self::assertStringContainsString(h(__t('deploy.terminal_reason_timeout')), deploy_terminal_blocks_html($job));
+            self::assertStringContainsString('<code>timeout</code>', deploy_log_technical_details_html($job, [], false));
         }
     }
 }

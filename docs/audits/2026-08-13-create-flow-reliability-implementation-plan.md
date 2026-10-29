@@ -665,7 +665,7 @@ Nach terminalem Async-Erfolg:
 
 1. Modul-/Ansible-Fehler redigieren und Create-Zeile `running -> failed` mit `module_failed` setzen.
 2. Identitätsfehler vor Launch setzt `pending/prepared -> failed` mit `identity_conflict`.
-3. `[n/total] FAIL create <vm_name> <error_code>` loggen.
+3. `[n/total] FAIL create <vm_name> <error_code>` loggen. Vermerk 29.10.2026 (E3, Auftrag 1527): Die Zeile trägt seither die gespeicherte, redigierte Ursache einzeilig und auf `VIRTUSPHERE_CREATE_PROGRESS_DETAIL_MAX_BYTES` gekürzt, ab dem zweiten Versuch mit dem Versuch: `[n/total] FAIL create <vm_name> <error_code>[; attempt n of 4]: <Text>`; `HOLD` ebenso. Der Fortschrittsvertrag aus `AGENTS.md` bleibt unberührt.
 4. Async-Status bereinigen, wenn er terminal ist.
 5. Ownership/Cancel prüfen und nach einem bestätigten per-VM-Fehler die nächste `pending`-Einheit starten.
 6. Bei einem globalen Sicherheits-/Protokollfehler keine nächste Einheit starten.

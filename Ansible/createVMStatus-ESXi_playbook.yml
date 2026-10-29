@@ -206,7 +206,9 @@
         # Die Ursache wird auf eine Zeile begrenzt und traegt keine
         # Modulargumente: der Marker ist eine Diagnosezeile, kein Dump. Den
         # Text samt Rueckfall fuer "keine Modulmeldung" liefert allein der
-        # Inspector; ohne `error` waere sein Befund widerspruechlich.
+        # Inspector; ohne `error` waere sein Befund widerspruechlich. Ob der
+        # Text die Meldung des Hosts oder der Rueckfall ist, sagt ebenfalls nur
+        # er (`error_from_host`); das Portal vergleicht keinen Text.
         - name: Fehlschlag schreiben
           ansible.builtin.copy:
             dest: "{{ vs_result_file }}"
@@ -218,7 +220,8 @@
                   'portal_vm_id': vs_target.portal_vm_id | int,
                   'async_jid': vs_async_jid | string,
                   'error': vs_async_snapshot.error
-                           | string | replace('\n', ' ') | truncate(1024, true, '')
+                           | string | replace('\n', ' ') | truncate(1024, true, ''),
+                  'error_from_host': vs_async_snapshot.error_from_host | bool
                 } | to_nice_json
               }}
           delegate_to: localhost

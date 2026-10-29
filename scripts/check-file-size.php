@@ -152,8 +152,10 @@ const FILE_SIZE_ALLOWANCES = [
     // listing seven values; the body lives in lib/migrations/0065_deploy_outcome_unknown.php.
     // In-job create retry adds the two registry lines for migration 0066; its columns
     // and check live in lib/migrations/0066_create_unit_attempt.php.
+    // B8 (29.10.2026) adds the two registry lines for migration 0067; its column and
+    // check live in lib/migrations/0067_create_error_detail_origin.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1254,
+        'lines' => 1256,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

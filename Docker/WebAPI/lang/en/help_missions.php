@@ -41,7 +41,7 @@ return [
     'status_findings_heading' => 'Findings and next step',
     'status_findings_p1' => 'The list shows the most severe finding with a link to the next step, and "+n" for more; the VM editor shows all of them. The order is severity, not time.',
     'status_finding_create_uncertain' => 'Create unresolved: the outcome of a Create unit on the host is unknown. Next step: job log and Create card; create nothing again.',
-    'status_finding_job_failed' => 'Job failed: the lifecycle is failed; the newest job of this VM names mode and time. Next step: job log.',
+    'status_finding_job_failed' => 'Job failed: the lifecycle is failed; the newest job of this VM names mode and time. If that job did not create the VM, the finding reads "Not created on ESXi" and leads straight to its failure line in the log. Next step: job log.',
     'status_finding_missing_from_inventory' => 'No longer in the inventory: the fresh inventory of the bound access does not know the instance UUID. Next step: ESXi card in System status.',
     'status_finding_job_running' => 'Job running: a job is working on this VM. Next step: job log.',
     'status_finding_old_mecm_device' => 'Delete the old MECM device: after "Reset MECM ID" the old device still exists in MECM. Next step: delete it in the MECM console, then check the MECM card in System status.',

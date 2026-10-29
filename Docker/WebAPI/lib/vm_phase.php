@@ -5,9 +5,8 @@ declare(strict_types=1);
 /**
  * Phase and findings of a VM, derived at read time from stored evidence (plan
  * "Phase und Befund", 20.10.2026). Pure: no database, no clock of its own, no
- * writer. Nothing here changes `vm_status`, `lifecycle_state` or
- * `mecm_sync_state`; they stay stored and on the wire (ADR-0008), and the raw
- * x/5 value remains visible as the technical tooltip and in the editor.
+ * writer. Nothing here changes `vm_status`, `lifecycle_state` or `mecm_sync_state`;
+ * they stay stored and on the wire (ADR-0008), the raw x/5 value in tooltip and editor.
  *
  * The two closed vocabularies carry their badge colour here, because the colour
  * belongs to the phase state machine (lib/status.php has no budget left); the
@@ -246,7 +245,7 @@ function virtusphere_vm_phase_sql(string $vm = 'v'): string
  * $evidence, as repo_vm_evidence_for_vm() shapes it: `is_template`,
  * `last_job` (the deploy_jobs row of the newest journal row of this VM, with
  * `id`, `status`, `mode`, `started_at`, `created_at`, `updated_at`, or null),
- * `create_uncertain` (list of `job_id`/`position`), `client_phases`,
+ * `create_uncertain` (list of `job_id`/`position`), `create_failed` (or null), `client_phases`,
  * `last_package_run` (`run_id`, `project_name`, `package_version`,
  * `completed_received_at`, `wrapper_result`, `reported_failures`, or null) and
  * `inventory` of the bound access (`fresh`, `answered`, `fresh_at`, `vms` as
@@ -291,12 +290,13 @@ function virtusphere_vm_findings(array $vm, array $evidence = [], ?int $now = nu
     // when it is terminal. The job is the display, never a second writer.
     if ($lifecycle === VIRTUSPHERE_LIFECYCLE_FAILED) {
         $terminal = $job !== null && in_array((string) ($job['status'] ?? ''), VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true);
+        $failed = $terminal ? (array) ($evidence['create_failed'] ?? []) : []; // E1: this job failed to create this VM
         // A reaped job's outcome is unknown, not failed (WK-04/WK-07 A); the text says so.
         $add(VIRTUSPHERE_VM_FINDING_JOB_FAILED, $terminal ? [
             'job_id' => $jobId,
             'mode' => (string) ($job['mode'] ?? ''),
             'time' => virtusphere_vm_finding_time((string) ($job['updated_at'] ?? ''), $current),
-        ] + ((string) ($job['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN ? ['outcome_unknown' => true] : []) : [], $terminal ? $jobLink : ['target' => VIRTUSPHERE_VM_FINDING_LINK_DEPLOY]);
+        ] + ((string) ($job['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN ? ['outcome_unknown' => true] : []) + ($failed === [] ? [] : ['create_failed' => true]) : [], $terminal ? $jobLink + ($failed === [] ? [] : ['create_position' => (int) $failed['position'], 'create_total' => (int) $failed['total']]) : ['target' => VIRTUSPHERE_VM_FINDING_LINK_DEPLOY]);
     }
 
     // 3 and 8: the reading of the bound access (lib/vm_inventory_observation.php);

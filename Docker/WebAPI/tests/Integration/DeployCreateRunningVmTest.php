@@ -184,7 +184,11 @@ final class DeployCreateRunningVmTest extends TestCase
         self::assertSame(VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, (string) $row['status']);
         self::assertStringContainsString('vm-99', (string) $row['error_detail']);
         self::assertStringContainsString('5099-foreign', (string) $row['error_detail']);
-        self::assertSame(1, $this->logCount($jobId, '%vm-99%5099-foreign%'));
+        // Its own line says what to do with the live VM; the FAIL line carries
+        // the stored cause since E3 (29.10.2026). Exactly one of each.
+        self::assertSame(1, $this->logCount($jobId, '%binding was refused. Live VM: MOID vm-99, instance UUID 5099-foreign%'));
+        self::assertSame(1, $this->logCount($jobId, '%] FAIL create %vm-99%5099-foreign%'));
+        self::assertSame(2, $this->logCount($jobId, '%vm-99%5099-foreign%'));
     }
 
     /** @return array{0:int,1:array{worker_id:string,lock_token:string,worker_epoch:int}} */

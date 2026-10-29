@@ -257,3 +257,20 @@ tr.row-usage details > summary {
     white-space: pre;
     overflow-wrap: normal;
 }
+
+/* An error line of the job log (E1): a create FAIL or HOLD line or an Ansible
+   `fatal:` head, decided by deploy_log_line_severity(). The tint and the edge
+   are the accent; the word in .log-flag is the signal, so the row still reads
+   as an error without colour, in print and under forced colours. */
+.log-row-error > td {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.log-row-error > td:first-child {
+    box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.log-flag {
+    color: var(--danger);
+    white-space: nowrap;
+}
