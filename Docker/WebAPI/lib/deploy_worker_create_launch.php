@@ -67,7 +67,7 @@ function deploy_worker_create_prepare_unit(
         $unit,
         [
             'vs_portal_vm_id' => (int) $unit['vm_id'],
-            'vs_result_file' => ansible_create_result_file((string) $context['remote_dir'], (int) $unit['position'], 'prepare'),
+            'vs_result_file' => ansible_create_result_file((string) $context['remote_dir'], (int) $unit['position'], deploy_create_unit_attempt($unit), 'prepare'),
         ]
     );
     if (($result['host_identity_error'] ?? null) !== null) {
@@ -190,6 +190,7 @@ function deploy_worker_create_launch_unit(
     }
     $remoteDir = (string) $context['remote_dir'];
     $position = (int) $unit['position'];
+    $attempt = deploy_create_unit_attempt($unit);
     $existedBefore = (int) ($unit['existed_before'] ?? 0) === 1;
 
     $newIntent = deploy_worker_vm_create_launch_intent($channel->connection(), $context['job_claim'], (int) $unit['vm_id'], true);
@@ -206,8 +207,8 @@ function deploy_worker_create_launch_unit(
         $unit,
         [
             'vs_portal_vm_id' => (int) $unit['vm_id'],
-            'vs_result_file' => ansible_create_result_file($remoteDir, $position, 'launch'),
-            'vs_async_dir' => ansible_create_async_dir($remoteDir, $position),
+            'vs_result_file' => ansible_create_result_file($remoteDir, $position, $attempt, 'launch'),
+            'vs_async_dir' => ansible_create_async_dir($remoteDir, $position, $attempt),
             'vs_async_timeout' => $remaining,
             'vs_expected_existed_before' => $existedBefore,
             'vs_expected_moid' => (string) ($unit['precheck_moid'] ?? ''),

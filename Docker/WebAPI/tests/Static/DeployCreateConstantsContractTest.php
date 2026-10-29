@@ -33,6 +33,7 @@ final class DeployCreateConstantsContractTest extends TestCase
             'remote cleanup max auto attempts' => VIRTUSPHERE_REMOTE_CLEANUP_MAX_AUTO_ATTEMPTS,
             'remote cleanup backoff min' => VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MIN_SECONDS,
             'remote cleanup backoff max' => VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MAX_SECONDS,
+            'in-job retry pause' => VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS,
         ];
         foreach ($values as $label => $value) {
             self::assertGreaterThan(0, $value, $label . ' must be positive');
@@ -69,6 +70,27 @@ final class DeployCreateConstantsContractTest extends TestCase
         self::assertLessThanOrEqual(
             VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MAX_SECONDS,
             VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MIN_SECONDS
+        );
+    }
+
+    /**
+     * In-job retry (prod job 1527). Exactly one more attempt: a second retry
+     * would double the time a broken host costs without new evidence, and the
+     * attempt number is part of the derived directory name. The pause is at
+     * least the longest transport backoff, so a retry does not come back to a
+     * host sooner than a poll would after a lost channel; it stays well inside
+     * the create budget, so a section that failed early still has room for the
+     * second attempt. The worker waits it out in heartbeat slices
+     * (deploy_worker_create_sleep), so the stale limit does not bound it.
+     */
+    public function testTheInJobRetryRelationsHold(): void
+    {
+        self::assertSame(2, VIRTUSPHERE_CREATE_MAX_ATTEMPTS);
+        self::assertGreaterThanOrEqual(VIRTUSPHERE_CREATE_TRANSPORT_BACKOFF_MAX_SECONDS, VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS);
+        self::assertGreaterThan(VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS, VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS);
+        self::assertLessThan(
+            intdiv(deploy_create_total_budget_seconds(), 10),
+            VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS * (VIRTUSPHERE_CREATE_MAX_ATTEMPTS - 1)
         );
     }
 
@@ -149,6 +171,11 @@ final class DeployCreateConstantsContractTest extends TestCase
         foreach ([VIRTUSPHERE_CREATE_ERROR_LAUNCH_UNCONFIRMED, VIRTUSPHERE_CREATE_ERROR_ASYNC_STATE_MISSING, VIRTUSPHERE_CREATE_ERROR_TRANSPORT_LOST, VIRTUSPHERE_CREATE_ERROR_JOB_TIMEOUT, VIRTUSPHERE_CREATE_ERROR_IDENTITY_CONFLICT, VIRTUSPHERE_CREATE_ERROR_IDENTITY_RESULT_INVALID, VIRTUSPHERE_CREATE_ERROR_PROTOCOL_ERROR, VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST] as $code) {
             self::assertNotContains($code, VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES, $code . ' must not auto-retry');
         }
+        // The in-job retry pass consumes this set, and module_failed is the one
+        // code whose async job is proven finished with the module's own failure.
+        // operator_released is the release's verdict after its job ended; the
+        // operator's "run again" re-creates such a unit, never the pass.
+        self::assertSame([VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED], VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES);
     }
 
     public function testTheJidClassRefusesWhatWouldReachAShell(): void
@@ -165,11 +192,13 @@ final class DeployCreateConstantsContractTest extends TestCase
 
     public function testTheStepKeyIsBoundToThePosition(): void
     {
-        self::assertSame('create.vm.1', deploy_create_step_key(1));
-        self::assertSame('create.vm.15', deploy_create_step_key(15));
+        self::assertSame('create.vm.1', deploy_create_step_key(1, 1));
+        self::assertSame('create.vm.15', deploy_create_step_key(15, 1));
+        // A later attempt never shares the directory of the attempt before it.
+        self::assertSame('create.vm.15.attempt2', deploy_create_step_key(15, 2));
 
         $this->expectException(InvalidArgumentException::class);
-        deploy_create_step_key(0);
+        deploy_create_step_key(0, 1);
     }
 
     public function testTheSchemaMirrorsTheConstOrderInBothSources(): void

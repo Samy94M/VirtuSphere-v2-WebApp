@@ -52,22 +52,51 @@ final class CreateFlowWorkerContractTest extends TestCase
     {
         $remoteDir = '/tmp/virtusphere-job-42-Mission';
 
-        self::assertSame($remoteDir . '/create.vm.3', ansible_create_unit_dir($remoteDir, 3));
-        self::assertSame($remoteDir . '/create.vm.3/async', ansible_create_async_dir($remoteDir, 3));
-        self::assertSame($remoteDir . '/create.vm.3/status.json', ansible_create_result_file($remoteDir, 3, 'status'));
+        self::assertSame($remoteDir . '/create.vm.3', ansible_create_unit_dir($remoteDir, 3, 1));
+        self::assertSame($remoteDir . '/create.vm.3/async', ansible_create_async_dir($remoteDir, 3, 1));
+        self::assertSame($remoteDir . '/create.vm.3/status.json', ansible_create_result_file($remoteDir, 3, 1, 'status'));
         // Derived rather than stored, which is what lets a restarted worker find
         // the async state of a unit it did not launch itself.
         self::assertSame(
-            ansible_create_async_dir($remoteDir, 3),
-            ansible_create_async_dir($remoteDir, 3)
+            ansible_create_async_dir($remoteDir, 3, 1),
+            ansible_create_async_dir($remoteDir, 3, 1)
         );
+    }
+
+    /**
+     * In-job retry: the second attempt has its own directory, derived from the
+     * stored attempt. Its job-id search must never find the job id the first
+     * attempt left behind, which a shared directory could hold whenever the
+     * best-effort cleanup failed.
+     */
+    public function testASecondAttemptDerivesItsOwnDirectory(): void
+    {
+        $remoteDir = '/tmp/virtusphere-job-42-Mission';
+
+        self::assertSame($remoteDir . '/create.vm.3.attempt2/async', ansible_create_async_dir($remoteDir, 3, 2));
+        self::assertSame($remoteDir . '/create.vm.3.attempt2/launch.json', ansible_create_result_file($remoteDir, 3, 2, 'launch'));
+        self::assertNotSame(ansible_create_async_dir($remoteDir, 3, 1), ansible_create_async_dir($remoteDir, 3, 2));
+        self::assertSame(2, deploy_create_unit_attempt(['attempt' => '2']));
+        self::assertSame(1, deploy_create_unit_attempt([]));
+        $command = ansible_create_control_command($remoteDir, VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP, 3, 2, [
+            'vs_async_jid' => 'j1.2',
+            'vs_async_dir' => ansible_create_async_dir($remoteDir, 3, 2),
+        ]);
+        self::assertStringContainsString("mkdir -p -m 0700 '" . $remoteDir . "/create.vm.3.attempt2/async'", $command);
+        self::assertStringNotContainsString("'" . $remoteDir . "/create.vm.3/async'", $command);
+    }
+
+    public function testAnAttemptBeyondTheMaximumHasNoDirectory(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        deploy_create_step_key(1, VIRTUSPHERE_CREATE_MAX_ATTEMPTS + 1);
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('unusableRemoteDirectories')]
     public function testAnAsyncDirectoryIsNeverBuiltUnderAnUnusablePath(string $remoteDir): void
     {
         $this->expectException(InvalidArgumentException::class);
-        ansible_create_async_dir($remoteDir, 1);
+        ansible_create_async_dir($remoteDir, 1, 1);
     }
 
     /** @return array<string, array{string}> */
@@ -82,7 +111,7 @@ final class CreateFlowWorkerContractTest extends TestCase
 
     public function testAControlCommandNeverCarriesACleanupTrap(): void
     {
-        $command = ansible_create_control_command('/tmp/vs-job-1', VIRTUSPHERE_CREATE_PLAYBOOK_STATUS, 2, [
+        $command = ansible_create_control_command('/tmp/vs-job-1', VIRTUSPHERE_CREATE_PLAYBOOK_STATUS, 2, 1, [
             'vs_portal_vm_id' => 12,
             'vs_result_file' => '/tmp/vs-job-1/create.vm.2/status.json',
             'vs_async_dir' => '/tmp/vs-job-1/create.vm.2/async',
@@ -110,7 +139,7 @@ final class CreateFlowWorkerContractTest extends TestCase
 
     public function testExtraVarsTravelAsTypedJsonAndAreCheckedInBothDirections(): void
     {
-        $command = ansible_create_control_command('/tmp/vs-job-1', VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH, 1, [
+        $command = ansible_create_control_command('/tmp/vs-job-1', VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH, 1, 1, [
             'vs_portal_vm_id' => 12,
             'vs_result_file' => '/tmp/vs-job-1/create.vm.1/launch.json',
             'vs_async_dir' => '/tmp/vs-job-1/create.vm.1/async',
@@ -129,7 +158,7 @@ final class CreateFlowWorkerContractTest extends TestCase
         self::assertStringContainsString('"vs_expected_existed_before":false', $command);
 
         $this->expectException(InvalidArgumentException::class);
-        ansible_create_control_command('/tmp/vs-job-1', VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE, 1, [
+        ansible_create_control_command('/tmp/vs-job-1', VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE, 1, 1, [
             'vs_portal_vm_id' => 12,
             'vs_result_file' => '/tmp/x.json',
             'vs_async_dir' => '/tmp/vs-job-1/create.vm.1/async',
@@ -145,14 +174,14 @@ final class CreateFlowWorkerContractTest extends TestCase
         foreach ($samples as $playbook => $vars) {
             self::assertStringContainsString(
                 "ansible-playbook '" . $playbook . "'",
-                ansible_create_control_command('/tmp/j', $playbook, 1, $vars)
+                ansible_create_control_command('/tmp/j', $playbook, 1, 1, $vars)
             );
         }
         // The cleanup call writes no result document, so it must not run the
         // emitter over a file nobody created.
         self::assertStringNotContainsString(
             'emit_create_result.py',
-            ansible_create_control_command('/tmp/j', VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP, 1, $samples[VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP])
+            ansible_create_control_command('/tmp/j', VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP, 1, 1, $samples[VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP])
         );
     }
 

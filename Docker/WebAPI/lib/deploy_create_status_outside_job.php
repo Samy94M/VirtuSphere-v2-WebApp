@@ -30,7 +30,7 @@ require_once __DIR__ . '/ssh.php';
  * command and removal together; a sweep leaves a leased row alone, and a failed
  * removal ends the lease so the next contact can take the row (K21-A4).
  *
- * @param array<string,mixed> $unit deploy_create_vm_results row: job_id, position, vm_id, vm_name, async_jid
+ * @param array<string,mixed> $unit deploy_create_vm_results row: job_id, position, attempt, vm_id, vm_name, async_jid
  * @param array{upload?: callable, execute?: callable} $seams upload = ssh_sftp_upload_directory() signature, execute = ssh_execute_capture() signature
  * @return array{marker: ?array<string,mixed>, error: ?string, secret_removed: bool}
  *         secret_removed is true only when the host confirmed that accounts.yml is gone (removed or already absent)
@@ -68,10 +68,11 @@ function deploy_create_status_query_outside_job(mysqli $db, array $unit, string 
         };
         $upload($ansibleCredential, $ansibleSecret, $localDir, $remoteDir);
 
-        $command = ansible_create_control_command($remoteDir, VIRTUSPHERE_CREATE_PLAYBOOK_STATUS, $position, [
+        $attempt = deploy_create_unit_attempt($unit);
+        $command = ansible_create_control_command($remoteDir, VIRTUSPHERE_CREATE_PLAYBOOK_STATUS, $position, $attempt, [
             'vs_portal_vm_id' => $vmId,
-            'vs_result_file' => ansible_create_result_file($remoteDir, $position, 'status'),
-            'vs_async_dir' => ansible_create_async_dir($remoteDir, $position),
+            'vs_result_file' => ansible_create_result_file($remoteDir, $position, $attempt, 'status'),
+            'vs_async_dir' => ansible_create_async_dir($remoteDir, $position, $attempt),
             'vs_async_jid' => $asyncJid,
         ]);
         $capture = $run($ansibleCredential, $ansibleSecret, $command, VIRTUSPHERE_CREATE_CONTROL_IDLE_TIMEOUT_SECONDS);

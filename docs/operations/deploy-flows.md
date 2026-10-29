@@ -258,7 +258,13 @@ Eine Create-Einheit im Zustand `uncertain` sperrt jede Wiederholung der Mission,
 ```mermaid
 flowchart TD
   N["Nächste Einheit: erst eine laufende, sonst die nächste offene nach Position"]
-  N -->|keine mehr| DONE["Zusammenfassung ins Protokoll, zurück zum Worker"]
+  N -->|keine mehr| RP{"Nachlauf: Einheit, deren erster Versuch mit module_failed endete?"}
+  RP -->|nein| DONE["Zusammenfassung ins Protokoll, zurück zum Worker"]
+  RP -->|ja, aber das Budget trägt die Pause nicht| DONE
+  RP -->|ja| RW["RETRY-Zeile je Einheit, Pause VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS"]
+  RW -->|Abbruch angefordert| RX["Abbruch an der Grenze bestätigt, kein zweiter Versuch"]
+  RW --> RQ["Einheit wieder pending als Versuch 2: Code, Detail und Job-ID von Versuch 1 bleiben, Launch-Intent gelöscht, eigenes Verzeichnis create.vm.n.attempt2"]
+  RQ --> AC
   N --> UN{"Einheit uncertain?"}
   UN -->|ja| HOLD["HOLD: gesamte Create-Phase stoppt"]
   UN -->|nein| AC{"Aktion der Einheit?"}
@@ -321,7 +327,7 @@ flowchart TD
   HU --> HOLD
 ```
 
-Trifft ein neuer Auftrag auf eine vorhandene eigene VM, wird sie nur ausgeschaltet angeglichen (DF-E1). Ist sie eingeschaltet, angehalten oder ihr Zustand unbekannt, endet die Einheit nach Prepare als `succeeded` mit `unchanged`, ohne Launch; das Protokoll nennt die nicht angeglichene VM. Launch prüft den Zustand erneut, weil die VM dazwischen eingeschaltet werden kann. Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein gewöhnlicher Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. `uncertain`, `protocol_error`, `ownership_lost`, `job_timeout` und `host_identity_rejected` stoppen die ganze Create-Phase. Eine Hostablehnung vor Prepare, Launch oder `verify_skip` ergibt `failed`: Die gesperrte Verbindung hat nichts ausgeführt. Bei einer bereits gestarteten Einheit oder der Job-ID-Suche nach einem tatsächlich verlorenen Launch bleibt der Ausgang auf ESXi unbekannt; die Hostablehnung ergibt sofort `uncertain`, ohne weitere Statusversuche. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis. Den Vertrauenscheck vor Anmeldung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host).
+Trifft ein neuer Auftrag auf eine vorhandene eigene VM, wird sie nur ausgeschaltet angeglichen (DF-E1). Ist sie eingeschaltet, angehalten oder ihr Zustand unbekannt, endet die Einheit nach Prepare als `succeeded` mit `unchanged`, ohne Launch; das Protokoll nennt die nicht angeglichene VM. Launch prüft den Zustand erneut, weil die VM dazwischen eingeschaltet werden kann. Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein gewöhnlicher Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. Nach der letzten Einheit bekommt jede Einheit, deren erster Versuch mit `module_failed` endete, genau einen zweiten Versuch (`deploy_worker_run_create_retry_pass()`), etwa nach einem kurzen `503 Service Unavailable` von ESXi. Der Nachlauf beginnt nur, wenn keine Einheit mehr `pending`, `prepared`, `running` oder `uncertain` ist, und erst nach `VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS` Sekunden. Abbruch, Besitz und Budget gehen an jeder Grenze vor. Der zweite Versuch läuft über dasselbe Prepare, denselben Launch und dieselben Statusabfragen, in einem eigenen Verzeichnis `create.vm.<n>.attempt2`. Prepare liest nur: Antwortet ESXi weiter nicht, bleibt die Einheit `failed`, und auf dem Host ändert sich nichts. Hat der erste Versuch die VM schon angelegt, meldet die Identitätsprüfung `identity_conflict`, und es entsteht keine zweite VM. Fehler, Detail und Job-ID des ersten Versuchs stehen weiter in der Zeile (`prior_error_code`, `prior_error_detail`, `prior_async_jid`) und im Auftragsprotokoll. `uncertain`, `protocol_error`, `ownership_lost`, `job_timeout` und `host_identity_rejected` stoppen die ganze Create-Phase. Eine Hostablehnung vor Prepare, Launch oder `verify_skip` ergibt `failed`: Die gesperrte Verbindung hat nichts ausgeführt. Bei einer bereits gestarteten Einheit oder der Job-ID-Suche nach einem tatsächlich verlorenen Launch bleibt der Ausgang auf ESXi unbekannt; die Hostablehnung ergibt sofort `uncertain`, ohne weitere Statusversuche. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis. Den Vertrauenscheck vor Anmeldung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host).
 
 ## Diagrammausnahmen für geschlossene Werte
 

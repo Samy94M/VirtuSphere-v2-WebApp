@@ -108,9 +108,10 @@ function repo_deploy_create_materialize(mysqli $db, int $jobId, array $selection
 function repo_deploy_create_results(mysqli $db, int $jobId, bool $lock = false): array
 {
     $stmt = $db->prepare(
-        'SELECT id, job_id, vm_id, vm_name, position, total, action, status, outcome, changed, existed_before,'
+        'SELECT id, job_id, vm_id, vm_name, position, total, attempt, action, status, outcome, changed, existed_before,'
         . ' precheck_moid, precheck_instance_uuid, replaced_instance_uuid, async_jid, remote_execution_id, async_deadline_at, vm_moid,'
-        . ' vm_instance_uuid, error_code, error_detail, resumed_from_result_id, started_at, finished_at, updated_at'
+        . ' vm_instance_uuid, error_code, error_detail, prior_error_code, prior_error_detail, prior_async_jid,'
+        . ' resumed_from_result_id, started_at, finished_at, updated_at'
         . ' FROM deploy_create_vm_results WHERE job_id = ? ORDER BY position'
         . ($lock ? ' FOR UPDATE' : '')
     );

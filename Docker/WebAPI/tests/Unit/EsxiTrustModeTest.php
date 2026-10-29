@@ -263,7 +263,7 @@ final class EsxiTrustModeTest extends TestCase
             require_once dirname(__DIR__, 2) . '/lib/ansible_command_create.php';
             foreach ([
                 ansible_remote_steps('/tmp/deploy', ['mode' => 'export'])[0]['command'],
-                ansible_create_control_command('/tmp/deploy', VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE, 1, [
+                ansible_create_control_command('/tmp/deploy', VIRTUSPHERE_CREATE_PLAYBOOK_PREPARE, 1, 1, [
                     'vs_portal_vm_id' => 1,
                     'vs_result_file' => '/tmp/deploy/create.vm.1/prepare.json',
                 ]),

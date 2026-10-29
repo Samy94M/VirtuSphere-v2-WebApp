@@ -135,14 +135,27 @@ const VIRTUSPHERE_CREATE_ERROR_CODES = [
     VIRTUSPHERE_CREATE_ERROR_VM_NOT_POWERED_OFF,
 ];
 
-// Which codes an automatic retry may re-run without a human deciding first.
-// Everything outside this set names a state where re-running could create a
-// second VM or overwrite evidence: the outcome has to be established, by a
-// resumed poll or by an operator, before anything starts again.
+// Which codes the in-job retry pass may re-run without a human deciding first
+// (deploy_worker_run_create_retry_pass()). Everything outside this set names a
+// state where re-running could create a second VM or overwrite evidence: the
+// outcome has to be established, by a resumed poll or by an operator, before
+// anything starts again. module_failed is the one code whose async job is
+// proven finished and whose failure came from the module itself, as when ESXi
+// answered 503 for a moment (prod job 1527). operator_released is NOT here: a
+// release happens after its job ended, and the operator's "run again" is the
+// path that re-creates such a unit, never an automatic one.
 const VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES = [
     VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED,
-    VIRTUSPHERE_CREATE_ERROR_OPERATOR_RELEASED,
 ];
+
+// In-job retry pass: after the last unit, every unit that ended with an
+// auto-retryable code gets at most one more attempt, after one pause. The
+// second attempt walks the normal Prepare/Launch/Status path in its own
+// derived directory (deploy_create_step_key()); its read-only Prepare is the
+// availability check, and the identity matrix refuses a VM the first attempt
+// left behind. Relations are pinned by DeployCreateConstantsContractTest.
+const VIRTUSPHERE_CREATE_MAX_ATTEMPTS = 2;
+const VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS = 60;
 
 // Timing. Every value is seconds, and every relation between them is pinned by
 // DeployCreateConstantsContractTest rather than by comment: a poll interval
@@ -259,12 +272,35 @@ function deploy_create_jid_is_valid(string $jid): bool
         && preg_match(VIRTUSPHERE_CREATE_JID_PATTERN, $jid) === 1;
 }
 
-/** The remote handle's step key for the unit at this one-based position. */
-function deploy_create_step_key(int $position): string
+/**
+ * The remote handle's step key for one attempt of the unit at this one-based
+ * position. The first attempt keeps the original `create.vm.<position>`, so a
+ * unit started before the in-job retry resumes in the directory it launched
+ * in. A later attempt gets its own `.attempt<n>` key: its async directory
+ * must never hold the job id of the attempt before it, or a job-id search
+ * after a lost launch could find the old, finished job and report it while
+ * the new one is still running on ESXi.
+ */
+function deploy_create_step_key(int $position, int $attempt): string
 {
     if ($position < 1) {
         throw new InvalidArgumentException('Create position is one-based.');
     }
+    if ($attempt < 1 || $attempt > VIRTUSPHERE_CREATE_MAX_ATTEMPTS) {
+        throw new InvalidArgumentException('Create attempt is outside 1..' . VIRTUSPHERE_CREATE_MAX_ATTEMPTS . '.');
+    }
 
-    return 'create.vm.' . $position;
+    return 'create.vm.' . $position . ($attempt === 1 ? '' : '.attempt' . $attempt);
+}
+
+/**
+ * The stored attempt of a unit row. A row read before migration 0066 has no
+ * column and is its first attempt by definition; a stored value is taken as
+ * it is and checked by the step key.
+ *
+ * @param array<string, mixed> $unit
+ */
+function deploy_create_unit_attempt(array $unit): int
+{
+    return isset($unit['attempt']) ? (int) $unit['attempt'] : 1;
 }

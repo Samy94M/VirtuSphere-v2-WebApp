@@ -48,6 +48,7 @@ function deploy_worker_create_control_call(
         (string) $context['remote_dir'],
         $playbook,
         (int) $unit['position'],
+        deploy_create_unit_attempt($unit),
         $extraVars,
         !empty($context['verbose'])
     );
@@ -129,7 +130,9 @@ function deploy_worker_create_control_call(
  */
 function deploy_worker_create_discover_jid(DeployWorkerDbChannel $channel, array $context, array $unit): array
 {
-    $asyncDir = ansible_create_async_dir((string) $context['remote_dir'], (int) $unit['position']);
+    // The directory of THIS attempt only: a second attempt never sees the job
+    // id its first attempt left there.
+    $asyncDir = ansible_create_async_dir((string) $context['remote_dir'], (int) $unit['position'], deploy_create_unit_attempt($unit));
     $deadline = time() + VIRTUSPHERE_CREATE_JID_DISCOVERY_TIMEOUT_SECONDS;
     $command = 'ls -1 -- ' . ansible_sh_quote($asyncDir) . ' 2>/dev/null | head -n 8';
 
@@ -201,9 +204,9 @@ function deploy_worker_create_cleanup_async(DeployWorkerDbChannel $channel, arra
         ssh_execute_capture(
             (array) $context['credential'],
             (string) $context['secret'],
-            ansible_create_control_command($remoteDir, VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP, (int) $unit['position'], [
+            ansible_create_control_command($remoteDir, VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP, (int) $unit['position'], deploy_create_unit_attempt($unit), [
                 'vs_async_jid' => $jid,
-                'vs_async_dir' => ansible_create_async_dir($remoteDir, (int) $unit['position']),
+                'vs_async_dir' => ansible_create_async_dir($remoteDir, (int) $unit['position'], deploy_create_unit_attempt($unit)),
             ], false),
             VIRTUSPHERE_CREATE_CONTROL_IDLE_TIMEOUT_SECONDS
         );

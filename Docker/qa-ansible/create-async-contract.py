@@ -442,6 +442,15 @@ PREPARE_CASES = [
      {"event": "rejected", "error_code": "identity_conflict"}),
     ("prepare-uuid-regex-escaped", "uuid.a", [vm("other-vm", "vm-1", "uuidXa")],
      {"event": "prepared", "existed_before": False, "replaced_instance_uuid": "uuid.a"}),
+    # In-job retry (prod job 1527): the first attempt's vmware_guest failed
+    # after it had already registered the VM. The second attempt's Prepare
+    # meets that VM under the portal's name, while the portal stored no UUID
+    # (a first create) or the UUID of an instance that is gone (a replacement).
+    # Either way it must refuse, so no second VM is built next to the first.
+    ("retry-leftover-unbound", "", [vm("fixture-vm", "vm-77", "uuid-left")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("retry-leftover-replacement", "uuid-gone", [vm("fixture-vm", "vm-77", "uuid-left")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
 ]
 
 

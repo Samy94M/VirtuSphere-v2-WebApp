@@ -57,6 +57,7 @@ function deploy_worker_create_poll_unit(
     }
     $remoteDir = (string) $context['remote_dir'];
     $position = (int) $unit['position'];
+    $attempt = deploy_create_unit_attempt($unit);
     $backoff = VIRTUSPHERE_CREATE_TRANSPORT_BACKOFF_MIN_SECONDS;
     $cancelRequested = false;
 
@@ -104,8 +105,8 @@ function deploy_worker_create_poll_unit(
             $unit,
             [
                 'vs_portal_vm_id' => (int) $unit['vm_id'],
-                'vs_result_file' => ansible_create_result_file($remoteDir, $position, 'status'),
-                'vs_async_dir' => ansible_create_async_dir($remoteDir, $position),
+                'vs_result_file' => ansible_create_result_file($remoteDir, $position, $attempt, 'status'),
+                'vs_async_dir' => ansible_create_async_dir($remoteDir, $position, $attempt),
                 'vs_async_jid' => $jid,
             ],
             $jid

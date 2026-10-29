@@ -144,7 +144,7 @@ function deploy_worker_create_verify_skip(
         $unit,
         [
             'vs_portal_vm_id' => (int) $unit['vm_id'],
-            'vs_result_file' => ansible_create_result_file((string) $context['remote_dir'], (int) $unit['position'], 'verify'),
+            'vs_result_file' => ansible_create_result_file((string) $context['remote_dir'], (int) $unit['position'], deploy_create_unit_attempt($unit), 'verify'),
         ]
     );
     $marker = $result['marker'];

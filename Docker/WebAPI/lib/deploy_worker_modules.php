@@ -28,6 +28,7 @@ const VIRTUSPHERE_DEPLOY_WORKER_MODULES = [
     'lib/deploy_worker_create_launch.php',
     'lib/deploy_worker_create_poll.php',
     'lib/deploy_worker_create_remote.php',
+    'lib/deploy_worker_create_retry.php',
     'lib/deploy_worker_network_preflight.php',
     'lib/deploy_worker_host_preflight.php',
     'lib/deploy_worker_esxi_preflight.php',

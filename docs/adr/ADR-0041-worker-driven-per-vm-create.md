@@ -315,3 +315,63 @@ ADR-0046. The sweep after a passed full test calls the same owner
 Verification: `K21RemoteSecretCleanupTest`, `AnsibleRemoteSecretCommandTest`,
 `DeployRemoteSecretStateTest`, `RemoteSecretUploadContractTest`,
 `DeployTerminalCleanupTest`, gate `ansible-vars-files-lifetime`.
+
+## Amendment (2026-10-29): one more attempt for a module failure inside the job
+
+Prod job 1527 (mission ATeP06, full chain, 15 VMs): `vmware_guest` for one VM
+broke off with `503 Service Unavailable` from the ESXi host, the only failure of
+the run. The next unit carried on, the job ended `partial_result`, and
+power-cycle, export and start never ran. The only help was "run again" by hand.
+User decision of 29.10.2026: inside the job, a unit that ended `module_failed`
+gets at most one more attempt.
+
+- **After the last unit, once.** `deploy_worker_run_create_retry_pass()` runs
+  when the unit loop ended without a stop and no unit is `pending`, `prepared`,
+  `running` or `uncertain`. Each unit that ended `module_failed` on its first
+  attempt (`VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES`, now only that code)
+  is re-opened after one pause of `VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS` (60)
+  and driven through the normal Prepare, Launch and Status calls, one unit after
+  the other. `VIRTUSPHERE_CREATE_MAX_ATTEMPTS` is 2. `operator_released` is not
+  in the set: a release happens after its job ended, and the operator's "run
+  again" re-creates such a unit.
+- **Prepare is the availability check.** It only reads. A host that still does
+  not answer leaves the unit `failed` (`transport_lost`, or `protocol_error`,
+  which stops the section as before) with nothing changed on ESXi. No second
+  probe path exists.
+- **No second VM.** If the first attempt registered the VM before it failed,
+  the identity matrix of the second Prepare meets a namesake that does not
+  carry the stored UUID and answers `identity_conflict`; nothing is launched.
+  The gate `ansible-create-async` holds both shapes (`retry-leftover-unbound`,
+  `retry-leftover-replacement`), and `CreateInJobRetryTest` holds that the
+  driver stops at that Prepare.
+- **Cancel, claim and budget come first.** The pass checks the claim and
+  honours a cancel at every boundary through the same check as the unit loop,
+  so "no further VM starts" holds for a second attempt. It starts no pause the
+  create budget cannot hold and no attempt after the budget is spent.
+- **Same row, own directory.** Migration 0066 adds `attempt` and
+  `prior_error_code`, `prior_error_detail`, `prior_async_jid`; a CHECK keeps a
+  later attempt and its evidence together. `deploy_worker_create_requeue_unit()`
+  is the one writer of the in-job edge `failed -> pending`, which stays out of
+  the closed CAS table. It runs under Mission -> Job -> Runtime -> create rows
+  -> journal, with the claim and fence, for a job still `running`, and only for
+  a candidate among all locked rows of the job. The step key, and with it the
+  async directory, derives from the stored attempt: `create.vm.<p>` for the
+  first attempt (unchanged), `create.vm.<p>.attempt2` for the second. A shared
+  directory could still hold the first job id after a failed best-effort
+  cleanup, and a job-id search after a lost launch would then report the old,
+  finished job while the new one was running.
+- **The launch intent belongs to an attempt.** The re-open clears
+  `create_launch_intent` in the same transaction. Its async job has a proven
+  terminal failure, and without the reset the second launch would only search
+  for that job and never start (A49, K15). The first job id stays as
+  `prior_async_jid`, and the K15 convergence treats a VM whose later attempt did
+  not succeed as touched (`fail`), also when that attempt never launched.
+
+The job log carries the evidence: the `FAIL module_failed` line and the module's
+Ansible output of the first attempt, then one `[n/total] RETRY create <vm>`
+line per unit, then the ordinary lines of the second attempt. The portal shows
+no new text; the per-VM card shows the outcome of the last attempt.
+
+Verification: `CreateInJobRetryTest`, `DeployCreateInJobRetryTest`,
+`CreateFlowWorkerContractTest`, `DeployCreateConstantsContractTest`, gate
+`ansible-create-async`.

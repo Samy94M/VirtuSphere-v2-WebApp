@@ -31,20 +31,22 @@ require_once __DIR__ . '/errors.php';
  * The per-unit directory below the job's remote work directory.
  *
  * Named by the same step key the generic remote handle uses for this unit
- * (`create.vm.<position>`), so a later stage that binds a handle finds the
- * shape it expects rather than a second naming scheme.
+ * (`create.vm.<position>`, a later attempt `.attempt<n>`), so a later stage
+ * that binds a handle finds the shape it expects rather than a second naming
+ * scheme. The attempt is a required argument on purpose: a caller that forgot
+ * it would poll or search the directory of the previous attempt.
  */
-function ansible_create_unit_dir(string $remoteDir, int $position): string
+function ansible_create_unit_dir(string $remoteDir, int $position, int $attempt): string
 {
     ansible_create_assert_remote_dir($remoteDir);
 
-    return rtrim($remoteDir, '/') . '/' . deploy_create_step_key($position);
+    return rtrim($remoteDir, '/') . '/' . deploy_create_step_key($position, $attempt);
 }
 
-/** The async state directory of one unit; the fixed subfolder of its unit dir. */
-function ansible_create_async_dir(string $remoteDir, int $position): string
+/** The async state directory of one attempt; the fixed subfolder of its unit dir. */
+function ansible_create_async_dir(string $remoteDir, int $position, int $attempt): string
 {
-    return ansible_create_unit_dir($remoteDir, $position) . '/' . VIRTUSPHERE_CREATE_ASYNC_DIR_NAME;
+    return ansible_create_unit_dir($remoteDir, $position, $attempt) . '/' . VIRTUSPHERE_CREATE_ASYNC_DIR_NAME;
 }
 
 /**
@@ -52,13 +54,13 @@ function ansible_create_async_dir(string $remoteDir, int $position): string
  * stale document from the previous call must never be read as this call's
  * answer; the command removes it before the playbook runs as well.
  */
-function ansible_create_result_file(string $remoteDir, int $position, string $stage): string
+function ansible_create_result_file(string $remoteDir, int $position, int $attempt, string $stage): string
 {
     if (preg_match('/^[a-z]{1,16}$/', $stage) !== 1) {
         throw new InvalidArgumentException('Create control stage name is malformed.');
     }
 
-    return ansible_create_unit_dir($remoteDir, $position) . '/' . $stage . '.json';
+    return ansible_create_unit_dir($remoteDir, $position, $attempt) . '/' . $stage . '.json';
 }
 
 /**
@@ -104,6 +106,7 @@ function ansible_create_control_command(
     string $remoteDir,
     string $playbook,
     int $position,
+    int $attempt,
     array $extraVars,
     bool $verbose = false
 ): string {
@@ -111,8 +114,8 @@ function ansible_create_control_command(
         throw new InvalidArgumentException('Unknown create control playbook: ' . $playbook);
     }
     ansible_create_assert_extra_vars($playbook, $extraVars);
-    $unitDir = ansible_create_unit_dir($remoteDir, $position);
-    $asyncDir = ansible_create_async_dir($remoteDir, $position);
+    $unitDir = ansible_create_unit_dir($remoteDir, $position, $attempt);
+    $asyncDir = ansible_create_async_dir($remoteDir, $position, $attempt);
 
     $commands = [
         'umask 077',

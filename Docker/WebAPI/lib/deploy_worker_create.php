@@ -13,6 +13,7 @@ require_once __DIR__ . '/repo/deploy_create_identity.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_vm_state.php';
 require_once __DIR__ . '/deploy_worker_create_unit.php';
+require_once __DIR__ . '/deploy_worker_create_retry.php';
 
 /**
  * The sequential per-VM create section of a mission deploy (Etappe 14B,
@@ -101,6 +102,13 @@ function deploy_worker_run_create_section(
             $stopReason = $verdict['reason'];
             break;
         }
+    }
+    // After the last unit, and only when nothing stopped the section: one more
+    // attempt for each unit the create module itself failed (prod job 1527).
+    // The pass reads the rows again and starts nothing while a unit is pending
+    // or in flight.
+    if ($stopReason === null) {
+        $stopReason = deploy_worker_run_create_retry_pass($channel, $job, $fence, $context);
     }
 
     $summary = repo_deploy_create_summary($channel->connection(), $jobId);
@@ -208,6 +216,8 @@ function deploy_worker_create_started_at(mysqli $db, int $jobId): ?string
  * it as one would refuse to start a job that has not begun. It counts as the
  * full budget, because the write that would have set it is the very next thing
  * the caller does.
+ *
+ * @phpstan-impure it reads the clock; two calls around a pause differ.
  */
 function deploy_worker_create_remaining_seconds(?string $createStartedAt, ?int $now = null): int
 {

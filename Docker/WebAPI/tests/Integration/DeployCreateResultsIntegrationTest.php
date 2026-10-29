@@ -390,7 +390,7 @@ final class DeployCreateResultsIntegrationTest extends TestCase
             . ' instance_id, generation_id, controller_state, effect_state, reconciliation_state, cleanup_state)'
             . ' VALUES (?, 1, ?, 1, ?, ?, ?, UNHEX(?), UNHEX(?), ?, ?, ?, ?)'
         );
-        $stepKey = deploy_create_step_key($position);
+        $stepKey = deploy_create_step_key($position, 1);
         $token = bin2hex(random_bytes(16));
         $unit = 'vs-' . $token;
         $dir = '/tmp/vs-' . $token;

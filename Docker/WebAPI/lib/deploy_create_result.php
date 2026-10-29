@@ -18,7 +18,10 @@ require_once __DIR__ . '/deploy_create_constants.php';
 
 /**
  * The closed transition table (plan section 7.1). A status not listed as a key
- * is terminal inside its job: succeeded, failed and skipped never move again.
+ * is terminal for this CAS: succeeded, failed and skipped never move again
+ * through it. The one exception is not an edge here on purpose: the in-job
+ * retry re-opens a `module_failed` unit as `pending` on its next attempt, and
+ * only its own writer, deploy_worker_create_requeue_unit(), may do that.
  *
  * Two entries are easy to misread and are deliberate. `running -> running` is
  * the poll refresh: it touches updated_at so the job does not look abandoned
