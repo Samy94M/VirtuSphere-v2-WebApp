@@ -221,12 +221,10 @@ test('stored create outcomes and their failure classes stay distinguishable whil
   await expect(card.locator('[data-create-finding-list] li')).toHaveCount(0);
   const outcome = page.locator('[data-deploy-create-outcome] li');
   await expect(outcome).toHaveCount(2);
-  // A module failure quotes its stored text. This row predates the recorded
-  // origin (migration 0067), so it is labelled as stored text, never as the
-  // message of the host (B8); every other class has no quoted text at all.
-  await expect(outcome.nth(0).locator('code.log-line')).toHaveText('The create module reported a failure.');
-  await expect(outcome.nth(0).locator('.muted')).toHaveText('Stored text:');
-  await expect(outcome.nth(1).locator('code.log-line')).toHaveCount(0);
+  // Only the readable sentence: raw stored text reads as another problem on
+  // the first look (user decision 29.10.2026) and stays in the details.
+  await expect(outcome.locator('code')).toHaveCount(0);
+  await expect(outcome.nth(0)).not.toContainText('The create module reported a failure.');
   expect(await outcome.nth(0).textContent()).not.toBe(await outcome.nth(1).textContent());
   // Each line leads to that unit's own FAIL or HOLD lines.
   await expect(outcome.nth(0).locator('a')).toHaveAttribute('href', /q=%5B4%2F5%5D\+FAIL\+create/);
@@ -237,6 +235,10 @@ test('stored create outcomes and their failure classes stay distinguishable whil
   await technical.locator('summary').click();
   await expect(technical).toContainText('module_failed');
   await expect(technical).toContainText('async_state_missing');
+  // This row predates the recorded origin (migration 0067), so its text is
+  // labelled as stored text, never as the message of the host (B8).
+  const stored = technical.locator('p', { hasText: 'The create module reported a failure.' });
+  await expect(stored.locator('.muted')).toHaveText('Stored text:');
   await expect(page.locator('[data-deploy-retry-blocked]')).toBeVisible();
 });
 

@@ -46,8 +46,10 @@ function deploy_log_outcome_html(mysqli $db, array $job, ?array $retryEvaluation
 }
 
 /**
- * One line per affected VM directly under "Result": the VM, the closed cause,
- * the host's message where there is one, and the place in the log. Below the
+ * One line per affected VM directly under "Result": the VM, the closed cause
+ * and the place in the log. The host's raw words stay in the technical
+ * details: "503 Service Unavailable" on the first look reads as a different
+ * problem than the one the sentence names (user decision 29.10.2026). Below the
  * list one sentence says what "Run again" does, and only while it is offered.
  *
  * @param list<array<string,mixed>> $findings
@@ -61,7 +63,6 @@ function deploy_log_create_outcome_html(int $jobId, array $findings, bool $retry
     foreach ($findings as $finding) {
         $html .= '<li data-create-outcome-position="' . h((string) (int) $finding['position']) . '">'
             . h(deploy_create_progress_finding_text($finding))
-            . deploy_create_progress_host_html($finding)
             . '<br><a href="' . h(deploy_log_create_unit_url($jobId, $finding)) . '">' . h(__t('deploy_log.show_in_log')) . '</a>'
             . '</li>';
     }
@@ -75,8 +76,9 @@ function deploy_log_create_outcome_html(int $jobId, array $findings, bool $retry
 
 /**
  * Everything technical in one collapsed block, open to every reader (E2): the
- * stored code and English detail of the job's end, the stored code and text of
- * each affected VM with its first attempt, and the correlation id. These texts
+ * stored code and English detail of the job's end, per affected VM its code,
+ * the host's or Ansible's own words under the label of their recorded origin,
+ * its stored text and its first attempt, and the correlation id. These texts
  * stay English as stored (docs/ai/reference/i18n.md R13); the visible meaning
  * is in the blocks above. Its own panel, so it exists for a running job too.
  *
@@ -106,8 +108,19 @@ function deploy_log_technical_details_html(array $job, array $findings, bool $ca
     }
     foreach ($findings as $finding) {
         $label = __t('deploy_log.technical_vm', ['name' => (string) $finding['vm_name'], 'position' => (int) $finding['position']]);
-        $html .= $row($label, $code((string) $finding['error_code'])
-            . ((string) $finding['detail'] !== '' ? ' ' . $text((string) $finding['detail']) : ''));
+        $html .= $row($label, $code((string) $finding['error_code']));
+        // The host's or Ansible's own words under the label of their recorded
+        // origin (B8), here and nowhere else: on the first look they read as
+        // a different problem than the one the sentence above names (user
+        // decision 29.10.2026). The stored text follows when it says more.
+        $hostLabel = deploy_create_progress_host_label($finding);
+        $hostDetail = is_string($finding['host_detail'] ?? null) ? (string) $finding['host_detail'] : null;
+        if ($hostLabel !== null) {
+            $html .= $row($hostLabel, $hostDetail !== null ? $text($hostDetail) : '');
+        }
+        if ((string) $finding['detail'] !== '' && (string) $finding['detail'] !== $hostDetail) {
+            $html .= $row(__t('deploy_log.stored_detail'), $text((string) $finding['detail']));
+        }
         if ((string) $finding['first_error_code'] !== '') {
             $html .= $row(__t('deploy_log.technical_first_attempt'), $code((string) $finding['first_error_code'])
                 . ((string) $finding['first_error_detail'] !== '' ? ' ' . $text((string) $finding['first_error_detail']) : ''));

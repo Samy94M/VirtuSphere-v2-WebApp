@@ -226,12 +226,11 @@ function deploy_create_progress_payload_from_view(?array $view, int $missionId =
         ],
         // Empty once the job has ended: the result block above the card then
         // names every affected VM with its cause and action (E1), and the
-        // same list twice on one page is noise.
+        // same list twice on one page is noise. Only the readable sentence:
+        // codes and the host's raw text live in the technical details (user
+        // decision 29.10.2026, "only when expanded").
         'findings' => $terminal ? [] : array_map(
             static fn(array $finding): array => [
-                'error_code' => (string) $finding['error_code'],
-                'host_detail' => $finding['host_detail'] ?? null,
-                'host_detail_label' => deploy_create_progress_host_label($finding),
                 'text' => deploy_create_progress_finding_text($finding),
             ],
             $view['findings']
@@ -353,10 +352,6 @@ function deploy_log_render_create_progress(mysqli $db, array $job, array $user):
                 <?php foreach ($findings as $finding) { ?>
                     <li>
                         <span><?php echo h(deploy_create_progress_finding_text($finding)); ?></span>
-                        <?php if ((string) $finding['error_code'] !== '') { ?>
-                            <code><?php echo h((string) $finding['error_code']); ?></code>
-                        <?php } ?>
-                        <?php echo deploy_create_progress_host_html($finding); ?>
                     </li>
                 <?php } ?>
             </ul>

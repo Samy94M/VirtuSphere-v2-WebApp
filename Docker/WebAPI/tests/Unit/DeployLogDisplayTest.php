@@ -76,7 +76,9 @@ final class DeployLogDisplayTest extends TestCase
         $fallback = $byOrigin(0);
         self::assertSame(__t('deploy_log.host_no_message'), deploy_create_progress_host_label($fallback));
         self::assertNull($fallback['host_detail'], 'a fallback is never shown as the host message');
-        self::assertStringNotContainsString('<code', deploy_create_progress_host_html($fallback));
+        $technical = deploy_log_technical_details_html([], [$fallback], false);
+        self::assertStringContainsString(h(__t('deploy_log.host_no_message')) . '</span> </p>', $technical, 'the fallback label stands alone');
+        self::assertStringContainsString(h(__t('deploy_log.stored_detail')), $technical, 'the stored fallback text stays readable as stored text');
 
         $legacy = $byOrigin(null);
         self::assertSame(__t('deploy_log.stored_detail'), deploy_create_progress_host_label($legacy));
@@ -97,7 +99,10 @@ final class DeployLogDisplayTest extends TestCase
 
         $bare = deploy_create_progress_finding(['error_detail' => 'The marker describes another VM or another async job. (control call exit code 0)'] + $row);
         self::assertNull(deploy_create_progress_host_label($bare), 'without a printed cause there is no line to quote');
-        self::assertSame('', deploy_create_progress_host_html($bare));
+        self::assertStringNotContainsString(h(__t('deploy_log.ansible_cause')), deploy_log_technical_details_html([], [$bare], false));
+        $technical = deploy_log_technical_details_html([], [$finding], false);
+        self::assertStringContainsString(h(__t('deploy_log.ansible_cause')) . '</span> <code class="log-line">TASK [Read the VM]', $technical);
+        self::assertStringContainsString(h(__t('deploy_log.stored_detail')) . '</span> <code class="log-line">The control call ended', $technical);
     }
 
     public function testTheResultBlockNamesTheVmItsCauseAndItsPlaceInTheLog(): void
@@ -107,7 +112,10 @@ final class DeployLogDisplayTest extends TestCase
         $html = deploy_log_create_outcome_html(1527, $view['findings'], true);
 
         self::assertStringContainsString(h(deploy_create_progress_finding_text($view['findings'][0])), $html);
-        self::assertStringContainsString('503 Service Unavailable', $html);
+        // The raw words of the host sit only in the technical details (user
+        // decision 29.10.2026): on the first look they read as another problem.
+        self::assertStringNotContainsString('503 Service Unavailable', $html);
+        self::assertStringNotContainsString(h(__t('deploy.create_progress_host_detail')), $html);
         self::assertStringContainsString(h(deploy_log_filter_url(1527, [
             'q' => '[13/15] FAIL create', 'source' => VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'phase' => '', 'errors' => false, 'active' => true,
         ])), $html);
@@ -146,6 +154,8 @@ final class DeployLogDisplayTest extends TestCase
 
         self::assertStringStartsWith('<section class="panel"><details class="technical-details" data-deploy-technical>', $html);
         self::assertStringNotContainsString(' open', $html, 'collapsed for every reader');
+        self::assertStringContainsString(h(__t('deploy.create_progress_host_detail')) . '</span> <code class="log-line">503 Service Unavailable</code>', $html);
+        self::assertSame(1, substr_count($html, '>503 Service Unavailable<'), 'the host text once, not again as stored text');
         foreach (['1d9bb5277aee27aa', 'partial_result', 'The per-VM create section', 'module_failed', 'Connection reset by peer'] as $needle) {
             self::assertStringContainsString($needle, $html);
         }

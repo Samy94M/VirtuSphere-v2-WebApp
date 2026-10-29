@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/deploy_create_progress.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_log_outcome.php';
 
 /**
  * The per-VM progress card (Etappe 14B, Teiletappe G).
@@ -212,10 +213,11 @@ final class DeployCreateProgressTest extends TestCase
     /**
      * 15.10.2026: two units failed with module_failed, and the card said only
      * "the remote VM module reported a failure" while ESXi had said exactly
-     * what was wrong. A module failure shows the host's stored words next to
-     * the label; every other class keeps its closed sentence alone.
+     * what was wrong. A module failure keeps the host's stored words for the
+     * technical details; every other class has none. The card and its live
+     * payload carry only the readable sentence (user decision 29.10.2026).
      */
-    public function testAModuleFailureShowsTheHostMessageAndNoOtherClassDoes(): void
+    public function testAModuleFailureKeepsTheHostMessageOnlyForTheTechnicalDetails(): void
     {
         $rows = $this->rows([
             [VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, ''],
@@ -235,9 +237,12 @@ final class DeployCreateProgressTest extends TestCase
 
         $payload = deploy_create_progress_payload_from_view($view);
         self::assertNotNull($payload);
-        self::assertSame($view['findings'][0]['host_detail'], $payload['findings'][0]['host_detail']);
-        self::assertNull($payload['findings'][1]['host_detail']);
-        self::assertNotSame('deploy.create_progress_host_detail', $payload['findings'][0]['host_detail_label']);
+        self::assertSame([['text'], ['text']], array_map('array_keys', $payload['findings']), 'no code, no raw host text in the card');
+        self::assertStringNotContainsString('not supported', json_encode($payload, JSON_THROW_ON_ERROR));
+        $technical = deploy_log_technical_details_html(['status' => VIRTUSPHERE_DEPLOY_STATUS_RUNNING], $view['findings'], false);
+        // A row from before migration 0067 has no recorded origin: "stored text".
+        self::assertStringContainsString(h(__t('deploy_log.stored_detail')), $technical);
+        self::assertStringContainsString('The operation is not supported on the object.', $technical);
 
         self::assertNull(deploy_create_progress_host_detail(VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED, '   '));
         self::assertSame(512, strlen((string) deploy_create_progress_host_detail(VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED, str_repeat('x', 2000))));

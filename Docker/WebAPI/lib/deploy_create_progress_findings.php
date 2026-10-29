@@ -128,8 +128,9 @@ function deploy_create_progress_host_label(array $finding): ?string
  * the call, and its message ("The operation is not supported on the object",
  * "503 Service Unavailable") is the only thing that tells the operator what to
  * change; a protocol_error keeps the Ansible failure line its control call
- * printed before it broke off (K2). It stays a quoted technical detail next to
- * the label, never the explanation itself. Every other class has a closed,
+ * printed before it broke off (K2). It is shown only in the collapsed technical
+ * details (deploy_log_technical_details_html), next to its label, never as the
+ * explanation itself (user decision 29.10.2026). Every other class has a closed,
  * portal-made sentence and no host message. The column is redacted at write time (FC2-08) and
  * bounded here.
  */
@@ -162,26 +163,6 @@ function deploy_create_progress_control_cause(string $detail): ?string
     $cause = trim(substr($detail, $at + strlen(VIRTUSPHERE_CREATE_CONTROL_CAUSE_PREFIX)));
 
     return $cause === '' ? null : $cause;
-}
-
-/**
- * The host message line of one finding as HTML, shared by the progress card
- * and the result block so the two cannot word it differently.
- *
- * @param array<string,mixed> $finding
- */
-function deploy_create_progress_host_html(array $finding): string
-{
-    $label = deploy_create_progress_host_label($finding);
-    if ($label === null) {
-        return '';
-    }
-    $detail = $finding['host_detail'] ?? null;
-    if (!is_string($detail)) {
-        return '<br><span class="muted">' . h($label) . '</span>';
-    }
-
-    return '<br><span class="muted">' . h($label) . '</span> <code class="log-line">' . h($detail) . '</code>';
 }
 
 /**

@@ -258,30 +258,8 @@
                 var text = document.createElement('span');
                 text.textContent = finding.text;
                 item.appendChild(text);
-                if (typeof finding.error_code === 'string' && finding.error_code !== '') {
-                    item.appendChild(document.createTextNode(' '));
-                    var code = document.createElement('code');
-                    code.textContent = finding.error_code;
-                    item.appendChild(code);
-                }
-                // The host's own message (module failures only); its label
-                // arrives translated with the payload, never built here. A
-                // label without a message is the sentence that the host gave
-                // none (B8), which stands on its own.
-                if (typeof finding.host_detail_label === 'string' && finding.host_detail_label !== '') {
-                    item.appendChild(document.createElement('br'));
-                    var detailLabel = document.createElement('span');
-                    detailLabel.className = 'muted';
-                    detailLabel.textContent = finding.host_detail_label;
-                    item.appendChild(detailLabel);
-                    if (typeof finding.host_detail === 'string' && finding.host_detail !== '') {
-                        item.appendChild(document.createTextNode(' '));
-                        var detail = document.createElement('code');
-                        detail.className = 'log-line';
-                        detail.textContent = finding.host_detail;
-                        item.appendChild(detail);
-                    }
-                }
+                // Only the readable sentence; code and raw host text sit in the
+                // technical details, which arrive with terminal_html.
                 findingsList.appendChild(item);
             });
             findingsContainer.hidden = findings.length === 0;
