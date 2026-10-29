@@ -1,0 +1,137 @@
+---
+# Einschalten einer VM im Power-Cycle, nie blind wiederholt (K4a, Entscheidung W2).
+#
+# Eingebunden aus powercycle_vm_tasks.yml fuer genau eine VM, die beim
+# Ausgangszustand nachweislich poweredOff war.
+#
+# Ein fehlgeschlagenes oder unklares Einschalten (etwa HTTP 503) kann die VM
+# trotzdem eingeschaltet haben: dann ging nur die Antwort verloren. Ein
+# zweites Einschalten meldete `changed: false`, und das Aufraeumen faende die
+# VM nie. Deshalb liest der Lauf nach jedem Fehlschlag den Zustand:
+#   - an:  diese VM war anfangs aus, also hat dieser Lauf sie bewegt. Sie
+#          zaehlt als eigener Start und kommt in die Ausschaltliste.
+#   - aus: noch ein Versuch, nach der Pause aus esxi_retry_wait_tasks.yml,
+#          hoechstens dreimal. Antwortet ein spaeterer Versuch unveraendert,
+#          hat ein frueherer Versuch dieses Laufs sie eingeschaltet; auch sie
+#          kommt in die Ausschaltliste.
+#   - unlesbar oder ein anderer Zustand: kein weiterer Versuch, keine
+#          Ausschaltung ohne Nachweis; der Aufrufer bricht mit Ursache ab.
+# Ein unveraendertes Ergebnis beim ERSTEN Versuch bleibt, was es war: jemand
+# anderes hat die VM seit der Statusabfrage eingeschaltet, sie bleibt an.
+#
+# Setzt:
+#   powercycle_on_outcome  started | external | failed | unknown
+#   powercycle_on_cause    Meldung fuer failed und unknown
+- name: Ersten Einschaltversuch zaehlen
+  ansible.builtin.set_fact:
+    powercycle_on_attempt: 1
+    powercycle_on_outcome: ''
+    powercycle_on_cause: ''
+  when: not (powercycle_on_is_retry | default(false) | bool)
+
+- name: VM einschalten (nur initial ausgeschaltet ohne MAC)
+  community.vmware.vmware_guest_powerstate:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+    uuid: "{{ powercycle_vm['instance']['instance_uuid'] }}"
+    use_instance_uuid: true
+    folder: "/"
+    datacenter: "{{ powercycle_vm['item']['datacenter_name'] }}"
+    state: powered-on
+    force: false
+  delegate_to: localhost
+  register: powercycle_start_result
+  # Toleriert: ein Fehlschlag fuehrt zur Zustandsabfrage unten, nie direkt zu
+  # einem zweiten Einschalten.
+  ignore_errors: true
+
+- name: Eindeutige Einschaltantwort uebernehmen
+  ansible.builtin.set_fact:
+    powercycle_on_outcome: >-
+      {{
+        'started'
+        if ((powercycle_start_result['changed'] | default(false) | bool) or (powercycle_on_attempt | int) > 1)
+        else 'external'
+      }}
+  when: not (powercycle_start_result['failed'] | default(false) | bool)
+
+- name: Nach unklarer Einschaltantwort den Zustand lesen
+  ansible.builtin.include_tasks: ./esxi_vm_read_tasks.yml
+  vars:
+    vs_read_uuid: "{{ powercycle_vm['instance']['instance_uuid'] }}"
+    vs_read_datacenter: "{{ powercycle_vm['item']['datacenter_name'] }}"
+    vs_read_position: "[{{ powercycle_index + 1 }}/{{ powercycle_to_start | length }}]"
+    vs_read_unit: "Powercycle state {{ powercycle_vm['item']['vm_name'] }}"
+  when: powercycle_start_result['failed'] | default(false) | bool
+
+- name: Gelesenen Zustand festhalten
+  ansible.builtin.set_fact:
+    powercycle_on_state: >-
+      {{
+        ''
+        if (vs_vm_read['failed'] | default(false) | bool)
+        else ((vs_vm_read['instance'] | default({}))['hw_power_status'] | default(''))
+      }}
+  when: powercycle_start_result['failed'] | default(false) | bool
+
+- name: Ausgang des unklaren Einschaltens einordnen
+  ansible.builtin.set_fact:
+    powercycle_on_outcome: >-
+      {{
+        'unknown' if (powercycle_on_state | length) == 0
+        else (
+          'started' if powercycle_on_state == 'poweredOn'
+          else (
+            'retry' if (
+              powercycle_on_state == 'poweredOff'
+              and (powercycle_on_attempt | int) <= ((EsxiRetryPauseSeconds | default([5, 15, 45])) | length)
+            )
+            else 'failed'
+          )
+        )
+      }}
+    powercycle_on_cause: >-
+      power-on failed after {{ powercycle_on_attempt }} attempt(s):
+      {{ powercycle_start_result['msg'] | default('no module message') | string | replace('\n', ' ') | truncate(300) }};
+      {{
+        ('power state could not be read: '
+         ~ (vs_vm_read['msg'] | default('no module message') | string | replace('\n', ' ') | truncate(300)))
+        if (powercycle_on_state | length) == 0
+        else ('power state afterwards ' ~ powercycle_on_state)
+      }}
+  when: powercycle_start_result['failed'] | default(false) | bool
+
+- name: Zustand nach dem unklaren Einschalten melden
+  ansible.builtin.debug:
+    msg: >-
+      [{{ powercycle_index + 1 }}/{{ powercycle_to_start | length }}] CHECK Powercycle
+      {{ powercycle_vm['item']['vm_name'] }}: {{ powercycle_on_cause }}
+      {{
+        '-> counts as started by this run and is powered off again'
+        if powercycle_on_outcome == 'started'
+        else ('-> powering on again' if powercycle_on_outcome == 'retry' else '-> no further attempt')
+      }}
+  when: powercycle_start_result['failed'] | default(false) | bool
+
+- name: Vor dem naechsten Einschaltversuch warten
+  ansible.builtin.include_tasks: ./esxi_retry_wait_tasks.yml
+  vars:
+    vs_retry_position: "[{{ powercycle_index + 1 }}/{{ powercycle_to_start | length }}]"
+    vs_retry_unit: "Powercycle {{ powercycle_vm['item']['vm_name'] }}"
+    vs_retry_attempt: "{{ powercycle_on_attempt }}"
+    vs_retry_cause: "{{ powercycle_start_result['msg'] | default('') }}"
+  when: powercycle_on_outcome == 'retry'
+
+- name: Einschaltversuch hochzaehlen
+  ansible.builtin.set_fact:
+    powercycle_on_attempt: "{{ powercycle_on_attempt | int + 1 }}"
+  when: powercycle_on_outcome == 'retry'
+
+- name: Ausgeschaltete VM erneut einschalten
+  ansible.builtin.include_tasks: ./powercycle_power_on_tasks.yml
+  vars:
+    powercycle_on_is_retry: true
+  when: powercycle_on_outcome == 'retry'

@@ -363,7 +363,7 @@ return [
     'mac_error_vm_not_in_job_scope' => 'The callback named a VM outside this job scope.',
     'mac_error_missing_name' => 'The callback result has no VM name.',
     'mac_error_missing_nic_data' => 'The callback contains no complete network-interface data.',
-    'mac_error_esxi_query_failed' => 'The ESXi VM-information query failed.',
+    'mac_error_esxi_query_failed' => 'ESXi returned no usable answer for this VM, not even after the automatic retries. Usually the host was briefly unreachable. The exact message is in the job log. Once the host responds again, use "Run again": the export then reads only the failed VMs.',
     'mac_error_duplicate_result' => 'The callback contains more than one result for this VM.',
     'mac_error_identity_mismatch' => 'The returned instance UUID belongs to a different VM identity.',
     'mac_error_mission_wds_missing' => 'The mission has no WDS/PXE port group.',

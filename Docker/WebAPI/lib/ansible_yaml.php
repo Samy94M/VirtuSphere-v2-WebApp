@@ -192,11 +192,11 @@ function ansible_serverlist_yml(array $mission, array $vms, int $powerCycleWait 
         $out .= '      stop_delay: ' . $vmAutostart['stop_delay'] . "\n";
     }
 
-    // Both waits are emitted in seconds and both playbooks pause in seconds, so
-    // the number in the artifact is the number of seconds the deploy stands
-    // still. Nothing converts a unit on the way.
+    // All waits are emitted in seconds and every playbook pauses in seconds; nothing converts a unit on the way.
+    // EsxiRetryPauseSeconds (K4a W1, no portal field) reuses the create retry list: one constant decides both.
     $out .= "\nPowerCycleWaitSeconds: " . $powerCycleWait . "\n";
-    $out .= 'StartWaitSeconds: ' . $startWait . "\n";
+    $out .= 'StartWaitSeconds: ' . $startWait . "\n"
+        . 'EsxiRetryPauseSeconds: [' . implode(', ', array_map('intval', VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS)) . "]\n";
     // CreateSettleSeconds is gone with Etappe 14B-E: the per-VM flow reads each VM's live identity back, so its blind 60 s wait was replaced by evidence.
     // identity_unbound_allowed is gone with IDR-R2: a full pipeline rewrites
     // this file after its create section (ansible_refresh_serverlist_after_create),

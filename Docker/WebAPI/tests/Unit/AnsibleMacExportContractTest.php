@@ -14,9 +14,14 @@ final class AnsibleMacExportContractTest extends TestCase
         // K15 moved the per-VM query into the include so each VM is admitted
         // right before its own read; a failed read still stays a per-VM result.
         self::assertStringContainsString('include_tasks: ./' . VIRTUSPHERE_EXPORT_VM_INFO_TASKS, $playbook);
+        // K4a: the read itself lives in the shared retrying include, which
+        // never aborts; its last result becomes this VM's row.
+        $perVm = $this->source(VIRTUSPHERE_EXPORT_VM_INFO_TASKS);
+        self::assertStringContainsString('include_tasks: ./' . VIRTUSPHERE_ESXI_VM_READ_TASKS, $perVm);
+        self::assertStringContainsString('vm_info_current: "{{ vs_vm_read }}"', $perVm);
         self::assertMatchesRegularExpression(
-            '/register:\\s+vm_info_current.*?ignore_errors:\\s+true/s',
-            $this->source(VIRTUSPHERE_EXPORT_VM_INFO_TASKS)
+            '/register:\\s+vs_vm_read.*?ignore_errors:\\s+true/s',
+            $this->source(VIRTUSPHERE_ESXI_VM_READ_TASKS)
         );
         self::assertStringContainsString(
             'content: \'{{ vm_info_identity_results | to_nice_json }}\'',

@@ -24,6 +24,9 @@ require_once dirname(__DIR__, 2) . '/lib/ansible.php';
  *  - only VMs this run moved from poweredOff are powered on, and exactly that
  *    derived list is powered off again in an `always:` block (force: true is
  *    reserved for that cleanup; the power-on must not force anything),
+ *  - a failed or unclear power-on is never repeated blindly (K4a W2): the run
+ *    reads the state back, counts poweredOn as its own start, retries only
+ *    after a proven poweredOff and ends hard on an unreadable state,
  *  - the selection chains are proven against fixtures without an ESXi host in
  *    Docker/qa-ansible/powercycle-selection-fixtures.yml (gate
  *    ansible-powercycle-selection), so both files must carry the chains
@@ -42,7 +45,17 @@ final class PowercyclePlaybookContractTest extends TestCase
         self::assertFileExists($path);
 
         return (string) file_get_contents($path) . "\n"
-            . file_get_contents(ansible_source_dir() . '/powercycle_vm_tasks.yml');
+            . file_get_contents(ansible_source_dir() . '/powercycle_vm_tasks.yml') . "\n"
+            . $this->source(VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS) . "\n"
+            . $this->source(VIRTUSPHERE_POWERCYCLE_POWER_OFF_TASKS);
+    }
+
+    private function source(string $file): string
+    {
+        $path = ansible_source_dir() . DIRECTORY_SEPARATOR . $file;
+        self::assertFileExists($path);
+
+        return (string) file_get_contents($path);
     }
 
     /**
@@ -97,11 +110,13 @@ final class PowercyclePlaybookContractTest extends TestCase
 
         // K15: the capture runs per VM in powercycle_vm_info.yml, the switching
         // per VM in powercycle_vm_tasks.yml; the playbook orders the two loops.
-        $infoTasks = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS);
-        $powerTasks = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . 'powercycle_vm_tasks.yml');
-        self::assertStringContainsString('community.vmware.vmware_guest_info:', $infoTasks, 'the initial power state is captured via vmware_guest_info');
-        self::assertStringNotContainsString('vmware_guest_powerstate', $infoTasks, 'the capture include never changes power state');
-        self::assertStringContainsString('community.vmware.vmware_guest_powerstate:', $powerTasks);
+        // K4a: the read itself is the shared, repeated esxi_vm_read_tasks.yml.
+        $infoTasks = $this->source(VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS);
+        $readTasks = $this->source(VIRTUSPHERE_ESXI_VM_READ_TASKS);
+        self::assertStringContainsString('include_tasks: ./' . VIRTUSPHERE_ESXI_VM_READ_TASKS, $infoTasks, 'the initial power state is captured via the shared read');
+        self::assertStringContainsString('community.vmware.vmware_guest_info:', $readTasks);
+        self::assertStringNotContainsString('vmware_guest_powerstate', $infoTasks . $readTasks, 'the capture never changes power state');
+        self::assertStringContainsString('community.vmware.vmware_guest_powerstate:', $source);
         $infoPos = strpos($source, 'include_tasks: ./' . VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS);
         $powerPos = strpos($source, 'include_tasks: ./powercycle_vm_tasks.yml');
         self::assertIsInt($infoPos);
@@ -130,18 +145,14 @@ final class PowercyclePlaybookContractTest extends TestCase
 
     public function testEachPowercycleInfoCallHasItsOwnConfirmedTouchAndPreservesLoopResultShape(): void
     {
-        $playbook = (string) file_get_contents(
-            ansible_source_dir() . DIRECTORY_SEPARATOR . self::PLAYBOOK
-        );
-        $infoTasks = (string) file_get_contents(
-            ansible_source_dir() . DIRECTORY_SEPARATOR . 'powercycle_vm_info.yml'
-        );
+        $playbook = $this->source(self::PLAYBOOK);
+        $infoTasks = $this->source(VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS);
         self::assertStringContainsString('include_tasks: ./powercycle_vm_info.yml', $playbook);
         self::assertStringContainsString('loop: "{{ powercycle_targets }}"', $playbook);
         self::assertStringContainsString('loop_var: powercycle_target', $playbook);
 
         $touchPos = strpos($infoTasks, './report_vm_touch.py');
-        $queryPos = strpos($infoTasks, 'community.vmware.vmware_guest_info:');
+        $queryPos = strpos($infoTasks, 'include_tasks: ./' . VIRTUSPHERE_ESXI_VM_READ_TASKS);
         self::assertIsInt($touchPos);
         self::assertIsInt($queryPos);
         self::assertLessThan($queryPos, $touchPos, 'the per-VM touch must be confirmed before that VM first reaches ESXi');
@@ -150,59 +161,75 @@ final class PowercyclePlaybookContractTest extends TestCase
         self::assertStringContainsString("job_execution['generation']", $infoTasks);
         self::assertStringContainsString('- --phase', $infoTasks);
         self::assertStringContainsString('- powercycle', $infoTasks);
-        self::assertStringContainsString('register: powercycle_current_info', $infoTasks);
+        self::assertStringContainsString('powercycle_current_info: "{{ vs_vm_read }}"', $infoTasks, 'the last read attempt is the result of this VM');
         self::assertStringContainsString("combine({'item': powercycle_target})", $infoTasks);
         self::assertStringContainsString('powercycle_initial.results', $infoTasks);
         self::assertStringContainsString("['failed']", $infoTasks);
-        self::assertStringContainsString("['msg']", $infoTasks);
+        self::assertStringContainsString("['msg']", $infoTasks, 'the final failure names the module message');
     }
 
-    public function testPowerOnAndCleanupLoopOverTheSameDerivedListInsideBlockAlways(): void
+    public function testPowerOnAndCleanupSitInsideOneBlockAlways(): void
     {
-        $source = $this->playbook();
+        $tasks = $this->source('powercycle_vm_tasks.yml');
+        $powerOn = $this->source(VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS);
+        $powerOff = $this->source(VIRTUSPHERE_POWERCYCLE_POWER_OFF_TASKS);
 
         self::assertMatchesRegularExpression(
-            '/block:.*state: powered-on.*always:.*state: powered-off/s',
-            $source,
-            'the power-on must sit in a block whose always: powers the started VMs off again'
+            '/block:.*include_tasks: \.\/' . preg_quote(VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS, '/') . '.*always:.*include_tasks: \.\/' . preg_quote(VIRTUSPHERE_POWERCYCLE_POWER_OFF_TASKS, '/') . '/s',
+            $tasks,
+            'the power-on must sit in a block whose always: powers the started VM off again'
         );
-
-        self::assertSame(1, substr_count($source, 'loop: "{{ powercycle_to_start }}"'), 'power-on uses the vetted candidate list exactly once');
-        self::assertStringContainsString('include_tasks: ./powercycle_vm_tasks.yml', $source);
-        self::assertStringContainsString('loop_var: powercycle_vm', $source);
-        self::assertStringContainsString('loop: "{{ [powercycle_vm] }}"', $source);
-        self::assertSame(1, substr_count($source, 'loop: "{{ powercycle_started_by_run | default([]) }}"'), 'cleanup uses confirmed successful starts exactly once');
+        self::assertSame(1, substr_count($this->playbook(), 'loop: "{{ powercycle_to_start }}"'), 'power-on uses the vetted candidate list exactly once');
+        self::assertStringContainsString('loop_var: powercycle_vm', $this->playbook());
+        self::assertMatchesRegularExpression(
+            '/include_tasks: \.\/' . preg_quote(VIRTUSPHERE_POWERCYCLE_POWER_OFF_TASKS, '/') . '\s*\R\s*when: powercycle_started_by_run \| default\(\[\]\) \| length > 0/',
+            $tasks,
+            'cleanup runs only for a start this run proved'
+        );
 
         // force: true is the cleanup's hard power-off (fresh VMs have no guest
         // OS to shut down); the power-on must not carry it.
-        self::assertSame(
-            1,
-            preg_match_all('/force: true/', $source),
-            'exactly one task (the cleanup power-off) may force'
-        );
-        self::assertMatchesRegularExpression(
-            '/state: powered-on.*?force: false/s',
-            $source,
-            'the power-on carries force: false'
-        );
+        self::assertSame(1, preg_match_all('/force: true/', $this->playbook()), 'exactly one task (the cleanup power-off) may force');
+        self::assertMatchesRegularExpression('/state: powered-on\s*\R\s*force: false/', $powerOn, 'the power-on carries force: false');
+        self::assertMatchesRegularExpression('/state: powered-off\s*\R\s*force: true/', $powerOff);
+        self::assertStringNotContainsString('state: powered-off', $powerOn);
+        self::assertStringNotContainsString('state: powered-on', $powerOff);
     }
 
-    public function testCleanupUsesOnlyConfirmedSuccessfulStartsInsteadOfTheOriginalCandidateList(): void
+    /**
+     * W2 (K4a): a failed or unclear power-on is never repeated blindly. The run
+     * reads the state; a VM that was off at capture and is on now was moved by
+     * this run and enters the cleanup list. Only a VM read as poweredOff is
+     * powered on again, and an unchanged answer on such a later attempt also
+     * counts as this run's start. A first-attempt unchanged answer stays
+     * "external": somebody else started it, and the cleanup leaves it alone.
+     */
+    public function testAnUnclearPowerOnIsReadBackAndNeverRepeatedBlindly(): void
     {
-        $source = $this->playbook();
-        $chains = $this->chains($source, self::PLAYBOOK);
+        $tasks = $this->source('powercycle_vm_tasks.yml');
+        $powerOn = $this->source(VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS);
 
-        self::assertStringNotContainsString("map(attribute='item')", $chains['powercycle_to_start'], 'the live UUID evidence must stay attached to each candidate');
-        self::assertStringContainsString('register: powercycle_start_results', $source);
-        self::assertStringContainsString('powercycle_started_by_run:', $source);
-        self::assertStringContainsString("item['changed'] | default(false) | bool", $source);
-        self::assertStringContainsString("not (item['failed'] | default(false) | bool)", $source);
-        self::assertMatchesRegularExpression(
-            '/state: powered-off.*?loop:\s*"\{\{\s*powercycle_started_by_run\s*\|\s*default\(\[\]\)\s*\}\}"/s',
-            $source,
-            'cleanup may only power off starts that returned successful changed evidence'
+        self::assertStringContainsString('register: powercycle_start_result', $powerOn);
+        self::assertStringContainsString(
+            "if ((powercycle_start_result['changed'] | default(false) | bool) or (powercycle_on_attempt | int) > 1)",
+            $powerOn,
+            'only a changed answer or an answer after a failed attempt of this run counts as started'
         );
-        self::assertStringContainsString('powercycle_start_results', $source, 'ambiguous start errors must remain a hard playbook error');
+        $readPos = strpos($powerOn, 'include_tasks: ./' . VIRTUSPHERE_ESXI_VM_READ_TASKS);
+        $againPos = strpos($powerOn, 'include_tasks: ./' . VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS);
+        self::assertIsInt($readPos, 'a failed power-on must read the state back');
+        self::assertIsInt($againPos);
+        self::assertLessThan($againPos, $readPos, 'the state read comes before any further power-on');
+        self::assertStringContainsString("'started' if powercycle_on_state == 'poweredOn'", $powerOn, 'a VM read as on after a failed power-on is a start of this run');
+        self::assertStringContainsString("powercycle_on_state == 'poweredOff'", $powerOn, 'only a VM read as off is powered on again');
+        self::assertMatchesRegularExpression(
+            '/include_tasks: \.\/' . preg_quote(VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS, '/') . '\s*\R\s*vars:\s*\R\s*powercycle_on_is_retry: true\s*\R\s*when: powercycle_on_outcome == \'retry\'/',
+            $powerOn
+        );
+        self::assertStringContainsString('powercycle_started_by_run: "{{ [powercycle_vm] }}"', $tasks);
+        self::assertStringContainsString("when: powercycle_on_outcome | default('') == 'started'", $tasks, 'only a proven start enters the cleanup list');
+        self::assertStringContainsString("powercycle_on_outcome | default('unknown') in ['started', 'external']", $tasks, 'failed and unknown outcomes stay a hard playbook error');
+        self::assertStringContainsString('ansible_failed_result', $tasks, 'the stop names the message of the failed task');
     }
 
     /**

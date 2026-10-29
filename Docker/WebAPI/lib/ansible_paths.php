@@ -21,6 +21,15 @@ const VIRTUSPHERE_REPORT_VM_TOUCH_SCRIPT = 'report_vm_touch.py';
 const VIRTUSPHERE_POWERCYCLE_VM_TASKS = 'powercycle_vm_tasks.yml';
 const VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS = 'powercycle_vm_info.yml';
 const VIRTUSPHERE_EXPORT_VM_INFO_TASKS = 'export_vm_info.yml';
+// K4a (W1/W2): the ESXi calls of power-cycle, export, start and autostart that
+// repeat after a failure, each a flat include file (the SFTP upload copies
+// only the top level). The shared pause is VIRTUSPHERE_ESXI_RETRY_WAIT_TASKS.
+const VIRTUSPHERE_ESXI_VM_READ_TASKS = 'esxi_vm_read_tasks.yml';
+const VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS = 'powercycle_power_on_tasks.yml';
+const VIRTUSPHERE_POWERCYCLE_POWER_OFF_TASKS = 'powercycle_power_off_tasks.yml';
+const VIRTUSPHERE_VM_IDENTITY_READ_TASKS = 'vm_identity_read_tasks.yml';
+const VIRTUSPHERE_START_VM_POWER_TASKS = 'start_vm_power_tasks.yml';
+const VIRTUSPHERE_AUTOSTART_WRITE_TASKS = 'autostart_write_tasks.yml';
 
 /**
  * Files that must be copied into every deploy work dir: every playbook a job
@@ -57,6 +66,13 @@ function ansible_required_files(): array
             VIRTUSPHERE_POWERCYCLE_VM_TASKS,
             VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS,
             VIRTUSPHERE_EXPORT_VM_INFO_TASKS,
+            VIRTUSPHERE_ESXI_VM_READ_TASKS,
+            VIRTUSPHERE_ESXI_RETRY_WAIT_TASKS,
+            VIRTUSPHERE_POWERCYCLE_POWER_ON_TASKS,
+            VIRTUSPHERE_POWERCYCLE_POWER_OFF_TASKS,
+            VIRTUSPHERE_VM_IDENTITY_READ_TASKS,
+            VIRTUSPHERE_START_VM_POWER_TASKS,
+            VIRTUSPHERE_AUTOSTART_WRITE_TASKS,
         ]
     )));
 }

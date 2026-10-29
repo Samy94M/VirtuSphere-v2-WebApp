@@ -35,38 +35,21 @@
 # nicht kennen. Die Prüfung gegen das eigene Prepare-Ergebnis übernimmt an der
 # Stelle das Launch-Playbook.
 
-# Alle VMs des Hosts, aber ohne Zusatzangaben. Die Matrix braucht nur
-# guest_name, moid, instance_uuid und power_state; das Modul liefert sie in
-# 6.2.0 immer, aus vm.summary und dem MOID. Jede Zusatzangabe kostet dagegen je
-# VM eigene Abfragen an ESXi (Netz, Ordnerpfad, Datacenter, Datastores,
-# Resource Pool, Host und Cluster, MAC-Adressen); acht davon sind standardmäßig
-# an, und mit ihnen dauerte dieser Task auf Prod rund 20 Sekunden, dreimal je
-# VM. Das Gate ansible-create-async leitet die show_*-Schalter aus dem
-# gepinnten Modul ab und verlangt jeden davon hier ausgeschaltet.
-#
-# Bewusst KEIN vm_name und kein folder: die Erkennung einer umbenannten
-# gebundenen VM (IDR-P02) sucht die gespeicherte UUID unter allen VMs des
-# Hosts, und ein Filter auf den Namen fände sie nie.
+# Die Abfrage selbst (alle VMs des Hosts, ohne Zusatzangaben, ohne Filter)
+# steht in create_identity_read_tasks.yml; dort wiederholt sie das Prepare nach
+# einem Fehlschlag bis zu dreimal (K4a, W1).
 - name: Live-Inventar fuer die Identitaetspruefung lesen
-  community.vmware.vmware_vm_info:
-    hostname: "{{ esxi_hostname }}"
-    port: "{{ esxi_port | int }}"
-    username: "{{ esxi_username }}"
-    password: "{{ esxi_password }}"
-    validate_certs: "{{ esxi_validate_certs | bool }}"
-    show_allocated: false
-    show_attribute: false
-    show_cluster: false
-    show_datacenter: false
-    show_datastore: false
-    show_esxi_hostname: false
-    show_folder: false
-    show_mac_address: false
-    show_net: false
-    show_resource_pool: false
-    show_tag: false
-  delegate_to: localhost
-  register: vs_identity_inventory
+  ansible.builtin.include_tasks: ./create_identity_read_tasks.yml
+
+# Auch der letzte Versuch ist fehlgeschlagen: Transport, Zugang oder Modul sind
+# kaputt, und der Steueraufruf endet ohne Marker wie vor K4a. Die Meldung des
+# Moduls steht im Text, damit der Worker sie nach `Cause:` speichert.
+- name: Fehlgeschlagene Inventarabfrage ohne Marker abbrechen
+  ansible.builtin.fail:
+    msg: >-
+      vmware_vm_info failed after {{ vs_identity_read_attempt }} attempt(s):
+      {{ vs_identity_inventory['msg'] | default('no module message') }}
+  when: vs_identity_inventory['failed'] | default(false) | bool
 
 - name: Namensgleiche VMs dieser einen Ziel-VM sammeln
   ansible.builtin.set_fact:

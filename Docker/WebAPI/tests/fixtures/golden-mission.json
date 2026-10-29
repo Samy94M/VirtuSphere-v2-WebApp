@@ -129,6 +129,7 @@
             ],
             "PowerCycleWaitSeconds": 7,
             "StartWaitSeconds": 123,
+            "EsxiRetryPauseSeconds": [5, 15, 45],
             "mission_configuration": {
                 "mission_name": "Bühne: \"Gold\" #7",
                 "mission_id": 42,

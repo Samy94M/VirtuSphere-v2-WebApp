@@ -363,7 +363,7 @@ return [
     'mac_error_vm_not_in_job_scope' => 'Der Callback nennt eine VM außerhalb dieses Job-Scopes.',
     'mac_error_missing_name' => 'Das Callback-Ergebnis besitzt keinen VM-Namen.',
     'mac_error_missing_nic_data' => 'Der Callback enthält keine vollständigen Netzwerkkartendaten.',
-    'mac_error_esxi_query_failed' => 'Die Abfrage der VM-Informationen auf ESXi ist fehlgeschlagen.',
+    'mac_error_esxi_query_failed' => 'ESXi hat zu dieser VM keine verwertbare Antwort geliefert, auch nicht nach den automatischen Wiederholungen. Meist war der Host kurz nicht erreichbar. Die genaue Meldung steht im Auftragsprotokoll. Antwortet der Host wieder, „Erneut ausführen“: Der Export liest dann nur die fehlgeschlagenen VMs.',
     'mac_error_duplicate_result' => 'Der Callback enthält mehr als ein Ergebnis für diese VM.',
     'mac_error_identity_mismatch' => 'Die gelieferte Instance-UUID gehört zu einer anderen VM-Identität.',
     'mac_error_mission_wds_missing' => 'Die Mission besitzt keine WDS/PXE-Portgruppe.',

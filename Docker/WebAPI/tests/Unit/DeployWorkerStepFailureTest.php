@@ -101,7 +101,14 @@ final class DeployWorkerStepFailureTest extends TestCase
         self::assertNotFalse($marker, 'the playbook must print ' . VIRTUSPHERE_ANSIBLE_AUTOSTART_MARKER . ' written=N total=M');
         self::assertLessThan($always, $write);
         self::assertLessThan($marker, $always);
-        self::assertStringContainsString('register: autostart_power_results', $playbook);
+        // K4a: the per-VM write is a retrying include that counts each entry
+        // it wrote; the marker reports that count.
+        self::assertStringContainsString('include_tasks: ./' . VIRTUSPHERE_AUTOSTART_WRITE_TASKS, substr($playbook, (int) $write, (int) $always - (int) $write));
+        self::assertStringContainsString(
+            'autostart_written: "{{ autostart_written | int + 1 }}"',
+            (string) file_get_contents(ansible_source_dir() . '/' . VIRTUSPHERE_AUTOSTART_WRITE_TASKS)
+        );
+        self::assertStringContainsString('written={{ autostart_written | default(0) }}', $playbook);
         self::assertMatchesRegularExpression('/\}\} total=\{\{/', $playbook);
     }
 

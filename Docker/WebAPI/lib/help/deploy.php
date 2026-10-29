@@ -36,6 +36,11 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
                 <li><?php echo h(__t('help_deploy.deploy_mode_start')); ?></li>
                 <li><?php echo h(__t('help_deploy.deploy_mode_autostart')); ?></li>
             </ul>
+            <p><?php echo h(__t('help_deploy.deploy_mode_retry_p1', [
+                'pause_2' => (string) VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[0],
+                'pause_3' => (string) VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[1],
+                'pause_4' => (string) VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[2],
+            ])); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_uncreated_vm_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_mode_p2')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_state_heading')); ?></h3>

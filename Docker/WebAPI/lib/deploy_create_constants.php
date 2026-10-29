@@ -235,6 +235,11 @@ const VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH = 'createVMLaunch-ESXi_playbook.yml';
 const VIRTUSPHERE_CREATE_PLAYBOOK_STATUS = 'createVMStatus-ESXi_playbook.yml';
 const VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP = 'createVMCleanup-ESXi_playbook.yml';
 const VIRTUSPHERE_CREATE_IDENTITY_TASKS = 'create_identity_check_tasks.yml';
+// The inventory read of the identity check, repeated by Prepare only (K4a, W1),
+// and the shared pause before the next attempt of any ESXi call. Both are
+// included by the identity check, so a create job uploads them too.
+const VIRTUSPHERE_CREATE_IDENTITY_READ_TASKS = 'create_identity_read_tasks.yml';
+const VIRTUSPHERE_ESXI_RETRY_WAIT_TASKS = 'esxi_retry_wait_tasks.yml';
 const VIRTUSPHERE_CREATE_RESULT_EMITTER = 'emit_create_result.py';
 const VIRTUSPHERE_CREATE_ASYNC_INSPECTOR = 'inspect_create_async_state.py';
 
@@ -268,6 +273,8 @@ const VIRTUSPHERE_CREATE_ARTIFACTS = [
     VIRTUSPHERE_CREATE_PLAYBOOK_STATUS,
     VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP,
     VIRTUSPHERE_CREATE_IDENTITY_TASKS,
+    VIRTUSPHERE_CREATE_IDENTITY_READ_TASKS,
+    VIRTUSPHERE_ESXI_RETRY_WAIT_TASKS,
     VIRTUSPHERE_CREATE_RESULT_EMITTER,
     VIRTUSPHERE_CREATE_ASYNC_INSPECTOR,
 ];

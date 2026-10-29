@@ -12,83 +12,49 @@
     - name: Power-Cycle mit Aufraeumgarantie
       when: powercycle_vm is defined
       block:
-        # Der Startfehler wird nur bis zum Ergebnis-Check dieser VM
-        # toleriert, damit das always-Cleanup jeden nachweislich erfolgreichen
-        # Start dieses Laufs sicher wieder ausschalten kann.
-        - name: VM einschalten (nur initial ausgeschaltet ohne MAC)
-          community.vmware.vmware_guest_powerstate:
-            hostname: "{{ esxi_hostname }}"
-            port: "{{ esxi_port | int }}"
-            username: "{{ esxi_username }}"
-            password: "{{ esxi_password }}"
-            validate_certs: "{{ esxi_validate_certs | bool }}"
-            uuid: "{{ (item['instance'] | default({}))['instance_uuid'] }}"
-            use_instance_uuid: true
-            folder: "/"
-            datacenter: "{{ (item['item'] | default({}))['datacenter_name'] }}"
-            state: powered-on
-            force: false
-          delegate_to: localhost
-          loop: "{{ [powercycle_vm] }}"
-          loop_control:
-            label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
-          register: powercycle_start_results
-          ignore_errors: true
+        # W2: ein unklares Einschalten wird nie blind wiederholt. Die Datei
+        # liest nach jedem Fehlschlag den Zustand und meldet als `started`
+        # auch eine VM, die nur die Antwort verloren hat.
+        - name: VM einschalten und unklare Antworten nachlesen
+          ansible.builtin.include_tasks: ./powercycle_power_on_tasks.yml
 
-        - name: Nur erfolgreiche eigene Einschaltungen fuer Cleanup erfassen
+        - name: Nur nachweislich eigene Einschaltungen fuer Cleanup erfassen
           ansible.builtin.set_fact:
-            powercycle_started_by_run: "{{ powercycle_started_by_run + [item['item']] }}"
-          loop: "{{ powercycle_start_results.results | default([]) }}"
-          loop_control:
-            label: "{{ ((item['item'] | default({}))['item'] | default({}))['vm_name'] | default('unknown') }}"
-          when:
-            - item['changed'] | default(false) | bool
-            - not (item['failed'] | default(false) | bool)
+            powercycle_started_by_run: "{{ [powercycle_vm] }}"
+          when: powercycle_on_outcome | default('') == 'started'
 
         - name: Warten, bis ESXi die MACs vergibt
           ansible.builtin.pause:
             seconds: "{{ PowerCycleWaitSeconds | default(5) | int }}"
           when: powercycle_started_by_run | length > 0
       always:
-        # Hart (force true) und nur fuer die Liste, die dieser Lauf gestartet
-        # hat: eine VM, die vor dem Lauf schon lief, steht hier nie drin. Ein
-        # Fehler in diesem Aufraeumen laesst den Lauf fehlschlagen.
-        - name: Vom Lauf gestartete VMs wieder hart ausschalten
-          community.vmware.vmware_guest_powerstate:
-            hostname: "{{ esxi_hostname }}"
-            port: "{{ esxi_port | int }}"
-            username: "{{ esxi_username }}"
-            password: "{{ esxi_password }}"
-            validate_certs: "{{ esxi_validate_certs | bool }}"
-            uuid: "{{ (item['instance'] | default({}))['instance_uuid'] }}"
-            use_instance_uuid: true
-            folder: "/"
-            datacenter: "{{ (item['item'] | default({}))['datacenter_name'] }}"
-            state: powered-off
-            force: true
-          delegate_to: localhost
-          loop: "{{ powercycle_started_by_run | default([]) }}"
-          loop_control:
-            label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+        # Hart (force true) und nur fuer die VM, die dieser Lauf nachweislich
+        # gestartet hat: eine VM, die vor dem Lauf schon lief, steht hier nie
+        # drin. Ein endgueltiger Fehler dabei laesst den Lauf fehlschlagen.
+        - name: Vom Lauf gestartete VM wieder hart ausschalten
+          ansible.builtin.include_tasks: ./powercycle_power_off_tasks.yml
+          when: powercycle_started_by_run | default([]) | length > 0
 
     - name: Mehrdeutige oder fehlgeschlagene Einschaltungen hart melden
       ansible.builtin.assert:
         that:
-          - powercycle_start_results.results | default([]) | map(attribute='failed', default=false) | select('equalto', true) | list | length == 0
+          - powercycle_on_outcome | default('unknown') in ['started', 'external']
         fail_msg: >-
-          Mindestens eine Einschaltung ist fehlgeschlagen oder ihr Ausgang ist
-          unklar. Nur nachweislich erfolgreiche, von diesem Lauf ausgefuehrte
-          Einschaltungen wurden wieder ausgeschaltet; den aktuellen Zustand der
-          betroffenen UUID im ESXi Host Client pruefen.
+          {{ powercycle_on_cause | default('power-on outcome unknown') }}.
+          Nur nachweislich von diesem Lauf eingeschaltete VMs wurden wieder
+          ausgeschaltet; ist der Zustand unbekannt, kann die VM noch laufen.
       when: powercycle_vm is defined
 
     - name: Abgeschlossenen VM-Zyklus melden
       ansible.builtin.debug:
         msg: "[{{ powercycle_index + 1 }}/{{ powercycle_to_start | length }}] pass Powercycle {{ powercycle_vm['item']['vm_name'] }}"
   rescue:
+    # Die Meldung des gescheiterten Tasks (Einschalten, Zustandsabfrage oder
+    # Ausschalten) steht im Text und wird so die Ursache des Auftrags.
     - name: Fehlgeschlagenen VM-Zyklus melden und vor der naechsten VM abbrechen
       ansible.builtin.fail:
         msg: >-
           [{{ powercycle_index + 1 }}/{{ powercycle_to_start | length }}] fail Powercycle
-          {{ powercycle_vm['item']['vm_name'] }} ({{ powercycle_vm['instance']['instance_uuid'] }}).
+          {{ powercycle_vm['item']['vm_name'] }} ({{ powercycle_vm['instance']['instance_uuid'] }}):
+          {{ (ansible_failed_result | default({}))['msg'] | default('no message') | string | replace('\n', ' ') | truncate(600) }}
           Zustand dieser UUID im ESXi Host Client pruefen. Keine weitere VM wird gestartet.

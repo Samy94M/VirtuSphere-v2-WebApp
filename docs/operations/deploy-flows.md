@@ -349,19 +349,24 @@ Liest nur. Beantwortet für genau eine Portal-VM, ob auf dem Host schon eine VM 
 flowchart TD
   A["Ziel-VM über portal_vm_id aus serverlist.yml auflösen"] --> B{"Genau ein Treffer?"}
   B -->|nein| BX["Abbruch: Protokollfehler"]
-  B -->|ja| C["Identitätsprüfung (create_identity_check_tasks.yml)"]
+  B -->|ja| C["Identitätsprüfung (create_identity_check_tasks.yml), Inventarabfrage mit bis zu drei Wiederholungen"]
+  C -->|Inventarabfrage scheitert auch beim letzten Versuch| CX["Abbruch ohne Ergebniszeile: protocol_error mit Ursache, auf dem Host hat sich nichts geändert"]
   C --> D{"Identitätsbefund?"}
   D -->|ja| DR["Ergebnis rejected mit Code, keine Änderung"]
   D -->|nein| DP["Ergebnis prepared: existierte vorher, MOID, Instance-UUID, ersetzte UUID, Energiezustand der vorhandenen VM"]
 ```
 
-### create_identity_check_tasks
+### create_identity_check_tasks und create_identity_read_tasks
 
-Die eine Identitätsmatrix für Prepare, Launch und Status. Ein Befund bricht nie ab, sondern setzt einen geschlossenen Code. Scheitert dagegen das Lesen des Live-Inventars selbst (Anmeldung, Transport, Modul), endet der Lauf ohne Ergebniszeile; der Worker wertet das als unlesbare Antwort.
+Die eine Identitätsmatrix für Prepare, Launch und Status. Ein Befund bricht nie ab, sondern setzt einen geschlossenen Code. Scheitert dagegen das Lesen des Live-Inventars selbst (Anmeldung, Transport, Modul, etwa ein `503 Service Unavailable`), wiederholt Prepare die Abfrage bis zu dreimal nach den Pausen aus `VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS` (5, 15, 45 s), jede als Zeile `RETRY Create identity read <VM>: <Meldung>; attempt n of 4 in s s`. Launch und Status lesen einmal: Ihr Steueraufruf hat ein festes Budget, und Wartezeiten vor der einen Mutation des Launch würden einen klaren Fehler in einen unbekannten Ausgang verwandeln. Scheitert auch der letzte Versuch, endet der Lauf ohne Ergebniszeile; nach einem Prepare speichert der Worker `protocol_error` mit der Meldung nach `Cause:`. Marker, Codes und der Worker-Vertrag sind dieselben wie ohne Wiederholung.
 
 ```mermaid
 flowchart TD
-  A["Live-Inventar lesen (vmware_vm_info): alle VMs des Hosts, nur Name, MOID, Instance-UUID und Energiezustand"] --> B["Namensgleiche VMs und VMs mit der gespeicherten Instance-UUID sammeln"]
+  R["Live-Inventar lesen (create_identity_read_tasks.yml)"] -->|Fehler, im Prepare noch Versuche übrig| RW["RETRY-Zeile mit Meldung, Pause, erneut lesen"]
+  RW --> R
+  R -->|Fehler beim letzten Versuch, in Launch und Status beim ersten| RX["Abbruch ohne Ergebniszeile mit der Meldung des Moduls; der Worker wertet ihn wie jeden Steueraufruf ohne Marker, im Prepare als protocol_error"]
+  R -->|gelesen| A
+  A["Antwort: alle VMs des Hosts, nur Name, MOID, Instance-UUID und Energiezustand"] --> B["Namensgleiche VMs und VMs mit der gespeicherten Instance-UUID sammeln"]
   B --> C{"Mehr als eine namensgleiche VM?"}
   C -->|ja| C1["identity_conflict"]
   C -->|nein| D{"Eine namensgleiche VM ohne MOID oder UUID?"}
@@ -437,35 +442,43 @@ flowchart TD
 
 Der Worker ruft es erst, wenn das Ergebnis der Einheit gespeichert ist, und nie für eine `uncertain`-Einheit.
 
-### powercycleVMs und powercycle_vm_info und powercycle_vm_tasks
+### powercycleVMs und powercycle_vm_info und powercycle_vm_tasks und powercycle_power_on_tasks und powercycle_power_off_tasks
 
-Erzeugt MAC-Adressen: ESXi vergibt einer Netzwerkkarte ihre MAC erst beim ersten Einschalten.
+Erzeugt MAC-Adressen: ESXi vergibt einer Netzwerkkarte ihre MAC erst beim ersten Einschalten. Der Lauf zählt zweimal mit: `[n/total] RUN|pass|fail Powercycle info <VM>` für jede Zielmaschine bei der Zustandsabfrage, danach `[n/total] RUN|pass|fail Powercycle <VM>` nur für die anfangs ausgeschalteten VMs, die er schaltet. Beide Zähler haben deshalb verschiedene Gesamtzahlen.
 
 ```mermaid
 flowchart TD
   A["Ziele: nur VMs mit needs_mac true (PXE-Karte im Portal ohne MAC; ohne erkennbare WDS-Karte gilt needs_mac als true)"] --> B["Genau diese VM mit report_vm_touch.py beim Portal zulassen"]
-  B -->|exakte Bestätigung| C["Erste Zustandsabfrage dieser VM per vmware_guest_info"]
+  B -->|exakte Bestätigung| C["Erste Zustandsabfrage dieser VM (esxi_vm_read_tasks.yml), bis zu drei Wiederholungen"]
   B -->|abgelehnt oder keine Bestätigung| BR["Globaler Abbruch vor der ESXi-Abfrage dieser VM"]
-  C -->|Abfrage fehlgeschlagen| CQ["fail-Zeile, dann Abbruch vor der nächsten VM mit der Modulmeldung"]
+  C -->|auch der letzte Versuch scheitert| CQ["fail Powercycle info, Abbruch vor der nächsten VM mit der Modulmeldung"]
   C -->|Antwort erhalten| D{"Name gleich und Instance-UUID gleich der gebundenen?"}
   D -->|nein| CX["Abbruch: Identitätsabweichung"]
   D -->|ja| E{"Jede Antwort trägt einen bekannten Energiezustand?"}
   E -->|nein| DX["Abbruch: Modulantwort passt nicht"]
   E -->|ja| F["Nur anfangs ausgeschaltete VMs schalten; laufende und angehaltene bleiben, wie sie sind"]
   subgraph JE["Je VM nacheinander"]
-    G["Einschalten per UUID"] --> H{"Eigene Einschaltung bestätigt (changed, nicht failed)?"}
-    H -->|ja| I["PowerCycleWaitSeconds warten"]
-    I --> J["Immer: bestätigte eigene Einschaltung hart ausschalten"]
-    H -->|nein| J
-    J -->|Ausschalten scheitert, VM kann eingeschaltet bleiben| KX
-    J -->|ausgeschaltet oder nichts auszuschalten| K{"Einschaltung fehlgeschlagen oder unklar?"}
-    K -->|ja| KX["Abbruch vor der nächsten VM: Zustand der UUID im ESXi Host Client prüfen"]
-    K -->|nein| KP["VM fertig, nächste VM"]
+    G["Einschalten per UUID (powercycle_power_on_tasks.yml)"] -->|changed| GS["eigene Einschaltung"]
+    G -->|unverändert beim ersten Versuch| GE["jemand anderes hat sie eingeschaltet: bleibt an, nicht ausschalten"]
+    G -->|Fehler oder unklare Antwort| GR["Zustand lesen, nie blind wiederholen (W2)"]
+    GR -->|an| GS
+    GR -->|aus, noch Versuche übrig| GW["RETRY-Zeile, Pause, erneut einschalten; unverändert heißt dann: ein früherer Versuch hat sie eingeschaltet"]
+    GW --> GWS["eigene Einschaltung, wenn sie jetzt an ist"]
+    GWS --> GS
+    GR -->|aus nach dem letzten Versuch, unlesbar oder anderer Zustand| GF["kein weiterer Versuch, kein Ausschalten ohne Nachweis"]
+    GS --> I["PowerCycleWaitSeconds warten"]
+    I --> J["Immer: eigene Einschaltung hart ausschalten (powercycle_power_off_tasks.yml), bis zu drei Wiederholungen"]
+    J -->|auch der letzte Versuch scheitert, VM kann eingeschaltet bleiben| KX
+    J -->|ausgeschaltet| KP["pass Powercycle, nächste VM"]
+    GE --> KP
+    GF --> KX["fail Powercycle mit Meldung des Hosts, Abbruch vor der nächsten VM: Zustand der UUID im ESXi Host Client prüfen"]
   end
   F --> G
 ```
 
-Je VM meldet das Playbook `[n/total] RUN`, `pass` oder `fail Powercycle <VM>`. Ein harter Prozessabbruch (SSH-Abriss, Kill) führt den Ausschaltblock nicht mehr aus und kann eine eingeschaltete VM zurücklassen.
+Die Regel „nur was der Lauf nachweislich bewegt hat“ gilt auch nach einem Fehler: Eine VM, die bei der Zustandsabfrage aus war und nach einem gescheiterten oder unklaren Einschalten an gelesen wird, hat dieser Lauf eingeschaltet. Sie kommt in die Ausschaltliste, und der Zyklus endet regulär, weil ihre MAC entstanden ist. Das Protokoll zeigt den Fall als `CHECK Powercycle <VM>: power-on failed …; power state afterwards poweredOn -> counts as started by this run`. Ein harter Prozessabbruch (SSH-Abriss, Kill) führt den Ausschaltblock nicht mehr aus und kann eine eingeschaltete VM zurücklassen.
+
+Endgültige Fehlschläge: Scheitert die Zustandsabfrage, bricht der Auftrag ab, bevor die nächste VM beim Portal zugelassen wird; nachfolgende Schritte (Export) entfallen. Scheitern Einschalten oder Ausschalten, bricht er vor der nächsten VM ab. „Erneut ausführen“ fasst nur VMs an, die dann ausgeschaltet sind; eine VM, die nach einem gescheiterten Ausschalten noch läuft, bleibt unberührt und muss im Host Client ausgeschaltet werden.
 
 ### exportVMs-Informations und export_vm_info
 
@@ -473,9 +486,9 @@ Liest die MACs und schickt sie an das Portal. Ein Abfragefehler oder eine Identi
 
 ```mermaid
 flowchart TD
-  A["Für genau diese VM report_vm_touch.py beim Portal bestätigen lassen"] -->|exakte Antwort| B["Je VM Informationen per gebundener Instance-UUID lesen (vmware_guest_info)"]
+  A["Für genau diese VM report_vm_touch.py beim Portal bestätigen lassen"] -->|exakte Antwort| B["Je VM Informationen per gebundener Instance-UUID lesen (esxi_vm_read_tasks.yml), bis zu drei Wiederholungen"]
   A -->|Refusal oder fehlende Antwort| AX["Globaler Abbruch vor dieser VM-Abfrage"]
-  B -->|Abfragefehler| QX["Fehler im vm_info.results Einzelergebnis sammeln"]
+  B -->|auch der letzte Versuch scheitert| QX["fail Export info VM: query_failed after n attempt(s) mit Meldung; nur den Fehlercode im Einzelergebnis sammeln"]
   B -->|Abfrage erfolgreich| C{"Name gleich und Instance-UUID gleich der gebundenen?"}
   C -->|nein| BX["Einzelergebnis als fehlgeschlagen markieren (identity mismatch)"]
   C -->|ja| BO["Einzelergebnis übernehmen"]
@@ -489,32 +502,61 @@ flowchart TD
   F -->|sonst| EX["Schritt fehlgeschlagen"]
 ```
 
-### startVMs
+Je VM meldet das Playbook `[n/total] RUN Export info <VM>` und danach `pass` oder `fail …` mit Grund. Eine VM, deren Abfrage auch nach den Wiederholungen scheitert, wertet das Portal als `esxi_query_failed`. Das Ergebnis zeigt dazu einen festen Satz (ESXi hat keine verwertbare Antwort geliefert, die genaue Meldung steht im Protokoll); den Wortlaut des Moduls mit der Zahl der Versuche enthält nur die `fail`-Zeile im Auftragsprotokoll, das Ergebnis des Rückrufs speichert keinen freien Text (ADR-0030). Die übrigen VMs werden übernommen, der Auftrag endet `partial`, und „Erneut ausführen“ exportiert nur die gescheiterten VMs.
+
+### startVMs und start_vm_power_tasks und vm_identity_read_tasks
 
 ```mermaid
 flowchart TD
-  A["Je VM Zustand per gebundener Instance-UUID lesen"] --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  A["Je VM Identität lesen (vm_identity_read_tasks.yml): RUN Start info, bis zu drei Wiederholungen"] -->|auch der letzte Versuch scheitert| AX["fail Start info, Abbruch: keine VM wird gestartet"]
+  A --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
   B -->|nein, bei einer VM| BX["Abbruch: keine VM wird gestartet"]
   B -->|ja, bei allen| C["StartWaitSeconds warten, damit MECM die Geräte übernimmt"]
-  C --> D["Alle VMs per UUID einschalten; laufende bleiben unverändert"]
+  C --> D["Je VM einschalten (start_vm_power_tasks.yml): RUN Start, per UUID ohne force, laufende bleiben unverändert"]
+  D -->|Fehler, noch Versuche übrig| DW["RETRY-Zeile mit Meldung, Pause, erneut einschalten"]
+  DW --> D
+  D -->|eingeschaltet| DP["pass Start, nächste VM"]
+  D -->|auch der letzte Versuch scheitert| DF["fail Start mit Meldung; die übrigen VMs werden trotzdem gestartet"]
+  DP --> E{"Alle VMs gestartet?"}
+  DF --> E
+  E -->|ja| E0["Schritt erfolgreich"]
+  E -->|nein| EX["Schritt fehlgeschlagen: n of m VMs did not start mit Namen und Meldungen; die übrigen laufen"]
 ```
 
-### autostartVMs
+`powered-on` ohne `force` ist idempotent: Eine VM, die ein früherer Versuch schon eingeschaltet hat, meldet nur „unverändert“. Deshalb darf das Einschalten im Start-Schritt wiederholt werden. Eigenständige Start-Aufträge lassen den Zustand der VMs im Portal unberührt; „Erneut ausführen“ startet die ganze Auswahl noch einmal, mit erneuter Wartezeit.
 
-Schreibt die Autostart-Richtlinie des Hosts für die VMs einer Mission.
+### autostartVMs und autostart_write_tasks
+
+Schreibt die Autostart-Richtlinie des Hosts für die VMs einer Mission. Die Identitätsabfrage je VM läuft wie beim Start über `vm_identity_read_tasks.yml` (`[n/total] RUN|pass|fail Autostart info <VM>`).
 
 ```mermaid
 flowchart TD
-  A["Je VM Zustand per gebundener Instance-UUID lesen"] --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  A["Je VM Identität lesen, bis zu drei Wiederholungen"] -->|auch der letzte Versuch scheitert| AX["fail Autostart info, Abbruch vor jeder Änderung am Host"]
+  A --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
   B -->|nein| BX["Abbruch vor jeder Änderung am Host"]
   B -->|ja| C{"Autostart der Mission aktiv?"}
-  C -->|ja| D["Host-Standardwerte setzen: Autostart ein, Verzögerungen, Stoppaktion, Heartbeat"]
+  C -->|ja| D["Host-Standardwerte setzen (Autostart defaults): Autostart ein, Verzögerungen, Stoppaktion, Heartbeat; bis zu drei Wiederholungen"]
+  D -->|auch der letzte Versuch scheitert| DX["Abbruch: kein VM-Eintrag wird geschrieben"]
   C -->|nein| E
-  D --> E["Je VM per UUID schreiben: powerOn oder none, Reihenfolge -1, Start- und Stoppverzögerung; Stoppaktion und Heartbeat bleiben beim Host-Standard (systemDefault)"]
-  E -.->|Schreiben scheitert für einzelne VMs| EX["Teilerfolg: Die Schleife schreibt die übrigen VMs trotzdem, nur die gescheiterten behalten die alte Richtlinie. Der Auftrag endet failed; der Endgrund nennt, wie viele VMs ihren Eintrag erhalten haben, und die letzte Fehlerzeile mit Sprung ins Protokoll"]
+  D --> E["Je VM per UUID schreiben (autostart_write_tasks.yml, RUN Autostart): powerOn oder none, Reihenfolge -1, Start- und Stoppverzögerung; Stoppaktion und Heartbeat bleiben beim Host-Standard (systemDefault); bis zu drei Wiederholungen"]
+  E -.->|Eintrag einzelner VMs scheitert auch beim letzten Versuch| EX["Teilerfolg: Die übrigen VMs werden trotzdem geschrieben, nur die gescheiterten behalten die alte Richtlinie. Die Markerzeile zählt die geschriebenen Einträge, der Auftrag endet failed; der Endgrund nennt, wie viele VMs ihren Eintrag erhalten haben, und die Namen mit Meldung"]
 ```
 
-Der Host-Autostart wird nie ausgeschaltet, weil ein Host VMs mehrerer Missionen tragen kann; eine Mission zieht ihre Richtlinie zurück, indem jede ihrer VMs `none` erhält.
+Beide Stufen schreiben einen Zielzustand, ein zweites Schreiben desselben Eintrags ändert nichts; deshalb dürfen sie wiederholt werden. Der Host-Autostart wird nie ausgeschaltet, weil ein Host VMs mehrerer Missionen tragen kann; eine Mission zieht ihre Richtlinie zurück, indem jede ihrer VMs `none` erhält.
+
+### esxi_vm_read_tasks und esxi_retry_wait_tasks
+
+Die gemeinsame Wiederholung bei einem kurzen ESXi-Aussetzer (W1). `esxi_vm_read_tasks.yml` ist die eine lesende Abfrage einer VM per gebundener Instance-UUID für Powercycle, Export, Start, Autostart und die Zustandsabfrage nach einem unklaren Einschalten. `esxi_retry_wait_tasks.yml` schreibt vor jedem weiteren Versuch, auch in den anderen wiederholenden Dateien, die Zeile `[n/total] RETRY <Einheit>: <Meldung>; attempt n of 4 in s s` und wartet. Die Pausen stehen als `EsxiRetryPauseSeconds` in `serverlist.yml` und kommen aus `VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS`, derselben Liste wie beim Anlegen und wie `RETRY_DELAYS_SECONDS` in `upload_mac_list.py`; `AnsiblePauseBudgetContractTest` hält alle drei gleich.
+
+```mermaid
+flowchart TD
+  A["ESXi-Aufruf, Fehler toleriert"] -->|Erfolg| OK["Ergebnis an den Aufrufer"]
+  A -->|Fehler, Versuch 1 bis 3| W["RETRY-Zeile mit Meldung des Moduls, Pause 5, 15 oder 45 s"]
+  W --> A
+  A -->|Fehler bei Versuch 4| F["Letztes Ergebnis an den Aufrufer: Export meldet es je VM, die anderen Schritte enden mit der Meldung"]
+```
+
+Wiederholt wird nur, was bei einer Wiederholung nichts ändert, was der erste Versuch nicht schon wollte: Abfragen, das harte Ausschalten, das Einschalten im Start-Schritt (ohne `force`) und das Schreiben eines Autostart-Eintrags. Das Einschalten im Powercycle wird nie blind wiederholt (W2, oben). Ein Fehler, der nicht vorübergehend ist, kostet so höchstens die Summe der Pausen, bevor der Schritt mit derselben Meldung endet wie ohne Wiederholung.
 
 ### inventoryESXi
 

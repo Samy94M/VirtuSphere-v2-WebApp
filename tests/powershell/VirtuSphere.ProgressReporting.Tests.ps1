@@ -107,10 +107,40 @@ Describe 'Visible progress reporting contract' {
 
         foreach ($source in @($script:PowercycleInfoTasks, $script:ExportInfoTasks)) {
             $touchPosition = $source.IndexOf('./report_vm_touch.py')
-            $infoPosition = $source.IndexOf('community.vmware.vmware_guest_info:')
+            # K4a: the ESXi read is the shared, repeated include.
+            $infoPosition = $source.IndexOf('include_tasks: ./esxi_vm_read_tasks.yml')
             $touchPosition | Should -BeGreaterOrEqual 0
             $infoPosition | Should -BeGreaterThan $touchPosition
         }
+    }
+
+    It 'reports every start and autostart VM before and after its ESXi call (K4a)' {
+        $ansible = Join-Path $script:RepoRoot 'Ansible'
+        $identity = Get-Content -LiteralPath (Join-Path $ansible 'vm_identity_read_tasks.yml') -Raw
+        $start = Get-Content -LiteralPath (Join-Path $ansible 'start_vm_power_tasks.yml') -Raw
+        $autostart = Get-Content -LiteralPath (Join-Path $ansible 'autostart_write_tasks.yml') -Raw
+        $identity | Should -Match '\[\{\{ vs_identity_index \+ 1 \}\}/\{\{ vs_identity_total \}\}\] RUN \{\{ vs_identity_step \}\} info'
+        $identity | Should -Match "'fail' if vs_vm_read\['failed'\]"
+        $start | Should -Match '\[\{\{ start_index \+ 1 \}\}/\{\{ start_identity_results\.results \| length \}\}\] RUN Start'
+        $start | Should -Match "'fail' if start_power_result\['failed'\]"
+        $autostart | Should -Match '\{\{ autostart_position \}\} RUN \{\{ autostart_unit \}\}'
+        $autostart | Should -Match "'fail' if autostart_write_result\['failed'\]"
+        $identity.IndexOf('] RUN ') | Should -BeLessThan $identity.IndexOf('include_tasks: ./esxi_vm_read_tasks.yml')
+        foreach ($pair in @(@($start, '] RUN Start'), @($autostart, ' RUN {{ autostart_unit }}'))) {
+            $call = $pair[0].IndexOf('community.vmware.')
+            $run = $pair[0].IndexOf($pair[1])
+            $run | Should -BeGreaterOrEqual 0
+            $call | Should -BeGreaterThan $run
+        }
+    }
+
+    It 'streams the export, start and autostart retry cases with bounded progress' {
+        $source = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/esxi-step-retry-contract.py') -Raw
+        $source | Should -Match 'enumerate\(CASES, 1\)'
+        $source | Should -Match '\] RUN '
+        $source | Should -Match '\] pass '
+        $source | Should -Match '\] fail '
+        $script:FastGates | Should -Match "esxi-step-retry-contract\.py'\) -Live"
     }
 
     It 'binds future agents and multi-unit runners to the n/total convention' {

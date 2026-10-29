@@ -287,7 +287,18 @@ function Register-FastCheckGates {
         }
         $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
             $toolImages.ansible, 'python', '/repo/Docker/qa-ansible/powercycle-sequence-contract.py') -Live
-        Format-ToolResult $r 'Powercycle-Auswahl und sequenzieller Produktionsablauf bewiesen' 'Powercycle-Ablauf weicht vom Vertrag ab'
+        if ($r.ExitCode -ne 0) {
+            return Format-ToolResult $r 'Powercycle-Ablauf bewiesen' 'Powercycle-Ablauf weicht vom Vertrag ab'
+        }
+        # K4a: Export, Start und Autostart ueberstehen einen kurzen ESXi-Aussetzer
+        # (bis zu drei Wiederholungen je Aufruf, RETRY-Zeile mit Ursache) und
+        # schreiben je VM ihre [n/total]-Zeilen. Dieselbe Stellvertreter-Technik
+        # wie oben: die Produktions-Playbooks laufen gegen einen geskripteten Host.
+        $retry = Join-Path $repoRoot 'Docker/qa-ansible/esxi-step-retry-contract.py'
+        if (-not (Test-Path $retry)) { return New-InfraResult 'esxi-step-retry-contract.py fehlt unter dem Pruef-Root (Zero-Match)' }
+        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
+            $toolImages.ansible, 'python', '/repo/Docker/qa-ansible/esxi-step-retry-contract.py') -Live
+        Format-ToolResult $r 'Powercycle-Auswahl, Powercycle-Ablauf und Wiederholung von Export, Start und Autostart bewiesen' 'Powercycle-, Export-, Start- oder Autostart-Ablauf weicht vom Vertrag ab'
     }
 
     Add-Gate -Name 'ansible-create-async' -Lanes $allLanes -Kind 'container' -Body {

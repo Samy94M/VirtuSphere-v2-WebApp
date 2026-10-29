@@ -198,13 +198,25 @@ final class EsxiTrustModeTest extends TestCase
                 continue;
             }
             // A task file has no play of its own; it inherits the CA bundle
-            // environment from every playbook that includes it.
-            $includers = array_filter(
-                $sources,
-                static fn (string $candidate, string $name): bool => str_contains($name, '_playbook')
-                    && preg_match('/include_tasks: \.\/' . preg_quote($file, '/') . '\b/', $candidate) === 1,
-                ARRAY_FILTER_USE_BOTH
-            );
+            // environment from every playbook that includes it, also through
+            // other task files (K4a nests the retrying reads and writes).
+            $includers = [];
+            $pending = [$file];
+            $seen = [$file => true];
+            while ($pending !== []) {
+                $target = array_pop($pending);
+                foreach ($sources as $name => $candidate) {
+                    if (isset($seen[$name]) || preg_match('/include_tasks: \.\/' . preg_quote($target, '/') . '\b/', $candidate) !== 1) {
+                        continue;
+                    }
+                    $seen[$name] = true;
+                    if (str_contains($name, '_playbook')) {
+                        $includers[$name] = $candidate;
+                    } else {
+                        $pending[] = $name;
+                    }
+                }
+            }
             self::assertNotSame([], $includers, $file . ' issues VMware calls but no playbook includes it');
             foreach ($includers as $name => $includer) {
                 self::assertStringContainsString('SSL_CERT_FILE', $includer, $name . ' includes ' . $file);
@@ -212,8 +224,11 @@ final class EsxiTrustModeTest extends TestCase
             }
         }
         self::assertGreaterThan(0, $vmwareFiles, 'zero-match: no VMware access path found');
+        // K4a: both per-VM info files reach ESXi through the shared retrying
+        // read, which therefore must stay a VMware access path itself.
+        self::assertStringContainsString('community.vmware.', $sources[VIRTUSPHERE_ESXI_VM_READ_TASKS] ?? '', VIRTUSPHERE_ESXI_VM_READ_TASKS . ' is no longer a VMware access path');
         foreach ([VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, VIRTUSPHERE_EXPORT_VM_INFO_TASKS] as $registered) {
-            self::assertStringContainsString('community.vmware.', $sources[$registered] ?? '', $registered . ' is no longer a VMware access path');
+            self::assertStringContainsString('include_tasks: ./' . VIRTUSPHERE_ESXI_VM_READ_TASKS, $sources[$registered] ?? '', $registered . ' is no longer a VMware access path');
         }
     }
 

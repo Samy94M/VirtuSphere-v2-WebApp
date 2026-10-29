@@ -1,3 +1,4 @@
+---
 - name: Beginn der Powercycle-Statusabfrage melden
   ansible.builtin.debug:
     msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] RUN Powercycle info {{ powercycle_target['vm_name'] }}"
@@ -31,20 +32,19 @@
           {{ powercycle_target['portal_vm_id'] }}; no ESXi query was started.
 
 # AN-01: addressed by the bound instance UUID, never by the name. The identity
-# assertion in powercycleVMs-ESXi_playbook.yml still checks both.
+# assertion in powercycleVMs-ESXi_playbook.yml still checks both. A failed read
+# is repeated up to three times (W1); every repetition is a RETRY line.
 - name: Ausgangszustand dieser VM erfassen
-  community.vmware.vmware_guest_info:
-    hostname: "{{ esxi_hostname }}"
-    port: "{{ esxi_port | int }}"
-    username: "{{ esxi_username }}"
-    password: "{{ esxi_password }}"
-    validate_certs: "{{ esxi_validate_certs | bool }}"
-    datacenter: "{{ powercycle_target['datacenter_name'] }}"
-    uuid: "{{ powercycle_target['vm_instance_uuid'] }}"
-    use_instance_uuid: true
-  delegate_to: localhost
-  register: powercycle_current_info
-  ignore_errors: true
+  ansible.builtin.include_tasks: ./esxi_vm_read_tasks.yml
+  vars:
+    vs_read_uuid: "{{ powercycle_target['vm_instance_uuid'] }}"
+    vs_read_datacenter: "{{ powercycle_target['datacenter_name'] }}"
+    vs_read_position: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}]"
+    vs_read_unit: "Powercycle info {{ powercycle_target['vm_name'] }}"
+
+- name: Ergebnis der Statusabfrage dieser VM festhalten
+  ansible.builtin.set_fact:
+    powercycle_current_info: "{{ vs_vm_read }}"
 
 - name: Loop-Ergebnisform der Statusabfrage erhalten
   ansible.builtin.set_fact:
@@ -57,13 +57,14 @@
       {{ 'fail' if powercycle_current_info['failed'] | default(false) | bool else 'pass' }}
       Powercycle info {{ powercycle_target['vm_name'] }}"
 
-# Die Abfrage laeuft mit ignore_errors nur, damit die fail-Zeile oben noch
-# erscheint. Danach endet der Lauf hier: ohne diesen Abbruch wuerde die naechste
-# VM noch beim Portal als angefasst gemeldet und abgefragt, und erst das
-# Identitaets-Assert brache mit einer falschen Ursache ab.
+# Auch der letzte Versuch ist fehlgeschlagen. Der Lauf endet hier: ohne diesen
+# Abbruch wuerde die naechste VM noch beim Portal als angefasst gemeldet und
+# abgefragt, und erst das Identitaets-Assert brache mit einer falschen Ursache
+# ab. Die Meldung des Moduls steht im Text und wird so die Ursache im Portal.
 - name: Fehlgeschlagene Statusabfrage vor der naechsten VM abbrechen
   ansible.builtin.fail:
     msg: >-
-      vmware_guest_info failed for {{ powercycle_target['vm_name'] }}:
+      vmware_guest_info failed for {{ powercycle_target['vm_name'] }}
+      after {{ vs_read_attempt }} attempt(s):
       {{ powercycle_current_info['msg'] | default('no module message') }}
   when: powercycle_current_info['failed'] | default(false) | bool

@@ -18,6 +18,9 @@ import types
 
 
 MARKER = "::virtusphere-create::"
+# The shared identity check and the files it includes (K4a: the repeated
+# inventory read and the shared pause before the next attempt).
+IDENTITY_FILES = ("create_identity_check_tasks.yml", "create_identity_read_tasks.yml", "esxi_retry_wait_tasks.yml")
 
 
 def run(command: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -87,6 +90,12 @@ def module(extra=None):
         + "    with open(os.environ['VS_VM_INFO_CALLS'], 'a', encoding='utf-8') as calls:\n"
         + "        calls.write(json.dumps({key: m.params[key] for key in " + repr(recorded) + "}) + '\\n')\n"
         + ("m.fail_json(msg='synthetic identity read failure')\n" if read_failure == "identity" else "")
+        # K4a: a host that answers the first read with an error and then again.
+        + ("counter = os.environ['VS_VM_INFO_COUNTER']\n"
+           "seen = int(open(counter).read()) if os.path.exists(counter) else 0\n"
+           "open(counter, 'w').write(str(seen + 1))\n"
+           "if seen == 0:\n"
+           "    m.fail_json(msg='synthetic transient identity read failure')\n" if read_failure == "identity-first" else "")
         + "m.exit_json(changed=False, virtual_machines=json.loads(" + repr(listing) + "))\n",
         encoding="utf-8",
     )
@@ -147,6 +156,7 @@ vm_configurations:
     vcpus: 2
     disks: []
     network: []
+EsxiRetryPauseSeconds: [1, 1, 1]
 """,
         encoding="utf-8",
     )
@@ -168,7 +178,7 @@ def run_status_case(repo: Path, label: str, source: str | None, expected: dict[s
         work = Path(raw)
         for name in (
             "createVMStatus-ESXi_playbook.yml",
-            "create_identity_check_tasks.yml",
+            *IDENTITY_FILES,
             "inspect_create_async_state.py",
             "emit_create_result.py",
         ):
@@ -189,6 +199,8 @@ def run_status_case(repo: Path, label: str, source: str | None, expected: dict[s
         env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
         env["ANSIBLE_CALLBACK_PLUGINS"] = str(callback_root)
         env["ANSIBLE_CALLBACKS_ENABLED"] = "remove_async_state"
+        calls_file = work / "vm-info-calls.jsonl"
+        env["VS_VM_INFO_CALLS"] = str(calls_file)
         if remove_after_snapshot:
             env["VS_REMOVE_ASYNC_STATE"] = str(state_file)
 
@@ -206,6 +218,11 @@ def run_status_case(repo: Path, label: str, source: str | None, expected: dict[s
         if read_failure == "identity":
             if completed.returncode == 0 or result_file.exists() or "synthetic identity read failure" not in completed.stdout:
                 raise AssertionError(f"{label}: identity read failure must abort without a marker\n{completed.stdout}\n{completed.stderr}")
+            # K4a: only Prepare repeats the read. Status keeps one read, so a
+            # poll never spends its control budget on pauses.
+            calls = calls_file.read_text(encoding="utf-8").splitlines() if calls_file.exists() else []
+            if len(calls) != 1 or "RETRY" in completed.stdout:
+                raise AssertionError(f"{label}: Status must read the inventory exactly once, got {len(calls)}\n{completed.stdout}")
             return
         if completed.returncode != 0:
             raise AssertionError(f"{label}: production playbook failed\n{completed.stdout}\n{completed.stderr}")
@@ -225,7 +242,7 @@ def run_launch_case(repo: Path, label: str, power_state: str | None) -> None:
     """Execute the resumed prepared-unit path and observe actual module calls."""
     with tempfile.TemporaryDirectory(prefix="vs-create-launch-") as raw:
         work = Path(raw)
-        for name in ("createVMLaunch-ESXi_playbook.yml", "create_identity_check_tasks.yml", "emit_create_result.py"):
+        for name in ("createVMLaunch-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
             shutil.copy2(repo / "Ansible" / name, work / name)
         write_vars(work, "fixture-uuid")
         inventory = [dict(DEFAULT_INVENTORY[0])]
@@ -285,7 +302,7 @@ def run_prepare_case(repo: Path, label: str, stored_uuid: str, inventory: list[d
     """
     with tempfile.TemporaryDirectory(prefix="vs-create-prepare-") as raw:
         work = Path(raw)
-        for name in ("createVMPrepare-ESXi_playbook.yml", "create_identity_check_tasks.yml", "emit_create_result.py"):
+        for name in ("createVMPrepare-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
             shutil.copy2(repo / "Ansible" / name, work / name)
         write_vars(work, stored_uuid)
         collection_root = write_stub_collection(work / "collections", inventory)
@@ -316,7 +333,7 @@ def run_identity_read_case(repo: Path, label: str) -> None:
     """
     with tempfile.TemporaryDirectory(prefix="vs-create-identity-read-") as raw:
         work = Path(raw)
-        for name in ("createVMPrepare-ESXi_playbook.yml", "create_identity_check_tasks.yml", "emit_create_result.py"):
+        for name in ("createVMPrepare-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
             shutil.copy2(repo / "Ansible" / name, work / name)
         write_vars(work)
         collection_root = write_stub_collection(work / "collections")
@@ -338,6 +355,46 @@ def run_identity_read_case(repo: Path, label: str) -> None:
         filters = {key: calls[0][key] for key in ("vm_name", "folder") if calls[0][key] is not None}
         if filters:
             raise AssertionError(f"{label}: the identity read must see every VM of the host, got a filter {filters!r}")
+
+
+def run_prepare_read_retry_case(repo: Path, label: str, read_failure: str) -> None:
+    """K4a (W1): Prepare repeats a failed inventory read, with a RETRY line.
+
+    `identity-first`: the host fails once and then answers; the unit is
+    prepared as usual after two reads. `identity`: the host keeps failing;
+    after four reads the call ends WITHOUT a marker, as before K4a, so the
+    worker still stores `protocol_error` with the host's message as cause.
+    """
+    with tempfile.TemporaryDirectory(prefix="vs-create-prepare-retry-") as raw:
+        work = Path(raw)
+        for name in ("createVMPrepare-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work)
+        collection_root = write_stub_collection(work / "collections", [], read_failure=read_failure)
+        calls_file = work / "vm-info-calls.jsonl"
+        result_file = work / "prepare.json"
+        env = os.environ.copy()
+        installed = env.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections")
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
+        env["VS_VM_INFO_CALLS"] = str(calls_file)
+        env["VS_VM_INFO_COUNTER"] = str(work / "vm-info-counter")
+        extra = {"vs_portal_vm_id": 1, "vs_result_file": str(result_file)}
+        completed = run(["ansible-playbook", "createVMPrepare-ESXi_playbook.yml", "-e", json.dumps(extra)], cwd=work, env=env)
+        calls = calls_file.read_text(encoding="utf-8").splitlines() if calls_file.exists() else []
+        if "RETRY Create identity read fixture-vm" not in completed.stdout:
+            raise AssertionError(f"{label}: the repeated read must announce itself\n{completed.stdout}")
+        if read_failure == "identity-first":
+            if completed.returncode != 0 or len(calls) != 2:
+                raise AssertionError(f"{label}: expected a prepared unit after two reads, got {len(calls)}\n{completed.stdout}\n{completed.stderr}")
+            emitted = run(["python3", "emit_create_result.py", str(result_file)], cwd=work, env=env)
+            payload = decode_marker(emitted.stdout.strip())
+            if payload.get("event") != "prepared" or payload.get("existed_before") is not False:
+                raise AssertionError(f"{label}: unexpected marker {payload!r}")
+            return
+        if completed.returncode == 0 or result_file.exists() or len(calls) != 4:
+            raise AssertionError(f"{label}: a persistent failure must end without a marker after four reads, got {len(calls)}\n{completed.stdout}")
+        if "vmware_vm_info failed after 4 attempt(s)" not in completed.stdout or "synthetic identity read failure" not in completed.stdout:
+            raise AssertionError(f"{label}: the abort must name the attempts and the host message\n{completed.stdout}")
 
 
 def run_vm_info_fields_case(label: str) -> None:
@@ -484,7 +541,9 @@ def main(argv: list[str]) -> int:
               ("launch-suspended", ("launch", "suspended")),
               ("launch-powered-off", ("launch", "poweredOff")),
               ("status-power-read-failure", ("read-failure", "power")),
-              ("status-identity-read-failure", ("read-failure", "identity"))]
+              ("status-identity-read-failure", ("read-failure", "identity")),
+              ("prepare-identity-read-transient", ("prepare-read-retry", "identity-first")),
+              ("prepare-identity-read-persistent", ("prepare-read-retry", "identity"))]
 
     for index, (label, case) in enumerate(cases, start=1):
         print(f"[{index}/{len(cases)}] RUN {label}", flush=True)
@@ -496,6 +555,8 @@ def main(argv: list[str]) -> int:
                 run_launch_case(repo, label, case[1])
             elif case is not None and case[0] == "identity-read":
                 run_identity_read_case(repo, label)
+            elif case is not None and case[0] == "prepare-read-retry":
+                run_prepare_read_retry_case(repo, label, case[1])
             elif case is not None and case[0] == "vm-info-fields":
                 run_vm_info_fields_case(label)
             elif case is not None and case[0] == "read-failure":

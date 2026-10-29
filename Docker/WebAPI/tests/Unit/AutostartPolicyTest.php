@@ -284,21 +284,22 @@ final class AutostartPolicyTest extends TestCase
      */
     public function testThePlaybookTrustsTheEffectiveFlagFromPhp(): void
     {
-        $playbook = (string) file_get_contents($this->playbookPath('autostart'));
+        $playbook = $this->autostartSources();
 
-        self::assertStringContainsString("'powerOn' if ((item['item'] | default({}))['autostart']['enabled'] | bool) else 'none'", $playbook);
+        self::assertStringContainsString("'start_action': 'powerOn' if (autostart_vm.item.autostart.enabled | bool) else 'none'", $playbook);
         self::assertStringNotContainsString('mission_configuration.autostart.enabled | bool) and', $playbook);
         // Never disables the host manager: other missions may live on this host.
         self::assertStringNotContainsString('enabled: false', $playbook);
+        self::assertStringNotContainsString("'enabled': false", $playbook);
         // start_order is pinned; community.vmware#1903 rejects anything above 1.
-        self::assertStringContainsString('start_order: -1', $playbook);
+        self::assertStringContainsString("'start_order': -1", $playbook);
     }
 
     public function testThePlaybookAddressesTheHostByItsObjectName(): void
     {
         // vmware_host_auto_start's esxi_hostname names the host object; the
         // connection address (possibly an IP) would not resolve to it.
-        $playbook = (string) file_get_contents($this->playbookPath('autostart'));
+        $playbook = $this->autostartSources();
 
         self::assertStringContainsString('esxi_hostname: "{{ vs_esxi_host }}"', $playbook);
         self::assertStringContainsString("mission_configuration.autostart.esxi_host | default('', true) or esxi_hostname", $playbook);
@@ -318,5 +319,14 @@ final class AutostartPolicyTest extends TestCase
     private function playbookPath(string $mode): string
     {
         return ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_PLAYBOOKS[$mode];
+    }
+
+    /** The autostart playbook plus its retrying write include (K4a), where the module call now lives. */
+    private function autostartSources(): string
+    {
+        $playbook = (string) file_get_contents($this->playbookPath('autostart'));
+        self::assertStringContainsString('include_tasks: ./' . VIRTUSPHERE_AUTOSTART_WRITE_TASKS, $playbook);
+
+        return $playbook . "\n" . (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_AUTOSTART_WRITE_TASKS);
     }
 }

@@ -33,6 +33,8 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
         'string', 'replace', 'truncate', 'match', 'equalto',
         // K12 (FC2-16): the autostart playbook counts written entries.
         'reject',
+        // K4a: start and autostart name the VMs that failed after their retries.
+        'join',
         'if', 'else', 'not', 'and', 'or', 'in', 'is', 'defined',
         'true', 'false', 'True', 'False', 'none', 'None',
         'item', 'ansible_date_time', 'ansible_facts', 'hostvars',
@@ -313,6 +315,10 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
             foreach ($blocks as $match) {
                 if (preg_match('/^\s*loop_var:\s*(\w+)\s*$/m', $match[2], $loopVar) === 1) {
                     $names[] = $loopVar[1];
+                }
+                // The position counter of the same loop (K4a progress lines).
+                if (preg_match('/^\s*index_var:\s*(\w+)\s*$/m', $match[2], $indexVar) === 1) {
+                    $names[] = $indexVar[1];
                 }
             }
         }

@@ -46,8 +46,13 @@
       ansible.builtin.set_fact:
         vs_target: "{{ vs_targets | first }}"
 
+    # Nur hier wird die Inventarabfrage nach einem Fehlschlag wiederholt
+    # (K4a, W1): das Prepare liest nur, und ein kurzer ESXi-Aussetzer soll die
+    # Create-Phase nicht als protocol_error anhalten.
     - name: Identitaet pruefen
       ansible.builtin.include_tasks: ./create_identity_check_tasks.yml
+      vars:
+        vs_identity_read_retries: true
 
     # Ein geschlossener Identitaetsbefund ist ein Ergebnis dieser Einheit, kein
     # Fehler dieses Steueraufrufs: er wird als Marker gemeldet, damit der Worker

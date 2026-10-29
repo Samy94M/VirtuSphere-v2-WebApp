@@ -133,16 +133,24 @@ final class AnsibleVmIdentityContractTest extends TestCase
             'autostartVMs-ESXi_playbook.yml' => 'community.vmware.vmware_host_auto_start:',
         ] as $file => $module) {
             $playbook = $this->source($file);
-            preg_match_all('/' . preg_quote($module, '/') . '\R((?:\s{8}.+\R)+)/', $playbook, $matches);
-            self::assertNotEmpty($matches[1], $file . ' has no inspectable mutation arguments');
-            foreach ($matches[1] as $arguments) {
+            // Arguments are the lines indented deeper than the module key, at
+            // whatever depth the task sits (block or flat include file).
+            preg_match_all('/^( *)' . preg_quote($module, '/') . '\R((?:\1  .+\R)+)/m', $playbook, $matches);
+            self::assertNotEmpty($matches[2], $file . ' has no inspectable mutation arguments');
+            foreach ($matches[2] as $arguments) {
                 // The host-wide autostart defaults intentionally select no VM.
-                if ($file === 'autostartVMs-ESXi_playbook.yml' && str_contains($arguments, 'system_defaults:')) {
+                // Since K4a one write task serves defaults and VM entries; its
+                // VM branch (power_info) must still select by instance UUID.
+                if ($file === 'autostartVMs-ESXi_playbook.yml' && !str_contains($arguments, 'power_info:')) {
                     continue;
                 }
                 self::assertStringContainsString('uuid:', $arguments, $file);
                 self::assertStringContainsString('instance_uuid', $arguments, $file);
-                self::assertStringContainsString('use_instance_uuid: true', $arguments, $file);
+                self::assertMatchesRegularExpression(
+                    '/use_instance_uuid: (true|"\{\{ true if autostart_vm is defined else omit \}\}")\R/',
+                    $arguments,
+                    $file
+                );
                 self::assertDoesNotMatchRegularExpression('/^\s*name:/m', $arguments, $file . ' must not resolve the VM by name again');
             }
         }
@@ -159,21 +167,23 @@ final class AnsibleVmIdentityContractTest extends TestCase
         self::assertStringNotContainsString('content: "{{ vm_info.results | to_nice_json }}"', $playbook);
     }
 
-    private function source(string $file): string
+    /** @param list<string> $ancestors */
+    private function source(string $file, array $ancestors = []): string
     {
         $source = file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . $file);
         self::assertIsString($source);
+        $ancestors[] = $file;
 
-        // Splice every local task include in at its own position, so the
-        // order checks above still measure the order Ansible executes.
+        // Splice every local task include in at its own position, recursively,
+        // so the order checks above still measure the order Ansible executes
+        // (K4a moved reads and mutations into nested includes). A retry file
+        // that includes itself is spliced once: its recursion repeats the
+        // same call and adds no new order.
         return (string) preg_replace_callback(
             '/include_tasks: \.\/([\w.-]+\.yml)/',
-            static function (array $match): string {
-                $included = file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . $match[1]);
-                self::assertIsString($included, $match[1]);
-
-                return $match[0] . "\n" . $included;
-            },
+            fn (array $match): string => in_array($match[1], $ancestors, true)
+                ? $match[0]
+                : $match[0] . "\n" . $this->source($match[1], $ancestors),
             $source
         );
     }

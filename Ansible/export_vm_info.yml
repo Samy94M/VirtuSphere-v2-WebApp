@@ -32,22 +32,21 @@
           Results already read in this run were NOT uploaded: start the export again.
 
 # AN-01: the bound instance UUID addresses the VM, as every mutation of this run
-# does. The identity check below still compares the name as well.
+# does. The identity check below still compares the name as well. A failed read
+# is repeated up to three times (W1); only the last result counts. It stays a
+# per-VM callback result: a touch refusal above is a hard playbook stop and
+# never reaches this query, a query failure is `esxi_query_failed` for this VM.
 - name: Informationen dieser VM abfragen
-  community.vmware.vmware_guest_info:
-    hostname: "{{ esxi_hostname }}"
-    port: "{{ esxi_port | int }}"
-    username: "{{ esxi_username }}"
-    password: "{{ esxi_password }}"
-    validate_certs: "{{ esxi_validate_certs | bool }}"
-    datacenter: "{{ export_vm_config['datacenter_name'] }}"
-    uuid: "{{ export_vm_config['vm_instance_uuid'] }}"
-    use_instance_uuid: true
-  delegate_to: localhost
-  register: vm_info_current
-  # Keep query failures as per-VM callback results; a touch refusal above is a
-  # hard playbook stop and never reaches this query.
-  ignore_errors: true
+  ansible.builtin.include_tasks: ./esxi_vm_read_tasks.yml
+  vars:
+    vs_read_uuid: "{{ export_vm_config['vm_instance_uuid'] }}"
+    vs_read_datacenter: "{{ export_vm_config['datacenter_name'] }}"
+    vs_read_position: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}]"
+    vs_read_unit: "Export info {{ export_vm_config['vm_name'] }}"
+
+- name: Ergebnis der Exportabfrage dieser VM festhalten
+  ansible.builtin.set_fact:
+    vm_info_current: "{{ vs_vm_read }}"
 
 - name: Loop-Ergebnisform der Exportabfrage erhalten
   ansible.builtin.set_fact:
@@ -100,7 +99,8 @@
         ''
         if not ((vm_info_identity_results | last)['failed'] | default(false) | bool)
         else (
-          ': query_failed'
+          ': query_failed after ' ~ vs_read_attempt ~ ' attempt(s): '
+          ~ (vm_info_current['msg'] | default('no module message') | string | replace('\n', ' ') | truncate(300))
           if (vm_info_current['failed'] | default(false) | bool)
           else (
             ': identity mismatch, stored instance UUID '

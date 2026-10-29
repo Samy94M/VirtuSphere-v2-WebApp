@@ -1,4 +1,18 @@
 ---
+# Schaltet die VMs eines Auftrags nach der Startwartezeit ein.
+#
+# Ablauf (K4a):
+#   1. Je VM die Identitaet lesen (vm_identity_read_tasks.yml), mit
+#      `[n/total] RUN|pass|fail Start info <vm>`. Scheitert eine Abfrage auch
+#      nach drei Wiederholungen, endet der Lauf, bevor eine VM startet.
+#   2. Name und Instance-UUID aller VMs pruefen, dann StartWaitSeconds warten.
+#   3. Je VM einschalten (start_vm_power_tasks.yml), mit
+#      `[n/total] RUN|pass|fail Start <vm>`. `powered-on` ohne force ist
+#      idempotent, deshalb bekommt ein Fehlschlag bis zu drei weitere
+#      Versuche. Eine VM, die auch dann nicht startet, haelt die anderen
+#      nicht auf; der Schritt endet danach rot mit ihrer Liste.
+# Jede Wiederholung ist eine RETRY-Zeile mit der Meldung des Moduls; die
+# Pausen kommen aus EsxiRetryPauseSeconds (W1).
 - name: Starten der VMs mit Wartezeit
   hosts: localhost
   gather_facts: false
@@ -10,22 +24,28 @@
     REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
 
   tasks:
+    - name: Ergebnisse der Identitaetsabfrage initialisieren
+      ansible.builtin.set_fact:
+        vs_identity_results: []
+        start_power_failures: []
+
     # AN-01: the bound instance UUID addresses the VM, as the mutation below does.
     - name: Ziel-VMs fuer die Identitaetspruefung lesen
-      community.vmware.vmware_guest_info:
-        hostname: "{{ esxi_hostname }}"
-        port: "{{ esxi_port | int }}"
-        username: "{{ esxi_username }}"
-        password: "{{ esxi_password }}"
-        validate_certs: "{{ esxi_validate_certs | bool }}"
-        datacenter: "{{ item.datacenter_name }}"
-        uuid: "{{ item.vm_instance_uuid }}"
-        use_instance_uuid: true
-      delegate_to: localhost
+      ansible.builtin.include_tasks: ./vm_identity_read_tasks.yml
+      vars:
+        vs_identity_step: Start
+        vs_identity_total: "{{ vm_configurations | length }}"
+        vs_identity_datacenter: "{{ vs_identity_vm['datacenter_name'] }}"
       loop: "{{ vm_configurations }}"
       loop_control:
-        label: "{{ item.vm_name }}"
-      register: start_identity_results
+        loop_var: vs_identity_vm
+        index_var: vs_identity_index
+        label: "{{ vs_identity_vm['vm_name'] }}"
+
+    - name: Loop-Ergebnisform der Identitaetsabfrage erhalten
+      ansible.builtin.set_fact:
+        start_identity_results:
+          results: "{{ vs_identity_results }}"
 
     - name: Name und Instance-UUID vor dem Start validieren
       ansible.builtin.assert:
@@ -59,21 +79,19 @@
       ansible.builtin.pause:
         seconds: "{{ StartWaitSeconds | default(300) | int }}"
 
-    - name: Vorhandene VMs starten
-      community.vmware.vmware_guest_powerstate:
-        hostname: "{{ esxi_hostname }}"
-        port: "{{ esxi_port | int }}"
-        username: "{{ esxi_username }}"
-        password: "{{ esxi_password }}"
-        validate_certs: "{{ esxi_validate_certs | bool }}"
-        uuid: "{{ (item['instance'] | default({}))['instance_uuid'] }}"
-        use_instance_uuid: true
-        folder: "/"
-        datacenter: "{{ (item['item'] | default({}))['datacenter_name'] }}"
-        state: powered-on
-        force: false
-      delegate_to: localhost
+    - name: Vorhandene VMs nacheinander starten
+      ansible.builtin.include_tasks: ./start_vm_power_tasks.yml
       loop: "{{ start_identity_results.results | default([]) }}"
       loop_control:
-        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
-      when: start_identity_results.results | default([]) | length > 0
+        loop_var: start_vm
+        index_var: start_index
+        label: "{{ (start_vm['item'] | default({}))['vm_name'] | default('unknown') }}"
+
+    # Teilweise gestartet: die genannten VMs sind aus, die anderen laufen.
+    - name: Nicht gestartete VMs als Fehler des Schritts melden
+      ansible.builtin.fail:
+        msg: >-
+          {{ start_power_failures | length }} of {{ start_identity_results.results | length }}
+          VMs did not start: {{ start_power_failures | join('; ') }}.
+          The other VMs were started.
+      when: start_power_failures | length > 0

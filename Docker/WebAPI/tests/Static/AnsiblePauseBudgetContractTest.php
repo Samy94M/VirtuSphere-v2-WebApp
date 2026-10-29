@@ -56,6 +56,16 @@ final class AnsiblePauseBudgetContractTest extends TestCase
         ],
     ];
 
+    /**
+     * Playbook list variable => the constant list it is emitted from (K4a, W1).
+     * A list pause is indexed by the attempt that just failed, so its
+     * expression names the list and an index; it is not operator-tunable and
+     * has no payload key. Its playbook fallback must be the whole list.
+     */
+    private const PAUSE_LISTS = [
+        'EsxiRetryPauseSeconds' => VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS,
+    ];
+
     /** Duration keys the pause module accepts; only one of them is allowed. */
     private const DURATION_KEYS = ['seconds', 'minutes', 'hours'];
 
@@ -79,6 +89,24 @@ final class AnsiblePauseBudgetContractTest extends TestCase
                     'The emitting constant is in seconds, so any other unit multiplies it silently.'
                 )
             );
+
+            $listVariable = $this->pauseListIn($units['seconds']);
+            if ($listVariable !== null) {
+                // `(List | default([a, b, c]))[attempt - 1]`: the fallback is
+                // a second copy of the whole list and has to be the same list.
+                self::assertSame(
+                    1,
+                    preg_match('/\b' . $listVariable . '\s*\|\s*default\(\[([\d,\s]+)\]\)\s*\)\s*\[/', $units['seconds'], $fallback),
+                    sprintf('%s: the list pause must read (%s | default([...]))[index].', $where, $listVariable)
+                );
+                self::assertSame(
+                    self::PAUSE_LISTS[$listVariable],
+                    array_map('intval', preg_split('/\s*,\s*/', trim($fallback[1])) ?: []),
+                    sprintf('%s: the default([...]) fallback disagrees with the constant that emits %s.', $where, $listVariable)
+                );
+                $seen[$listVariable] = true;
+                continue;
+            }
 
             $variables = $this->variablesIn($units['seconds']);
             self::assertCount(
@@ -114,7 +142,7 @@ final class AnsiblePauseBudgetContractTest extends TestCase
         }
 
         // Sorted: the order is the glob's, not a contract.
-        $registered = array_keys(self::PAUSE_VARIABLES);
+        $registered = array_merge(array_keys(self::PAUSE_VARIABLES), array_keys(self::PAUSE_LISTS));
         $found = array_keys($seen);
         sort($registered);
         sort($found);
@@ -139,6 +167,55 @@ final class AnsiblePauseBudgetContractTest extends TestCase
                 (string) $bounds['default'],
                 $emitted[$variable],
                 sprintf('%s is emitted as %s while its constant says %s.', $variable, $emitted[$variable], (string) $bounds['default'])
+            );
+        }
+    }
+
+    /**
+     * K4a (W1): the retry pauses of every playbook, the in-job create retry and
+     * the MAC upload client are one list. The playbooks receive it through
+     * serverlist.yml; upload_mac_list.py cannot (it runs without the artifact
+     * vars), so its tuple is held to the same constant here.
+     */
+    public function testRetryPauseListsAreEmittedFromTheirConstantAndAgreeWithTheUploadClient(): void
+    {
+        $yaml = ansible_serverlist_yml(
+            ['id' => 1, 'mission_name' => 'PauseBudget', 'hypervisor_datacenter' => 'DC1', 'hypervisor_datastorage' => 'ds1', 'wds_vlan' => 'VLAN10'],
+            [['vm_name' => 'vm01', 'disks' => [], 'interfaces' => [], 'packages' => []]]
+        );
+        foreach (self::PAUSE_LISTS as $variable => $pauses) {
+            self::assertSame(
+                1,
+                preg_match('/^' . $variable . ':\s*\[([\d,\s]+)\]\s*$/m', $yaml, $match),
+                sprintf('%s is read by a playbook but ansible_serverlist_yml() does not emit it as a list.', $variable)
+            );
+            self::assertSame($pauses, array_map('intval', preg_split('/\s*,\s*/', trim($match[1])) ?: []));
+        }
+
+        $client = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . VIRTUSPHERE_ANSIBLE_UPLOAD_SCRIPT);
+        self::assertSame(1, preg_match('/^RETRY_DELAYS_SECONDS = \(([\d,\s]+)\)\s*$/m', $client, $tuple), 'upload_mac_list.py no longer names RETRY_DELAYS_SECONDS as a tuple.');
+        self::assertSame(
+            VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS,
+            array_map('intval', array_values(array_filter(preg_split('/\s*,\s*/', trim($tuple[1])) ?: [], static fn (string $part): bool => $part !== ''))),
+            'upload_mac_list.py retries with other pauses than the ESXi steps.'
+        );
+    }
+
+    public function testNoRetryPauseCanReachTheBudgetOfTheCallItRunsIn(): void
+    {
+        foreach (self::PAUSE_LISTS as $variable => $pauses) {
+            self::assertNotSame([], $pauses, $variable . ' is empty; nothing would be retried.');
+            foreach ($pauses as $pause) {
+                self::assertGreaterThanOrEqual(1, (int) $pause, $variable . ': the pause module raises anything below 1 s to 1 s.');
+                // The create Prepare repeats its read inside one control call,
+                // which has the tightest silence budget of any remote command.
+                self::assertLessThan(VIRTUSPHERE_CREATE_CONTROL_IDLE_TIMEOUT_SECONDS, (int) $pause, $variable . ': one silent pause would end the Prepare control call.');
+                self::assertLessThan(VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS, (int) $pause);
+            }
+            self::assertLessThan(
+                VIRTUSPHERE_CREATE_CONTROL_TOTAL_TIMEOUT_SECONDS,
+                array_sum($pauses),
+                $variable . ': all pauses of one Prepare read exceed the total budget of its control call.'
             );
         }
     }
@@ -247,6 +324,18 @@ final class AnsiblePauseBudgetContractTest extends TestCase
         self::assertNotEmpty($tasks, 'No pause task found at all; the scan pattern stopped matching and this contract went silently green.');
 
         return $tasks;
+    }
+
+    /** The registered list variable a pause expression indexes, if any. */
+    private function pauseListIn(string $expression): ?string
+    {
+        foreach (array_keys(self::PAUSE_LISTS) as $variable) {
+            if (preg_match('/\b' . $variable . '\b/', $expression) === 1) {
+                return $variable;
+            }
+        }
+
+        return null;
     }
 
     /**

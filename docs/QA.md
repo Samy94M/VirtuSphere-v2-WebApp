@@ -1321,4 +1321,11 @@ The canonical ansible-powercycle-selection gate also runs the production playboo
 and its shipped per-VM task file with local VMware action doubles. It checks
 ordered power-on/pause/power-off, a real seconds pause, external starts, empty
 and excluded selections, missing identity/state and fail-stop cleanup paths.
+Since K4a it also covers the repeated ESXi calls: a transient read, power-on
+or power-off failure is retried with RETRY lines, an unclear power-on is read
+back and never repeated blindly (a VM that is on afterwards is powered off),
+and an unreadable state stops without a power-off. The same gate then runs
+`Docker/qa-ansible/esxi-step-retry-contract.py`: the export, start and autostart
+playbooks against a scripted host, with transient and persistent failures,
+per-VM `[n/total]` lines, the per-VM export rows and the autostart marker.
 No ESXi connection is made; real host state convergence remains a lab acceptance.

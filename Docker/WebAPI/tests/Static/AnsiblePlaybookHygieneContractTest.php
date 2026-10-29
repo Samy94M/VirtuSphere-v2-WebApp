@@ -40,10 +40,18 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         // state read after a proven success (reported as unknown on error).
         'createVMStatus-ESXi_playbook.yml' => 2,
         'exportVMs-Informations-ESXi_playbook.yml' => 0,
-        'export_vm_info.yml' => 1,
+        'export_vm_info.yml' => 0,
         'inventoryESXi_playbook.yml' => 7,
-        'powercycle_vm_info.yml' => 1,
-        'powercycle_vm_tasks.yml' => 1,
+        'powercycle_vm_info.yml' => 0,
+        'powercycle_vm_tasks.yml' => 0,
+        // K4a (W1/W2): each repeated ESXi call tolerates its failure until the
+        // last attempt; the caller or the file's own last task then decides.
+        'esxi_vm_read_tasks.yml' => 1,
+        'powercycle_power_on_tasks.yml' => 1,
+        'powercycle_power_off_tasks.yml' => 1,
+        'start_vm_power_tasks.yml' => 1,
+        'autostart_write_tasks.yml' => 1,
+        'create_identity_read_tasks.yml' => 1,
     ];
 
     public function testIgnoreErrorsOnlyWhereClassifiedAndAlwaysRegistered(): void
@@ -205,7 +213,7 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
         self::assertGreaterThanOrEqual(2, count($switchSets), 'VM list scan found fewer reads than the repo contains (zero-match must not pass).');
         $reference = [];
         foreach ($switchSets as [$name, $switches]) {
-            if ($name === 'create_identity_check_tasks.yml') {
+            if ($name === VIRTUSPHERE_CREATE_IDENTITY_READ_TASKS) {
                 $reference = $switches;
             }
         }
@@ -265,27 +273,42 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
      * AN-01/AN-02: every read of a live VM that precedes a mutation or an export
      * addresses the VM by its bound instance UUID. A name is shared by namesakes,
      * and a read by name can return the foreign VM before the identity check
-     * compares it. The read is one call per playbook, and it sets
-     * use_instance_uuid so the module treats the value as an instance UUID.
+     * compares it. Since K4a the call lives once, in the repeated
+     * esxi_vm_read_tasks.yml; it sets use_instance_uuid so the module treats
+     * the value as an instance UUID, and every caller passes the bound UUID.
      */
     public function testIdentityReadsAddressTheBoundInstanceUuidNotTheName(): void
     {
+        $playbooks = $this->playbooks();
+        $calls = $this->moduleArguments($playbooks[VIRTUSPHERE_ESXI_VM_READ_TASKS] ?? '', 'community.vmware.vmware_guest_info');
+        self::assertCount(1, $calls, 'the shared read must read its live VM exactly once (zero-match must not pass).');
+        self::assertArrayNotHasKey('name', $calls[0], 'the shared read addresses the VM by name; a namesake would be the object that is read.');
+        self::assertSame('true', $calls[0]['use_instance_uuid'] ?? '', 'the shared read must set use_instance_uuid.');
+        self::assertSame('"{{ vs_read_uuid }}"', $calls[0]['uuid'] ?? '');
+
         foreach ([
             'export_vm_info.yml' => 'export_vm_config',
             'powercycle_vm_info.yml' => 'powercycle_target',
-            'startVMs-ESXi_playbook.yml' => 'item',
-            'autostartVMs-ESXi_playbook.yml' => 'item',
+            VIRTUSPHERE_VM_IDENTITY_READ_TASKS => 'vs_identity_vm',
         ] as $file => $loopItem) {
-            $calls = $this->moduleArguments($this->playbooks()[$file] ?? '', 'community.vmware.vmware_guest_info');
-            self::assertCount(1, $calls, $file . ' must read its live VM exactly once (zero-match must not pass).');
-            $arguments = $calls[0];
-
-            self::assertArrayNotHasKey('name', $arguments, $file . ' reads the VM by name; a namesake would be the object that is read.');
-            self::assertSame('true', $arguments['use_instance_uuid'] ?? '', $file . ' must set use_instance_uuid.');
+            $source = $playbooks[$file] ?? '';
+            self::assertSame([], $this->moduleArguments($source, 'community.vmware.vmware_guest_info'), $file . ' must read through the shared read, not a second copy.');
             self::assertMatchesRegularExpression(
-                '/\b' . preg_quote($loopItem, '/') . '(?:\.vm_instance_uuid|\[\'vm_instance_uuid\'\])/',
-                $arguments['uuid'] ?? '',
+                '/include_tasks: \.\/' . preg_quote(VIRTUSPHERE_ESXI_VM_READ_TASKS, '/') . '\s*\R\s*vars:\s*\R\s*vs_read_uuid: "\{\{ ' . preg_quote($loopItem, '/') . '\[\'vm_instance_uuid\'\] \}\}"/',
+                $source,
                 $file . ' must address the VM by its bound vm_instance_uuid.'
+            );
+        }
+
+        // Start and autostart read every selected VM through the per-VM file
+        // before their first change.
+        foreach (['startVMs-ESXi_playbook.yml', 'autostartVMs-ESXi_playbook.yml'] as $file) {
+            $source = $playbooks[$file] ?? '';
+            self::assertSame([], $this->moduleArguments($source, 'community.vmware.vmware_guest_info'), $file);
+            self::assertMatchesRegularExpression(
+                '/include_tasks: \.\/' . preg_quote(VIRTUSPHERE_VM_IDENTITY_READ_TASKS, '/') . '.*?loop: "\{\{ vm_configurations \}\}".*?loop_var: vs_identity_vm/s',
+                $source,
+                $file . ' must read the identity of every selected VM.'
             );
         }
     }
@@ -308,7 +331,7 @@ final class AnsiblePlaybookHygieneContractTest extends TestCase
 
         $export = $this->playbooks()['export_vm_info.yml'] ?? '';
         self::assertStringContainsString('export_result_reason', $export, 'the export line must carry the reason of a failed VM');
-        self::assertStringContainsString("': query_failed'", $export);
+        self::assertStringContainsString("': query_failed after '", $export, 'a failed query names its attempts and the module message');
         self::assertStringContainsString('identity mismatch, stored instance UUID', $export);
         // The query task of this file does carry the password argument; only the
         // reason block that the line prints is held to "no credentials".

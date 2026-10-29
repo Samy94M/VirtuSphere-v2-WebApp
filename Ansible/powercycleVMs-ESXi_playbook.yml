@@ -11,7 +11,15 @@
 #     MACs existieren laengst, der Export liest sie ohne Zyklus,
 #   - der always-Block schaltet die vom Lauf gestarteten VMs auch nach einem
 #     Teilfehler zwischen Ein- und Ausschalten wieder aus; ein Fehler dabei
-#     macht den Lauf fehlerhaft, nie zum Erfolg.
+#     macht den Lauf fehlerhaft, nie zum Erfolg,
+#   - "vom Lauf gestartet" heisst auch: eine anfangs ausgeschaltete VM, die
+#     nach einem fehlgeschlagenen oder unklaren Einschalten eingeschaltet
+#     gelesen wird (W2, powercycle_power_on_tasks.yml). Das Einschalten wird
+#     nie blind wiederholt, nur nach einem gelesenen poweredOff.
+# Ein kurzer ESXi-Aussetzer beendet den Lauf nicht: Zustandsabfrage,
+# Einschalten (nach W2) und hartes Ausschalten bekommen bis zu drei weitere
+# Versuche mit den Pausen aus EsxiRetryPauseSeconds (W1), jede als RETRY-Zeile
+# mit der Meldung des Moduls im Protokoll.
 # Grenze: ein harter Prozessabbruch (Kill des ansible-Prozesses, SSH-Abriss)
 # fuehrt keinen always-Block mehr aus und kann gestartete VMs eingeschaltet
 # zuruecklassen; docs/DEPLOYMENT.md nennt das im Power-Cycle-Abschnitt.

@@ -1,0 +1,72 @@
+---
+# Hartes Ausschalten der VM, die dieser Lauf eingeschaltet hat (K4a, W1).
+#
+# Eingebunden aus dem always-Teil von powercycle_vm_tasks.yml, nur wenn
+# powercycle_started_by_run die VM nachweislich enthaelt. Hart (force true),
+# weil eine frisch angelegte VM kein Betriebssystem hat. `powered-off` auf eine
+# ausgeschaltete VM aendert nichts, deshalb ist eine Wiederholung sicher: Nach
+# einem Fehlschlag folgen bis zu drei weitere Versuche mit den Pausen aus
+# esxi_retry_wait_tasks.yml. Scheitert auch der letzte, endet der Lauf mit der
+# Meldung des Moduls; die VM kann dann noch laufen.
+- name: Ersten Ausschaltversuch zaehlen
+  ansible.builtin.set_fact:
+    powercycle_off_attempt: 1
+  when: not (powercycle_off_is_retry | default(false) | bool)
+
+- name: Vom Lauf gestartete VM wieder hart ausschalten
+  community.vmware.vmware_guest_powerstate:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+    uuid: "{{ powercycle_vm['instance']['instance_uuid'] }}"
+    use_instance_uuid: true
+    folder: "/"
+    datacenter: "{{ powercycle_vm['item']['datacenter_name'] }}"
+    state: powered-off
+    force: true
+  delegate_to: localhost
+  register: powercycle_stop_result
+  # Toleriert bis zum letzten Versuch; danach bricht der letzte Task ab.
+  ignore_errors: true
+
+- name: Naechsten Ausschaltversuch entscheiden
+  ansible.builtin.set_fact:
+    powercycle_off_again: >-
+      {{
+        (powercycle_stop_result['failed'] | default(false) | bool)
+        and (powercycle_off_attempt | int) <= ((EsxiRetryPauseSeconds | default([5, 15, 45])) | length)
+      }}
+
+- name: Vor dem naechsten Ausschaltversuch warten
+  ansible.builtin.include_tasks: ./esxi_retry_wait_tasks.yml
+  vars:
+    vs_retry_position: "[{{ powercycle_index + 1 }}/{{ powercycle_to_start | length }}]"
+    vs_retry_unit: "Powercycle power-off {{ powercycle_vm['item']['vm_name'] }}"
+    vs_retry_attempt: "{{ powercycle_off_attempt }}"
+    vs_retry_cause: "{{ powercycle_stop_result['msg'] | default('') }}"
+  when: powercycle_off_again | bool
+
+- name: Ausschaltversuch hochzaehlen
+  ansible.builtin.set_fact:
+    powercycle_off_attempt: "{{ powercycle_off_attempt | int + 1 }}"
+  when: powercycle_off_again | bool
+
+- name: VM erneut hart ausschalten
+  ansible.builtin.include_tasks: ./powercycle_power_off_tasks.yml
+  vars:
+    powercycle_off_is_retry: true
+  when: powercycle_off_again | bool
+
+# Nur auf der aeussersten Ebene: die inneren Versuche kehren hierher zurueck,
+# und powercycle_stop_result ist dann das Ergebnis des letzten Versuchs.
+- name: Gescheitertes Ausschalten als Fehler melden
+  ansible.builtin.fail:
+    msg: >-
+      hard power-off failed after {{ powercycle_off_attempt }} attempt(s):
+      {{ powercycle_stop_result['msg'] | default('no module message') | string | replace('\n', ' ') | truncate(300) }}.
+      This run powered the VM on; it may still be running.
+  when:
+    - not (powercycle_off_is_retry | default(false) | bool)
+    - powercycle_stop_result['failed'] | default(false) | bool
