@@ -39,7 +39,7 @@ final class CreateInJobRetryContractTest extends TestCase
         $retry = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_worker_create_retry.php');
         // The reset and the move of the first job id share one transaction.
         self::assertMatchesRegularExpression(
-            '/prior_async_jid = async_jid.*?SET create_launch_intent = 0/s',
+            '/first_async_jid = COALESCE\(first_async_jid, async_jid\).*?SET create_launch_intent = 0/s',
             $retry
         );
         self::assertStringContainsString('deploy_worker_owned_transaction($db, $claim,', $retry);

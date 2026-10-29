@@ -57,9 +57,9 @@ final class DeployCreateInJobRetryTest extends TestCase
         self::assertNotNull($unit);
         self::assertSame(VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING, (string) $unit['status']);
         self::assertSame(2, (int) $unit['attempt']);
-        self::assertSame(VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED, (string) $unit['prior_error_code']);
-        self::assertSame('503 Service Unavailable', (string) $unit['prior_error_detail']);
-        self::assertSame('1234567890.1', (string) $unit['prior_async_jid']);
+        self::assertSame(VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED, (string) $unit['first_error_code']);
+        self::assertSame('503 Service Unavailable', (string) $unit['first_error_detail']);
+        self::assertSame('1234567890.1', (string) $unit['first_async_jid']);
         foreach (['error_code', 'error_detail', 'async_jid', 'async_deadline_at', 'finished_at', 'existed_before'] as $column) {
             self::assertNull($unit[$column], $column . ' belongs to the next attempt');
         }
@@ -72,17 +72,26 @@ final class DeployCreateInJobRetryTest extends TestCase
         self::assertSame(VIRTUSPHERE_CREATE_ERROR_TRANSPORT_LOST, (string) repo_deploy_create_results($this->db, (int) $claim['id'])[1]['error_code']);
     }
 
-    public function testASecondAttemptIsNeverReopenedAgain(): void
+    public function testTheFourthAttemptIsNeverReopenedAndTheFirstEvidenceStays(): void
     {
         [$claim, $vms] = $this->createJob(1);
         $this->moduleFailure($claim, 1, $vms[0]);
-        self::assertNotNull(deploy_worker_create_requeue_unit($this->db, $claim, $this->fence($claim), 1));
-        $this->moduleFailure($claim, 1, $vms[0]);
+        for ($attempt = 2; $attempt <= VIRTUSPHERE_CREATE_MAX_ATTEMPTS; $attempt++) {
+            $unit = deploy_worker_create_requeue_unit($this->db, $claim, $this->fence($claim), 1);
+            self::assertNotNull($unit, 'attempt ' . $attempt . ' is re-opened');
+            self::assertSame($attempt, (int) $unit['attempt']);
+            // The first attempt's evidence, never the attempt just before.
+            self::assertSame('1234567890.1', (string) $unit['first_async_jid']);
+            self::assertSame('503 Service Unavailable', (string) $unit['first_error_detail']);
+            $this->moduleFailure($claim, 1, $vms[0], '1234567890.' . (10 + $attempt), 'later failure ' . $attempt);
+        }
 
         self::assertNull(deploy_worker_create_requeue_unit($this->db, $claim, $this->fence($claim), 1));
         $row = repo_deploy_create_results($this->db, (int) $claim['id'])[0];
-        self::assertSame(2, (int) $row['attempt']);
+        self::assertSame(VIRTUSPHERE_CREATE_MAX_ATTEMPTS, (int) $row['attempt']);
         self::assertSame(VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, (string) $row['status']);
+        self::assertSame('later failure ' . VIRTUSPHERE_CREATE_MAX_ATTEMPTS, (string) $row['error_detail']);
+        self::assertSame(VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED, (string) $row['first_error_code']);
     }
 
     public function testNothingIsReopenedWhileAUnitIsInFlightOrForAnotherCode(): void
@@ -119,8 +128,8 @@ final class DeployCreateInJobRetryTest extends TestCase
 
         foreach ([
             'UPDATE deploy_create_vm_results SET attempt = 2 WHERE job_id = ?',
-            "UPDATE deploy_create_vm_results SET prior_error_code = 'module_failed', prior_error_detail = 'x', prior_async_jid = '1.2' WHERE job_id = ?",
-            "UPDATE deploy_create_vm_results SET attempt = 2, prior_error_code = 'module_failed', prior_error_detail = 'x' WHERE job_id = ?",
+            "UPDATE deploy_create_vm_results SET first_error_code = 'module_failed', first_error_detail = 'x', first_async_jid = '1.2' WHERE job_id = ?",
+            "UPDATE deploy_create_vm_results SET attempt = 2, first_error_code = 'module_failed', first_error_detail = 'x' WHERE job_id = ?",
         ] as $sql) {
             try {
                 repo_execute($this->db, $sql, 'i', [$jobId]);
@@ -171,7 +180,7 @@ final class DeployCreateInJobRetryTest extends TestCase
         $row = repo_deploy_create_results($this->db, (int) $claim['id'])[0];
         self::assertSame(VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED, (string) $row['status']);
         self::assertSame(VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST, (string) $row['error_code']);
-        self::assertSame('1234567890.1', (string) $row['prior_async_jid']);
+        self::assertSame('1234567890.1', (string) $row['first_async_jid']);
     }
 
     /** @return array{0:array<string,mixed>,1:list<int>} */
@@ -215,13 +224,13 @@ final class DeployCreateInJobRetryTest extends TestCase
     }
 
     /** @param array<string,mixed> $claim */
-    private function moduleFailure(array $claim, int $position, int $vmId): void
+    private function moduleFailure(array $claim, int $position, int $vmId, ?string $jid = null, string $detail = '503 Service Unavailable'): void
     {
         self::assertNotNull(deploy_worker_vm_create_launch_intent($this->db, $claim, $vmId, true));
-        $this->toRunning($claim, $position, '1234567890.' . $position);
+        $this->toRunning($claim, $position, $jid ?? '1234567890.' . $position);
         self::assertTrue(repo_deploy_create_transition($this->db, (int) $claim['id'], $position, 'running', 'failed', [
             'error_code' => VIRTUSPHERE_CREATE_ERROR_MODULE_FAILED,
-            'error_detail' => '503 Service Unavailable',
+            'error_detail' => $detail,
         ], $this->fence($claim)));
     }
 

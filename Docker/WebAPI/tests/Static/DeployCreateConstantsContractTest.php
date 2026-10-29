@@ -33,7 +33,7 @@ final class DeployCreateConstantsContractTest extends TestCase
             'remote cleanup max auto attempts' => VIRTUSPHERE_REMOTE_CLEANUP_MAX_AUTO_ATTEMPTS,
             'remote cleanup backoff min' => VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MIN_SECONDS,
             'remote cleanup backoff max' => VIRTUSPHERE_REMOTE_CLEANUP_BACKOFF_MAX_SECONDS,
-            'in-job retry pause' => VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS,
+            'in-job retry pause before attempt 2' => VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[0],
         ];
         foreach ($values as $label => $value) {
             self::assertGreaterThan(0, $value, $label . ' must be positive');
@@ -74,23 +74,31 @@ final class DeployCreateConstantsContractTest extends TestCase
     }
 
     /**
-     * In-job retry (prod job 1527). Exactly one more attempt: a second retry
-     * would double the time a broken host costs without new evidence, and the
-     * attempt number is part of the derived directory name. The pause is at
-     * least the longest transport backoff, so a retry does not come back to a
-     * host sooner than a poll would after a lost channel; it stays well inside
-     * the create budget, so a section that failed early still has room for the
-     * second attempt. The worker waits it out in heartbeat slices
-     * (deploy_worker_create_sleep), so the stale limit does not bound it.
+     * In-job retry (prod job 1527). Up to three more attempts, decided by the
+     * user on 29.10.2026: one pause per further attempt, at least 5, 15 and
+     * 45 s, ascending so a host that stays away is asked less often. A pause
+     * counts from the end of the attempt before, so a long section is pause
+     * enough. All pauses together stay well inside the create budget, so a
+     * section that failed early still has room for every attempt. The worker
+     * waits them out in heartbeat slices (deploy_worker_create_sleep), so the
+     * stale limit does not bound them. The attempt number is part of the
+     * derived directory name and fits the TINYINT column of migration 0066.
      */
     public function testTheInJobRetryRelationsHold(): void
     {
-        self::assertSame(2, VIRTUSPHERE_CREATE_MAX_ATTEMPTS);
-        self::assertGreaterThanOrEqual(VIRTUSPHERE_CREATE_TRANSPORT_BACKOFF_MAX_SECONDS, VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS);
-        self::assertGreaterThan(VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS, VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS);
+        self::assertSame(4, VIRTUSPHERE_CREATE_MAX_ATTEMPTS);
+        self::assertLessThanOrEqual(255, VIRTUSPHERE_CREATE_MAX_ATTEMPTS);
+        self::assertSame(array_keys(VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS), range(0, VIRTUSPHERE_CREATE_MAX_ATTEMPTS - 2));
+        $floor = [5, 15, 45];
+        $previous = 0;
+        foreach (VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS as $index => $pause) {
+            self::assertGreaterThanOrEqual($floor[$index], $pause, 'pause before attempt ' . ($index + 2));
+            self::assertGreaterThan($previous, $pause, 'pauses ascend');
+            $previous = $pause;
+        }
         self::assertLessThan(
             intdiv(deploy_create_total_budget_seconds(), 10),
-            VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS * (VIRTUSPHERE_CREATE_MAX_ATTEMPTS - 1)
+            array_sum(VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS)
         );
     }
 

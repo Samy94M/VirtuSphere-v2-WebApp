@@ -116,10 +116,13 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_create_cleanup_async',
         'deploy_worker_create_ownership',
         'deploy_worker_create_sleep',
-        // In-job retry (prod job 1527): one more attempt for a module_failed
-        // unit after the last unit, through its one re-opening writer.
+        'deploy_worker_create_control_failure_cause',
+        // In-job retry (prod job 1527): up to three more attempts for a
+        // module_failed unit after the last unit, through its one re-opening
+        // writer.
         'deploy_worker_create_retry_candidates',
         'deploy_worker_run_create_retry_pass',
+        'deploy_worker_create_retry_wait_seconds',
         'deploy_worker_create_requeue_unit',
     ];
 

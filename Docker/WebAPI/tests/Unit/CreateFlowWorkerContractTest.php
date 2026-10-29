@@ -76,6 +76,7 @@ final class CreateFlowWorkerContractTest extends TestCase
         self::assertSame($remoteDir . '/create.vm.3.attempt2/async', ansible_create_async_dir($remoteDir, 3, 2));
         self::assertSame($remoteDir . '/create.vm.3.attempt2/launch.json', ansible_create_result_file($remoteDir, 3, 2, 'launch'));
         self::assertNotSame(ansible_create_async_dir($remoteDir, 3, 1), ansible_create_async_dir($remoteDir, 3, 2));
+        self::assertSame($remoteDir . '/create.vm.3.attempt4/async', ansible_create_async_dir($remoteDir, 3, VIRTUSPHERE_CREATE_MAX_ATTEMPTS));
         self::assertSame(2, deploy_create_unit_attempt(['attempt' => '2']));
         self::assertSame(1, deploy_create_unit_attempt([]));
         $command = ansible_create_control_command($remoteDir, VIRTUSPHERE_CREATE_PLAYBOOK_CLEANUP, 3, 2, [

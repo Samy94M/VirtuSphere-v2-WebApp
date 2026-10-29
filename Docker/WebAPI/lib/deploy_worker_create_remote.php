@@ -7,7 +7,9 @@ require_once __DIR__ . '/ansible_create_protocol.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_create_result.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
+require_once __DIR__ . '/deploy_worker_step_failure.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
+require_once __DIR__ . '/network_mac_constants.php';
 require_once __DIR__ . '/ssh.php';
 
 /**
@@ -55,7 +57,11 @@ function deploy_worker_create_control_call(
     $secrets = (array) ($context['secrets'] ?? []);
     $markerLines = [];
     $buffer = '';
-    $collect = static function (string $line) use (&$markerLines): void {
+    // The last task and failure line, for a call that ends without its
+    // marker: the host's reason (a 503 from ESXi) is otherwise only in the log.
+    $trace = new DeployWorkerStepTrace();
+    $collect = static function (string $line) use (&$markerLines, $trace): void {
+        $trace->observe($line);
         if (str_starts_with(trim($line), VIRTUSPHERE_CREATE_MARKER_PREFIX)) {
             $markerLines[] = trim($line);
         }
@@ -109,7 +115,8 @@ function deploy_worker_create_control_call(
             'transport_error' => null,
             'host_identity_error' => null,
             'protocol_error' => deploy_worker_redact_secrets($exception->getMessage(), $secrets)
-                . ' (control call exit code ' . $exitCode . ')',
+                . ' (control call exit code ' . $exitCode . ')'
+                . deploy_worker_create_control_failure_cause($trace, $secrets),
         ];
     }
 
@@ -263,4 +270,27 @@ function deploy_worker_create_sleep(DeployWorkerDbChannel $channel, array $conte
         sleep((int) min($slice, $seconds - $waited));
         $channel->tick();
     }
+}
+
+/**
+ * The cause a control call printed before it ended without its marker, as
+ * " Cause: TASK [name] <failure head>: <reason>", or "" when it printed none.
+ *
+ * Prepare and Launch print one marker on every path they complete; a call
+ * without one broke off in a task, and that task's failure line is the only
+ * place that says why (prod job 1527: `503 Service Unavailable` from ESXi).
+ * Normalised and redacted like its log line, so the stored detail is the text
+ * the log search finds, and bounded: a finding, not a copy of the output.
+ *
+ * @param array<mixed> $secrets
+ */
+function deploy_worker_create_control_failure_cause(DeployWorkerStepTrace $trace, array $secrets): string
+{
+    $cause = $trace->failureDetail();
+    if ($cause === null) {
+        return '';
+    }
+    $cause = trim(deploy_worker_redact_secrets(deploy_job_output_normalize_line($cause), $secrets));
+
+    return $cause === '' ? '' : ' Cause: ' . virtusphere_bounded_utf8_bytes($cause, 1024);
 }

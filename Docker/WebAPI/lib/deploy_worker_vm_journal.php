@@ -55,7 +55,7 @@ function deploy_worker_vm_journal_generation_matches(mysqli $db, array $job): bo
 /** @return array<int,array<string,mixed>> Read before VM locks, not a process-memory guess. */
 function deploy_worker_vm_create_evidence(mysqli $db, int $jobId): array
 {
-    $stmt = $db->prepare('SELECT vm_id, status, outcome, async_jid, prior_async_jid FROM deploy_create_vm_results WHERE job_id = ? ORDER BY position FOR UPDATE');
+    $stmt = $db->prepare('SELECT vm_id, status, outcome, async_jid, first_async_jid FROM deploy_create_vm_results WHERE job_id = ? ORDER BY position FOR UPDATE');
     $stmt->bind_param('i', $jobId);
     $stmt->execute();
     $units = [];
@@ -83,7 +83,7 @@ function deploy_worker_vm_journal_disposition(array $state, ?array $unit): strin
         // In-job retry: the first attempt's async job reached ESXi. A second
         // attempt that did not succeed, including one that never launched,
         // leaves that fact standing; its cleared intent proves nothing about it.
-        if (!in_array($status, ['succeeded', 'skipped'], true) && (string) ($unit['prior_async_jid'] ?? '') !== '') {
+        if (!in_array($status, ['succeeded', 'skipped'], true) && (string) ($unit['first_async_jid'] ?? '') !== '') {
             return 'fail';
         }
     }

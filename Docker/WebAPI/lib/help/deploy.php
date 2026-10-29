@@ -2,6 +2,7 @@
 // Help panel partial, included by portal/help.php. Not directly reachable
 // (nginx denies /lib/).
 declare(strict_types=1);
+require_once __DIR__ . '/../deploy_create_constants.php';
 require_once __DIR__ . '/../deploy_late_start.php';
 // The hardware versions shown in the create text come from their owner, not from a typed number (R9).
 require_once __DIR__ . '/../esxi_create_compatibility.php';
@@ -154,7 +155,11 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
             <p><?php echo h(__t('help_deploy.create_progress_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p3')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p4')); ?></p>
-            <p><?php echo h(__t('help_deploy.create_progress_p5')); ?></p>
+            <p><?php echo h(__t('help_deploy.create_progress_p5', [
+                'pause_2' => (string) VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[0],
+                'pause_3' => (string) VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[1],
+                'pause_4' => (string) VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[2],
+            ])); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p6')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p7', [
                 'hw_70_ga' => (string) esxi_create_hardware_version_for('7.0.0'),

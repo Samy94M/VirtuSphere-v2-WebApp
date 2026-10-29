@@ -19,19 +19,23 @@ require_once __DIR__ . '/deploy_worker_create_unit.php';
  * the job ended `partial`: power-cycle, export and start never ran over a
  * selection that was one VM short, and the only help was "run again" by hand.
  *
- * After the last unit, every unit that ended `module_failed` gets at most one
- * more attempt, after one pause of VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS. The
- * attempt is not a second path. It is the same unit walking the same Prepare,
- * Launch and Status calls (ADR-0041), one unit after the other:
+ * After the last unit, every unit that ended `module_failed` gets up to three
+ * more attempts (VIRTUSPHERE_CREATE_MAX_ATTEMPTS), one round per attempt and
+ * one unit after the other. Before attempt n+1 at least
+ * VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[n-1] seconds have passed since
+ * attempt n ended; a unit whose turn comes later anyway does not wait again.
+ * An attempt is not a second path. It is the same unit walking the same
+ * Prepare, Launch and Status calls (ADR-0041):
  *
  *  - its read-only Prepare is the availability check. A host that still does
- *    not answer leaves the unit `failed` (transport_lost or protocol_error)
- *    with nothing changed on ESXi;
- *  - the identity matrix of that Prepare refuses a VM the first attempt left
+ *    not answer leaves the unit `failed` (transport_lost, or protocol_error,
+ *    which stops the section) with nothing changed on ESXi, and that unit's
+ *    chain ends: only module_failed is retried;
+ *  - the identity matrix of that Prepare refuses a VM an earlier attempt left
  *    behind: a namesake without the stored UUID is `identity_conflict`, so a
  *    second VM cannot come into existence;
- *  - its own derived directory (`create.vm.<p>.attempt2`) keeps the job-id
- *    search after a lost launch from finding the first attempt's job.
+ *  - its own derived directory (`create.vm.<p>.attempt<n>`) keeps the job-id
+ *    search after a lost launch from finding an earlier attempt's job.
  *
  * Never `prepared`, `running` or `uncertain`: the pass starts only when every
  * unit is terminal, and only for the auto-retryable code. A cancel, a lost
@@ -77,8 +81,14 @@ function deploy_worker_create_retry_candidates(array $rows): array
  * Runs the retry pass and returns the reason the create section stopped, or
  * null when it may conclude from its rows as usual.
  *
+ * One round per further attempt, so a unit's attempts are as far apart as the
+ * other units' turns allow. The rows are read again for every round: the
+ * candidates of round three are the units whose second attempt ended
+ * module_failed again, and a unit that succeeded or failed otherwise is out.
+ * The loop is bounded by the attempt maximum as well as by the rows.
+ *
  * A cancel at a boundary throws DeployWorkerCancelled from the same check the
- * unit loop uses, so "no further VM starts" holds for a second attempt too.
+ * unit loop uses, so "no further VM starts" holds for every later attempt too.
  *
  * @param array<string, mixed> $job the claim
  * @param array{worker_id:string,lock_token:string,worker_epoch:int} $fence
@@ -92,60 +102,79 @@ function deploy_worker_run_create_retry_pass(
 ): ?string {
     $jobId = (int) $job['id'];
     $workerId = (string) $fence['worker_id'];
-    $candidates = deploy_worker_create_retry_candidates(repo_deploy_create_results($channel->connection(), $jobId));
-    if ($candidates === []) {
-        return null;
-    }
-    $pause = VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS;
-    if (deploy_worker_create_remaining_seconds($context['create_started_at'] ?? null) <= $pause) {
-        $channel->log(
-            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-            'Create retry not started: the create budget of this job leaves no room for the ' . $pause
-            . ' s pause. ' . count($candidates) . ' unit(s) keep their first result.'
-        );
-
-        return null;
-    }
-    foreach ($candidates as $unit) {
-        $channel->log(
-            VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-            deploy_worker_create_progress_line(
-                $unit,
-                'RETRY',
-                (string) $unit['error_code'] . '; attempt ' . (deploy_create_unit_attempt($unit) + 1)
-                . ' of ' . VIRTUSPHERE_CREATE_MAX_ATTEMPTS . ' after ' . $pause . ' s'
-            )
-        );
-    }
-    deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
-    deploy_worker_create_sleep($channel, $context, $pause);
-
-    foreach ($candidates as $candidate) {
-        deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
-        if (deploy_worker_create_remaining_seconds($context['create_started_at'] ?? null) <= 0) {
-            $channel->log(
-                VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
-                'Create retry stopped: the create budget of this job is exhausted; the remaining units keep their first result.'
-            );
-
+    for ($round = 2; $round <= VIRTUSPHERE_CREATE_MAX_ATTEMPTS; $round++) {
+        $candidates = deploy_worker_create_retry_candidates(repo_deploy_create_results($channel->connection(), $jobId));
+        if ($candidates === []) {
             return null;
         }
-        $unit = deploy_worker_create_requeue_unit($channel->connection(), $job, $fence, (int) $candidate['position']);
-        if ($unit === null) {
-            // Refused under the lock: a cancel that arrived since the check
-            // above, or a claim this worker lost. The conclusion decides the
-            // first; the second is not ours to conclude.
-            return deploy_worker_create_ownership($channel->connection(), $jobId, $workerId) === 'lost'
-                ? VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST
-                : null;
-        }
-        $verdict = deploy_worker_create_drive_unit($channel, $job, $fence, $unit, $context);
-        if ($verdict['stop']) {
-            return $verdict['reason'];
+        foreach ($candidates as $index => $candidate) {
+            deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
+            $next = deploy_create_unit_attempt($candidate) + 1;
+            $wait = deploy_worker_create_retry_wait_seconds($candidate);
+            if (deploy_worker_create_remaining_seconds($context['create_started_at'] ?? null) <= $wait) {
+                $channel->log(
+                    VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+                    'Create retry stopped: the create budget of this job leaves no room for attempt ' . $next
+                    . ' of ' . VIRTUSPHERE_CREATE_MAX_ATTEMPTS . '. ' . (count($candidates) - $index)
+                    . ' unit(s) keep their last result.'
+                );
+
+                return null;
+            }
+            $channel->log(
+                VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+                deploy_worker_create_progress_line(
+                    $candidate,
+                    'RETRY',
+                    (string) $candidate['error_code'] . '; attempt ' . $next . ' of ' . VIRTUSPHERE_CREATE_MAX_ATTEMPTS
+                    . ($wait > 0 ? ' in ' . $wait . ' s' : '')
+                )
+            );
+            if ($wait > 0) {
+                deploy_worker_create_sleep($channel, $context, $wait);
+                deploy_worker_assert_job_is_ours($channel->connection(), $jobId, $workerId, true, $job);
+            }
+            $unit = deploy_worker_create_requeue_unit($channel->connection(), $job, $fence, (int) $candidate['position']);
+            if ($unit === null) {
+                // Refused under the lock: a cancel that arrived since the check
+                // above, or a claim this worker lost. The conclusion decides the
+                // first; the second is not ours to conclude.
+                return deploy_worker_create_ownership($channel->connection(), $jobId, $workerId) === 'lost'
+                    ? VIRTUSPHERE_CREATE_ERROR_OWNERSHIP_LOST
+                    : null;
+            }
+            $verdict = deploy_worker_create_drive_unit($channel, $job, $fence, $unit, $context);
+            if ($verdict['stop']) {
+                return $verdict['reason'];
+            }
         }
     }
 
     return null;
+}
+
+/**
+ * The seconds still to wait before the next attempt of a candidate: its pause
+ * (VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS, by the attempt that ended) minus
+ * the time since that attempt ended. A unit whose turn comes later than its
+ * pause waits nothing. `finished_at` is written as UTC_TIMESTAMP(), read the
+ * way the create budget reads its start; a row without one waits the full
+ * pause.
+ *
+ * @param array<string, mixed> $unit
+ */
+function deploy_worker_create_retry_wait_seconds(array $unit, ?int $now = null): int
+{
+    $pause = VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[deploy_create_unit_attempt($unit) - 1] ?? null;
+    if ($pause === null) {
+        throw new LogicException('Create attempt ' . deploy_create_unit_attempt($unit) . ' has no further attempt.');
+    }
+    $finishedAt = strtotime(trim((string) ($unit['finished_at'] ?? '')) . ' UTC');
+    if (trim((string) ($unit['finished_at'] ?? '')) === '' || $finishedAt === false) {
+        return $pause;
+    }
+
+    return max(0, min($pause, $pause - (($now ?? time()) - $finishedAt)));
 }
 
 /**
@@ -157,12 +186,13 @@ function deploy_worker_run_create_retry_pass(
  * the order every create and convergence writer takes. Inside it: the claim
  * and fence still hold and the job is `running` (a cancelling job starts no
  * further VM), the unit is still a candidate among ALL locked rows of the job,
- * and its journal row exists. Then the first attempt's code, detail and async
- * job id move to prior_*, the prepare evidence is cleared for the new
- * Prepare, and the durable launch intent goes back to 0. That last write is
- * what lets the second attempt launch at all: the intent belonged to an async
- * job whose terminal failure is established, and its id stays as
- * prior_async_jid, which keeps the K15 convergence on "fail" for this VM.
+ * and its journal row exists. On the first re-open the first attempt's code,
+ * detail and async job id move to first_*; a later re-open leaves them as they
+ * are (COALESCE), and the attempts in between stay in the job log. The prepare
+ * evidence is cleared for the new Prepare, and the durable launch intent goes
+ * back to 0. That last write is what lets the next attempt launch at all: the
+ * intent belonged to an async job whose terminal failure is established, and
+ * first_async_jid keeps the K15 convergence on "fail" for this VM.
  *
  * @param array<string, mixed> $claim
  * @param array{worker_id:string,lock_token:string,worker_epoch:int} $fence
@@ -196,11 +226,13 @@ function deploy_worker_create_requeue_unit(mysqli $db, array $claim, array $fenc
         $pending = VIRTUSPHERE_CREATE_RESULT_STATUS_PENDING;
         $failed = VIRTUSPHERE_CREATE_RESULT_STATUS_FAILED;
         $rowId = (int) $unit['id'];
-        // prior_* are assigned before the columns they copy are cleared;
+        // first_* are assigned before the columns they copy are cleared;
         // MySQL evaluates single-table SET assignments left to right.
         $stmt = $db->prepare(
             'UPDATE deploy_create_vm_results SET status = ?, attempt = attempt + 1,'
-            . ' prior_error_code = error_code, prior_error_detail = error_detail, prior_async_jid = async_jid,'
+            . ' first_error_code = COALESCE(first_error_code, error_code),'
+            . ' first_error_detail = COALESCE(first_error_detail, error_detail),'
+            . ' first_async_jid = COALESCE(first_async_jid, async_jid),'
             . ' error_code = NULL, error_detail = NULL, async_jid = NULL, async_deadline_at = NULL, finished_at = NULL,'
             . ' existed_before = NULL, precheck_moid = NULL, precheck_instance_uuid = NULL, replaced_instance_uuid = NULL'
             . ' WHERE id = ? AND status = ? AND attempt = ?'

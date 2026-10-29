@@ -15,7 +15,7 @@ namespace {
         {
             static $loaded = false;
             if (!$loaded) {
-                $code = 'namespace HostIdentityCreateProbe; use \\SshHostIdentityRejected; use \\RuntimeException; use \\CreateMarkerProtocolException;';
+                $code = 'namespace HostIdentityCreateProbe; use \\SshHostIdentityRejected; use \\RuntimeException; use \\CreateMarkerProtocolException; use \\DeployWorkerStepTrace;';
                 foreach (['control_call', 'discover_jid', 'prepare_unit', 'launch_unit', 'verify_skip', 'poll_unit', 'terminate_unit', 'remaining_seconds', 'progress_line'] as $suffix) {
                     $reflection = new ReflectionFunction('deploy_worker_create_' . $suffix);
                     $path = $reflection->getFileName();

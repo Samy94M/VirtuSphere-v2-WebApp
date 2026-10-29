@@ -44,7 +44,11 @@ function deploy_worker_create_prepare_unit(
     array $unit,
     array $context
 ): array {
-    $channel->log(VIRTUSPHERE_DEPLOY_LOG_SYSTEM, deploy_worker_create_progress_line($unit, 'RUN'));
+    $attempt = deploy_create_unit_attempt($unit);
+    $channel->log(
+        VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+        deploy_worker_create_progress_line($unit, 'RUN', $attempt > 1 ? 'attempt ' . $attempt . ' of ' . VIRTUSPHERE_CREATE_MAX_ATTEMPTS : '')
+    );
     $remaining = deploy_worker_create_remaining_seconds($context['create_started_at'] ?? null);
     if ($remaining <= 0) {
         // Nothing was started for this unit, so there is nothing uncertain
@@ -67,7 +71,7 @@ function deploy_worker_create_prepare_unit(
         $unit,
         [
             'vs_portal_vm_id' => (int) $unit['vm_id'],
-            'vs_result_file' => ansible_create_result_file((string) $context['remote_dir'], (int) $unit['position'], deploy_create_unit_attempt($unit), 'prepare'),
+            'vs_result_file' => ansible_create_result_file((string) $context['remote_dir'], (int) $unit['position'], $attempt, 'prepare'),
         ]
     );
     if (($result['host_identity_error'] ?? null) !== null) {

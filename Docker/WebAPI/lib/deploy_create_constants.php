@@ -149,13 +149,16 @@ const VIRTUSPHERE_CREATE_AUTO_RETRYABLE_ERROR_CODES = [
 ];
 
 // In-job retry pass: after the last unit, every unit that ended with an
-// auto-retryable code gets at most one more attempt, after one pause. The
-// second attempt walks the normal Prepare/Launch/Status path in its own
-// derived directory (deploy_create_step_key()); its read-only Prepare is the
-// availability check, and the identity matrix refuses a VM the first attempt
-// left behind. Relations are pinned by DeployCreateConstantsContractTest.
-const VIRTUSPHERE_CREATE_MAX_ATTEMPTS = 2;
-const VIRTUSPHERE_CREATE_RETRY_PAUSE_SECONDS = 60;
+// auto-retryable code gets up to three more attempts, one round per attempt.
+// Before attempt n+1 at least VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[n-1]
+// seconds have passed since attempt n ended; a round that comes later anyway
+// does not wait again. Every attempt walks the normal Prepare/Launch/Status
+// path in its own derived directory (deploy_create_step_key()); its read-only
+// Prepare is the availability check, and the identity matrix refuses a VM an
+// earlier attempt left behind. Relations are pinned by
+// DeployCreateConstantsContractTest.
+const VIRTUSPHERE_CREATE_MAX_ATTEMPTS = 4;
+const VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS = [5, 15, 45];
 
 // Timing. Every value is seconds, and every relation between them is pinned by
 // DeployCreateConstantsContractTest rather than by comment: a poll interval

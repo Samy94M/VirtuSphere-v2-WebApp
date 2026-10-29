@@ -696,7 +696,7 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
     total INT UNSIGNED NOT NULL,
     -- In-job retry (migration 0066): the attempt this row is on. Step key and
     -- async directory derive from it; a later attempt keeps the evidence of
-    -- the one before in the prior_* columns.
+    -- the first one in the first_* columns.
     attempt TINYINT UNSIGNED NOT NULL DEFAULT 1,
     action ENUM('create','verify_skip') NOT NULL,
     status ENUM('pending','prepared','running','succeeded','failed','uncertain','skipped') NOT NULL DEFAULT 'pending',
@@ -716,9 +716,9 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
     vm_instance_uuid VARCHAR(64) NULL,
     error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
     error_detail TEXT NULL,
-    prior_error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
-    prior_error_detail TEXT NULL,
-    prior_async_jid VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    first_error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    first_error_detail TEXT NULL,
+    first_async_jid VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
     resumed_from_result_id BIGINT UNSIGNED NULL,
     started_at DATETIME NULL,
     finished_at DATETIME NULL,
@@ -773,8 +773,8 @@ CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
         replaced_instance_uuid IS NULL OR existed_before = 0
     ),
     CONSTRAINT deploy_create_result_attempt_check CHECK (
-        (attempt = 1 AND prior_error_code IS NULL AND prior_error_detail IS NULL AND prior_async_jid IS NULL)
-        OR (attempt > 1 AND prior_error_code IS NOT NULL AND prior_error_detail IS NOT NULL AND prior_async_jid IS NOT NULL)
+        (attempt = 1 AND first_error_code IS NULL AND first_error_detail IS NULL AND first_async_jid IS NULL)
+        OR (attempt > 1 AND first_error_code IS NOT NULL AND first_error_detail IS NOT NULL AND first_async_jid IS NOT NULL)
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
