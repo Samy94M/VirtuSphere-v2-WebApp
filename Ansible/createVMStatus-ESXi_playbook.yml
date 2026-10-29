@@ -204,7 +204,9 @@
       when: vs_async_snapshot.state == 'failed'
       block:
         # Die Ursache wird auf eine Zeile begrenzt und traegt keine
-        # Modulargumente: der Marker ist eine Diagnosezeile, kein Dump.
+        # Modulargumente: der Marker ist eine Diagnosezeile, kein Dump. Den
+        # Text samt Rueckfall fuer "keine Modulmeldung" liefert allein der
+        # Inspector; ohne `error` waere sein Befund widerspruechlich.
         - name: Fehlschlag schreiben
           ansible.builtin.copy:
             dest: "{{ vs_result_file }}"
@@ -215,7 +217,7 @@
                   'event': 'failed',
                   'portal_vm_id': vs_target.portal_vm_id | int,
                   'async_jid': vs_async_jid | string,
-                  'error': (vs_async_snapshot.error | default('the create module reported a failure'))
+                  'error': vs_async_snapshot.error
                            | string | replace('\n', ' ') | truncate(1024, true, '')
                 } | to_nice_json
               }}

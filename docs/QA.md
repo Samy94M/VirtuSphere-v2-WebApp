@@ -540,7 +540,9 @@ in the incident; that number comes from the customer report, not from a machine
 this repository can reach, and it sits below the requirement declared by the
 pinned Collection runtime. Whether production has the complete locked set is a
 site question, and the executable preflight turns it into a hard check instead
-of a second version list in this document.
+of a second version list in this document. The production log of job 1527
+(29.10.2026) already shows the 2.19 error format (`[ERROR]: Task failed:
+Module failed: …`), so production has moved to 2.19 or newer since that report.
 
 ### Etappe 14B: what proves the repaired create path
 
@@ -550,7 +552,10 @@ Four layers, none of which needs ESXi. **The async seam** is the
 separate later query reports running and then finished, and that the targeted
 cleanup removes exactly that status file. It also pins the reason the whole
 design hangs off the status file: an unknown job id answers `finished` without
-`failed`, so a lost job would otherwise look like a completed one.
+`failed`, so a lost job would otherwise look like a completed one. A terminal
+module failure is checked in both shapes the status file holds: `msg` from
+`fail_json()` and the 2.19 error summary of an exception that escaped the
+module, which has no `msg`.
 
 The same gate runs the production Prepare, Launch and Status playbooks against
 local VMware module stubs. Prepare carries the observed power state or null.

@@ -42,6 +42,73 @@ class InspectCreateAsyncStateTest(unittest.TestCase):
                 INSPECT.inspect_state(directory, "123.3"),
             )
 
+    # Status files as ansible-core 2.19.11 writes them for an exception that
+    # escapes the module (captured in virtusphere-qa-ansible, 29.10.2026). They
+    # carry no `msg`; job 1527 showed only the generic fallback for this shape.
+    UNCAUGHT = {
+        "failed": True,
+        "exception": {
+            "event": {"msg": "503 Service Unavailable", "__ansible_type": "Event"},
+            "__ansible_type": "ErrorSummary",
+        },
+    }
+    CHAINED = {
+        "failed": True,
+        "exception": {
+            "event": {
+                "msg": "503 Service Unavailable",
+                "chain": {
+                    "msg_reason": "<<< caused by >>>",
+                    "traceback_reason": "The above exception was the direct cause of the following exception:",
+                    "event": {"msg": "[Errno 104] Connection reset by peer", "__ansible_type": "Event"},
+                    "follow": True,
+                    "__ansible_type": "EventChain",
+                },
+                "__ansible_type": "Event",
+            },
+            "__ansible_type": "ErrorSummary",
+        },
+    }
+
+    def test_uncaught_module_exception_keeps_its_message(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.write(directory, "123.8", self.UNCAUGHT)
+            self.assertEqual(
+                {"state": "failed", "error": "503 Service Unavailable"},
+                INSPECT.inspect_state(directory, "123.8"),
+            )
+
+    def test_followed_cause_is_joined_like_the_ansible_error_line(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.write(directory, "123.9", self.CHAINED)
+            self.assertEqual(
+                {"state": "failed", "error": "503 Service Unavailable: [Errno 104] Connection reset by peer"},
+                INSPECT.inspect_state(directory, "123.9"),
+            )
+            unfollowed = json.loads(json.dumps(self.CHAINED))
+            unfollowed["exception"]["event"]["chain"]["follow"] = False
+            self.write(directory, "123.10", unfollowed)
+            self.assertEqual(
+                {"state": "failed", "error": "503 Service Unavailable"},
+                INSPECT.inspect_state(directory, "123.10"),
+            )
+
+    def test_module_msg_wins_and_unusable_failures_keep_the_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            both = dict(self.UNCAUGHT, msg="Failed to create a virtual machine")
+            self.write(directory, "123.11", both)
+            self.assertEqual("Failed to create a virtual machine", INSPECT.inspect_state(directory, "123.11")["error"])
+            for jid, payload in (
+                ("123.12", {"failed": True}),
+                ("123.13", {"failed": True, "msg": "  ", "exception": "not a summary"}),
+                ("123.14", {"failed": True, "exception": {"event": {"msg": 503}}}),
+            ):
+                self.write(directory, jid, payload)
+                self.assertEqual(
+                    {"state": "failed", "error": "the create module reported a failure"},
+                    INSPECT.inspect_state(directory, jid),
+                )
+
     def test_terminal_success_keeps_changed_true_and_false(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             for jid, changed in (("123.4", True), ("123.5", False)):
