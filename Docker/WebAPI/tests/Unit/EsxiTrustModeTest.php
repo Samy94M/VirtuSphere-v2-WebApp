@@ -236,7 +236,7 @@ final class EsxiTrustModeTest extends TestCase
     {
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE,
-            ansible_categorize_inventory_error('certificate verify failed: unable to get local issuer certificate', 2)
+            ansible_categorize_inventory_error("fatal: [localhost]: FAILED! => {\"msg\": \"certificate verify failed: unable to get local issuer certificate\"}\n", 2)
         );
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE,

@@ -51,6 +51,8 @@ final class EsxiInventoryModuleContractTest extends TestCase
         'esxi_inventory_clear_ansible_selection_if_matches',
         'esxi_inventory_enqueue_for_credential',
         'esxi_inventory_refresh_all_targets',
+        'esxi_inventory_host_error_follow_up_pending',
+        'esxi_inventory_attempt_due',
         'esxi_inventory_name_set',
         'esxi_inventory_value_unknown',
         'esxi_inventory_missing_values',

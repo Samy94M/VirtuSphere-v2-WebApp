@@ -359,12 +359,120 @@ final class AnsibleInventoryParseTest extends TestCase
         ansible_parse_inventory_output("PLAY RECAP\nok=1 failed=0\n");
     }
 
+    /** One module failure the way ansible-core prints it: the cause and the result line. */
+    private static function failure(string $message): string
+    {
+        return "TASK [Gather datacenters] ******\n"
+            . '[ERROR]: Task failed: Module failed: ' . $message . "\n"
+            . "Origin: /tmp/run/inventoryESXi_playbook.yml:23:7\n\n"
+            . "23     - name: Gather datacenters\n         ^ column 7\n\n"
+            . 'fatal: [localhost]: FAILED! => {"changed": false, "msg": "' . $message . "\"}\n\n"
+            . "PLAY RECAP ******\n"
+            . "localhost                  : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0\n";
+    }
+
+    private static function fixture(string $name): string
+    {
+        return (string) file_get_contents(dirname(__DIR__) . '/fixtures/ansible-inventory-2.19/' . $name . '.txt');
+    }
+
     public function testErrorCategories(): void
     {
-        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTH, ansible_categorize_inventory_error('Cannot complete login due to an incorrect user name or password.', 2));
-        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, ansible_categorize_inventory_error('Unable to connect to the host: timed out', 2));
-        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTHZ, ansible_categorize_inventory_error('Permission to perform this operation was denied.', 2));
-        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_PARSE, ansible_categorize_inventory_error('some other unexpected failure', 2));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTH, ansible_categorize_inventory_error(self::failure('Cannot complete login due to an incorrect user name or password.'), 2));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, ansible_categorize_inventory_error(self::failure('Unable to connect to the host: timed out'), 2));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_AUTHZ, ansible_categorize_inventory_error(self::failure('Permission to perform this operation was denied.'), 2));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_PARSE, ansible_categorize_inventory_error(self::failure('some other unexpected failure'), 2));
+    }
+
+    /**
+     * K4b: the PLAY RECAP of every run says `unreachable=0`. Read over the
+     * whole output, that word filed every otherwise unknown failure, a 503
+     * included, as "host not reachable".
+     */
+    public function testTheRecapNeverDecidesTheCategory(): void
+    {
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_PARSE, ansible_categorize_inventory_error(self::failure('something nobody planned for'), 2));
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_PARSE,
+            ansible_categorize_inventory_error("PLAY RECAP ***\nlocalhost : ok=0 changed=0 unreachable=0 failed=1\n", 2)
+        );
+        self::assertSame([], ansible_inventory_failure_lines("PLAY RECAP ***\nlocalhost : ok=0 unreachable=0 failed=1\n"));
+    }
+
+    /** Measured ansible-core 2.19.11 output of the real inventory playbook (tests/fixtures/ansible-inventory-2.19). */
+    public function testMeasuredHostAnswersWithA5xxAreHostErrors(): void
+    {
+        // A 5xx on the SOAP call: the fault text carries the status line.
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR, ansible_categorize_inventory_error(self::fixture('soap-503'), 2));
+        // ESXi's reverse proxy in front of a stopped hostd.
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR, ansible_categorize_inventory_error(self::fixture('soap-503-rhttpproxy'), 2));
+        // A 5xx while pyVmomi reads the API description never shows the
+        // status: "<host>:<port> is down or is not a VIM server".
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR, ansible_categorize_inventory_error(self::fixture('version-503'), 2));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR, ansible_categorize_inventory_error(self::failure('500 Internal Server Error'), 2));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR, ansible_categorize_inventory_error(self::failure('502 Bad Gateway'), 2));
+    }
+
+    public function testMeasuredRefusedPortStaysUnreachable(): void
+    {
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, ansible_categorize_inventory_error(self::fixture('connection-refused'), 2));
+        // A number that only looks like a status is not one.
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, ansible_categorize_inventory_error(self::failure('Unable to connect to 10.0.0.503 port 443: timed out'), 2));
+    }
+
+    public function testMeasuredAnsibleConfigFailuresOf219(): void
+    {
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG, ansible_categorize_inventory_error(self::fixture('missing-playbook'), 1));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG, ansible_categorize_inventory_error(self::fixture('unknown-module'), 4));
+    }
+
+    /**
+     * An ignored failure is no cause, and the Origin excerpt of the real one
+     * quotes the source of the task before it ("permission to log on" here).
+     */
+    public function testIgnoredFailuresAndOriginExcerptsAreNotRead(): void
+    {
+        $output = self::fixture('ignored-then-503');
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR, ansible_categorize_inventory_error($output, 2));
+        $lines = ansible_inventory_failure_lines($output);
+        self::assertCount(2, $lines);
+        foreach ($lines as $line) {
+            self::assertStringNotContainsString('permission', $line);
+            self::assertStringContainsString('503 Service Unavailable', $line);
+        }
+    }
+
+    /** The multi-line fault text of 2.19 is joined into its [ERROR] line, up to Origin. */
+    public function testErrorContinuationLinesBelongToTheirErrorLine(): void
+    {
+        $lines = ansible_inventory_failure_lines(self::fixture('soap-503'));
+        self::assertCount(2, $lines);
+        self::assertStringStartsWith('[ERROR]: Task failed: Module failed:', $lines[0]);
+        self::assertStringContainsString("msg = '503 Service Unavailable'", $lines[0]);
+        self::assertStringNotContainsString('Gather datacenters', $lines[0]);
+        self::assertStringStartsWith('fatal: [localhost]: FAILED!', $lines[1]);
+    }
+
+    /**
+     * `login` alone paused the automation for any text that contained it, a
+     * method name in a verbose traceback included. Only the sign-in wordings
+     * of vSphere and community.vmware are `auth` now.
+     */
+    public function testLoginAloneNoLongerMeansARejectedSignIn(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR,
+            ansible_categorize_inventory_error(self::failure('makeUserLoginMethod: 503 Service Unavailable'), 2)
+        );
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_AUTH,
+            ansible_categorize_inventory_error(self::failure('Unable to log on to vCenter or ESXi API at esxi01:443  as root: Cannot complete login due to an incorrect user name or password.'), 2)
+        );
+        // The permission wording of community.vmware stays authz, not auth.
+        self::assertSame(
+            VIRTUSPHERE_INVENTORY_ERROR_AUTHZ,
+            ansible_categorize_inventory_error(self::failure('User probe does not have required permission to log on to vCenter or ESXi API at esxi01:443 : denied'), 2)
+        );
     }
 
     /**
@@ -390,7 +498,7 @@ final class AnsibleInventoryParseTest extends TestCase
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG,
             ansible_categorize_inventory_error(
-                "Failed to import the required Python library (PyVmomi) on ansible01's Python /usr/bin/python3.",
+                self::failure('Failed to import the required Python library (PyVmomi) on the Python /usr/bin/python3 of ansible01.'),
                 2
             )
         );
@@ -405,7 +513,7 @@ final class AnsibleInventoryParseTest extends TestCase
     {
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_PARSE,
-            ansible_categorize_inventory_error('The object or item referred to could not be found.', 2)
+            ansible_categorize_inventory_error(self::failure('The object or item referred to could not be found.'), 2)
         );
     }
 
@@ -413,21 +521,22 @@ final class AnsibleInventoryParseTest extends TestCase
      * Section 2.3: the become timeout is Ansible's own configuration, and its
      * wording contains the general `timed out` needle. Reading that needle
      * first called a broken sudo setup a network problem, which is the one
-     * cause an operator cannot find by checking the network.
+     * cause an operator cannot find by checking the network. Since 2.19 it is
+     * an UNREACHABLE result, still a `fatal:` line.
      */
     public function testABecomeTimeoutIsAnsibleConfigNotAnUnreachableHost(): void
     {
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG,
             ansible_categorize_inventory_error(
-                'fatal: [ansible01]: FAILED! => {"msg": "Timeout (12s) waiting for privilege escalation prompt: "}',
+                'fatal: [ansible01]: UNREACHABLE! => {"msg": "Timeout (12s) waiting for privilege escalation prompt: "}',
                 2
             )
         );
         // And the general timeout still means what it says.
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
-            ansible_categorize_inventory_error('Unable to connect to the host: timed out', 2)
+            ansible_categorize_inventory_error(self::failure('Unable to connect to the host: timed out'), 2)
         );
     }
 
@@ -438,11 +547,11 @@ final class AnsibleInventoryParseTest extends TestCase
         // against the config patterns.
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_AUTHZ,
-            ansible_categorize_inventory_error('Permission to perform this operation was denied.', 2)
+            ansible_categorize_inventory_error(self::failure('Permission to perform this operation was denied.'), 2)
         );
         self::assertSame(
             VIRTUSPHERE_INVENTORY_ERROR_AUTH,
-            ansible_categorize_inventory_error('Cannot complete login due to an incorrect user name or password.', 2)
+            ansible_categorize_inventory_error(self::failure('Cannot complete login due to an incorrect user name or password.'), 2)
         );
     }
 }

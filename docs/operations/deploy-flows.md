@@ -231,23 +231,25 @@ flowchart TD
     block -->|ja| refused["Abgelehnt mit Befund und Verweis auf die Stelle, die ihn behebt; nichts eingereiht"]
     refused -.->|Create-Einheit uncertain| release["Freigabe durch einen Administrator nach geprüftem Inventar: Einheit failed mit operator_released; danach erneut fragen"]
     block -->|nein; bei outcome_unknown nennt der Dialog zuerst, was auf ESXi zu prüfen ist| plan{"Was belegt der alte Auftrag?"}
-    plan -->|MAC-Teilergebnis mit Liste der gescheiterten VMs| export_failed["export nur für die gescheiterten VMs"]
-    plan -->|MAC-Ergebnis widerspricht dem Status oder Teilergebnis ohne Liste| export_all["export für die ursprüngliche Auswahl"]
+    plan -->|voller Ablauf failed beim Start oder Autostart laut failed_step, nach vollständig erfolgreichem MAC-Export| resume["am gescheiterten Schritt fortsetzen: start für die ursprüngliche Auswahl, danach autostart, wenn die Mission Autostart nutzt; oder nur autostart"]
+    plan -->|MAC-Teilergebnis, oder MAC-Ergebnis widerspricht dem Status| export["export: bei einem Teilergebnis mit Liste nur die gescheiterten VMs, sonst die ursprüngliche Auswahl"]
     plan -->|Create-Einheiten vorhanden| create_retry["gleicher Modus; früher bestätigte VMs als verify_skip, übrige neu anlegen"]
     plan -->|sonst| same["alter Auftrag mit unverändertem Umfang"]
-    export_failed --> queued["Neuer Auftrag queued unter neuer Korrelations-ID; das Protokoll verweist auf den alten Auftrag; alle Einreihsperren gelten erneut"]
-    export_all --> queued
+    export --> queued["Neuer Auftrag queued unter neuer Korrelations-ID; das Protokoll verweist auf den alten Auftrag; alle Einreihsperren gelten erneut"]
     create_retry --> queued
+    resume --> queued
     same --> queued
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
     classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
-    class ask,export_failed,export_all,create_retry,same,queued,release step;
+    class ask,resume,export,create_retry,same,queued,release step;
     class kind,block,plan decision;
     class no,refused blocked;
 ```
 
 Die Reihenfolge der Befunde ist fest: zuerst der Remote-Lauf (eine offene Wiederherstellung oder eine fremde Laufzeitgeneration), dann die Lesbarkeit des Ergebnisses, die Create-Einheiten des alten Auftrags, die aktuelle Identität des Umfangs, MAC-Befunde, die nur ein Mensch klären kann, und der Netzvertrag. MAC-Befunde, die eine Prüfung außerhalb des Portals verlangen, sperren nicht; der Bestätigungsdialog nennt sie (`external_confirmation`). Ebenso sperrt ein Ausgangsauftrag in `outcome_unknown` nicht: Er trägt die Feststellung `retry_remote_outcome_unknown`, und der Bestätigungsdialog stellt voran, was auf ESXi zu prüfen ist (`deploy_retry_confirmation()`). Die gefährlichen Fälle (offener Remote-Lauf, ungeklärte Create-Einheit, Identität, Netz) sperren über ihre eigenen Befunde. Würde die Wiederholung gebundene VMs auf einem anderen Host neu anlegen, warnt sie wie das Formular, ohne zu sperren. `deploy_job_retry_plan()` legt den Exportumfang fest, `repo_deploy_create_materialize_retry()` die Create-Einheiten des neuen Auftrags.
+
+Scheitert ein voller Ablauf nach vollständig erfolgreichem MAC-Export beim Start oder Autostart, setzt die Wiederholung an diesem Schritt fort (`deploy_job_resume_plan()`, vor `deploy_job_retry_plan()` gefragt). Den Schritt liest sie aus `deploy_jobs.failed_step`, den der Worker im selben Abschluss wie `last_error` schreibt (`repo_finish_deploy_job()`), nie aus dem Fehlertext. Gescheitert beim Start, reiht sie `start` für die ursprüngliche Auswahl ein, mit `then_autostart` im Auftragsinhalt, wenn die Mission jetzt Autostart nutzt; dieser Start schreibt danach den Autostart, und scheitert erst der, setzt die nächste Wiederholung wieder dort fort. Gescheitert beim Autostart, reiht sie `autostart` ein. Anlegen, Powercycle und Export laufen nicht noch einmal, der Zustand der VMs bleibt, wie der MAC-Import ihn gesetzt hat, und alle Sperren oben gelten für den neuen Modus. Ohne vollständig erfolgreichen MAC-Export, ohne gespeicherten Schritt (auch bei Aufträgen von vor Migration 0068) oder bei einem anderen Schritt bleibt es beim Export wie oben. Bestätigungsdialog und erste Protokollzeile nennen den Schritt (`resumed at the start step`, `resumed at the autostart step`).
 
 Eine Create-Einheit im Zustand `uncertain` sperrt jede Wiederholung der Mission, weil die VM auf ESXi entstanden sein kann. Ein Administrator kann sie im Auftragsprotokoll freigeben (`create_unit_release`, `deploy_handle_create_unit_release()`): Er braucht `system.config`, `deploy.run` und `vms.write`, muss bestätigen, die „Recent Tasks“ des Hosts geprüft zu haben, und eine Begründung angeben. Unter Sperre entscheidet `deploy_create_release_blockers()` neu: Die Einheit muss noch `uncertain` sein, Auftrag und Mission dürfen nicht aktiv sein, und ein Inventarabruf nach dem Ergebnis der Einheit muss die VM-Liste vollständig beantwortet haben und weder den Namen noch die gespeicherte UUID kennen. Erst dann schreibt `repo_deploy_create_release_unit()` die Begründung als unveränderlichen Nachweis und setzt die Einheit auf `failed` mit `operator_released`. An der VM und am alten Auftragsprotokoll ändert die Freigabe nichts; sie beendet nur den Zustand, in dem eine Wiederholung verboten war. Die beiden übrigen Wiederherstellungsaktionen in `VIRTUSPHERE_DEPLOY_RECOVERY_ACTIONS` (`remote_cleanup_retry`, `remote_review_document`) zeigt das Protokoll nur zu einem Datensatz des vorbereiteten Remote-Vertrags (`deploy_log_render_recovery()`), den der aktive Worker nicht schreibt; auch sie schreiben nur in die Datenbank.
 
@@ -523,7 +525,7 @@ flowchart TD
   E -->|nein| EX["Schritt fehlgeschlagen: n of m VMs did not start mit Namen und Meldungen; die übrigen laufen"]
 ```
 
-`powered-on` ohne `force` ist idempotent: Eine VM, die ein früherer Versuch schon eingeschaltet hat, meldet nur „unverändert“. Deshalb darf das Einschalten im Start-Schritt wiederholt werden. Eigenständige Start-Aufträge lassen den Zustand der VMs im Portal unberührt; „Erneut ausführen“ startet die ganze Auswahl noch einmal, mit erneuter Wartezeit.
+`powered-on` ohne `force` ist idempotent: Eine VM, die ein früherer Versuch schon eingeschaltet hat, meldet nur „unverändert“. Deshalb darf das Einschalten im Start-Schritt wiederholt werden. Eigenständige Start-Aufträge lassen den Zustand der VMs im Portal unberührt; „Erneut ausführen“ startet die ganze Auswahl noch einmal, mit erneuter Wartezeit. Setzt ein Start-Auftrag einen gescheiterten vollen Ablauf fort, folgt ihm der Autostart-Schritt unter derselben Missionsbedingung wie im vollen Ablauf (`then_autostart`, siehe [Wiederholen und Freigeben](#wiederholen-und-freigeben)).
 
 ### autostartVMs und autostart_write_tasks
 
@@ -564,9 +566,13 @@ Liest nur und läuft ohne Mission als Systemauftrag je ESXi-Zugang.
 
 ```mermaid
 flowchart TD
-  A["Datacenter lesen (Verbindungstest, ohne Fehlertoleranz)"] -->|Fehler| AX["Abruf failed; der Worker ordnet die Ursache ein"]
+  A["Datacenter lesen (Verbindungstest, ohne Fehlertoleranz)"] -->|Fehler| AX["Abruf failed; der Worker ordnet die Ursache nur aus den Fehlerzeilen ein"]
   A --> B["Datastores, Standard-Portgruppen, verteilte Portgruppen des ersten Datacenters, Hostdaten, VMs (nur Name, MOID, Instance-UUID, Energiezustand), Produkt und Lizenz, Wartungsmodus und HA-Zustand lesen; jede Abfrage darf einzeln scheitern"]
   B --> C["Ergebnis und Zustand jeder Einzelabfrage als eine Base64-Markerzeile ausgeben"]
+  AX -->|host_error, erster Fehlschlag der Serie, Automatik an| F["Ein Nachlauf nach 5 bis 10 Minuten"]
+  AX -->|jede andere Kategorie oder Folgefehlschlag| G["Nächster Versuch nach dem Intervall; bei auth Pause bis zur Änderung des Zugangs"]
 ```
 
 Im Worker folgt darauf: Ausgabe begrenzt einlesen, Markerzeile auswerten, Inventar-Cache und Host-Eigenschaften speichern, VLAN-Katalog abgleichen. Ein Fehlschlag erhöht die Fehlerserie des Zugangs; der vorige Cache bleibt erhalten.
+
+Die Kategorie eines Fehlschlags liest `ansible_categorize_inventory_error()` nur aus den Fehlerzeilen (`ansible_inventory_failure_lines()`): `[ERROR]:` und `ERROR!` mit ihren Folgezeilen bis `Origin:`, dazu `fatal:` und `failed:`. Nicht gelesen werden `PLAY RECAP` (dort steht in jedem Lauf `unreachable=0`), der `Origin:`-Ausschnitt mit Playbook-Quelltext und ein Fehler, den `...ignoring` abschließt. Antwortet der Host mit HTTP 5xx, heißt das `host_error`; so erscheint auch „is down or is not a VIM server“, denn pyVmomi meldet damit eine Fehlerantwort beim Lesen der API-Beschreibung, während ein abgelehnter Port als `Connection refused` kommt. Nach dem ersten `host_error` einer Fehlerserie plant `esxi_inventory_attempt_due()` genau einen Nachlauf nach `VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS` (300 s, geprüft im 300-s-Takt des Wartungsdienstes); der Nachlauf erhöht die Serie auf 2, danach gilt wieder das Intervall. `auth` und `authz` bekommen nie einen Nachlauf.

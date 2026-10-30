@@ -28,7 +28,7 @@ function repo_deploy_retry_job(mysqli $db, int $jobId, bool $lock = false): ?arr
         $db,
         'SELECT id, mission_id, status, payload_json, result_json, credential_esxi_id, credential_ansible_id, '
         . 'execution_contract, LOWER(HEX(execution_generation_id)) AS execution_generation_id, '
-        . 'recovery_requested_at, attempts '
+        . 'recovery_requested_at, attempts, failed_step '
         . 'FROM deploy_jobs WHERE id = ? LIMIT 1' . ($lock ? ' FOR UPDATE' : ''),
         'i',
         [$jobId]
@@ -53,7 +53,7 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
 
     $mission = repo_fetch_one(
         $db,
-        'SELECT id, wds_vlan FROM deploy_missions WHERE id = ? LIMIT 1' . ($lock ? ' FOR UPDATE' : ''),
+        'SELECT id, wds_vlan, autostart_enabled FROM deploy_missions WHERE id = ? LIMIT 1' . ($lock ? ' FOR UPDATE' : ''),
         'i',
         [$missionId]
     );
@@ -122,11 +122,9 @@ function deploy_retry_blockers(mysqli $db, int $jobId, bool $lock = false): arra
     // Runtime and remote handles precede Create units in the locking path.
     $sourceCreateRows = repo_deploy_create_results($db, $jobId, $lock);
     $isCreateSummary = deploy_create_retry_summary_is_valid($job, $originalPayload, $sourceCreateRows);
-    $plan = $result === null ? null : deploy_job_retry_plan(
-        (string) $job['status'],
-        $result,
-        $originalPayload['vm_ids']
-    );
+    // K4b F1 first: a failed start or autostart step continues there.
+    $plan = deploy_job_resume_plan((string) $job['status'], $result, $originalPayload, $job['failed_step'] ?? null, (int) $mission['autostart_enabled'] === 1)
+        ?? ($result === null ? null : deploy_job_retry_plan((string) $job['status'], $result, $originalPayload['vm_ids']));
     $mode = $plan !== null ? (string) $plan['mode'] : (string) $originalPayload['mode'];
     if ($plan === null && ansible_mode_creates_vms($mode) && $sourceCreateRows !== []) {
         $plan = ['mode' => $mode, 'vm_ids' => deploy_create_retry_vm_ids($sourceCreateRows), 'scope' => 'create_units'];

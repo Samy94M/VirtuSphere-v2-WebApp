@@ -40,6 +40,12 @@ final class DeployJobRepoFacadeContractTest extends TestCase
         'deploy_job_payload',
         'deploy_job_is_retryable',
         'deploy_job_retry_plan',
+        // K4b F1: the failed step a retry resumes at, and the payload and log note
+        // the evaluated plan produces.
+        'deploy_job_failed_step_for_playbook',
+        'deploy_job_resume_plan',
+        'deploy_retry_payload',
+        'deploy_retry_plan_note',
         'deploy_retry_blockers',
         'deploy_retry_finding',
         'deploy_retry_has_blocking_kind',

@@ -23,8 +23,8 @@ declare(strict_types=1);
  *
  * Ownership map:
  * - ansible_inventory_artifacts.php   job artifact prep, remote command
- * - ansible_inventory_parse.php       marker decode, core normalization,
- *                                     playbook-failure categorization
+ * - ansible_inventory_parse.php       marker decode, core normalization
+ * - ansible_inventory_errors.php      playbook-failure categorization (K4b)
  * - ansible_inventory_datastore.php   datastore health, per-query outcome
  * - ansible_inventory_capability.php  ESXi capability facts, host facts
  */
@@ -34,5 +34,6 @@ require_once __DIR__ . '/esxi_datastore_health.php';
 require_once __DIR__ . '/ansible_inventory_modules.php';
 require_once __DIR__ . '/ansible_inventory_artifacts.php';
 require_once __DIR__ . '/ansible_inventory_parse.php';
+require_once __DIR__ . '/ansible_inventory_errors.php';
 require_once __DIR__ . '/ansible_inventory_datastore.php';
 require_once __DIR__ . '/ansible_inventory_capability.php';

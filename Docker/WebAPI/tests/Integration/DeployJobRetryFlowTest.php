@@ -323,6 +323,106 @@ final class DeployJobRetryFlowTest extends TestCase
         self::assertContains('retry_result_protocol_error', array_column($evaluation['findings'], 'code'));
     }
 
+    /**
+     * K4b F1: a full pipeline that failed at start after a fully successful MAC
+     * export continues at start. The autostart step follows only when the
+     * mission uses autostart now, the same gate as the full pipeline.
+     */
+    public function testAFullPipelineThatFailedAtStartResumesAtStart(): void
+    {
+        foreach ([1 => true, 0 => false] as $autostart => $thenAutostart) {
+            [$missionId, $vmIds] = $this->insertMissionWithVms('resume_start_' . $autostart, 2);
+            $this->setMissionAutostart($missionId, $autostart);
+            $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, $this->resultJson('success', $vmIds, []), [VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED, VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED]);
+            $this->setFailedStep($jobId, 'start');
+
+            $evaluation = deploy_retry_blockers($this->db, $jobId);
+            self::assertTrue($evaluation['allowed'], 'autostart ' . $autostart);
+            self::assertSame('resume_start', $evaluation['plan']['scope']);
+            self::assertSame(
+                __t($thenAutostart ? 'deploy.confirm_retry_resume_start_autostart' : 'deploy.confirm_retry_resume_start', ['name' => 'M']),
+                deploy_retry_confirmation($evaluation, 'M'),
+            );
+
+            $newJobId = repo_retry_deploy_job($this->db, $jobId, $this->userId);
+
+            $payload = $this->jobPayload($newJobId);
+            self::assertSame('start', $payload['mode'], 'create, power cycle and export succeeded and must not run again');
+            self::assertSame($vmIds, $payload['vm_ids']);
+            self::assertSame($thenAutostart, $payload['then_autostart']);
+            self::assertStringContainsString('(resumed at the start step' . ($thenAutostart ? ', then autostart)' : ')'), $this->jobLog($newJobId));
+            self::assertSame([], repo_deploy_create_results($this->db, $newJobId), 'a start job carries no create units');
+        }
+    }
+
+    /** K4b F1: failed at autostart, the retry writes only the autostart policy again. */
+    public function testAFullPipelineThatFailedAtAutostartResumesAtAutostart(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('resume_autostart', 2);
+        $this->setMissionAutostart($missionId, 1);
+        $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, $this->resultJson('success', $vmIds, []), [VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED, VIRTUSPHERE_CREATE_RESULT_STATUS_SUCCEEDED]);
+        $this->setFailedStep($jobId, 'autostart');
+
+        $newJobId = repo_retry_deploy_job($this->db, $jobId, $this->userId);
+
+        $payload = $this->jobPayload($newJobId);
+        self::assertSame(VIRTUSPHERE_DEPLOY_MODE_AUTOSTART, $payload['mode']);
+        self::assertSame($vmIds, $payload['vm_ids']);
+        self::assertFalse($payload['then_autostart']);
+        self::assertStringContainsString('(resumed at the autostart step)', $this->jobLog($newJobId));
+    }
+
+    /**
+     * K4b F1 side point: without a fully successful MAC export the stored step
+     * changes nothing. A partial result keeps the export of the original
+     * selection, and a stored export step keeps it as well.
+     */
+    public function testAStoredStepWithoutAFullyExportedPipelineKeepsTheExportPath(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('resume_partial', 2);
+        $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, $this->resultJson('partial', [$vmIds[0]], [$vmIds[1]]));
+        $this->setFailedStep($jobId, 'start');
+
+        $payload = $this->jobPayload(repo_retry_deploy_job($this->db, $jobId, $this->userId));
+        self::assertSame('export', $payload['mode']);
+        self::assertSame($vmIds, $payload['vm_ids']);
+        self::assertFalse($payload['then_autostart'] ?? false);
+
+        // A second mission: the retry above left a queued job that owns the first.
+        [$missionId, $vmIds] = $this->insertMissionWithVms('resume_export', 2);
+        $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, $this->resultJson('success', $vmIds, []));
+        $this->setFailedStep($jobId, 'export');
+        self::assertSame('export', $this->jobPayload(repo_retry_deploy_job($this->db, $jobId, $this->userId))['mode']);
+    }
+
+    /** K4b F1: the terminal write stores the failed step only beside status failed. */
+    public function testTheTerminalWriteStoresTheFailedStepOnlyWhenTheJobFailed(): void
+    {
+        [$missionId, $vmIds] = $this->insertMissionWithVms('finish_step', 1);
+        $cases = [
+            [VIRTUSPHERE_DEPLOY_STATUS_FAILED, 'start', 'start'],
+            [VIRTUSPHERE_DEPLOY_STATUS_FAILED, 'autostart', 'autostart'],
+            [VIRTUSPHERE_DEPLOY_STATUS_FAILED, 'create', null],
+            [VIRTUSPHERE_DEPLOY_STATUS_FAILED, null, null],
+            [VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, 'start', null],
+            [VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, 'start', null],
+        ];
+        foreach ($cases as [$status, $step, $expected]) {
+            $jobId = $this->insertTerminalJob($missionId, VIRTUSPHERE_DEPLOY_STATUS_RUNNING, VIRTUSPHERE_DEPLOY_MODE_FULL, $vmIds, null);
+            $worker = 'phpunit-f1-' . $jobId;
+            $stmt = $this->db->prepare('UPDATE deploy_jobs SET locked_by = ?, locked_at = NOW() WHERE id = ?');
+            $stmt->bind_param('si', $worker, $jobId);
+            $stmt->execute();
+
+            self::assertTrue(repo_finish_deploy_job($this->db, $jobId, $worker, $status, 'fixture', null, null, null, $step));
+            self::assertSame($expected, repo_scalar($this->db, 'SELECT failed_step FROM deploy_jobs WHERE id = ?', 'i', [$jobId]), $status . '/' . ($step ?? 'null'));
+
+            $stmt = $this->db->prepare('DELETE FROM deploy_jobs WHERE id = ?');
+            $stmt->bind_param('i', $jobId);
+            $stmt->execute();
+        }
+    }
+
     public function testActiveAndSucceededJobsCannotBeRetried(): void
     {
         [$missionId, $vmIds] = $this->insertMissionWithVms('guard', 1);
@@ -479,6 +579,20 @@ final class DeployJobRetryFlowTest extends TestCase
             ],
             'retry' => ['mode' => 'export', 'vm_ids' => $failed],
         ], JSON_THROW_ON_ERROR);
+    }
+
+    private function setFailedStep(int $jobId, string $step): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_jobs SET failed_step = ? WHERE id = ?');
+        $stmt->bind_param('si', $step, $jobId);
+        $stmt->execute();
+    }
+
+    private function setMissionAutostart(int $missionId, int $enabled): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_missions SET autostart_enabled = ? WHERE id = ?');
+        $stmt->bind_param('ii', $enabled, $missionId);
+        $stmt->execute();
     }
 
     /** @return array<string,mixed> */

@@ -57,6 +57,7 @@ return [
     // Verbindungsfehler (VIRTUSPHERE_INVENTORY_ERROR_*): Klartext für das Portal.
     'conn_dns' => 'Der Host „:host“ konnte nicht aufgelöst werden. Prüfen Sie den Hostnamen.',
     'conn_unreachable' => 'Der Host „:host“ ist nicht erreichbar. Prüfen Sie Port, Netzwerk und Firewall.',
+    'conn_host_error' => 'Der Host „:host“ hat geantwortet, aber sein Verwaltungsdienst war nicht bereit. Meist ist das ein kurzer Aussetzer.',
     'conn_certificate' => 'Das Zertifikat von „:host“ konnte nicht verifiziert werden. Gespeichertes CA-Bundle bzw. Serverzertifikat und Hostnamen prüfen oder im Zugang „Ohne Zertifikatsprüfung“ wählen.',
     'conn_tls' => 'Die TLS-Verbindung zu „:host“ wurde abgelehnt. TLS-Version, Port und Gegenstelle prüfen.',
     'conn_auth' => 'Die Anmeldung wurde abgelehnt. Benutzername oder Secret stimmt nicht.',

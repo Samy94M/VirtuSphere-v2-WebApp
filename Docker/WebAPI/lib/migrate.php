@@ -32,6 +32,7 @@ require_once __DIR__ . '/migrations/0064_remote_secret_files.php';
 require_once __DIR__ . '/migrations/0065_deploy_outcome_unknown.php';
 require_once __DIR__ . '/migrations/0066_create_unit_attempt.php';
 require_once __DIR__ . '/migrations/0067_create_error_detail_origin.php';
+require_once __DIR__ . '/migrations/0068_deploy_job_failed_step.php';
 function migrator_acquire_schema_lock(mysqli $db): void
 {
     $row = migrator_query_row($db, "SELECT GET_LOCK('virtusphere_schema_migration', 30) AS locked", 'schema migration lock');
@@ -1208,6 +1209,7 @@ SQL;
     '0065_deploy_outcome_unknown' => migrate_0065_deploy_outcome_unknown(...),
     '0066_create_unit_attempt' => migrate_0066_create_unit_attempt(...),
     '0067_create_error_detail_origin' => migrate_0067_create_error_detail_origin(...),
+    '0068_deploy_job_failed_step' => migrate_0068_deploy_job_failed_step(...),
 ];
 try {
     $db = db();

@@ -63,6 +63,7 @@ return [
     'mode_invalid_payload' => 'Auftragsdaten nicht lesbar',
     'mode_scope_one' => ':count VM',
     'mode_scope_many' => ':count VMs',
+    'mode_then_autostart' => 'danach Autostart',
 
     // Missionsstatus im Dashboard. Die Spalte ist ein freies VARCHAR, kein Enum:
     // nur `active` und leer haben eine feste Bedeutung, jeder andere Altwert

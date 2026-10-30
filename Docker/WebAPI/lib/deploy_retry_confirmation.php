@@ -12,6 +12,13 @@ function deploy_retry_confirmation(array $evaluation, string $name): string
     $plan = $evaluation['plan'] ?? null;
     if (is_array($plan) && ($plan['scope'] ?? '') === 'create_units') {
         $retryConfirm = __t('deploy.confirm_retry_create', ['name' => $name]);
+    } elseif (is_array($plan) && ($plan['scope'] ?? '') === 'resume_start') {
+        // K4b F1: the retry continues at the failed start step.
+        $retryConfirm = !empty($plan['then_autostart'])
+            ? __t('deploy.confirm_retry_resume_start_autostart', ['name' => $name])
+            : __t('deploy.confirm_retry_resume_start', ['name' => $name]);
+    } elseif (is_array($plan) && ($plan['scope'] ?? '') === 'resume_autostart') {
+        $retryConfirm = __t('deploy.confirm_retry_resume_autostart', ['name' => $name]);
     } elseif (!empty($evaluation['external_confirmation'])) {
         $retryConfirm = __t('deploy.confirm_retry_external', ['name' => $name]);
     } elseif (is_array($plan) && ($evaluation['effective_mode'] ?? '') === 'export') {

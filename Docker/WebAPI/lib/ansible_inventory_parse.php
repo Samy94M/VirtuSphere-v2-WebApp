@@ -21,9 +21,9 @@ function ansible_inventory_capture_chunk(string &$output, string $chunk): bool
 /**
  * Core inventory output normalization (ADR-0023). Split out of
  * lib/ansible_inventory.php (Etappe 7, ADR-0006): the marker decode, the two
- * item normalizers it dispatches to, the raw-vs-kept log line and the
- * playbook-failure categorizer all read the same base64-JSON marker or the
- * same raw stdout, unchanged.
+ * item normalizers it dispatches to and the raw-vs-kept log line all read the
+ * same base64-JSON marker, unchanged. The playbook-failure categorizer lives in
+ * lib/ansible_inventory_errors.php since K4b.
  */
 
 /**
@@ -298,60 +298,4 @@ function ansible_inventory_normalization_log_line(array $normalization): ?string
     }
 
     return 'Inventory normalization: ' . implode('; ', $parts) . ' - the raw module output sits in the playbook log above.';
-}
-
-/**
- * Classifies an inventory fetch failure from the playbook output + exit code
- * into an error category so the portal can show a specific hint.
- */
-function ansible_categorize_inventory_error(string $output, int $exitCode): string
-{
-    $lower = strtolower($output);
-    // Our own deployment, not the host's answer. A missing playbook or a
-    // missing collection means the run never reached ESXi, so it must not be
-    // reported with a sentence about the host: an inventory pull once died on
-    // "the playbook: inventoryESXi_playbook.yml could not be found" and told
-    // the operator the host had answered unexpectedly, sending them to check a
-    // network path that was never used.
-    // Every needle here is ansible-playbook's OWN diagnostic wording for "I
-    // could not load or run what you asked me to". The category names Ansible
-    // rather than the portal (Etappe 8): the operator fixes this on the Ansible
-    // host, by installing a collection or a Python library, not in VirtuSphere.
-    //
-    // Deliberately narrow, and narrower than before: the bare `could not be
-    // found` also matched "The object or item referred to could not be found",
-    // which is vCenter's own answer for a missing datastore, so a genuine ESXi
-    // reply was filed as our misconfiguration. The playbook form carries
-    // Ansible's `ERROR! the playbook:` prefix and cannot be confused with it.
-    if (str_contains($lower, 'error! the playbook:')
-        || str_contains($lower, "couldn't resolve module/action")
-        // The controller is missing a Python library the module needs (pyVmomi
-        // is the one this playbook always needs). Ansible names the interpreter
-        // it looked in, so this is evidence about the host, not a guess.
-        || str_contains($lower, 'failed to import the required python library')
-        // Before the general `timed out` needle below, which would otherwise
-        // call a become prompt that never came a network problem. Nothing was
-        // unreachable: the sudo configuration on the Ansible host is wrong.
-        || str_contains($lower, 'waiting for privilege escalation')
-    ) {
-        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_CONFIG;
-    }
-    if (str_contains($lower, 'certificate verify failed')
-        || str_contains($lower, 'unable to get local issuer')
-        || str_contains($lower, 'self-signed certificate')
-        || str_contains($lower, 'self signed certificate')
-    ) {
-        return VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE;
-    }
-    if (str_contains($lower, 'permission') || str_contains($lower, 'not authorized') || str_contains($lower, 'privilege') || str_contains($lower, 'restricted')) {
-        return VIRTUSPHERE_INVENTORY_ERROR_AUTHZ;
-    }
-    if (str_contains($lower, 'incorrect user name or password') || str_contains($lower, 'login') || str_contains($lower, 'authentication') || str_contains($lower, 'invalid credentials')) {
-        return VIRTUSPHERE_INVENTORY_ERROR_AUTH;
-    }
-    if (str_contains($lower, 'unreachable') || str_contains($lower, 'timed out') || str_contains($lower, 'unable to connect') || str_contains($lower, 'no route to host') || str_contains($lower, 'connection refused')) {
-        return VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE;
-    }
-
-    return VIRTUSPHERE_INVENTORY_ERROR_PARSE;
 }

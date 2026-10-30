@@ -1,0 +1,4 @@
+Measured 30.10.2026 in the QA image (ansible-core 2.19.11, community.vmware 6.2.0, pyVmomi 9.1.0.0)
+by running Ansible/inventoryESXi_playbook.yml against a local TLS stub that answers HTTP 5xx.
+Probe scripts: qa-artifacts/k4b-2026-10-30/probe (not versioned). The trailing exit= line is the probe's.
+ignored-then-503 is a two-task playbook: an ignored permission failure, then a 503.

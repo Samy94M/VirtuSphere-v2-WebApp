@@ -9,6 +9,10 @@ declare(strict_types=1);
  */
 const VIRTUSPHERE_INVENTORY_ERROR_DNS = 'dns';
 const VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE = 'unreachable';
+// K4b: the host answered, but its management service sent an HTTP 5xx (a
+// hostd outage behind rhttpproxy reads like this). Never pauses; the scheduler
+// tries once more after a few minutes (esxi_inventory_attempt_due()).
+const VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR = 'host_error';
 const VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE = 'certificate';
 const VIRTUSPHERE_INVENTORY_ERROR_TLS = 'tls';
 const VIRTUSPHERE_INVENTORY_ERROR_AUTH = 'auth';
@@ -31,6 +35,7 @@ const VIRTUSPHERE_INVENTORY_ERROR_CONFIG = 'config';
 const VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES = [
     VIRTUSPHERE_INVENTORY_ERROR_DNS,
     VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE,
+    VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR,
     VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE,
     VIRTUSPHERE_INVENTORY_ERROR_TLS,
     VIRTUSPHERE_INVENTORY_ERROR_AUTH,

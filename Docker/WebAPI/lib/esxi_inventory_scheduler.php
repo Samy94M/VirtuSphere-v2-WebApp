@@ -2,6 +2,15 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/deploy_constants.php';
+
+// K4b: after the FIRST failed pull of a series whose category is `host_error`
+// (the host answered with an HTTP 5xx), the scheduler tries once more after
+// this many seconds instead of waiting for the interval. Checked on the
+// VIRTUSPHERE_ESXI_INVENTORY_SCHEDULE_CHECK_SECONDS tick, so the follow-up
+// starts one to two ticks later.
+const VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS = 300;
+
 /**
  * Resolves the Ansible SSH credential used by every inventory job.
  *
@@ -138,6 +147,51 @@ function esxi_inventory_refresh_all_targets(mysqli $db): array
     return ['ids' => $ids, 'skipped_paused' => $skippedPaused];
 }
 
+/**
+ * Whether the stored state asks for the one short follow-up after a host
+ * outage (K4b): the last pull failed with `host_error` and it is the first
+ * failure of its series. The streak is what makes it exactly one: a follow-up
+ * that fails again raises it to 2, and from there the interval applies. Never
+ * for `auth` or `authz`, whose repeat would not help and, for `auth`, could
+ * lock the ESXi account.
+ *
+ * @param array<string, mixed>|null $state Inventory state row, or null.
+ */
+function esxi_inventory_host_error_follow_up_pending(?array $state): bool
+{
+    return $state !== null
+        && (string) ($state['last_status'] ?? '') === 'failed'
+        && (string) ($state['last_error_category'] ?? '') === VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR
+        && (int) ($state['failure_streak'] ?? 0) === 1;
+}
+
+/**
+ * Whether a credential's automatic pull is due now. Pure, so the decision is
+ * testable without a database.
+ *
+ * The gate is the last ATTEMPT (success or failure), not just the last
+ * success: record_success/record_failure both stamp last_attempt_at, so a
+ * credential that never succeeded (misconfigured host/rights) retries once per
+ * interval instead of every check cycle (~5 min). The one exception is the
+ * follow-up after a first `host_error`, due after
+ * VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS.
+ *
+ * @param array<string, mixed>|null $state Inventory state row, or null when never pulled.
+ */
+function esxi_inventory_attempt_due(?array $state, int $intervalSeconds, int $now): bool
+{
+    $lastAttempt = $state['last_attempt_at'] ?? null;
+    if ($lastAttempt === null) {
+        return true;
+    }
+    $since = $now - (int) strtotime((string) $lastAttempt . ' UTC');
+    $wait = esxi_inventory_host_error_follow_up_pending($state)
+        ? min($intervalSeconds, VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS)
+        : $intervalSeconds;
+
+    return $since >= $wait;
+}
+
 /** Configured pull interval in hours (0 = automation off). */
 function esxi_inventory_interval_hours(mysqli $db): int
 {
@@ -169,12 +223,7 @@ function esxi_inventory_enqueue_due(mysqli $db): int
         if (esxi_inventory_automation_blocker($hours, $state, $ansibleHostSelected) !== null) {
             continue;
         }
-        // Interval gate on the last ATTEMPT (success or failure), not just the
-        // last success: record_success/record_failure both stamp last_attempt_at,
-        // so a credential that never succeeded (misconfigured host/rights) retries
-        // once per interval instead of every check cycle (~5 min).
-        $lastAttempt = $state['last_attempt_at'] ?? null;
-        if ($lastAttempt !== null && ($now - (int) strtotime((string) $lastAttempt . ' UTC')) < $intervalSeconds) {
+        if (!esxi_inventory_attempt_due($state, $intervalSeconds, $now)) {
             continue;
         }
         if (!empty(esxi_inventory_enqueue_for_credential($db, $credentialId)['enqueued'])) {

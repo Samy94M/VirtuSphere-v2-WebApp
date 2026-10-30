@@ -116,15 +116,22 @@ function ansible_filter_vms(array $vms, array $vmIds): array
  * runs, including for a disabled mission, because that is how a policy is
  * withdrawn (every VM of the mission is written with start_action "none").
  *
+ * $thenAutostart is the payload flag of a start job that resumes a full
+ * pipeline (K4b, deploy_job_resume_plan()): it appends the autostart step
+ * under the same mission gate as the full pipeline. Every other mode ignores it.
+ *
  * @return string[]
  */
-function ansible_playbooks_for_mode(string $mode, bool $autostartEnabled = false): array
+function ansible_playbooks_for_mode(string $mode, bool $autostartEnabled = false, bool $thenAutostart = false): array
 {
     return match ($mode) {
         'create' => [VIRTUSPHERE_PLAYBOOKS['create']],
         'powercycle' => [VIRTUSPHERE_PLAYBOOKS['powercycle'], VIRTUSPHERE_PLAYBOOKS['export']],
         'export' => [VIRTUSPHERE_PLAYBOOKS['export']],
-        'start' => [VIRTUSPHERE_PLAYBOOKS['start']],
+        'start' => array_merge(
+            [VIRTUSPHERE_PLAYBOOKS['start']],
+            $thenAutostart && $autostartEnabled ? [VIRTUSPHERE_PLAYBOOKS['autostart']] : []
+        ),
         VIRTUSPHERE_DEPLOY_MODE_AUTOSTART => [VIRTUSPHERE_PLAYBOOKS['autostart']],
         default => array_merge(
             [
@@ -280,7 +287,7 @@ function ansible_remote_steps(string $remoteDir, array $payload, bool $autostart
     ];
 
     $steps = [];
-    foreach (ansible_playbooks_for_mode($mode, $autostartEnabled) as $playbook) {
+    foreach (ansible_playbooks_for_mode($mode, $autostartEnabled, !empty($payload['then_autostart'])) as $playbook) {
         if ($playbook === VIRTUSPHERE_PLAYBOOKS['create']) {
             // Etappe 14B, Teiletappe E: the create playbook is not a step of
             // this sequence any more. It mutates exactly one VM per call, and

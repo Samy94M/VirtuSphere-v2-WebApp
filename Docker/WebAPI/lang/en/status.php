@@ -60,6 +60,7 @@ return [
     'mode_invalid_payload' => 'Job payload is not readable',
     'mode_scope_one' => ':count VM',
     'mode_scope_many' => ':count VMs',
+    'mode_then_autostart' => 'then autostart',
 
     // Dashboard mission status. The column is a free VARCHAR, not an enum: only
     // `active` and empty carry a fixed meaning, and any other legacy value is

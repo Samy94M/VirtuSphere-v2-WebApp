@@ -167,8 +167,7 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
         $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
         $payload = is_array($payload) ? $payload : [];
         $plan = $evaluation['plan'];
-        $payload['mode'] = $evaluation['effective_mode'];
-        $payload['vm_ids'] = $evaluation['scope_vm_ids'];
+        $payload = deploy_retry_payload($payload, $evaluation);
 
         // The per-VM create retry (Etappe 14B-F, plan section 10.3). The WHOLE
         // original selection travels into the new job, not the failed part of
@@ -192,10 +191,7 @@ function repo_retry_deploy_job(mysqli $db, int $jobId, int $userId): int
             null,
             $createRetrySource
         );
-        $note = 'Retry of deploy job ' . $jobId;
-        if ($plan !== null && $plan['mode'] === 'export') {
-            $note .= ' (export-only: ' . ($plan['scope'] === 'failed_vms' ? count($plan['vm_ids']) . ' failed VMs' : 'original selection') . ')';
-        }
+        $note = 'Retry of deploy job ' . $jobId . deploy_retry_plan_note($plan);
         if ($createRetrySource !== null) {
             $createPlan = deploy_create_retry_plan($createRetrySource);
             $note .= ' (create: ' . count($createPlan['verify']) . ' confirmed VM(s) to verify, '

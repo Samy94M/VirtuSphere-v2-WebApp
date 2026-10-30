@@ -41,6 +41,7 @@ Die exakten Privilegien-Bezeichner werden bei der Umsetzung gegen die community.
 |---|---|---|
 | `dns` | Hostname nicht auflösbar | Hostnamen im Zugangsdatum prüfen; DNS/Suchdomäne des Portal-Containers prüfen |
 | `unreachable` | Host aus oder nicht erreichbar | Netzwerk und Host prüfen; Auto-Retry beim nächsten Intervall; alter Cache bleibt |
+| `host_error` | Host hat geantwortet, sein Verwaltungsdienst aber mit einem Fehler (HTTP 5xx, auch „is down or is not a VIM server“) | Kurzer Aussetzer: bei eingeschalteter Automatik genau ein Nachlauf nach wenigen Minuten, danach wieder das Intervall; bleibt es, hostd und Speicher auf dem Host prüfen; alter Cache bleibt, keine Pause |
 | `certificate` | ESXi-Zertifikat konnte nicht verifiziert werden oder fehlt im strikten Modus | Hostnamen, Gültigkeit und gespeichertes CA-Bundle bzw. Serverzertifikat prüfen; danach strikten Test wiederholen |
 | `tls` | TLS-Handshake außerhalb der Zertifikatsprüfung gescheitert | HTTPS-Port, TLS-Version und Gegenstelle prüfen |
 | `auth` | Falscher Benutzer/Passwort | Zugangsdatum korrigieren; **Auto-Abruf pausiert** bis zur Änderung (Kontosperren-Schutz), kein Auto-Retry |

@@ -57,6 +57,7 @@ return [
     // Connection failures (VIRTUSPHERE_INVENTORY_ERROR_*): portal wording.
     'conn_dns' => 'The host ":host" could not be resolved. Check the host name.',
     'conn_unreachable' => 'The host ":host" is unreachable. Check port, network and firewall.',
+    'conn_host_error' => 'The host ":host" answered, but its management service was not ready. This is usually a short outage.',
     'conn_certificate' => 'The certificate of ":host" could not be verified. Check the stored CA bundle or server certificate and the host name, or choose "No certificate verification" in the credential.',
     'conn_tls' => 'The TLS connection to ":host" was rejected. Check the TLS version, port and peer.',
     'conn_auth' => 'The login was rejected. User name or secret is wrong.',

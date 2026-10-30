@@ -52,6 +52,23 @@ function deploy_job_normalize_mission_mode(string $mode): string
     return $mode;
 }
 
+/**
+ * The remote steps a failed job can name in deploy_jobs.failed_step (K4b,
+ * migration 0068): every VIRTUSPHERE_PLAYBOOKS key except `create`, whose
+ * section the worker drives per VM and concludes on its own. Mirrored
+ * order-exact in the CHECK of struktur.sql and the migration
+ * (DeployJobFailedStepContractTest).
+ */
+const VIRTUSPHERE_DEPLOY_FAILED_STEPS = ['powercycle', 'export', 'start', 'autostart'];
+
+/** The failed_step value for a remote step's playbook; null for anything else. */
+function deploy_job_failed_step_for_playbook(?string $playbook): ?string
+{
+    $step = $playbook === null ? false : array_search($playbook, VIRTUSPHERE_PLAYBOOKS, true);
+
+    return is_string($step) && in_array($step, VIRTUSPHERE_DEPLOY_FAILED_STEPS, true) ? $step : null;
+}
+
 function deploy_job_bool(mixed $value): bool
 {
     return in_array(strtolower((string) $value), ['1', 'true', 'yes', 'on'], true);
@@ -111,8 +128,14 @@ function deploy_job_normalize_start_wait(mixed $value): int
 
 function deploy_job_payload(array $data): array
 {
+    $mode = deploy_job_normalize_mode((string) ($data['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL));
+
     return [
-        'mode' => deploy_job_normalize_mode((string) ($data['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL)),
+        'mode' => $mode,
+        // K4b: a start job that resumes a full pipeline writes the autostart
+        // policy afterwards, under the same mission gate as the full pipeline.
+        // Only a start job carries it; any other mode stores false.
+        'then_autostart' => $mode === 'start' && deploy_job_bool($data['then_autostart'] ?? false),
         'verbose' => deploy_job_bool($data['verbose'] ?? false),
         'vm_ids' => deploy_job_normalize_vm_ids($data['vm_ids'] ?? []),
         // K16 keeps the skipped IDs beside the runnable scope. In particular,
@@ -200,6 +223,78 @@ function deploy_job_retry_plan(string $status, ?array $result, array $originalVm
     }
 
     return null;
+}
+
+/**
+ * F1 (K4b, user decision 29.10.2026): the retry of a job whose start or
+ * autostart step failed continues at that step instead of repeating what
+ * succeeded. Asked before deploy_job_retry_plan(); null leaves the plan to it.
+ *
+ * The failed step comes only from deploy_jobs.failed_step, never from the
+ * reason text. Two sources qualify, both `failed`:
+ *  - a full pipeline whose MAC export succeeded for EVERY VM. A partial or
+ *    missing result keeps today's export path (fail-closed): its VMs are not
+ *    all bound, and starting them would run past the step that is missing;
+ *  - a start job that resumed a full pipeline (then_autostart) and failed in
+ *    its autostart step.
+ * Failed at start: mode start over the original selection, plus the autostart
+ * step when the mission uses autostart now (the same gate as the full
+ * pipeline). Failed at autostart: mode autostart over the original selection.
+ * Both modes leave the VM states as the MAC import set them.
+ *
+ * @param array{outcome:string, successful_vm_ids:list<int>, failed_vm_ids:list<int>}|null $result decoded MAC result
+ * @param array<string,mixed> $payload the source job's normalized payload (deploy_job_payload)
+ * @return array{mode:string, vm_ids:list<int>, scope:string, then_autostart:bool}|null
+ */
+function deploy_job_resume_plan(string $status, ?array $result, array $payload, ?string $failedStep, bool $missionAutostart): ?array
+{
+    if ($status !== VIRTUSPHERE_DEPLOY_STATUS_FAILED || !in_array($failedStep, ['start', VIRTUSPHERE_DEPLOY_MODE_AUTOSTART], true)) {
+        return null;
+    }
+    $mode = (string) ($payload['mode'] ?? '');
+    $fromFull = $mode === VIRTUSPHERE_DEPLOY_MODE_FULL && $result !== null && $result['outcome'] === 'success';
+    $fromResumedStart = $mode === 'start' && !empty($payload['then_autostart']) && $failedStep === VIRTUSPHERE_DEPLOY_MODE_AUTOSTART;
+    if (!$fromFull && !$fromResumedStart) {
+        return null;
+    }
+    $vmIds = array_values(deploy_job_normalize_vm_ids($payload['vm_ids'] ?? []));
+
+    return $failedStep === 'start'
+        ? ['mode' => 'start', 'vm_ids' => $vmIds, 'scope' => 'resume_start', 'then_autostart' => $missionAutostart]
+        : ['mode' => VIRTUSPHERE_DEPLOY_MODE_AUTOSTART, 'vm_ids' => $vmIds, 'scope' => 'resume_autostart', 'then_autostart' => false];
+}
+
+/**
+ * The payload of a retry job: the source payload with the evaluated mode,
+ * scope and, for a plan, its autostart follow-up. Without a plan the source
+ * payload is repeated unchanged, then_autostart included.
+ *
+ * @param array<string,mixed> $payload raw source payload
+ * @param array<string,mixed> $evaluation deploy_retry_blockers()
+ * @return array<string,mixed>
+ */
+function deploy_retry_payload(array $payload, array $evaluation): array
+{
+    $plan = $evaluation['plan'] ?? null;
+    $payload['mode'] = $evaluation['effective_mode'];
+    $payload['vm_ids'] = $evaluation['scope_vm_ids'];
+    if (is_array($plan)) {
+        $payload['then_autostart'] = !empty($plan['then_autostart']);
+    }
+
+    return $payload;
+}
+
+/** The suffix of the retry job's first log line that names its plan. */
+function deploy_retry_plan_note(?array $plan): string
+{
+    return match ($plan['scope'] ?? null) {
+        'failed_vms' => ' (export-only: ' . count($plan['vm_ids']) . ' failed VMs)',
+        'original_selection' => ' (export-only: original selection)',
+        'resume_start' => ' (resumed at the start step' . (!empty($plan['then_autostart']) ? ', then autostart' : '') . ')',
+        'resume_autostart' => ' (resumed at the autostart step)',
+        default => '',
+    };
 }
 
 function deploy_schedule_error(string $field, string $key, string $fallback, array $replace = []): ValidationException

@@ -206,12 +206,13 @@ function deploy_worker_handle_failure(
     string $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
     bool $vmsMarked = true,
     ?string $reasonDetail = null,
-    ?int $exitCode = null
+    ?int $exitCode = null,
+    ?string $failedStep = null
 ): void
 {
     $reasonDetail ??= $message;
     $reached = false;
-    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked, $reasonDetail, $exitCode, &$reached): ?string {
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked, $reasonDetail, $exitCode, $failedStep, &$reached): ?string {
         $reached = true;
         $jobId = (int) $job['id'];
         if ((string) $locked['locked_by'] !== $workerId) {
@@ -247,7 +248,7 @@ function deploy_worker_handle_failure(
         if ($keepVmIds !== []) {
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a successful MAC result keep their state.');
         }
-        return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $reasonDetail);
+        return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $reasonDetail, null, true, $failedStep);
     });
     if (!$reached) {
         deploy_worker_log_discarded_write((int) $job['id'], 'failure', $message);
@@ -273,12 +274,13 @@ function deploy_worker_finish_job(
     ?string $reasonCode = null,
     ?string $reasonDetail = null,
     ?array $terminalResult = null,
-    bool $remoteStepStarted = true
+    bool $remoteStepStarted = true,
+    ?string $failedStep = null
 ): ?string
 {
     $jobId = (int) $job['id'];
     $reached = false;
-    $published = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult, $remoteStepStarted, &$reached): ?string {
+    $published = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult, $remoteStepStarted, $failedStep, &$reached): ?string {
         $reached = true;
         if ((string) $locked['locked_by'] !== $workerId) {
             deploy_worker_log_discarded_write($jobId, 'terminal status ' . $status, $lastError);
@@ -293,7 +295,7 @@ function deploy_worker_finish_job(
             return deploy_worker_confirm_owned_cancel($db, $job, $message) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
         }
 
-        return repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult)
+        return repo_finish_deploy_job($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResult, $failedStep)
             ? $status : null;
     });
     if (!$reached) {

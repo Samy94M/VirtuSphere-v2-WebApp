@@ -14,6 +14,7 @@ const VIRTUSPHERE_ANSIBLE_INVENTORY_MODULES = [
     'lib/ansible_inventory.php',
     'lib/ansible_inventory_artifacts.php',
     'lib/ansible_inventory_parse.php',
+    'lib/ansible_inventory_errors.php',
     'lib/ansible_inventory_datastore.php',
     'lib/ansible_inventory_capability.php',
 ];

@@ -154,8 +154,10 @@ const FILE_SIZE_ALLOWANCES = [
     // and check live in lib/migrations/0066_create_unit_attempt.php.
     // B8 (29.10.2026) adds the two registry lines for migration 0067; its column and
     // check live in lib/migrations/0067_create_error_detail_origin.php.
+    // K4b (30.10.2026) adds the two registry lines for migration 0068; its column and
+    // check live in lib/migrations/0068_deploy_job_failed_step.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1256,
+        'lines' => 1258,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

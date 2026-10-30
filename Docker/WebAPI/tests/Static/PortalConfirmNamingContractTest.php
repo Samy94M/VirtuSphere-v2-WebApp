@@ -49,6 +49,10 @@ final class PortalConfirmNamingContractTest extends TestCase
         'deploy.confirm_retry_partial',
         'deploy.confirm_retry_partial_many',
         'deploy.confirm_retry_partial_one',
+        // K4b F1: the retry continues a full pipeline at its failed start or autostart step.
+        'deploy.confirm_retry_resume_autostart',
+        'deploy.confirm_retry_resume_start',
+        'deploy.confirm_retry_resume_start_autostart',
         'missions.confirm_delete',
         'missions.confirm_delete_empty',
         'missions.confirm_delete_scheduled',

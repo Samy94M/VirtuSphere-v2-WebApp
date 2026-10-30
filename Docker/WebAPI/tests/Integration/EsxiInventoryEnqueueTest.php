@@ -81,6 +81,44 @@ final class EsxiInventoryEnqueueTest extends TestCase
         self::assertSame(0, $pending);
     }
 
+    /**
+     * K4b: a first `host_error` gets exactly one follow-up after a few
+     * minutes; the follow-up that fails again waits for the interval.
+     */
+    public function testEnqueueDueRetriesAFirstHostErrorOnceAfterAFewMinutes(): void
+    {
+        $esxiCount = (int) repo_scalar($this->db, "SELECT COUNT(*) FROM deploy_credentials WHERE type = 'esxi'", '', []);
+        if ($esxiCount !== 1 || esxi_inventory_ansible_credential_id($this->db) === null) {
+            self::markTestSkipped('Expected exactly one ESXi credential and one resolvable Ansible credential in the test DB.');
+        }
+        $backdate = function (int $seconds): void {
+            $stmt = $this->db->prepare('UPDATE deploy_esxi_inventory_state SET last_attempt_at = NOW() - INTERVAL ? SECOND WHERE credential_id = ?');
+            $stmt->bind_param('ii', $seconds, $this->esxiId);
+            $stmt->execute();
+        };
+        $pending = fn (): int => (int) repo_scalar(
+            $this->db,
+            'SELECT COUNT(*) FROM deploy_jobs WHERE credential_esxi_id = ? AND mission_id IS NULL AND status = ?',
+            'is',
+            [$this->esxiId, VIRTUSPHERE_DEPLOY_STATUS_QUEUED]
+        );
+
+        repo_esxi_inventory_record_failure($this->db, $this->esxiId, VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR);
+        $backdate(VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS - 60);
+        self::assertSame(0, esxi_inventory_enqueue_due($this->db), 'too early for the follow-up');
+
+        $backdate(VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS + 1);
+        self::assertSame(1, esxi_inventory_enqueue_due($this->db), 'the follow-up is due');
+        self::assertSame(1, $pending());
+
+        // The follow-up failed with the same answer: the streak is 2 now.
+        $this->db->query('DELETE FROM deploy_jobs WHERE mission_id IS NULL AND credential_esxi_id = ' . $this->esxiId);
+        repo_esxi_inventory_record_failure($this->db, $this->esxiId, VIRTUSPHERE_INVENTORY_ERROR_HOST_ERROR);
+        $backdate(VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS + 1);
+        self::assertSame(0, esxi_inventory_enqueue_due($this->db), 'only one follow-up per series');
+        self::assertSame(0, $pending());
+    }
+
     public function testRefreshAllTargetsSkipPausedCredential(): void
     {
         $pausedId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, 443, 'paused');

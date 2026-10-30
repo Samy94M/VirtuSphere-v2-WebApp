@@ -489,6 +489,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     -- explain a terminal transition; NULL denotes an unmigrated legacy row.
     terminal_reason_code VARCHAR(32) NULL,
     terminal_reason_detail VARCHAR(1024) NULL,
+    -- K4b (migration 0068): the VIRTUSPHERE_PLAYBOOKS key of the remote step
+    -- whose failure ended the job; NULL when no remote step failed. A retry of
+    -- a full pipeline continues there (deploy_job_retry_plan()).
+    failed_step VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
     credential_esxi_id INT NULL,
     credential_ansible_id INT NULL,
     -- cancelled_at names the CONFIRMED end state only; the wish carries its
@@ -540,6 +544,9 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
         (status = _utf8mb4'failed' AND terminal_reason_code IN (_utf8mb4'execution_failed',_utf8mb4'timeout',_utf8mb4'stale_heartbeat',_utf8mb4'ownership_lost',_utf8mb4'configuration_blocked')) OR
         (status = _utf8mb4'cancelled' AND terminal_reason_code IN (_utf8mb4'operator_cancelled',_utf8mb4'cancel_converged')) OR
         (status = _utf8mb4'outcome_unknown' AND terminal_reason_code = _utf8mb4'stale_heartbeat')
+    ),
+    CONSTRAINT deploy_jobs_failed_step_check CHECK (
+        failed_step IS NULL OR failed_step IN (_ascii'powercycle',_ascii'export',_ascii'start',_ascii'autostart')
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

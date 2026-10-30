@@ -46,6 +46,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
     $localDir = null;
     $remoteDir = null;
     $remoteStepInFlight = false;
+    // K4b: the remote step that is running, kept outside the try so a failure
+    // thrown inside it reaches deploy_jobs.failed_step; null outside the loop.
+    $failedPlaybook = null;
     $esxiSecret = null;
     $ansibleSecret = null;
     $exitCode = null;
@@ -134,8 +137,11 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
         // policy, and may drop the autostart step from a full pipeline without
         // failing the rest of it.
         $autostartEnabled = !empty($artifacts['autostart_enabled']);
+        // K4b: a start job resuming a full pipeline (then_autostart) writes it
+        // under the same mission gate as the full pipeline.
         $writesAutostart = (string) $payload['mode'] === VIRTUSPHERE_DEPLOY_MODE_AUTOSTART
-            || ((string) $payload['mode'] === VIRTUSPHERE_DEPLOY_MODE_FULL && $autostartEnabled);
+            || ((string) $payload['mode'] === VIRTUSPHERE_DEPLOY_MODE_FULL && $autostartEnabled)
+            || ((string) $payload['mode'] === 'start' && !empty($payload['then_autostart']) && $autostartEnabled);
         if ($writesAutostart) {
             $autostartEnabled = deploy_worker_autostart_preflight($channel->connection(), $jobId, (int) $esxiCredential['id'], (string) $payload['mode'], $autostartEnabled);
         }
@@ -218,6 +224,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
             // in, including before the first marker arrives, so a transport
             // failure at the very start of a step is named too.
             $currentStep = $step['playbook'];
+            $failedPlaybook = $currentStep;
             $buffer = '';
             // FC2-05: the last task and failure line of this step, kept for the
             // terminal reason if the step fails.
@@ -260,6 +267,7 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
                 throw deploy_worker_step_failed($channel, $exitCode, $currentStep, $trace);
             }
         }
+        $failedPlaybook = null;
 
         // The last boundary. Every step has ended with exit code 0 by now, so a
         // cancel committed while the final playbook ran is confirmed by the
@@ -314,7 +322,8 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
                 deploy_terminal_reason_for_exception($exception),
                 $vmsMarked,
                 $exception instanceof DeployWorkerStepFailed ? $exception->detail : null,
-                $exception instanceof DeployWorkerStepFailed ? $exception->exitCode : null
+                $exception instanceof DeployWorkerStepFailed ? $exception->exitCode : null,
+                deploy_job_failed_step_for_playbook($failedPlaybook)
             );
         }
     } finally {

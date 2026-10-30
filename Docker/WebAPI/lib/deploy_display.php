@@ -71,6 +71,10 @@ function deploy_job_payload_display(?string $payloadJson): string
     }
 
     $parts = [deploy_mode_label((string) ($payload['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL))];
+    // K4b: a start job that resumes a full pipeline writes autostart afterwards.
+    if ((string) ($payload['mode'] ?? '') === 'start' && !empty($payload['then_autostart'])) {
+        $parts[0] .= ', ' . __t('status.mode_then_autostart');
+    }
     if (!empty($payload['verbose'])) {
         $parts[] = '-vvv';
     }

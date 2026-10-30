@@ -24,6 +24,7 @@ final class AnsibleInventoryModuleContractTest extends TestCase
         'ansible_inventory_vm_item',
         'ansible_parse_inventory_output',
         'ansible_inventory_normalization_log_line',
+        'ansible_inventory_failure_lines',
         'ansible_categorize_inventory_error',
         'ansible_inventory_datastore_health',
         'ansible_inventory_datastore_health_log_line',

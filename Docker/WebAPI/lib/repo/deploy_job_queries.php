@@ -24,6 +24,8 @@ function deploy_job_payload_summary(?string $payloadJson): string
     }
 
     $mode = (string) ($payload['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL);
+    // K4b: the resumed start of a full pipeline names its autostart follow-up.
+    $mode .= $mode === 'start' && !empty($payload['then_autostart']) ? ' then autostart' : '';
     $verbose = !empty($payload['verbose']) ? ' -vvv' : '';
     $vmIds = is_array($payload['vm_ids'] ?? null) ? $payload['vm_ids'] : [];
     $scope = $vmIds === [] ? '' : ' (' . count($vmIds) . ' VMs)';

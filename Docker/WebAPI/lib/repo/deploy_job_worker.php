@@ -168,7 +168,10 @@ function repo_finish_deploy_job(
     ?string $lastError = null,
     ?string $reasonCode = null,
     ?string $reasonDetail = null,
-    ?array $terminalResult = null
+    ?array $terminalResult = null,
+    // K4b: the VIRTUSPHERE_DEPLOY_FAILED_STEPS key of the remote step that
+    // failed; stored only with status failed, otherwise NULL.
+    ?string $failedStep = null
 ): bool
 {
     if (!in_array($status, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
@@ -188,10 +191,13 @@ function repo_finish_deploy_job(
     };
     deploy_terminal_reason_assert($status, $reasonCode);
     $lastError = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null;
+    // An unknown value is dropped rather than thrown: a throw here would cost
+    // the job its terminal state, and NULL only means "plan the retry as before".
+    $failedStep = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED && in_array($failedStep, VIRTUSPHERE_DEPLOY_FAILED_STEPS, true) ? $failedStep : null;
     $reasonDetail = deploy_terminal_reason_detail($reasonDetail ?? ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null));
     $terminalResultJson = $terminalResult === null ? null : repo_encode_deploy_preflight_result($terminalResult);
 
-    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResultJson): bool {
+    return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResultJson, $failedStep): bool {
         $stmt = $db->prepare('SELECT status, locked_by, result_json FROM deploy_jobs WHERE id = ? LIMIT 1 FOR UPDATE');
         $stmt->bind_param('i', $jobId);
         $stmt->execute();
@@ -222,8 +228,8 @@ function repo_finish_deploy_job(
         );
 
         $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
-        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, result_json = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
-        $stmt->bind_param('sssssiss', $status, $lastError, $resultJson, $reasonCode, $reasonDetail, $jobId, $workerId, $running);
+        $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, result_json = ?, terminal_reason_code = ?, terminal_reason_detail = ?, failed_step = ?, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND locked_by = ? AND status = ?');
+        $stmt->bind_param('ssssssiss', $status, $lastError, $resultJson, $reasonCode, $reasonDetail, $failedStep, $jobId, $workerId, $running);
         $stmt->execute();
         $finished = $stmt->affected_rows === 1;
 
