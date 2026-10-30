@@ -54,10 +54,17 @@ if ($PSVersionTable.PSEdition -eq 'Core') { $hostShell = 'pwsh' }
 # (eine Quelle; das Modul definiert nur Funktionen und fuehrt beim Import nichts aus)
 . (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'runtime.ps1')
 $shExe = Find-Sh
-$phpImage = 'virtusphere-php:8.4-tooling'
+# PHP-Tooling-Image aus der Lockdatei (dockerImages.php.ref), derselben Quelle
+# wie der php-lint-Hook; ohne lesbaren Eintrag gilt das Image als nicht verfuegbar.
+$phpImage = $null
+try {
+    $phpImage = (Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'tool-lock.json') | ConvertFrom-Json).dockerImages.php.ref
+} catch {
+    $phpImage = $null
+}
 $dockerAvailable = Test-Command 'docker'
 $phpImageAvailable = $false
-if ($dockerAvailable) {
+if ($dockerAvailable -and $phpImage) {
     $probe = Invoke-Tool 'docker' @('image', 'inspect', '--format', 'ok', $phpImage)
     $phpImageAvailable = ($probe.ExitCode -eq 0)
 }
@@ -1025,9 +1032,20 @@ function Invoke-HookWithPayload {
     }
 }
 
+# php-lint-Hook mit einer Payload wie unter Windows (JSON-escapte Backslashes).
+function Invoke-PhpLintHook {
+    param([string]$File)
+    $jsonPath = ($File -replace '/', '\') -replace '\\', '\\'
+    return Invoke-HookWithPayload '.claude/hooks/php-lint.sh' ('{"tool_input":{"file_path":"' + $jsonPath + '"}}')
+}
+# Der Hook lintet mit Host-PHP oder im Tooling-Image; ohne beides kann kein
+# Blockfall bewiesen werden (infra, nie ein stiller Gruenfall).
+$phpLintToolAvailable = (Test-Command 'php') -or $phpImageAvailable
+
 # Hook-Payload-Faelle: ungueltige Payloads duerfen weder crashen noch blocken
 # (Exit 0); eine Payload auf eine kaputte PHP-Datei muss blocken (Exit 2).
-# Der Hook nutzt Host-PHP oder fuer fixture-fremde Pfade das Projekt-Image.
+# Der Hook lintet genau die editierte Datei (Host-PHP oder Tooling-Image aus
+# tool-lock.json), nie die gleichnamige Datei im laufenden App-Container.
 $cases += @(
     @{ Name = 'hooks.php-lint.invalid-payload'; Body = {
         Assert-Guard (Invoke-HookWithPayload '.claude/hooks/php-lint.sh' 'kein json {{{') @(0)
@@ -1039,10 +1057,27 @@ $cases += @(
         Assert-Guard (Invoke-HookWithPayload '.claude/hooks/lint-csp-patterns.sh' 'kein json {{{') @(0)
     } }
     @{ Name = 'hooks.php-lint.blocks-syntax-error'; Body = {
+        if (-not $phpLintToolAvailable) { return @{ Status = 'infra'; Detail = 'weder Host-PHP noch PHP-Tooling-Image' } }
         $fx = New-Fixture
         Add-FixtureFile $fx 'broken.php' "<?php`nif (true {`n"
         $payload = '{"tool_input":{"file_path":"' + (($fx -replace '\\', '/') + '/broken.php') + '"}}'
         Assert-Guard (Invoke-HookWithPayload '.claude/hooks/php-lint.sh' $payload) @(2) 'BLOCK'
+    } }
+    @{ Name = 'hooks.php-lint.lints-edited-copy'; Body = {
+        # Kaputte Kopie einer Datei, die es im App-Container intakt gibt (wie
+        # eine Aenderung im Worktree): geblockt wird die bearbeitete Kopie.
+        if (-not $phpLintToolAvailable) { return @{ Status = 'infra'; Detail = 'weder Host-PHP noch PHP-Tooling-Image' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/ansible.php' "<?php`nif (true {`n"
+        Assert-Guard (Invoke-PhpLintHook (Join-Path $fx 'Docker/WebAPI/lib/ansible.php')) @(2) 'BLOCK'
+    } }
+    @{ Name = 'hooks.php-lint.passes-new-valid-file'; Body = {
+        # Neue gueltige Datei, die der App-Container nicht kennt (neue Datei im
+        # Worktree): kein Block.
+        if (-not $phpLintToolAvailable) { return @{ Status = 'infra'; Detail = 'weder Host-PHP noch PHP-Tooling-Image' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'Docker/WebAPI/guard-new-file-probe.php' "<?php`necho 1;`n"
+        Assert-Guard (Invoke-PhpLintHook (Join-Path $fx 'Docker/WebAPI/guard-new-file-probe.php')) @(0)
     } }
 )
 

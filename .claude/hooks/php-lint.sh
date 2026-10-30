@@ -1,9 +1,14 @@
 #!/bin/sh
-# PostToolUse-Hook: php -l fuer die editierte Datei. Blockt (exit 2) bei
-# Syntaxfehlern. Nutzt Host-PHP, sonst den PHP-Container fuer Dateien unter
-# Docker/WebAPI/; ohne beides still ueberspringen (Air-Gap-/Offline-freundlich).
+# PostToolUse-Hook: php -l fuer genau die editierte Datei. Blockt (exit 2) bei
+# Syntax- oder Compile-Fehlern. Lintet mit Host-PHP, sonst im PHP-Tooling-Image
+# aus scripts/tool-lock.json (dockerImages.php.ref), die Datei read-only
+# gemountet. Nie per docker exec im laufenden App-Container: der sieht den
+# Hauptbaum, nicht die bearbeitete Datei eines Worktrees.
+# Ohne Host-PHP und ohne Docker still ueberspringen (Air-Gap-/Offline-freundlich).
+# Fehlt nur das Image oder scheitert Docker, nicht blockierender Hinweis (exit 1),
+# damit ein fehlendes Werkzeug nicht als gruener Lint durchgeht.
 set -eu
-# Git-Bash/MSYS wuerde /var/www/... in Windows-Pfade uebersetzen und den
+# Git-Bash/MSYS wuerde /lint/... in Windows-Pfade uebersetzen und den
 # Container-Lint damit brechen.
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
@@ -19,42 +24,47 @@ case "$file_path" in
 esac
 [ -f "$file_path" ] || exit 0
 
+# php -l meldet jeden Syntax- und Compile-Fehler mit "Errors parsing". Nur
+# dieser Befund blockt; andere Fehlschlaege sind kein Syntaxbefund.
+judge() {
+  rc="$1" out="$2" via="$3"
+  [ "$rc" -eq 0 ] && exit 0
+  case "$out" in
+    *"Errors parsing"*)
+      echo "BLOCK: PHP-Syntaxfehler in $file_path$via" >&2
+      printf '%s\n' "$out" >&2
+      exit 2
+      ;;
+  esac
+  echo "php-lint-Hook: $file_path nicht geprueft$via (exit $rc)" >&2
+  printf '%s\n' "$out" >&2
+  exit 1
+}
+
 if command -v php >/dev/null 2>&1; then
-  if ! out=$(php -l "$file_path" 2>&1); then
-    echo "BLOCK: PHP-Syntaxfehler in $file_path" >&2
-    echo "$out" >&2
-    exit 2
-  fi
-  exit 0
+  rc=0
+  out=$(php -l "$file_path" 2>&1) || rc=$?
+  judge "$rc" "$out" ""
 fi
 
-case "$file_path" in
-  *Docker/WebAPI/*)
-    rel="${file_path##*Docker/WebAPI/}"
-    if docker exec virtusphere-v2-webapp-php-1 php -l "/var/www/html/$rel" >/dev/null 2>&1; then
-      exit 0
-    fi
-    # Container nicht erreichbar vs. echter Syntaxfehler unterscheiden:
-    if ! docker exec virtusphere-v2-webapp-php-1 true >/dev/null 2>&1; then
-      exit 0
-    fi
-    echo "BLOCK: PHP-Syntaxfehler in $file_path (Container-Lint)" >&2
-    docker exec virtusphere-v2-webapp-php-1 php -l "/var/www/html/$rel" >&2 || true
-    exit 2
-    ;;
-esac
+command -v docker >/dev/null 2>&1 || exit 0
 
-# Guard-Harness fixtures and other edited PHP files outside Docker/WebAPI are
-# not mounted into the running app container. Reuse the already-built project
-# image with a narrow read-only mount instead of requiring host PHP.
-php_image="virtusphere-v2-webapp-php"
-if command -v docker >/dev/null 2>&1 && docker image inspect "$php_image" >/dev/null 2>&1; then
-  lint_dir="$(dirname "$file_path")"
-  lint_name="$(basename "$file_path")"
-  if ! out=$(docker run --rm -v "$lint_dir:/lint:ro" "$php_image" php -l "/lint/$lint_name" 2>&1); then
-    echo "BLOCK: PHP-Syntaxfehler in $file_path (Container-Lint)" >&2
-    echo "$out" >&2
-    exit 2
-  fi
+lock="$(dirname "$0")/../../scripts/tool-lock.json"
+php_image=""
+if [ -f "$lock" ]; then
+  php_image="$(sed -n '/"php"[[:space:]]*:[[:space:]]*{/,/}/s/.*"ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$lock" | head -n 1)"
 fi
-exit 0
+if [ -z "$php_image" ]; then
+  echo "php-lint-Hook: kein dockerImages.php.ref in $lock; $file_path nicht geprueft" >&2
+  exit 1
+fi
+if ! docker image inspect "$php_image" >/dev/null 2>&1; then
+  echo "php-lint-Hook: Image $php_image nicht verfuegbar (Docker aus oder Image fehlt: docker build --target tooling -t $php_image Docker/php); $file_path nicht geprueft" >&2
+  exit 1
+fi
+
+lint_dir="$(dirname "$file_path")"
+lint_name="$(basename "$file_path")"
+rc=0
+out=$(docker run --rm --network none -v "$lint_dir:/lint:ro" "$php_image" php -l "/lint/$lint_name" 2>&1) || rc=$?
+judge "$rc" "$out" " (Container-Lint $php_image)"

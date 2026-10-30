@@ -40,4 +40,4 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A14 .claude/hooks/: session-start.sh runs the drift checks quietly; PostToolUse runs lint-csp-patte
 
-- `.claude/hooks/`: `session-start.sh` runs the drift checks quietly; PostToolUse runs `lint-csp-patterns.sh`, `php-lint.sh` (blocking `php -l`) and `lang-parity.sh` (blocking DE/EN audit on `lang/` edits).
+- `.claude/hooks/`: `session-start.sh` runs the drift checks quietly; PostToolUse runs `lint-csp-patterns.sh`, `php-lint.sh` (blocking `php -l` on the edited file via host PHP or the `tool-lock.json` PHP tooling image, never the running app container) and `lang-parity.sh` (blocking DE/EN audit on `lang/` edits).
