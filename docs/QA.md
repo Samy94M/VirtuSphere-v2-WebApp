@@ -133,6 +133,18 @@ triplet with the test key generated per run, and without
 key pair exists only in the Pester `TestDrive`. A full `restore-drill` against an
 encrypted QA backup needs that key in `VIRTUSPHERE_BACKUP_PRIVATE_KEY`.
 
+Two R1 cases (ADR-0017 amendment 7) pin the readiness order. On the safety
+harness the fake MySQL answers on the socket at once but over TCP only from the
+third probe, like the image's temporary init server before the final one; the
+drill must import only after a TCP probe answered. A second case reads the
+"Echter Restore" section of `docs/operations/backup.md` and the `mysql` service
+of `docker-compose.yml`: the runbook starts MySQL with
+`docker compose up -d --wait mysql` before the dump import, and the healthcheck
+behind `--wait` stays on TCP (`-h 127.0.0.1`). The real drill needs a backup
+triplet under `Docker/backups/` of its check root. That directory is ignored, so
+a fresh worktree has none and ends with `[restore.backup-missing]` (exit 2); a
+copied triplet lets the drill run with the worktree's code.
+
 ### Container hardening and supply chain (AP8)
 
 PHP-FPM requires exactly `KILL`, `SETGID` and `SETUID`: the master runs as

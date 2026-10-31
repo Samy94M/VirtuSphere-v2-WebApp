@@ -143,7 +143,12 @@ ist der Vertrag, den dieses Runbook erfüllt.
   Handle. Erst der bestehende Recoveryvertrag darf eine Einheit freigeben.
 - Ein Restore verwendet Datenbank, `.env`, Host-Override, APP_KEY und
   Quellrelease desselben Sicherungsstands und folgt dem Backup-Runbook dieses
-  Quellrelease, nicht dem des neueren Stands. Anschließend AD-Konvergenz ausführen;
+  Quellrelease, nicht dem des neueren Stands. Eine Ausnahme gilt für das
+  Starten der Datenbank vor dem Import: auch nach einem älteren Runbook
+  `docker compose up -d --wait mysql` verwenden und erst nach fehlerfreiem Ende
+  einspielen (Begründung im aktuellen [Backup-Runbook](backup.md), Schritt 3).
+  Der dafür nötige TCP-Healthcheck steht in jedem bisherigen Release in
+  `docker-compose.yml`. Anschließend AD-Konvergenz ausführen;
   neuere offene Browserseiten und Callbacks müssen an ihren Revisions-/
   Generationfences scheitern.
 - Nach Restore oder Rückbau bleiben `uncertain`-Einheiten, fremde
