@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
-  "updatedAt": "2026-10-27T08:43:07.803Z",
-  "reason": "Welle B2, Nutzerentscheidung 27.10.2026: DE-Anfuehrungszeichen „Als JSON exportieren“ auf der Missionsseite (Anführungszeichen-Paket d104ed0b); erlaubt nur light/dark missions-desktop, missions-mobile, missions-wrap",
+  "updatedAt": "2026-10-31T19:55:24.469Z",
+  "reason": "Windows 10.0.26300 (Update 29.10.2026, KB5121794/KB5127694): nur osRelease geändert, Schriften, Chromium 1228 und Playwright 1.61.1 gleich; kein inhaltlicher Unterschied, Abweichungen nur an bekannten Kanten (Register Welle V0); V0, Nutzerentscheidung 30.10.2026",
   "runner": {
     "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
     "platform": "win32",
     "arch": "x64",
-    "osRelease": "10.0.26200",
+    "osRelease": "10.0.26300",
     "browser": {
       "engine": "chromium",
       "revision": "1228",
@@ -133,7 +133,7 @@
     "dark/missions-desktop.png": "02caa80afef87a83ba55ed7d10a22185994f579f985a733047234266478ec803",
     "dark/missions-mobile.png": "8a9851e3ae95efe6e0f027e05f4cee836d149f0fffe612ad30f673dec70204d4",
     "dark/missions-wrap.png": "5c89eb8970ed0935a61e1e16565a82534e058f07f42322813e99464b6e58697c",
-    "dark/system-status-desktop.png": "95c48e1c1d87775e0c9afe0b2636c8c21eea22013565573da3e2866801356aea",
+    "dark/system-status-desktop.png": "b4926b3c9e061a6b6cca5bb2c819fcdd269c0d73373ef370bae09c84fdefffcf",
     "dark/system-status-mobile.png": "766d8e2d20d01af4850d6493ea1a1f9cdd392dd9d672374f709e5ba3b72f0d92",
     "dark/system-status-wrap.png": "1f46a964596285f9dd6ac03a724c189192592445e05287bbbacf654e1470bc79",
     "light/deploy-desktop.png": "f441c95e1194980e095d51912aa487631915c43bdb3a4a81cb7be85de242b0e8",
