@@ -139,7 +139,7 @@ function credentials_after_esxi_save(mysqli $db, string $type, int $credentialId
             // same line in the log its start got.
             audit_event($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_RECOVERED, [
                 'action' => 'resumed',
-                'reason' => 'credential saved',
+                'reason' => VIRTUSPHERE_AUDIT_INVENTORY_AUTOMATION_REASON_CREDENTIAL_SAVED,
             ], $userId);
         }
         // A legacy row with a stored certificate gets the strict probe: the one pull
@@ -330,12 +330,12 @@ function credentials_handle_post(mysqli $connection, array $user): string
                 // Asynchronous by nature: the pull is a queued job on the Ansible
                 // host, so the outcome lands in the traffic light, not in a flash.
                 [$flashType, $flashMessage, $enqueue] = credentials_test_esxi($connection, $id, (int) $user['id']);
-                $inventoryContext = ['reason' => (string) ($enqueue['reason'] ?? 'queued')];
+                $inventoryContext = ['reason' => (string) ($enqueue['reason'] ?? VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_QUEUED)];
                 if (isset($enqueue['job_id'])) {
                     $inventoryContext['job_id'] = (int) $enqueue['job_id'];
                 }
                 audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REQUESTED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $inventoryContext, (int) $user['id']);
-                $actionUrl = in_array(($enqueue['reason'] ?? ''), ['ambiguous_ansible_credential', 'invalid_ansible_credential', 'no_ansible_credential'], true)
+                $actionUrl = in_array(($enqueue['reason'] ?? ''), [VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_AMBIGUOUS_ANSIBLE, VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_INVALID_ANSIBLE, VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_NO_ANSIBLE], true)
                     ? settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)
                     : system_status_url('credential-' . $id, ['inventory' => $id]);
                 // The settings target is offered to readers of system.config only (R11):

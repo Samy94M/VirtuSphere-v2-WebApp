@@ -25,8 +25,21 @@ final class AuditLogDisplayContractTest extends TestCase
     {
         $page = $this->source('portal/logs.php');
 
-        self::assertStringContainsString('audit_log_display_message(', $page, 'the logs page must render rows through the display module');
+        self::assertStringContainsString('audit_log_display(', $page, 'the logs page must render rows through the display module');
         self::assertStringNotContainsString("\$row['log_message']", $page, 'the logs page must not echo the stored log_message');
+    }
+
+    public function testTheTechnicalDetailIsOnlyShownFolded(): void
+    {
+        $page = $this->source('portal/logs.php');
+
+        // Portal rule 29.10.2026: a host or Ansible text is never on the first look.
+        self::assertSame(1, substr_count($page, "\$display['detail']); ?>"), 'zero-match: the detail is echoed exactly once');
+        self::assertMatchesRegularExpression(
+            '~<details class="technical-details"><summary><\?php echo h\(__t\(\'common\.technical_details\'\)\); \?></summary><code><\?php echo h\(\$display\[\'detail\'\]\); \?></code></details>~',
+            $page,
+            'the detail is echoed only inside the collapsed technical details'
+        );
     }
 
     public function testBothListQueriesSelectTheStructuredColumns(): void

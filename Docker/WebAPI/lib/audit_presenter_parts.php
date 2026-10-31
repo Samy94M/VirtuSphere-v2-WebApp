@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/lang.php';
+require_once __DIR__ . '/audit_vocabulary.php';
+require_once __DIR__ . '/directory_constants.php';
+require_once __DIR__ . '/remote_execution_constants.php';
 
 /**
  * Word and fragment helpers of the audit presenter (lib/audit_presenter.php). Every word
@@ -34,6 +37,28 @@ function audit_token_label(string $locale, string $prefix, string $word): string
     return $label === $key ? $word : $label;
 }
 
+/** The catalog key of a closed word: code_<field>_<word with every other run of characters as _>. */
+function audit_code_key(string $field, string $code): string
+{
+    return 'code_' . $field . '_' . trim((string) preg_replace('/[^a-z0-9]+/', '_', strtolower($code)), '_');
+}
+
+/**
+ * A closed word from the context (a reason, an outcome, a state), lists in
+ * lib/audit_vocabulary.php. The English label is the word itself, so the stored
+ * sentence keeps it; any other word (a legacy row, free text) shows as written.
+ */
+function audit_code_label(string $locale, string $field, string $code): string
+{
+    if ($code === '') {
+        return '';
+    }
+    $key = 'audit_log.' . audit_code_key($field, $code);
+    $label = Lang::getIn($locale, $key);
+
+    return $label === $key ? $code : $label;
+}
+
 /** @param array<string,mixed> $context */
 function audit_scope_label(string $locale, array $context): string
 {
@@ -62,14 +87,14 @@ function audit_deploy_object_label(string $objectType, string $id, string $local
 /** @param array<string,mixed> $context */
 function audit_login_description(string $id, string $result, array $context, string $locale = 'en'): string
 {
-    $source = (string) ($context['source'] ?? 'local');
+    $source = audit_code_label($locale, 'auth_source', (string) ($context['source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL));
     if ($result === VIRTUSPHERE_AUDIT_RESULT_SUCCESS) {
         return audit_t($locale, 'login_succeeded', [
             'source' => $source,
             'controller_part' => isset($context['controller_id']) ? audit_t($locale, 'login_controller', ['controller' => (string) $context['controller_id']]) : '',
         ]);
     }
-    $reason = (string) ($context['reason'] ?? audit_t($locale, 'invalid_credentials'));
+    $reason = isset($context['reason']) ? audit_code_label($locale, 'login_reason', (string) $context['reason']) : audit_t($locale, 'invalid_credentials');
     $user = isset($context['username'])
         ? audit_t($locale, 'login_user_name', ['username' => (string) $context['username']])
         : ($id !== 'unknown' ? audit_t($locale, 'login_user_id', ['id' => $id]) : '');
@@ -80,11 +105,15 @@ function audit_login_description(string $id, string $result, array $context, str
 /** @param array<string,mixed> $context */
 function audit_session_description(array $context, string $locale = 'en'): string
 {
-    $reason = (string) ($context['reason'] ?? audit_t($locale, 'ended'));
+    if (($context['reason'] ?? null) === VIRTUSPHERE_AUDIT_SESSION_REASON_EXPIRED && isset($context['duration_seconds'])) {
+        return audit_t($locale, 'session_expired', ['seconds' => (string) $context['duration_seconds']]);
+    }
+    // A failed directory recheck stores its directory outcome as the reason.
+    $reason = isset($context['reason'])
+        ? audit_code_label($locale, 'directory_outcome', audit_code_label($locale, 'session_reason', (string) $context['reason']))
+        : audit_t($locale, 'ended');
 
-    return $reason === 'expired' && isset($context['duration_seconds'])
-        ? audit_t($locale, 'session_expired', ['seconds' => (string) $context['duration_seconds']])
-        : audit_t($locale, 'session_ended', ['reason' => $reason]);
+    return audit_t($locale, 'session_ended', ['reason' => $reason]);
 }
 
 /** @param array<string,mixed> $context */
@@ -170,12 +199,10 @@ function audit_machine_api_denied(string $id, array $context, string $locale = '
     return $refused . audit_t($locale, ($context['reason'] ?? '') === 'ip_role_not_permitted' ? 'machine_api_role_denied' : 'machine_api_not_listed');
 }
 
-/** @param array<string,mixed> $context */
-function audit_description_reason(array $context, string $locale = 'en'): string
+/** ": <reason>" after a sentence, or nothing for an empty reason. */
+function audit_reason_part(string $locale, string $reason): string
 {
-    return isset($context['reason']) && $context['reason'] !== ''
-        ? audit_t($locale, 'reason_part', ['reason' => (string) $context['reason']])
-        : '';
+    return $reason !== '' ? audit_t($locale, 'reason_part', ['reason' => $reason]) : '';
 }
 
 /** @param array<string,mixed> $context */

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/directory_service.php';
+require_once __DIR__ . '/audit_vocabulary.php';
 require_once __DIR__ . '/repo/directory.php';
 
 /**
@@ -65,12 +66,12 @@ function directory_revalidate_user(mysqli $db, array $user): array
 {
     $guid = (string) ($user['ad_object_guid'] ?? '');
     if (strlen($guid) !== 16 || !directory_is_enabled($db)) {
-        return ['ok' => false, 'temporary' => false, 'reason' => 'directory_disabled'];
+        return ['ok' => false, 'temporary' => false, 'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_DISABLED];
     }
     try {
         $entry = directory_find_user_by_guid($db, $guid);
         if (empty($entry['enabled'])) {
-            return ['ok' => false, 'temporary' => false, 'reason' => 'directory_account_disabled'];
+            return ['ok' => false, 'temporary' => false, 'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_ACCOUNT_DISABLED];
         }
         repo_directory_update_user_cache($db, (int) $user['id'], $entry);
 
@@ -86,11 +87,11 @@ function directory_revalidate_user(mysqli $db, array $user): array
             VIRTUSPHERE_DIRECTORY_OUTCOME_DOMAIN_MISMATCH,
             VIRTUSPHERE_DIRECTORY_OUTCOME_RODC_UNSUPPORTED,
         ], true)) {
-            return ['ok' => false, 'temporary' => true, 'reason' => 'directory_unavailable'];
+            return ['ok' => false, 'temporary' => true, 'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_UNAVAILABLE];
         }
 
         return ['ok' => false, 'temporary' => false, 'reason' => $exception->outcome];
     } catch (Throwable) {
-        return ['ok' => false, 'temporary' => true, 'reason' => 'directory_unavailable'];
+        return ['ok' => false, 'temporary' => true, 'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_UNAVAILABLE];
     }
 }

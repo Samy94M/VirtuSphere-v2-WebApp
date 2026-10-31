@@ -243,7 +243,7 @@ function maintenance_worker_sweep_deploying_vms(mysqli $db): void
             audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_CONVERGENCE, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_WARNING, [
                 'vm_count' => count($vmIds),
                 'vm_ids' => array_slice($vmIds, 0, VIRTUSPHERE_AUDIT_ID_LIST_MAX),
-                'reason' => 'stuck in deploying without an active deploy job',
+                'reason' => VIRTUSPHERE_AUDIT_CONVERGENCE_REASON_STUCK,
             ], null, 'cli');
         } catch (Throwable $exception) {
             fwrite(STDERR, '[maintenance-worker] sweep audit failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");

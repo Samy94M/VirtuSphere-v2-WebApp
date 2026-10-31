@@ -107,7 +107,8 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
                     <td><?php echo portal_badge(log_category_badge_class((string) ($row['category'] ?? '')), log_category_label((string) ($row['category'] ?? ''))); ?></td>
                     <td><?php echo h($row['user_name'] ?? ($row['user_id'] ?? '')); ?></td>
                     <td><?php echo h($row['ip'] ?? ''); ?></td>
-                    <td class="log-message"><?php echo h(audit_log_display_message($row)); ?></td>
+                    <?php $display = audit_log_display($row); ?>
+                    <td class="log-message"><?php echo h($display['message']); ?><?php if ($display['detail'] !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><code><?php echo h($display['detail']); ?></code></details><?php } ?></td>
                     <?php // The trace link is dropped while this view already IS
                           // that trace: a link to the page you are on reads as a
                           // different page. ?>

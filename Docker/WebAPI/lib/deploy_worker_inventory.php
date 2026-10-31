@@ -238,7 +238,7 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
             if ($isOnset) {
                 audit_event($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_WARNING, [
                     'action' => 'paused',
-                    'reason' => 'authentication failure; save the credential to resume',
+                    'reason' => VIRTUSPHERE_AUDIT_INVENTORY_AUTOMATION_REASON_AUTH_FAILURE,
                 ], null, 'cli');
             }
         } catch (Throwable $stateError) {

@@ -153,7 +153,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         auth_finish_failed_login($db, $attemptId, $username, $source);
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
-            'reason' => 'account is locked',
+            'reason' => VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_LOCKED,
             'username' => virtusphere_log_login_name($username),
         ], (int) $user['id']);
         return ['ok' => false, 'reason' => 'locked'];
@@ -191,7 +191,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
             return ['ok' => false, 'reason' => 'locked'];
         }
 
-        $reason = $user && (int) $user['is_active'] !== 1 ? 'account is deactivated' : 'invalid credentials';
+        $reason = $user && (int) $user['is_active'] !== 1 ? VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_DEACTIVATED : VIRTUSPHERE_AUDIT_LOGIN_REASON_INVALID_CREDENTIALS;
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', $user ? (int) $user['id'] : null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
             'reason' => $reason,
@@ -292,7 +292,7 @@ function current_user(?mysqli $db = null): ?array
         // Audit before logout(): it wipes the session this entry is attributed to.
         // Recorded once, because the branch runs once per session.
         audit_event($db ?? db(), VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'reason' => 'expired',
+            'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_EXPIRED,
             'duration_seconds' => session_lifetime_seconds($db),
         ], $userId);
         logout();
@@ -315,7 +315,7 @@ function current_user(?mysqli $db = null): ?array
         $verifiedAt = (int) ($_SESSION['directory_verified_at'] ?? 0);
         if (!directory_is_enabled($db)) {
             audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
-                'reason' => 'directory integration disabled',
+                'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_INTEGRATION_DISABLED,
             ], $userId);
             logout();
             return null;

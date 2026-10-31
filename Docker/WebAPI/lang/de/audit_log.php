@@ -7,8 +7,9 @@ declare(strict_types=1);
 // Text bleibt englisch (lang/en/audit_log.php). Gleiche Schlüssel und gleiche
 // :Platzhalter wie in der englischen Datei (scripts/lang-audit.php).
 //
-// Technische Codes aus dem Kontext (Ergebnis, Zustand, Rolle, Grundcodes, Namen,
-// Hosts, IDs) werden unverändert eingesetzt. Ein Schlüssel action_<token> bekommt
+// Geschlossene Wörter aus dem Kontext (Gründe, Zustände, Ergebnisse) stehen unten als
+// code_<Feld>_<Wort>; freie Werte (Namen, Hosts, IDs, Rollen, Fehlertexte) werden
+// unverändert eingesetzt. Ein Schlüssel action_<token> bekommt
 // ein Verb in Partizipform, das am Satzende steht, und ist nur vorhanden, wo die
 // Anwendung dieses Token tatsächlich schreibt.
 
@@ -118,8 +119,8 @@ return [
     'inventory_refresh' => 'ESXi-Inventaraktualisierung angefordert für Ziele:targets und Aufträge:jobs (:queued eingereiht, :open offen, :paused pausiert, :failed fehlgeschlagen)',
     'vlan_reassigned' => 'VLAN :id auf :target_vlan umgehängt (:missions Missionen, :interfaces Schnittstellen)',
     'convergence_sweep' => '[maintenance-worker] Konvergenzlauf markierte VMs (:count) der Mission mit ID :id als fehlgeschlagen:reason_part',
-    'claim_paused' => 'Annahme neuer Bereitstellungsaufträge auf :state gesetzt:claim_job_part',
-    'claim_job_part' => ' während Auftrag :job aktiv war',
+    'claim_paused' => 'Annahme neuer Bereitstellungsaufträge: :state:claim_job_part',
+    'claim_job_part' => ' (Auftrag :job war aktiv)',
     'claim_resumed' => 'Annahme neuer Bereitstellungsaufträge wieder aufgenommen',
     'cleanup_retry_queued' => 'Wiederholung der Fernbereinigung für Bereitstellungsauftrag mit ID :id eingereiht (Ausführung :execution)',
     'cleanup_retry_refused' => 'Wiederholung der Fernbereinigung für Bereitstellungsauftrag mit ID :id abgelehnt (Ausführung :execution)',
@@ -196,4 +197,156 @@ return [
     'action_reset_mecm_id_noop' => 'MECM-ID unverändert',
     'action_queued_mecm_transfer_on_save' => 'MECM-Übertragung beim Speichern vorgemerkt',
     'action_queued_mecm_transfer_os_confirmed' => 'MECM-Übertragung nach bestätigtem Betriebssystem vorgemerkt',
+
+    // Geschlossene Wörter aus dem Kontext (lib/audit_vocabulary.php, audit_code_label()).
+    // Schlüssel code_<Feld>_<Wort>; der englische Wert ist das gespeicherte Wort selbst.
+    'code_auth_source_local' => 'lokal',
+    'code_auth_source_active_directory' => 'Active Directory',
+
+    'code_login_reason_invalid_credentials' => 'ungültige Anmeldedaten',
+    'code_login_reason_account_is_locked' => 'Konto ist gesperrt',
+    'code_login_reason_account_is_deactivated' => 'Konto ist deaktiviert',
+
+    'code_session_reason_expired' => 'abgelaufen',
+    'code_session_reason_directory_integration_disabled' => 'Anmeldung über Active Directory ist ausgeschaltet',
+    'code_session_reason_directory_disabled' => 'Anmeldung über Active Directory ist ausgeschaltet',
+    'code_session_reason_directory_account_disabled' => 'Konto im Active Directory deaktiviert',
+    'code_session_reason_directory_unavailable' => 'Active Directory nicht erreichbar',
+
+    'code_password_reason_current_password_is_wrong' => 'aktuelles Passwort falsch',
+
+    'code_directory_outcome_ok' => 'in Ordnung',
+    'code_directory_outcome_extension_missing' => 'LDAP-Erweiterung fehlt',
+    'code_directory_outcome_tls_failed' => 'TLS-Verbindung oder Zertifikatsprüfung fehlgeschlagen',
+    'code_directory_outcome_unavailable' => 'nicht erreichbar',
+    'code_directory_outcome_timeout' => 'Zeitüberschreitung',
+    'code_directory_outcome_service_bind_rejected' => 'Suchkonto abgewiesen',
+    'code_directory_outcome_user_bind_rejected' => 'Benutzeranmeldung abgewiesen',
+    'code_directory_outcome_secret_unreadable' => 'gespeichertes Geheimnis nicht lesbar',
+    'code_directory_outcome_search_failed' => 'Verzeichnisabfrage fehlgeschlagen',
+    'code_directory_outcome_not_found' => 'Objekt nicht gefunden',
+    'code_directory_outcome_not_authorized' => 'Konto nicht für VirtuSphere berechtigt',
+    'code_directory_outcome_ambiguous' => 'Ergebnis nicht eindeutig',
+    'code_directory_outcome_domain_mismatch' => 'Controller gehört nicht zur AD-Domäne',
+    'code_directory_outcome_read_only_controller_unsupported' => 'schreibgeschützter Domänencontroller (RODC) nicht unterstützt',
+    'code_directory_outcome_invalid_response' => 'Antwort nicht vollständig prüfbar',
+
+    'code_credential_test_outcome_ok' => 'in Ordnung',
+    'code_credential_test_outcome_preflight' => 'Vorprüfung der Toolchain fehlgeschlagen',
+    'code_credential_test_outcome_sftp' => 'Dateiübertragung fehlgeschlagen',
+    'code_credential_test_outcome_allowlist' => 'Rückmelde-IP fehlt auf der Machine-API-Liste',
+    'code_credential_test_outcome_dns' => 'Hostname nicht auflösbar',
+    'code_credential_test_outcome_unreachable' => 'Host nicht erreichbar',
+    'code_credential_test_outcome_host_error' => 'Verwaltungsdienst des Hosts nicht bereit',
+    'code_credential_test_outcome_certificate' => 'Zertifikat nicht verifizierbar',
+    'code_credential_test_outcome_tls' => 'TLS-Verbindung abgelehnt',
+    'code_credential_test_outcome_auth' => 'Anmeldung abgelehnt',
+    'code_credential_test_outcome_authz' => 'Rechte fehlen',
+    'code_credential_test_outcome_ansible_dns' => 'Name des Ansible-Hosts nicht auflösbar',
+    'code_credential_test_outcome_ansible_unreachable' => 'Ansible-Host nicht erreichbar',
+    'code_credential_test_outcome_ansible_auth' => 'Anmeldung am Ansible-Host abgelehnt',
+    'code_credential_test_outcome_ansible_host_identity' => 'Host-Schlüssel des Ansible-Hosts abweichend oder unbestätigt',
+    'code_credential_test_outcome_ansible_authz' => 'Aktion auf dem Ansible-Host nicht erlaubt',
+    'code_credential_test_outcome_ansible_preflight' => 'Vorprüfung der Toolchain auf dem Ansible-Host fehlgeschlagen',
+    'code_credential_test_outcome_ansible_config' => 'Ansible-Umgebung unvollständig',
+    'code_credential_test_outcome_ansible_sftp' => 'Dateiübertragung zum Ansible-Host fehlgeschlagen',
+    'code_credential_test_outcome_ansible_timeout' => 'Zeitbudget der SSH-Verbindung überschritten',
+    'code_credential_test_outcome_ansible_transport' => 'SSH-Verbindung zum Ansible-Host fehlgeschlagen',
+    'code_credential_test_outcome_http' => 'HTTP-Fehler (Altwert)',
+    'code_credential_test_outcome_ssh' => 'SSH-Fehler (Altwert)',
+    'code_credential_test_outcome_worker' => 'Worker- oder Datenbankfehler',
+    'code_credential_test_outcome_parse' => 'unerwartete Ausgabe',
+    'code_credential_test_outcome_config' => 'Konfiguration unvollständig',
+    'code_credential_test_outcome_discarded' => 'verworfen, weil ein neuerer Test vorliegt',
+
+    'code_inventory_automation_reason_credential_saved' => 'Zugangsdaten gespeichert',
+    'code_inventory_automation_reason_authentication_failure_save_the_credential_to_resume' => 'Anmeldung fehlgeschlagen; zum Fortsetzen die Zugangsdaten speichern',
+
+    'code_inventory_request_reason_queued' => 'eingereiht',
+    'code_inventory_request_reason_already_pending' => 'bereits eingereiht',
+    'code_inventory_request_reason_error' => 'Einreihen fehlgeschlagen',
+    'code_inventory_request_reason_ambiguous_ansible_credential' => 'Ansible-Zugang für Inventarabrufe nicht eindeutig',
+    'code_inventory_request_reason_invalid_ansible_credential' => 'Ansible-Zugang für Inventarabrufe ungültig',
+    'code_inventory_request_reason_no_ansible_credential' => 'kein Ansible-Zugang für Inventarabrufe',
+
+    'code_convergence_reason_stuck_in_deploying_without_an_active_deploy_job' => 'hing im Zustand „Wird bereitgestellt“ ohne aktiven Bereitstellungsauftrag',
+
+    'code_progress_kind_mecm_pending' => 'Warten auf MECM',
+    'code_progress_kind_os_installing' => 'Betriebssysteminstallation',
+
+    'code_rollout_effect_current_pending' => 'wartender Rollout übernimmt den Namen',
+    'code_rollout_effect_next_rollout' => 'erst beim nächsten Rollout',
+
+    'code_deploy_mode_full' => 'Vollständige Kette',
+    'code_deploy_mode_create' => 'VMs anlegen',
+    'code_deploy_mode_powercycle' => 'Ein- und ausschalten mit MAC-Export',
+    'code_deploy_mode_export' => 'MAC-Adressen exportieren',
+    'code_deploy_mode_start' => 'VMs starten',
+    'code_deploy_mode_autostart' => 'ESXi-Autostart anwenden',
+    'code_deploy_mode_inventory' => 'Inventar abrufen',
+
+    'code_deploy_status_succeeded' => 'erfolgreich',
+    'code_deploy_status_failed' => 'fehlgeschlagen',
+    'code_deploy_status_cancelled' => 'abgebrochen',
+    'code_deploy_status_partial' => 'teilweise erfolgreich',
+    'code_deploy_status_outcome_unknown' => 'Ausgang unbekannt',
+
+    'code_deploy_reason_stale_heartbeat' => 'von der Überwachung nach veraltetem Heartbeat beendet',
+
+    'code_claim_state_accepting' => 'nimmt Aufträge an',
+    'code_claim_state_pause_after_current' => 'pausiert nach dem aktuellen Auftrag',
+    'code_claim_state_paused' => 'nimmt keine Aufträge an',
+
+    'code_resolution_code_confirmed_applied' => 'Änderung angekommen',
+    'code_resolution_code_confirmed_not_applied' => 'Änderung nicht angekommen',
+    'code_resolution_code_inconclusive' => 'nicht abschließend feststellbar',
+
+    'code_create_blocker_release_unit_not_uncertain' => 'Einheit hat inzwischen ein festgestelltes Ergebnis',
+    'code_create_blocker_release_job_active' => 'Auftrag läuft noch',
+    'code_create_blocker_release_mission_busy' => 'anderer Auftrag der Mission läuft',
+    'code_create_blocker_release_inventory_never_succeeded' => 'kein erfolgreicher Inventarabruf',
+    'code_create_blocker_release_inventory_vm_kind_unanswered' => 'VM-Liste im Inventar unvollständig',
+    'code_create_blocker_release_inventory_stale' => 'Inventar nicht neuer als das offene Ergebnis',
+    'code_create_blocker_release_inventory_name_present' => 'VM mit diesem Namen im Inventar',
+    'code_create_blocker_release_inventory_uuid_present' => 'VM mit dieser Instance-UUID im Inventar',
+
+    'code_supervisor_blocker_switch_activation_not_settled' => 'Aktivierung noch nicht abgeschlossen',
+    'code_supervisor_blocker_switch_legacy_job_unresolved' => 'Altauftrag noch nicht geklärt',
+    'code_supervisor_blocker_switch_claims_not_paused' => 'Auftragsannahme nicht pausiert',
+    'code_supervisor_blocker_switch_not_drained' => 'Aufträge laufen noch',
+    'code_supervisor_blocker_switch_supervisor_still_reporting' => 'Supervisor meldet sich noch',
+    'code_supervisor_blocker_switch_already_applied' => 'Umstellung bereits angewendet',
+
+    'code_integration_state_ok' => 'in Ordnung',
+    'code_integration_state_legacy' => 'Lebenszeichen ohne Ergebnis',
+    'code_integration_state_warning' => 'Warnung',
+    'code_integration_state_danger' => 'Fehler',
+    'code_integration_state_missing' => 'fehlt',
+    'code_integration_state_unknown' => 'unbekannt',
+    'code_integration_state_stale' => 'veraltet',
+
+    'code_callback_reason_request_too_large' => 'Anfrage zu groß',
+    'code_callback_reason_callback_job_not_active' => 'Auftrag nicht mehr aktiv',
+    'code_callback_reason_callback_mode_rejected' => 'Modus nimmt keine MAC-Rückmeldung an',
+    'code_callback_reason_callback_execution_contract_missing' => 'Ausführungsvertrag fehlt',
+    'code_callback_reason_callback_generation_mismatch' => 'veraltete Generation',
+    'code_callback_reason_callback_remote_handle_mismatch' => 'fremde Ausführung',
+    'code_callback_reason_callback_result_conflict' => 'widerspricht einem gespeicherten Ergebnis',
+    'code_callback_reason_result_contract_too_large' => 'Ergebnis zu groß',
+    'code_callback_reason_response_contract_too_large' => 'Antwort zu groß',
+
+    'code_touch_cause_job_unknown' => 'Auftrag unbekannt',
+    'code_touch_cause_mission_missing' => 'Mission fehlt',
+    'code_touch_cause_job_not_active' => 'Auftrag nicht aktiv',
+    'code_touch_cause_attempt_stale' => 'veralteter Versuch',
+    'code_touch_cause_generation_malformed' => 'Generation ungültig',
+    'code_touch_cause_generation_stale' => 'veraltete Generation',
+    'code_touch_cause_runtime_mismatch' => 'Laufzeitumgebung passt nicht',
+    'code_touch_cause_mode_mismatch' => 'Modus passt nicht',
+    'code_touch_cause_phase_mismatch' => 'Schritt passt nicht',
+    'code_touch_cause_execution_contract_mismatch' => 'Ausführungsvertrag passt nicht',
+    'code_touch_cause_remote_handle_mismatch' => 'fremde Ausführung',
+    'code_touch_cause_create_unit_mismatch' => 'Anlageeinheit passt nicht',
+    'code_touch_cause_vm_not_in_scope' => 'VM gehört nicht zum Auftrag',
+    'code_touch_cause_journal_state_missing' => 'Journalzustand fehlt',
 ];

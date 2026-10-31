@@ -66,7 +66,7 @@ function auth_login_directory(mysqli $db, string $username, string $password, in
         auth_finish_failed_login($db, $attemptId, $username, $source);
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY,
-            'reason' => 'invalid credentials',
+            'reason' => VIRTUSPHERE_AUDIT_LOGIN_REASON_INVALID_CREDENTIALS,
             'username' => virtusphere_log_login_name($username),
         ]);
 

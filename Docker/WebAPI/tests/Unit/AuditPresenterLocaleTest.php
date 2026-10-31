@@ -63,11 +63,11 @@ final class AuditPresenterLocaleTest extends TestCase
     public function testTheGermanSentencesReadAsGermanForRepresentativeRows(): void
     {
         self::assertSame(
-            'Anmeldung erfolgreich (directory, Controller 3)',
-            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', '42', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['source' => 'directory', 'controller_id' => 3], 'de')
+            'Anmeldung erfolgreich (Active Directory, Controller 3)',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', '42', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['source' => 'active_directory', 'controller_id' => 3], 'de')
         );
         self::assertSame(
-            'Anmeldung abgewiesen für Benutzer „jörg.müller“: invalid credentials',
+            'Anmeldung abgewiesen für Benutzer „jörg.müller“: ungültige Anmeldedaten',
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', '42', VIRTUSPHERE_AUDIT_RESULT_DENIED, ['source' => 'local', 'reason' => 'invalid credentials', 'username' => 'jörg.müller'], 'de')
         );
         self::assertSame(
@@ -75,8 +75,32 @@ final class AuditPresenterLocaleTest extends TestCase
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', '99', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'updated', 'mission_id' => 12, 'name' => 'srv-sql-01', 'changes' => 'cpu, memory'], 'de')
         );
         self::assertSame(
-            'Bereitstellungsauftrag mit ID 812 (Mission 12, Modus full): failed: ESXi host unreachable: timeout after 300 s',
+            'Bereitstellungsauftrag mit ID 812 (Mission 12, Modus Vollständige Kette): fehlgeschlagen: ESXi host unreachable: timeout after 300 s',
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME, 'deploy_job', '812', VIRTUSPHERE_AUDIT_RESULT_FAILURE, ['mission_id' => 12, 'mode' => 'full', 'status' => 'failed', 'reason' => 'ESXi host unreachable: timeout after 300 s'], 'de')
+        );
+        self::assertSame(
+            'Bereitstellungsauftrag mit ID 813 (Mission 12, Modus VMs starten): Ausgang unbekannt: von der Überwachung nach veraltetem Heartbeat beendet',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME, 'deploy_job', '813', VIRTUSPHERE_AUDIT_RESULT_WARNING, ['mission_id' => 12, 'mode' => 'start', 'status' => 'outcome_unknown', 'reason' => 'stale_heartbeat'], 'de')
+        );
+        self::assertSame(
+            'MAC-Rückmeldung für Auftrag mit ID 77 abgewiesen: veraltete Generation',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_CALLBACK_REJECTED, 'deploy_job', '77', VIRTUSPHERE_AUDIT_RESULT_DENIED, ['reason_code' => 'callback_generation_mismatch'], 'de')
+        );
+        self::assertSame(
+            'Sitzung beendet: Active Directory nicht erreichbar',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', '42', VIRTUSPHERE_AUDIT_RESULT_DENIED, ['reason' => 'directory_unavailable'], 'de')
+        );
+        self::assertSame(
+            'Sitzung beendet: Zeitüberschreitung',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', '42', VIRTUSPHERE_AUDIT_RESULT_DENIED, ['reason' => 'timeout'], 'de')
+        );
+        self::assertSame(
+            'Zugangsdaten mit ID 5 geprüft: Anmeldung am Ansible-Host abgelehnt',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED, 'credential', '5', VIRTUSPHERE_AUDIT_RESULT_FAILURE, ['outcome' => 'ansible_auth', 'evidence_stored' => true], 'de')
+        );
+        self::assertSame(
+            '[maintenance-worker] Integration mecm_sync: Zustand in Ordnung -> Warnung',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE, 'integration_source', 'mecm_sync', VIRTUSPHERE_AUDIT_RESULT_WARNING, ['old_state' => 'ok', 'new_state' => 'warning'], 'de')
         );
         self::assertSame(
             'Einstellung portal timezone geändert: Europe/Berlin -> UTC',
@@ -100,6 +124,19 @@ final class AuditPresenterLocaleTest extends TestCase
         $case = $this->cases()[0];
 
         self::assertSame($this->render($case, 'de'), $this->render($case, 'fr'));
+    }
+
+    public function testACodeLabelIsLocalizedOnlyForAClosedWord(): void
+    {
+        self::assertSame('Konto ist gesperrt', audit_code_label('de', 'login_reason', 'account is locked'));
+        self::assertSame('account is locked', audit_code_label('en', 'login_reason', 'account is locked'), 'English shows the stored word');
+        self::assertSame('Konto ist gesperrt', audit_code_label('fr', 'login_reason', 'account is locked'), 'an unknown locale renders the default locale');
+        self::assertSame('ESXi host unreachable: timeout', audit_code_label('de', 'deploy_reason', 'ESXi host unreachable: timeout'), 'free text shows as written');
+        self::assertSame('legacy_word', audit_code_label('de', 'login_reason', 'legacy_word'), 'an unknown word shows as written');
+        self::assertSame('account is locked', audit_code_label('de', 'no_such_field', 'account is locked'), 'the word is looked up in its own field only');
+        self::assertSame('', audit_code_label('de', 'login_reason', ''));
+        self::assertSame('code_login_reason_account_is_locked', audit_code_key('login_reason', 'account is locked'));
+        self::assertSame('code_inventory_automation_reason_authentication_failure_save_the_credential_to_resume', audit_code_key('inventory_automation_reason', 'authentication failure; save the credential to resume'));
     }
 
     public function testTheGermanAndEnglishCatalogsHaveTheSameKeysAndPlaceholders(): void

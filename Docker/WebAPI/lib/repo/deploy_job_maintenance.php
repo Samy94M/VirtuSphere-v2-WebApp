@@ -263,7 +263,7 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 repo_deploy_confirm_claim_pause($db);
                 // LG-07: the conclusion's outcome row, written in this transaction
                 // like the job's other writes: a reaped job never commits without it.
-                if (!deploy_worker_write_outcome_audit($db, $job, (string) $job['reaped_to'], 'stale_heartbeat')) {
+                if (!deploy_worker_write_outcome_audit($db, $job, (string) $job['reaped_to'], VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT)) {
                     throw new RuntimeException('Deploy outcome audit could not be stored; the reaper change was rolled back.');
                 }
                 if (!$wasCancelling
