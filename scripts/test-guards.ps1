@@ -913,7 +913,15 @@ function zz_guard_ok(mysqli $db): void
         msg: Failed to import the required Python library (requests) on probe Python /usr/bin/python3
       ignore_errors: true
 '@)
-        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.missing-library\]' -InfraOnExit2
+        $gate = Invoke-RunnerGate $fx 'ansible-module-contract'
+        $verdict = Assert-Guard $gate @(1) '\[ansible-module-contract\.missing-library\]' -InfraOnExit2
+        # In Lanes war dieser Fall mehrfach unbewiesen, ohne dass zu sehen war,
+        # woran der Gate stattdessen scheiterte. Die Erwartung bleibt; ein
+        # unbewiesener Lauf nennt jetzt das Ende der Gate-Ausgabe.
+        if ($verdict.Status -eq 'unproven') {
+            $verdict.Detail = $verdict.Detail + ' | Gate-Ausgabe: ' + ((@($gate.Output) | Select-Object -Last 12) -join ' / ')
+        }
+        return $verdict
     } }
     @{ Name = 'runner.ansible-module-contract.argument-spec'; Body = {
         # Gegen die ECHTE Collection: ein Argumentname, den die gepinnte Version

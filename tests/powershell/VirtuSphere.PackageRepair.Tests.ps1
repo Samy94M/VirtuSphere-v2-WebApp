@@ -176,8 +176,13 @@ function Get-VsPackageReportApiConfiguration {
                 $listener.Stop()
             }
         }
-        for ($attempt = 0; $attempt -lt 120 -and -not (Test-Path -LiteralPath $ready) -and
-            $job.State -notin @('Completed', 'Failed', 'Stopped'); $attempt++) {
+        # Start-Job launches its own powershell.exe; a bare start took 4.3 to 6.2 s
+        # under 48 busy loops (KB1, 31.10.2026). The receiver is test scaffolding, so
+        # waiting for it longer cannot hide a product failure; a 3 s wait reported
+        # "not ready" and hid the product's own reason.
+        $readyClock = [Diagnostics.Stopwatch]::StartNew()
+        while ($readyClock.ElapsedMilliseconds -lt 15000 -and -not (Test-Path -LiteralPath $ready) -and
+            $job.State -notin @('Completed', 'Failed', 'Stopped')) {
             Start-Sleep -Milliseconds 25
         }
         if (-not (Test-Path -LiteralPath $ready)) {
@@ -204,7 +209,18 @@ function Get-VsPackageReportApiConfiguration {
                 $b = $budget[0]
                 "reporting_budget: active_ms=$($b.active_ms), verifier_ms=$($b.verifier_ms), host_start_ms=$($b.host_start_ms), ipc_ms=$($b.ipc_ms), teardown_ms=$($b.teardown_ms)"
             } else { 'reporting_budget=(no record)' }
-            return "$reasonPart; $timingPart; wrapper_wall_ms=$WrapperWallMs"
+            # A start or budget reason means the host was too slow for a product
+            # limit. One bare child start says how slow: idle it takes 1.3 to 1.5 s
+            # (KB1, 31.10.2026). The full path bypasses the PowerShell.exe guard
+            # function above, which exists only to catch an unmocked wrapper child.
+            $hostPart = ''
+            if ($disabled.Count -gt 0 -and $disabled[0].reason -in @('bundle_unavailable', 'supervisor_unavailable', 'budget_exhausted')) {
+                $bare = [Diagnostics.Stopwatch]::StartNew()
+                $null = & (Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -Command 'exit 0'
+                $bare.Stop()
+                $hostPart = "; bare_child_start_ms=$($bare.ElapsedMilliseconds)"
+            }
+            return "$reasonPart; $timingPart; wrapper_wall_ms=$WrapperWallMs$hostPart"
         } catch {
             return "reporting log unreadable ($($_.Exception.Message)); wrapper_wall_ms=$WrapperWallMs"
         }
@@ -220,6 +236,35 @@ function Get-VsPackageReportApiConfiguration {
     }, $true))
     if ($identityDefinition.Count -ne 1) { throw "Get-VsPackageIdentityHash in der Vorlage nicht eindeutig ($($identityDefinition.Count))." }
     . ([scriptblock]::Create($identityDefinition[0].Extent.Text))
+
+    # KB1 (31.10.2026): the wrapper compiles its job-object type once per process
+    # (Add-Type in Start-VsPackageReporterJobProcess). All test files share one
+    # Pester process and this file is the first to start a supervised child, so its
+    # first reporter case paid the compile inside the product's verifier budget:
+    # the first supervised verify of a process took 0.7 to 1.7 s longer than the
+    # later ones (idle 3.2 to 3.7 s against 2.4 to 3.1 s). On 29.10. that case was
+    # the only red reporter case. Compiling the wrapper's own type definition here,
+    # outside every timed case, gives each case the same start. Budgets and
+    # assertions are unchanged: a host too slow for them stays red, and the
+    # diagnostic names the limit and the bare child start time.
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+            -not ('VirtuSphere.PackageReporterJobProcess' -as [type])) {
+        $addType = @($script:TemplateAstForIdentity.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-Type'
+        }, $true))
+        if ($addType.Count -ne 1) { throw "Add-Type in der Vorlage nicht eindeutig ($($addType.Count))." }
+        $elements = @($addType[0].CommandElements)
+        $definitionIndex = -1
+        for ($i = 0; $i -lt $elements.Count; $i++) {
+            if ($elements[$i] -is [System.Management.Automation.Language.CommandParameterAst] -and
+                    $elements[$i].ParameterName -eq 'TypeDefinition') { $definitionIndex = $i + 1 }
+        }
+        if ($definitionIndex -lt 1 -or $definitionIndex -ge $elements.Count -or
+                $elements[$definitionIndex] -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            throw 'Add-Type -TypeDefinition der Vorlage ist kein konstanter Text.'
+        }
+        Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition $elements[$definitionIndex].Value
+    }
 }
 
 # Discovery-time capability flag, like $HasRegistry in VirtuSphere.ErrorPaths.Tests.ps1.
@@ -358,12 +403,15 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
 
         It 'preserves detection and exit when a verified worker lacks a published identity' {
             Add-RepairReporterBundle
+            $watch = [Diagnostics.Stopwatch]::StartNew()
             Invoke-RepairWrapper
+            $watch.Stop()
+            $diag = Get-RepairReportingDiagnostic -WrapperWallMs $watch.ElapsedMilliseconds
             $script:WrapperExit | Should -Be 0
             $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
                 -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
             $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-            @($records.event) | Should -Be @('header', 'report_attempt', 'reporting_disabled', 'reporting_budget')
+            @($records.event) | Should -Be @('header', 'report_attempt', 'reporting_disabled', 'reporting_budget') -Because $diag
             $records[1].report_event | Should -Be 'started'
             $records[1].attempted | Should -BeFalse
             $records[1].reason | Should -Be 'identity_unavailable'

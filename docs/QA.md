@@ -175,6 +175,8 @@ The Integration lane provisions its own throwaway stack as its first gate (`qa-s
 
 Against that stack the lane runs `migrate-check`, the **full** PHPUnit suite with `--fail-on-skipped` (a dynamic skip is never legitimate here; tests that need an allowlisted or non-allowlisted client IP arrange it themselves via `tests/Integration/ClientIpAllowlist.php` and restore the previous state), `schema-convergence`, the health/exposure contract, the guard harness, and `e2e-portal`: the functional Playwright Chromium suite plus the deterministic visual proof from `tests/e2e/` (ADR-0028 revisions). Runner and Playwright call the same resolver: `PLAYWRIGHT_CHROMIUM` when explicitly set, otherwise the exact executable belonging to the lockfile-installed `playwright-core`; there is no local-user fallback or highest-revision scan. `npm ci` runs automatically when `tests/e2e/node_modules` is missing.
 
+**Reading an `errno=12` failure (KB1, 31.10.2026).** A red case that says `require(): Read of N bytes failed with errno=12 Cannot allocate memory` (PHPUnit, a `runPhp` seed in Playwright, a language catalog that did not load) is the Windows host running out of memory, not the code and not a container limit. On Docker Desktop the PHP containers see `Docker/WebAPI` as a 9p mount of the Windows drive (`mount` inside the container shows `type 9p` with `aname=drvfs`); the `read()` that PHP's `require` issues goes through that file share and fails with `ENOMEM` when Windows cannot allocate for it. The PHP service's own cgroup limit (512 MB) is far away: at the time of KB1 it used 18 to 30 MB with `memory.events` `oom 0`, and a cgroup OOM would kill the process (exit 137) instead of failing a read. What to do: note the host's free memory (`Get-CimInstance Win32_OperatingSystem`, `FreePhysicalMemory`; KB1 saw 0.65 GB of 15.5 GB free with FightersPortal stacks and several agent sessions running), rerun only the failed gate or case once memory is back, and record both runs. Never treat it as a pass and never raise a container limit for it; the Compose file is also the production file.
+
 **Both gates that seed and delete deploy rows quiesce the QA workers first**, and for the same reason: `phpunit-full` and every Playwright gate create queued/running/stale jobs on purpose and then delete their fixtures, so a concurrently claiming deploy worker or reaping maintenance worker is a second owner of the same throwaway rows. `phpunit-full` has done this since the Etappe-8 remainder, after `BulkVmActionsTest` hit a real MySQL deadlock. `Invoke-PlaywrightSuite` did not, and on 2026-09-06 the Release lane showed why: `e2e-portal` failed with `Deadlock found when trying to get lock` inside the `beforeEach` cleanup of `deploy-actions.spec.js`, right after its retry test had created the one job that file's own header says the worker may claim. The assertions never depended on that job's fate; the cleanup's `DELETE FROM deploy_jobs` did. No spec needs a live worker: with both stopped the full Chromium suite is 259/259 and finishes faster than with them. Production locking is unchanged, and a `finally` restarts both with `--wait` even after a red or throwing run.
 
 ### Etappe 12 deploy and portal UX contract
@@ -391,18 +393,21 @@ Two changes address it without hiding anything:
   timeout of 7 s (`tests/e2e/playwright.config.js`); the Firefox and WebKit
   projects set no per-project override. Navigation has its own 15 s limit.
   Retries stay at zero on purpose: a retry
-  turns a genuine intermittent defect green and tells nobody.
-  One named exception exists, and it is reported, not silent (BK-N12, Welle A2,
-  26.10.2026): `deploy-blocker-session.spec.js` sends its blocker GET at most
-  twice, and only when the first attempt ended without any HTTP answer with a
-  transport error (`socket hang up`, `ECONNRESET`, `ECONNREFUSED`, `EPIPE`)
-  before it reached the deliberately locked read. The trace of the failure on
-  25.10.2026 showed the connection closed right after sending with no status, so
-  the request never reached PHP and says nothing about the session release the
-  spec proves. Every HTTP answer and every timeout stays red, the second attempt
-  must pass every assertion, and a retry that happened is a `transport-retry`
-  annotation in the HTML report plus a `[transport-retry]` warning in the gate
-  log. No other spec and no Playwright `retries` setting follows from it.
+  turns a genuine intermittent defect green and tells nobody, and no spec
+  retries a request on its own either. `deploy-blocker-session.spec.js` used to
+  be the one exception (BK-N12, Welle A2); KB1 (31.10.2026) found the cause and
+  removed it. Every Playwright API request context of a worker, `page.request`
+  included, shares one keep-alive agent, and nginx closes an idle keep-alive
+  connection after 65 s without a `Keep-Alive` hint. A request written onto
+  such a socket at the moment nginx closes it ends in `socket hang up` with no
+  status (the race Node documents for `request.reusedSocket`). In the full
+  suite the last API request of `deploy-actions.spec.js` comes close to 65 s
+  before the blocker GET: the three red runs on record had 55.4 to 55.8 s of
+  tests in between, the seven green ones 14.3 to 55.0 s or 65.3 s. The spec now sends the two
+  requests it asserts on over their own connection (`node:http`,
+  `agent: false`) with the proven `PHPSESSID`, so every transport error is red.
+  A new spec that needs a request to survive a long idle pause does the same
+  instead of retrying.
 - Each Playwright gate writes its HTML report into its own folder
   (`VIRTUSPHERE_E2E_REPORT_DIR`, set from the project list in
   `Invoke-PlaywrightSuite`). All three gates used to share one folder, so the

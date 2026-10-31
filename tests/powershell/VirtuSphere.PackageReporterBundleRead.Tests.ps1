@@ -14,6 +14,45 @@ BeforeAll {
         . ([scriptblock]::Create($definition.Extent.Text))
     }
 
+    # KB1 (31.10.2026), T2: the wrapper compiles its job-object type once per
+    # process. In the full suite VirtuSphere.PackageRepair.Tests.ps1 has already
+    # done it; a filtered run of this file paid it inside the 5 s deadline of the
+    # good case below (cold 4.8 to 5.9 s, warm 3.2 to 4.4 s under 12 busy loops on
+    # 16 cores). Compiling the wrapper's own definition here gives both runs the
+    # same start. Deadline and bound stay the product's 5 s.
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+            -not ('VirtuSphere.PackageReporterJobProcess' -as [type])) {
+        $addType = @($ast.FindAll({ param($node)
+            $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Add-Type'
+        }, $true))
+        if ($addType.Count -ne 1) { throw "Wrapper Add-Type is not unique ($($addType.Count))." }
+        $elements = @($addType[0].CommandElements)
+        $definitionIndex = -1
+        for ($i = 0; $i -lt $elements.Count; $i++) {
+            if ($elements[$i] -is [Management.Automation.Language.CommandParameterAst] -and
+                    $elements[$i].ParameterName -eq 'TypeDefinition') { $definitionIndex = $i + 1 }
+        }
+        if ($definitionIndex -lt 1 -or $definitionIndex -ge $elements.Count -or
+                $elements[$definitionIndex] -isnot [Management.Automation.Language.StringConstantExpressionAst]) {
+            throw 'Wrapper Add-Type -TypeDefinition is not constant text.'
+        }
+        Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition $elements[$definitionIndex].Value
+    }
+
+    # One bare powershell.exe start, for failure messages: idle 1.3 to 1.5 s,
+    # 4.3 to 6.2 s under 48 busy loops (KB1). A deadline miss next to a slow bare
+    # start is host load against the product's fixed budget, not a verifier defect.
+    function Measure-VsBareChildStart {
+        try {
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            $null = & (Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -Command 'exit 0'
+            $clock.Stop()
+            return "bare_child_start_ms=$($clock.ElapsedMilliseconds)"
+        } catch {
+            return "bare child start failed: $($_.Exception.Message)"
+        }
+    }
+
     function New-VsReporterBundleFixture {
         param([string]$Root)
         $reporting = Join-Path $Root 'reporting'
@@ -77,6 +116,10 @@ Describe 'T4 wrapper reads only a complete bound reporter generation' {
             $clock = [Diagnostics.Stopwatch]::StartNew()
             $verified = Get-VsPackageSupervisedReporterBundle -PackageRoot $script:fixture.Root -TimeoutMs 5000
             $clock.Stop()
+            if ($null -eq $verified) {
+                $verified | Should -Not -BeNullOrEmpty -Because ("the healthy bundle must verify within the 5000 ms deadline; returned after {0} ms, {1}" -f
+                    $clock.ElapsedMilliseconds, (Measure-VsBareChildStart))
+            }
             $verified.BundleId | Should -Match '^[0-9a-f]{64}$'
             @($verified.Files).Count | Should -Be 4
             $clock.ElapsedMilliseconds | Should -BeLessThan 5500

@@ -5,32 +5,62 @@
 
 const { test, expect } = require('../lib/test');
 const { spawn } = require('node:child_process');
+const http = require('node:http');
 const { ROLES } = require('../lib/auth');
 const { phpJson, runPhp, PHP_CONTAINER } = require('../lib/php');
 
 const PREFIX = 'e2e_u13_session_';
 
-// BK-N12: the lock helper holds the relation at most this long. The blocker read
-// needs it held through two attempts, the peer ping and the release.
+// The lock helper holds the relation at most this long: through the blocker
+// read, the peer ping and the release.
 const LOCK_HOLD_SECONDS = 45;
 const BLOCKER_TIMEOUT_MS = 40000;
+// The bound only ends a request that never gets there. How long the read took
+// to reach the lock is reported as the `blocker-wait` annotation.
 const BLOCKER_WAIT_OBSERVATION_MS = 10000;
-// One retry, only for a blocker GET that lost its connection without any HTTP
-// answer before it reached the lock. The trace of the 2026-10-25 failure shows the
-// connection closed 6 ms after the request was sent, with no status: the request
-// never reached PHP, so it says nothing about the session release under test.
-// Every HTTP answer (200, 401, 500 ...) and every timeout stays red.
-const BLOCKER_ATTEMPTS = 2;
-const TRANSPORT_FAILURE = /socket hang up|ECONNRESET|ECONNREFUSED|EPIPE/;
-
-function isTransportFailure(error) {
-  return error instanceof Error
-    && typeof error.message === 'string'
-    && TRANSPORT_FAILURE.test(error.message);
-}
 
 function firstLine(text) {
   return String(text).split('\n')[0].slice(0, 300);
+}
+
+// KB1 (31.10.2026), cause of BK-N12: every Playwright API request context of a
+// worker shares one keep-alive agent, and nginx closes an idle keep-alive
+// connection after 65 s without announcing it. In the full suite the last API
+// request before this spec (deploy-actions.spec.js) left a socket in that pool,
+// and the blocker GET reused it at the moment nginx closed it: "socket hang up"
+// with no status, exactly the race Node documents for request.reusedSocket. The
+// two requests this spec asserts on therefore open their own connection
+// (agent: false) and carry the proven PHPSESSID explicitly. No earlier socket
+// can take part, and every transport failure stays red.
+function sessionRequest(baseURL, sessionId, { method = 'GET', path, form = null, timeoutMs }) {
+  const url = new URL(path, baseURL);
+  if (url.protocol !== 'http:') {
+    throw new Error(`sessionRequest speaks plain HTTP only, got ${url.protocol}`);
+  }
+  const body = form === null ? null : new URLSearchParams(form).toString();
+  const headers = { Cookie: `PHPSESSID=${sessionId}`, Accept: 'application/json', Connection: 'close' };
+  if (body !== null) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    headers['Content-Length'] = Buffer.byteLength(body);
+  }
+  return new Promise((resolve, reject) => {
+    const request = http.request(url, { method, headers, agent: false }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => { chunks.push(chunk); });
+      response.on('error', reject);
+      response.on('end', () => {
+        resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString('utf8') });
+      });
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error(`${method} ${url.pathname} got no answer within ${timeoutMs} ms`));
+    });
+    request.on('error', reject);
+    if (body !== null) {
+      request.write(body);
+    }
+    request.end();
+  });
 }
 
 function seedMission() {
@@ -225,18 +255,14 @@ function startVmTableLock() {
   });
 }
 
-test('same-session peer proceeds while live blockers wait and the locale persists', async ({ browser, playwright }, testInfo) => {
-  // Lock hold, up to two blocker attempts and the release fit in this budget,
-  // not in the global 30 s.
+test('same-session peer proceeds while live blockers wait and the locale persists', async ({ browser }, testInfo) => {
+  // Lock hold, the blocker read, the peer ping and the release fit in this
+  // budget, not in the global 30 s.
   test.setTimeout(90000);
   const fixture = seedMission();
-  const browserContext = await browser.newContext({
-    baseURL: testInfo.project.use.baseURL,
-    locale: 'de-DE',
-  });
+  const baseURL = testInfo.project.use.baseURL;
+  const browserContext = await browser.newContext({ baseURL, locale: 'de-DE' });
   const page = await browserContext.newPage();
-  let blockerApi;
-  let peerApi;
   let tableLock;
   let blockerPromise;
 
@@ -244,74 +270,52 @@ test('same-session peer proceeds while live blockers wait and the locale persist
     await signInFresh(page);
     await expect(page.locator('html')).toHaveAttribute('lang', 'de');
     const csrf = await page.getByRole('banner').locator('form[action="logout.php"] input[name="_csrf"]').inputValue();
-    const sharedState = await browserContext.storageState();
-    const sessionIds = sharedState.cookies.filter((cookie) => cookie.name === 'PHPSESSID').map((cookie) => cookie.value);
+    const sessionIds = (await browserContext.storageState()).cookies
+      .filter((cookie) => cookie.name === 'PHPSESSID').map((cookie) => cookie.value);
     expect(sessionIds.length, 'the pair starts with exactly one proven PHP session id').toBe(1);
-
-    blockerApi = await playwright.request.newContext({ baseURL: testInfo.project.use.baseURL, storageState: sharedState });
-    peerApi = await playwright.request.newContext({ baseURL: testInfo.project.use.baseURL, storageState: sharedState });
-    const blockerSessionIds = (await blockerApi.storageState()).cookies.filter((cookie) => cookie.name === 'PHPSESSID').map((cookie) => cookie.value);
-    const peerSessionIds = (await peerApi.storageState()).cookies.filter((cookie) => cookie.name === 'PHPSESSID').map((cookie) => cookie.value);
-    expect(blockerSessionIds.length).toBe(1);
-    expect(peerSessionIds.length).toBe(1);
-    expect(blockerSessionIds[0] === sessionIds[0], 'blocker request uses the fresh browser session').toBe(true);
-    expect(peerSessionIds[0] === sessionIds[0], 'peer request uses the same fresh browser session').toBe(true);
+    const sessionId = sessionIds[0];
 
     tableLock = await startVmTableLock();
-    const blockerUrl = `deploy_blockers.php?mission_id=${Number(fixture.mission_id)}&mode=export&lang=en`;
-    let blockerState = { settled: false };
-    for (let attempt = 1; ; attempt += 1) {
-      const startedAt = Date.now();
-      const state = { settled: false };
-      blockerPromise = blockerApi
-        .get(blockerUrl, { timeout: BLOCKER_TIMEOUT_MS })
-        .finally(() => { state.settled = true; });
-      // Observe early rejection while the test is still waiting on the peer;
-      // the promise of the attempt that reached the lock is awaited below.
-      void blockerPromise.catch(() => {});
+    const blockerPath = `deploy_blockers.php?mission_id=${Number(fixture.mission_id)}&mode=export&lang=en`;
+    const startedAt = Date.now();
+    const blockerState = { settled: false };
+    blockerPromise = sessionRequest(baseURL, sessionId, { path: blockerPath, timeoutMs: BLOCKER_TIMEOUT_MS })
+      .finally(() => { blockerState.settled = true; });
+    // Observe early rejection while the test is still waiting on the peer; the
+    // promise is awaited below.
+    void blockerPromise.catch(() => {});
 
-      const { waiting, observation } = await observeBlockerWait(fixture.vm_id, () => state.settled);
-      if (waiting) {
-        blockerState = state;
-        break;
-      }
+    const { waiting, observation } = await observeBlockerWait(fixture.vm_id, () => blockerState.settled);
+    const elapsed = Date.now() - startedAt;
+    if (!waiting) {
       tableLock.assertHeld();
-      // A blocker request that settled without ever waiting on the lock left
-      // no trace of why (twice in the 2026.10.2 release lane, never in five
-      // isolated runs). Its answer is the missing evidence: a 401/403 points at
-      // the session, a 200 at a read path that skipped the locked relation.
-      const elapsed = Date.now() - startedAt;
+      // A blocker request that settled without ever waiting on the lock is
+      // explained by its answer: a 401/403 points at the session, a 200 at a
+      // read path that skipped the locked relation, a transport error at the
+      // connection (no retry: this spec owns its connection).
       let answer = '';
-      let transportFailure = null;
-      if (state.settled) {
+      if (blockerState.settled) {
         const outcome = await blockerPromise.then((response) => ({ response }), (error) => ({ error }));
-        if (outcome.response) {
-          answer = `; blocker answered HTTP ${outcome.response.status()}: ${(await outcome.response.text().catch(() => '')).slice(0, 400)}`;
-        } else {
-          answer = `; blocker request failed: ${firstLine(outcome.error && outcome.error.message ? outcome.error.message : outcome.error)}`;
-          transportFailure = isTransportFailure(outcome.error) ? outcome.error : null;
-        }
-      }
-      if (transportFailure && attempt < BLOCKER_ATTEMPTS) {
-        const description = `blocker attempt ${attempt}/${BLOCKER_ATTEMPTS} lost its connection without an HTTP answer `
-          + `after ${elapsed} ms (${firstLine(transportFailure.message)}); retrying once`;
-        testInfo.annotations.push({ type: 'transport-retry', description });
-        console.warn(`[transport-retry] ${testInfo.title}: ${description}`);
-        continue;
+        answer = outcome.response
+          ? `; blocker answered HTTP ${outcome.response.status}: ${outcome.response.text.slice(0, 400)}`
+          : `; blocker request failed: ${firstLine(outcome.error && outcome.error.message ? outcome.error.message : outcome.error)}`;
       }
       throw new Error(
-        `blocker attempt ${attempt}/${BLOCKER_ATTEMPTS} after ${elapsed} ms did not reach the locked VM relation read: `
-        + `VM wait observation: ${JSON.stringify(observation)}; blocker settled: ${state.settled}${answer}`,
+        `blocker request after ${elapsed} ms did not reach the locked VM relation read: `
+        + `VM wait observation: ${JSON.stringify(observation)}; blocker settled: ${blockerState.settled}${answer}`,
       );
     }
+    testInfo.annotations.push({ type: 'blocker-wait', description: `the blocker read waited on the lock after ${elapsed} ms` });
     tableLock.assertHeld();
 
-    const ping = await peerApi.post('session_ping.php', {
+    const ping = await sessionRequest(baseURL, sessionId, {
+      method: 'POST',
+      path: 'session_ping.php',
       form: { _csrf: csrf },
-      timeout: 5000,
+      timeoutMs: 5000,
     });
-    expect(ping.status()).toBe(200);
-    expect(await ping.json()).toMatchObject({ ok: true });
+    expect(ping.status, `peer ping answer: ${ping.text.slice(0, 400)}`).toBe(200);
+    expect(JSON.parse(ping.text)).toMatchObject({ ok: true });
     expect(blockerVmQueryIsWaiting(fixture.vm_id).waiting,
       'the same scoped DB read is still waiting after the peer write').toBe(true);
     expect(blockerState.settled, 'the DB read must still be in flight when the same-session write completes').toBe(false);
@@ -319,8 +323,8 @@ test('same-session peer proceeds while live blockers wait and the locale persist
     await tableLock.release();
     tableLock = null;
     const blockerResponse = await blockerPromise;
-    expect(blockerResponse.status()).toBe(200);
-    expect(await blockerResponse.json()).toMatchObject({ ok: true });
+    expect(blockerResponse.status, `blocker answer: ${blockerResponse.text.slice(0, 400)}`).toBe(200);
+    expect(JSON.parse(blockerResponse.text)).toMatchObject({ ok: true });
 
     await page.goto('dashboard.php');
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
@@ -332,8 +336,6 @@ test('same-session peer proceeds while live blockers wait and the locale persist
     if (tableLock) {
       try { await tableLock.release(); } catch (error) { cleanupErrors.push(error); }
     }
-    try { await blockerApi?.dispose(); } catch (error) { cleanupErrors.push(error); }
-    try { await peerApi?.dispose(); } catch (error) { cleanupErrors.push(error); }
     await blockerPromise?.catch(() => {});
     try { await browserContext.close(); } catch (error) { cleanupErrors.push(error); }
     try { cleanupMission(); } catch (error) { cleanupErrors.push(error); }
