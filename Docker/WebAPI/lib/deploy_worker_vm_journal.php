@@ -140,7 +140,7 @@ function deploy_worker_apply_locked_vm_journal(mysqli $db, array $job, string $n
             // A journaled touch owns its failure even for a bound VM that was
             // deliberately never marked deploying. The legacy filter is no authority.
             $nextLifecycle = VIRTUSPHERE_LIFECYCLE_FAILED;
-            $nextMecm = VIRTUSPHERE_MECM_SYNC_FAILED;
+            $nextMecm = VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED;
         }
         if ($lifecycle === $nextLifecycle && $mecm === $nextMecm) {
             continue;

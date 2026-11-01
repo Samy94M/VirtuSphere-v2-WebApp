@@ -184,6 +184,7 @@ try {
             // rule for; a remove is only ever planned against entries here.
             $vm['owned_collections'] = repo_mecm_rules_for_vm($connection, $vmId);
             $vm['vm_status'] = virtusphere_legacy_status_from_states((string) $vm['lifecycle_state'], (string) $vm['mecm_sync_state']);
+            $vm['mecm_sync_state'] = virtusphere_mecm_sync_wire_value((string) $vm['mecm_sync_state']);
             $vm['updated'] = 1;
             $data[] = $vm;
         }

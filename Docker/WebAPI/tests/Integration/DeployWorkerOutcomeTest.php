@@ -80,7 +80,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         self::assertNull($this->job($jobId)['last_error']);
         self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT, (string) $this->job($jobId)['terminal_reason_code']);
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($ok));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($bad));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($bad));
     }
 
     /** Matrix 3: a wholly failed import throws, and the failure path converges job and VMs. */
@@ -105,8 +105,8 @@ final class DeployWorkerOutcomeTest extends TestCase
         deploy_worker_handle_failure($this->db, $job, self::WORKER, [$vmA, $vmB], $message);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmA));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmB));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vmA));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vmB));
     }
 
     /** L3: an export sequence without any recorded result fails job and VMs, never leaves `deploying`. */
@@ -130,7 +130,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         deploy_worker_handle_failure($this->db, $job, self::WORKER, [$vmId], $message);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vmId));
     }
 
     /**
@@ -177,7 +177,7 @@ final class DeployWorkerOutcomeTest extends TestCase
     /**
      * Matrix 14 (E1): a follow-up failure after a committed import fails the
      * JOB, but VMs from successful_vm_ids keep deployed/pending; only the
-     * rest converges to failed/failed.
+     * rest converges to failed/deploy_failed.
      *
      * Runs as `export`: since K15 a create-capable mode admits a touch only
      * after its create units completed, which the create tests own. The E1
@@ -196,7 +196,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
         self::assertSame('Ansible command failed with exit code 2.', (string) $this->job($jobId)['last_error']);
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported), 'a committed import outlives the failing job (E1)');
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($unfinished));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($unfinished));
     }
 
     /**
@@ -220,7 +220,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId), 'a cancel must never be repainted');
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
         self::assertSame($mac, $this->interfaceMac($imported), 'stored MACs survive the cancel convergence');
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($stuck));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($stuck));
     }
 
     /**
@@ -244,7 +244,7 @@ final class DeployWorkerOutcomeTest extends TestCase
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $this->jobStatus($jobId));
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($stuck));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($stuck));
     }
 
     /**
@@ -287,7 +287,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         self::assertTrue(deploy_worker_confirm_owned_cancel($this->db, $this->job($jobId)));
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vm));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vm));
         self::assertStringNotContainsString('every playbook step', (string) $this->job($jobId)['terminal_reason_detail']);
     }
 
@@ -327,7 +327,7 @@ final class DeployWorkerOutcomeTest extends TestCase
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($ok));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($bad));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($bad));
         self::assertStringContainsString('every playbook step ended with exit code 0', (string) $this->job($jobId)['terminal_reason_detail']);
     }
 
@@ -346,7 +346,7 @@ final class DeployWorkerOutcomeTest extends TestCase
         deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$vm]);
 
         self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vm));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vm));
         self::assertStringNotContainsString('every playbook step', (string) $this->job($jobId)['terminal_reason_detail']);
     }
 

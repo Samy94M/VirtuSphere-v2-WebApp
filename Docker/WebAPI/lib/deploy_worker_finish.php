@@ -68,7 +68,7 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
             // A sequence without an export step produces no per-VM verdict, so the
             // `deploying` painted at claim time must be taken back by the worker
             // itself. Left alone, the convergence sweep would later mark the VMs
-            // of this GREEN job failed/failed - a false failure after a success.
+            // of this GREEN job failed/deploy_failed - a false failure after a success.
             deploy_worker_restore_deploying_vms($db, $job, 'deploy job ' . $jobId . ' succeeded without export step; lifecycle restored', $vmIds, $priorLifecycles);
         }
 
@@ -138,7 +138,7 @@ function deploy_worker_conclude_cancel_after_sequence(mysqli $db, array $job, ar
 
 /**
  * The worker-side cancel convergence. A cancel must not leave VMs behind in
- * `deploying`: whatever this job put there converges to failed/failed. VMs
+ * `deploying`: whatever this job put there converges to failed/deploy_failed. VMs
  * the import endpoint already finished stay deployed/pending, and stored
  * MACs are never touched. The job status itself stays `cancelled`.
  *
@@ -189,7 +189,7 @@ function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): 
  * Fails a mission job with selective VM marking (E1): VMs whose MAC import
  * already committed keep their proven state: unbound imports stay
  * deployed/pending, unchanged bound exports keep their original state. Everything
- * else in the job scope becomes failed/failed - lifecycle and mecm_sync_state
+ * else in the job scope becomes failed/deploy_failed - lifecycle and mecm_sync_state
  * together, so no failed VM advertises a sync that can never happen.
  * $vmsMarked false (a failure before deploy_worker_mark_vms_deploying()) fails
  * only the job and leaves every VM as it was. $reasonDetail is the failure the

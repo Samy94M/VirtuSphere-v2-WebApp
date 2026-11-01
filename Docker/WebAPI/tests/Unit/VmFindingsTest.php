@@ -64,7 +64,7 @@ final class VmFindingsTest extends TestCase
     {
         $vm = $this->vm([
             'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_FAILED,
-            'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_FAILED,
+            'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED,
             'vm_instance_uuid' => self::UUID,
             'vm_bound_esxi_host' => 'esxi01',
             'mecm_previous_id' => 'OLD-R1',
@@ -132,12 +132,12 @@ final class VmFindingsTest extends TestCase
     public function testAFailedMecmSyncIsTheLastFindingAfterTheFailedJob(): void
     {
         $findings = virtusphere_vm_findings(
-            $this->vm(['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_FAILED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_FAILED]),
+            $this->vm(['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_FAILED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED]),
             $this->evidence(['last_job' => $this->job(['status' => 'failed'])]),
             self::NOW
         );
 
-        self::assertSame([VIRTUSPHERE_VM_FINDING_JOB_FAILED, VIRTUSPHERE_VM_FINDING_MECM_SYNC_FAILED], $this->kinds($findings));
+        self::assertSame([VIRTUSPHERE_VM_FINDING_JOB_FAILED, VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED], $this->kinds($findings));
         self::assertSame(['target' => VIRTUSPHERE_VM_FINDING_LINK_JOB_LOG, 'job_id' => 7], $findings[1]['link']);
     }
 

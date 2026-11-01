@@ -158,8 +158,10 @@ const FILE_SIZE_ALLOWANCES = [
     // check live in lib/migrations/0068_deploy_job_failed_step.php.
     // SP3 (01.11.2026) adds the two registry lines for migration 0069; its table and
     // backfill live in lib/migrations/0069_audit_vm_refs.php.
+    // MX0 (01.11.2026) adds the two registry lines for migration 0070; its rename
+    // lives in lib/migrations/0070_mecm_sync_deploy_failed.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1260,
+        'lines' => 1262,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

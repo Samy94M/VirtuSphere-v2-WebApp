@@ -216,7 +216,7 @@ final class PortalStatusDisplayTest extends TestCase
     /**
      * Every finding kind is named in both locales, its text never leaks a
      * catalog key or the raw kind, and its badge variant comes from the meta.
-     * `mecm_sync_failed` deliberately reuses `status.mecm_failed`, so it stays
+     * `mecm_sync_deploy_failed` deliberately reuses `status.mecm_deploy_failed`, so it stays
      * out of the uniqueness walk.
      */
     public function testEveryFindingKindIsNamedInBothLocalesAndHasAColour(): void
@@ -245,7 +245,7 @@ final class PortalStatusDisplayTest extends TestCase
                 self::assertNotSame('', trim($text), $locale . ': ' . $kind . ' has no text');
                 self::assertStringNotContainsString('status.', $text, $locale . ': ' . $kind . ' renders an untranslated key');
                 self::assertStringNotContainsString($kind, $text, $locale . ': ' . $kind . ' renders its raw kind');
-                if ($kind !== VIRTUSPHERE_VM_FINDING_MECM_SYNC_FAILED) {
+                if ($kind !== VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED) {
                     self::assertArrayNotHasKey($text, $seen, $locale . ': ' . $kind . ' shares a text with ' . ($seen[$text] ?? ''));
                     $seen[$text] = $kind;
                 }

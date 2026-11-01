@@ -34,6 +34,7 @@ require_once __DIR__ . '/migrations/0066_create_unit_attempt.php';
 require_once __DIR__ . '/migrations/0067_create_error_detail_origin.php';
 require_once __DIR__ . '/migrations/0068_deploy_job_failed_step.php';
 require_once __DIR__ . '/migrations/0069_audit_vm_refs.php';
+require_once __DIR__ . '/migrations/0070_mecm_sync_deploy_failed.php';
 function migrator_acquire_schema_lock(mysqli $db): void
 {
     $row = migrator_query_row($db, "SELECT GET_LOCK('virtusphere_schema_migration', 30) AS locked", 'schema migration lock');
@@ -304,12 +305,12 @@ $migrations = [
         migrator_add_column($db, 'deploy_vms', 'updated', 'TINYINT(1) NOT NULL DEFAULT 0');
         migrator_add_column($db, 'deploy_vms', 'lifecycle_state', "ENUM('initializing','ready','deploying','deployed','os_installing','os_installed','failed') NOT NULL DEFAULT 'ready'");
         // The value set is the CURRENT one, not the one this migration shipped
-        // with: 'submitted' was withdrawn in 0028. A column definition is a mirror
-        // of the PHP SSoT (database rule, check-enum-sync.sh), so it is corrected
-        // in place rather than left as history. Both paths still converge - on a
-        // fresh install this creates the final shape and 0028's MODIFY is a no-op;
-        // on an existing one this migration is long applied and 0028 does the work.
-        migrator_add_column($db, 'deploy_vms', 'mecm_sync_state', "ENUM('not_ready','pending','registered','failed') NOT NULL DEFAULT 'not_ready'");
+        // with: 'submitted' was withdrawn in 0028, 'failed' renamed in 0070. A column
+        // definition mirrors the PHP SSoT (database rule, check-enum-sync.sh), so it
+        // is corrected in place, not left as history. Both paths converge: fresh, 0028
+        // narrows the empty column to its older set and 0070 restores the final one;
+        // existing, this migration is long applied and 0028/0070 do the work.
+        migrator_add_column($db, 'deploy_vms', 'mecm_sync_state', "ENUM('not_ready','pending','registered','deploy_failed') NOT NULL DEFAULT 'not_ready'");
         migrator_add_column($db, 'deploy_users', 'role', "ENUM('admin','user') NOT NULL DEFAULT 'user'");
         migrator_add_column($db, 'deploy_users', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
         migrator_add_column($db, 'deploy_users', 'must_change_password', 'TINYINT(1) NOT NULL DEFAULT 0');
@@ -1212,6 +1213,7 @@ SQL;
     '0067_create_error_detail_origin' => migrate_0067_create_error_detail_origin(...),
     '0068_deploy_job_failed_step' => migrate_0068_deploy_job_failed_step(...),
     '0069_audit_vm_refs' => migrate_0069_audit_vm_refs(...),
+    '0070_mecm_sync_deploy_failed' => migrate_0070_mecm_sync_deploy_failed(...),
 ];
 try {
     $db = db();

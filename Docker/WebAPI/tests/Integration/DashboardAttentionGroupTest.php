@@ -75,9 +75,9 @@ final class DashboardAttentionGroupTest extends TestCase
     {
         $mission = repo_create_mission($this->db, ['mission_name' => self::PREFIX . 'mx0_' . bin2hex(random_bytes(3))]);
         $before = repo_vm_overview_count($this->db, VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_OVERDUE);
-        // An old pending stamp left behind on a failed sync: MX0 will move deploy
-        // failures to their own value; until it does, failed is no wait.
-        $vm = $this->vm($mission, 'MX0', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_FAILED, 5, null);
+        // An old pending stamp left behind on a deploy failure (deploy_failed since
+        // MX0): a failed job is a finding for a person, not a wait for MECM.
+        $vm = $this->vm($mission, 'MX0', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, 5, null);
 
         self::assertSame($before, repo_vm_overview_count($this->db, VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_OVERDUE));
         self::assertNotContains($vm, $this->idsOf(VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_OVERDUE));
@@ -94,7 +94,7 @@ final class DashboardAttentionGroupTest extends TestCase
         $ids[] = $this->vm($missionId, 'MOD', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, 3, null);
         $ids[] = $this->vm($missionId, 'MFR', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, 1, null);
         $ids[] = $this->vm($missionId, 'MNS', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, null, null);
-        $ids[] = $this->vm($missionId, 'MFL', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_FAILED, 3, null);
+        $ids[] = $this->vm($missionId, 'MFL', VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, 3, null);
         $ids[] = $this->vm($missionId, 'IOD', VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, null, 7);
         $ids[] = $this->vm($missionId, 'IFR', VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, null, 1);
         $ids[] = $this->vm($missionId, 'INR', VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_NOT_READY, null, 7);

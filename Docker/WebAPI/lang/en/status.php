@@ -31,7 +31,7 @@ return [
     'mecm_not_ready' => 'Not ready yet',
     'mecm_pending' => 'Waiting for MECM',
     'mecm_registered' => 'Registered in MECM',
-    'mecm_failed' => 'MECM sync open after failure',
+    'mecm_deploy_failed' => 'MECM sync open after failure',
     'mecm_unknown' => 'Unknown state',
 
     // Job status (the active and terminal sets from lib/deploy_constants.php).
@@ -82,7 +82,7 @@ return [
 
     // VM findings (VIRTUSPHERE_VM_FINDINGS, lib/vm_phase.php). The time part drops
     // out only when no valid server time exists; then the variant without time or
-    // origin applies. `mecm_sync_failed` reuses `mecm_failed`.
+    // origin applies. `mecm_sync_deploy_failed` reuses `mecm_deploy_failed`.
     'finding_create_uncertain' => 'Create unresolved (job :job_id, unit :position)',
     'finding_job_failed' => 'Job failed: :mode, :time',
     'finding_create_failed' => 'Not created on ESXi: :mode, :time',
@@ -124,5 +124,5 @@ return [
     'finding_short_client_phase_failed' => 'Client phase failed',
     'finding_short_client_phase_unconfirmed' => 'Client phase unconfirmed',
     'finding_short_package_run_failed' => 'Package report failed',
-    'finding_short_mecm_sync_failed' => 'MECM sync open',
+    'finding_short_mecm_sync_deploy_failed' => 'MECM sync open',
 ];

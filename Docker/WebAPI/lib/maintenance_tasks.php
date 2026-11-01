@@ -220,7 +220,7 @@ function maintenance_worker_reap_deploy_jobs(mysqli $db): void
 }
 
 // Convergence sweep: VMs stuck in `deploying` whose mission has no active
-// (queued/running) job converge to failed/failed. Covers the fault the deploy
+// (queued/running) job converge to failed/deploy_failed. Covers the fault the deploy
 // worker cannot handle itself - it died before its own failure/cancel path ran
 // - and the heartbeat reaper misses, because the job is already terminal. One
 // audit line per affected mission; the per-VM evidence is in the status events

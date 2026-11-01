@@ -68,7 +68,7 @@ function virtusphere_mecm_sync_meta(string $mecmSyncState): array
         VIRTUSPHERE_MECM_SYNC_NOT_READY => ['badge' => 'neutral'],
         VIRTUSPHERE_MECM_SYNC_PENDING => ['badge' => 'warning'],
         VIRTUSPHERE_MECM_SYNC_REGISTERED => ['badge' => 'success'],
-        VIRTUSPHERE_MECM_SYNC_FAILED => ['badge' => 'danger'],
+        VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED => ['badge' => 'danger'],
         default => ['badge' => 'neutral'],
     };
 }
@@ -91,14 +91,17 @@ function virtusphere_legacy_status_from_states(string $lifecycleState, string $m
     return VIRTUSPHERE_STATUS_INITIALIZING;
 }
 
-// The boundary is emit-only, so there is no inverse of the mapping above. Every
-// machine-API write names both states explicitly and passes the legacy string
-// as a literal alongside them (mecm_client_ack.php, mecm_updateid.php,
-// db_importMAC.php); nothing ever derives the pair back from a legacy string.
-// An inverse existed and was never called, which is worse than none: it would
-// have answered a question no caller asked, from a table nothing checked. An
-// endpoint that starts accepting a legacy string needs one plus an ADR-0008
-// note, because collapsing five strings onto two axes is not lossless.
+// The boundary is emit-only: no inverse exists, every machine-API write names
+// both states and passes the legacy string as a literal (mecm_client_ack.php,
+// mecm_updateid.php, db_importMAC.php). Accepting a legacy string would need an
+// inverse plus an ADR-0008 note: five strings onto two axes is not lossless.
+
+// getDeviceList emits the stored MECM token; the deploy failure mark keeps its
+// wire name `failed` (migration 0070, ADR-0019 amendment 5).
+function virtusphere_mecm_sync_wire_value(string $mecmSyncState): string
+{
+    return $mecmSyncState === VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED ? 'failed' : $mecmSyncState;
+}
 
 function virtusphere_is_lifecycle_state(string $state): bool
 {

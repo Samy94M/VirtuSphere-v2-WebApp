@@ -156,7 +156,7 @@ Eine abweichende, nicht leere gespeicherte MAC ergibt `bound_mac_changed` und
 ein fehlgeschlagenes VM-Ergebnis, ohne MAC oder ResourceID zu überschreiben.
 Das Format zählt nicht: Gespeicherte und gemeldete MAC werden normalisiert
 verglichen. Der reguläre Worker-Abschluss konvergiert die fehlgeschlagene VM
-wie bisher nach `failed/failed`. Sie verliert damit `registered` und
+wie bisher nach `failed/deploy_failed` (bis Migration 0070 hieß der MECM-Wert `failed`). Sie verliert damit `registered` und
 `os_installed` und mit ihnen die Umbenennungssperre; MECM-ID und gespeicherte
 MAC bleiben. Ein Abbruch folgt derselben K15-Journalregel: bestätigte Exportversuche scheitern nur ihre eigene VM, unberührte markierte VMs erhalten beide Vorzustände zurück, und erfolgreiche MAC-IDs bleiben geschützt. Der DE/EN-Hinweis erklärt, dass MECM noch die alte
 MAC kennt, und nennt die Reihenfolge: altes Gerät in der MECM-Konsole löschen,
@@ -483,7 +483,7 @@ Vom Symptom aus führt die [Störungsdiagnose](troubleshooting.md) zur richtigen
 
 Migration 0060 legt `deploy_job_vm_states` an. Jede Zeile gehört genau zu einem
 Auftrag und einer VM; ihre dauerhafte `id` bestimmt den jüngsten Job/VM-Eigentümer
-für den Sweep. `lifecycle_before` und `mecm_before` werden einmal gespeichert.
+für den Sweep. `lifecycle_before` und `mecm_before` werden einmal gespeichert; nur Migration 0070 hat darin `failed` in `deploy_failed` umbenannt.
 `marked_deploying` hält fest, ob der Worker diese VM in `deploying` gesetzt hat;
 `esxi_touched` und `touch_phase` halten einen bestätigten Zugriffversuch fest.
 `create_launch_intent` schließt die Lücke zwischen dem Beginn eines Create-Starts
@@ -492,7 +492,7 @@ und dem Speichern seiner Async-ID. Es gibt keine Rückfüllung für alte Aufträ
 `start` und `autostart` schreiben Lifecycle und MECM nie. Bei den übrigen Modi
 stellen Fehler, Abbruch, Reaper und Sweep eine markierte, nicht angefasste VM auf
 beide gespeicherten Vorzustände zurück. Eine bestätigte, genau dieser VM
-zugeordnete ESXi-Arbeit führt nur diese VM zu `failed/failed`. Dazu zählt ein
+zugeordnete ESXi-Arbeit führt nur diese VM zu `failed/deploy_failed` (Lebenszyklus `failed`, MECM-Achse `deploy_failed`). Dazu zählt ein
 dauerhaft zugelassener Zugriffversuch, nicht nur eine bestätigte Änderung.
 Erfolgreiche VM-IDs aus dem MAC-Rückruf bleiben unangetastet. Der Sweep wählt
 den jüngsten Journalbesitzer nach `id` und schreibt nur, wenn dessen

@@ -139,11 +139,11 @@ final class VmPhaseTest extends TestCase
     {
         self::assertSame(
             VIRTUSPHERE_VM_PHASE_ON_ESXI,
-            virtusphere_vm_phase(self::vm(VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED, true))
+            virtusphere_vm_phase(self::vm(VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, true))
         );
         self::assertSame(
             VIRTUSPHERE_VM_PHASE_CREATED,
-            virtusphere_vm_phase(self::vm(VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED, false))
+            virtusphere_vm_phase(self::vm(VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, false))
         );
     }
 

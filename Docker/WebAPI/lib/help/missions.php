@@ -117,7 +117,7 @@ require_once __DIR__ . '/../vm_timeline.php';
                 <li><?php echo h(__t('help_missions.status_axes_mecm_not_ready')); ?></li>
                 <li><?php echo h(__t('help_missions.status_axes_mecm_pending')); ?></li>
                 <li><?php echo h(__t('help_missions.status_axes_mecm_registered')); ?></li>
-                <li><?php echo h(__t('help_missions.status_axes_mecm_failed')); ?></li>
+                <li><?php echo h(__t('help_missions.status_axes_mecm_deploy_failed')); ?></li>
                 <li><?php echo h(__t('help_missions.status_axes_lifecycle')); ?></li>
             </ul>
             <h3><?php echo h(__t('help_missions.status_stuck_heading')); ?></h3>

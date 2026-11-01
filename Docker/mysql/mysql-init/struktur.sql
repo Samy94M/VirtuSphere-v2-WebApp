@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS deploy_vms (
     -- status, so it sits outside the ENUM-sync check; keep both in step by hand.
     vm_status VARCHAR(64) NOT NULL DEFAULT '2/5 Registered',
     lifecycle_state ENUM('initializing','ready','deploying','deployed','os_installing','os_installed','failed') NOT NULL DEFAULT 'ready',
-    mecm_sync_state ENUM('not_ready','pending','registered','failed') NOT NULL DEFAULT 'not_ready',
+    mecm_sync_state ENUM('not_ready','pending','registered','deploy_failed') NOT NULL DEFAULT 'not_ready',
     mecm_id VARCHAR(255),
     -- Rollout identity (Etappe 14D, ADR-0043). Internal runtime, NOT a second
     -- desired value: vm_hostname above stays the one editable business SSoT.

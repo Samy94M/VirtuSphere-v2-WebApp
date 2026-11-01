@@ -60,7 +60,7 @@ function portal_mecm_sync_label(string $mecmSyncState): string
         VIRTUSPHERE_MECM_SYNC_NOT_READY => __t('status.mecm_not_ready'),
         VIRTUSPHERE_MECM_SYNC_PENDING => __t('status.mecm_pending'),
         VIRTUSPHERE_MECM_SYNC_REGISTERED => __t('status.mecm_registered'),
-        VIRTUSPHERE_MECM_SYNC_FAILED => __t('status.mecm_failed'),
+        VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED => __t('status.mecm_deploy_failed'),
         default => __t('status.mecm_unknown'),
     };
 }
@@ -169,7 +169,7 @@ function portal_vm_finding_text(array $finding): string
             'minutes' => (int) ($params['minutes'] ?? 0),
         ]),
         VIRTUSPHERE_VM_FINDING_PACKAGE_RUN_FAILED => __t('status.finding_package_run_failed', ['package' => $text('package')]),
-        VIRTUSPHERE_VM_FINDING_MECM_SYNC_FAILED => __t('status.mecm_failed'),
+        VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED => __t('status.mecm_deploy_failed'),
         default => __t('status.finding_unknown'),
     };
 }

@@ -92,7 +92,7 @@ final class VmProgressAttentionTest extends TestCase
         ])));
         self::assertNull(virtusphere_vm_progress_watch_kind($this->vm([
             'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_FAILED,
-            'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_FAILED,
+            'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED,
         ])));
     }
 

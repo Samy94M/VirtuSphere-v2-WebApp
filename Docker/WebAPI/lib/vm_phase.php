@@ -61,7 +61,7 @@ const VIRTUSPHERE_VM_FINDING_OS_INSTALL_WATCHING = 'os_install_watching';
 const VIRTUSPHERE_VM_FINDING_CLIENT_PHASE_FAILED = 'client_phase_failed';
 const VIRTUSPHERE_VM_FINDING_CLIENT_PHASE_UNCONFIRMED = 'client_phase_unconfirmed';
 const VIRTUSPHERE_VM_FINDING_PACKAGE_RUN_FAILED = 'package_run_failed';
-const VIRTUSPHERE_VM_FINDING_MECM_SYNC_FAILED = 'mecm_sync_failed';
+const VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED = 'mecm_sync_deploy_failed';
 
 /** kind => badge variant; the key order is the severity order. */
 const VIRTUSPHERE_VM_FINDINGS = [
@@ -79,7 +79,7 @@ const VIRTUSPHERE_VM_FINDINGS = [
     VIRTUSPHERE_VM_FINDING_CLIENT_PHASE_FAILED => 'warning',
     VIRTUSPHERE_VM_FINDING_CLIENT_PHASE_UNCONFIRMED => 'info',
     VIRTUSPHERE_VM_FINDING_PACKAGE_RUN_FAILED => 'warning',
-    VIRTUSPHERE_VM_FINDING_MECM_SYNC_FAILED => 'warning',
+    VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED => 'warning',
 ];
 
 /** The closed set of places a finding may point to (the presenter builds the href). */
@@ -383,8 +383,8 @@ function virtusphere_vm_findings(array $vm, array $evidence = [], ?int $now = nu
     }
 
     // 15: the MECM axis still carries the worker's failure mark; the sync is open.
-    if ($mecm === VIRTUSPHERE_MECM_SYNC_FAILED) {
-        $add(VIRTUSPHERE_VM_FINDING_MECM_SYNC_FAILED, [], $jobLink);
+    if ($mecm === VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED) {
+        $add(VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED, [], $jobLink);
     }
 
     return $findings;

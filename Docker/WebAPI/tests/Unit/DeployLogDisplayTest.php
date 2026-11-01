@@ -220,7 +220,7 @@ final class DeployLogDisplayTest extends TestCase
 
     public function testAVmWhoseCreateFailedLinksToItsFailLines(): void
     {
-        $vm = ['id' => 613, 'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_FAILED, 'mecm_sync_state' => 'failed', 'vm_status' => '1'];
+        $vm = ['id' => 613, 'lifecycle_state' => VIRTUSPHERE_LIFECYCLE_FAILED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, 'vm_status' => '1'];
         $evidence = [
             'last_job' => ['id' => 1527, 'status' => VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, 'mode' => 'full', 'updated_at' => '2026-10-29 11:52:04'],
             'create_failed' => ['job_id' => 1527, 'position' => 13, 'total' => 15],

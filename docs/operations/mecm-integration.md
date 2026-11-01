@@ -446,6 +446,10 @@ automatisch aus aktualisiertem Content.
 > Basisfeldern liefert es `rollout_revision` sowie die beiden Generationen
 > `device_generation` und `acceptance_generation` (ADR-0044); sein `vm_hostname` ist ebenfalls der
 > Snapshot, weil der Client Windows nach dem benennt, was er dort liest.
+>
+> **MX0 (Migration 0070, ADR-0019-Amendment 5):** Der Wert, den ein gescheiterter
+> Auftrag auf die MECM-Achse schreibt, heißt gespeichert `deploy_failed`; auf der
+> Leitung bleibt er `failed` (`virtusphere_mecm_sync_wire_value()`).
 
 ## VM außer Betrieb nehmen
 
