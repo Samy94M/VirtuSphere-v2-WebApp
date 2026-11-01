@@ -25,5 +25,5 @@ return [
     'state_cancellable' => 'Abbrechen möglich',
     'job_states_desc' => 'Aktive Status: :active. Abbrechen lässt sich: :cancellable. Endzustände: :terminal. Übergänge: :transitions.',
     'job_states_transition' => 'von :from nach :to',
-    'job_states_note' => 'Aus einem Endzustand führt kein Weg zurück; „Erneut ausführen“ legt einen neuen Auftrag an. „Ausgang unbekannt“ setzt nur die Aufsicht, wenn ein laufender Auftrag keinen Herzschlag mehr meldet.',
+    'job_states_note' => 'Aus einem Endzustand führt kein Weg zurück; „Erneut ausführen“ legt einen neuen Auftrag an. „Ausgang unbekannt“ setzt die Aufsicht, wenn ein laufender Auftrag keinen Herzschlag mehr meldet, und der Worker, wenn die Verbindung zum Ansible-Host mitten in einem Schritt abbricht.',
 ];

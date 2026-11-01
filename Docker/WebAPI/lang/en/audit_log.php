@@ -291,6 +291,7 @@ return [
     'code_deploy_status_outcome_unknown' => 'outcome_unknown',
 
     'code_deploy_reason_stale_heartbeat' => 'stale_heartbeat',
+    'code_deploy_reason_ansible_connection_lost' => 'ansible_connection_lost',
 
     'code_claim_state_accepting' => 'accepting',
     'code_claim_state_pause_after_current' => 'pause_after_current',

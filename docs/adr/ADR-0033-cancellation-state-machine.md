@@ -245,3 +245,49 @@ operator's wish wins).
 A worker that is alive but loses its SSH session in the middle of a step still
 writes `failed` with `timeout` or `execution_failed`; whether that case also
 deserves the unknown outcome (U-01) is a separate follow-up.
+
+## Amendment (2026-11-01): a lost Ansible host connection mid-step is `outcome_unknown`
+
+U-01, user decision of 2026-10-30, migration 0071. A worker that loses its SSH
+connection to the Ansible host while a playbook step runs now ends the job
+`outcome_unknown` with the new reason `ansible_connection_lost`, the way the
+reaper ends a silent job. This supersedes the first bullet and the last
+paragraph of the amendment of 2026-10-26: the reaper is no longer the only
+writer of the status.
+
+Measured on 2026-11-01 against a real sshd with the production read loop
+(phpseclib 3.0.57): a loss while the channel is read surfaces only as
+phpseclib's `ConnectionClosedException`. In the black-hole case the keepalive
+reports it once the portal host's TCP retry limit is reached, and the step had
+finished on the Ansible host although the worker would have written
+`execution_failed`. A playbook error arrives as an exit code, an expired idle
+or total budget as `SshTransportBudgetExceeded`, and a remote process killed by
+a signal as a channel end without exit status; none of them is that type.
+
+- Detection is by type in one place: `ssh_stream_command_output()` turns the
+  phpseclib type from the read slice into `SshTransportConnectionLost`. Login,
+  the exec request and SFTP are untouched.
+- Only a playbook step in flight counts (`$remoteStepInFlight` in the mission
+  loop). The read-only host preflight, the K21 sweep, SFTP, an inventory pull
+  and a Create control call stay `failed`; a Create unit decides its own
+  outcome and stays `uncertain` when the launch is unclear. An expired budget
+  stays `timeout` even when a network outage caused it: silence cannot be told
+  from a hanging playbook.
+- `deploy_worker_handle_failure()` derives the status from the reason after
+  its cancel branch, so a pending cancel still wins (decision 4); its detail
+  then says the step's end is unknown. VM convergence is the failure path's
+  (journal decision, contract A49, MECM `deploy_failed`): no MECM pickup is
+  advertised without proof, and no new waiting value exists.
+- `repo_finish_deploy_job()` accepts `outcome_unknown` only with
+  `ansible_connection_lost`; `stale_heartbeat` stays the reaper's. The redacted
+  diagnosis is also kept in `last_error`, as the reaper keeps it; the portal
+  shows "Last error" only for `failed`. No `failed_step` is stored, so a retry
+  never resumes at a step nobody saw end (K4b resume needs `failed`); it plans
+  like every unknown outcome, with `retry_remote_outcome_unknown` and the
+  warning sentence first.
+- `deploy.outcome` is a `warning` row with the closed reason code. The result
+  text says that the connection broke off during a step and that the end of
+  the step is unknown; the raw transport text appears only as reason detail.
+- This is the Portal-to-Ansible-host leg. Short ESXi interruptions on the
+  Ansible-to-ESXi leg are retried inside the playbooks (K2 to K4a) and are
+  unaffected.

@@ -7,6 +7,17 @@ final class SshTransportBudgetExceeded extends RuntimeException
 {
 }
 
+/**
+ * The SSH connection was lost while a started remote command was being read
+ * (U-01). Raised only by ssh_stream_command_output() for phpseclib's
+ * ConnectionClosedException, which stays attached as the previous exception.
+ * The remote command may have finished, may still run or may have died; the
+ * caller cannot tell which.
+ */
+final class SshTransportConnectionLost extends RuntimeException
+{
+}
+
 /** The remote SFTP subsystem or an SFTP operation failed. */
 final class SftpTransportFailed extends RuntimeException
 {

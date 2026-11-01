@@ -177,10 +177,12 @@ function repo_finish_deploy_job(
     if (!in_array($status, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
         throw new InvalidArgumentException('Deploy job finish status must be terminal.');
     }
-    // Only the stale-job reaper may conclude a job as outcome_unknown: a worker
-    // that is alive to call this knows how its run ended (WK-04/WK-07 A).
-    if ($status === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN) {
-        throw new InvalidArgumentException('A worker never concludes a deploy job with an unknown outcome.');
+    // A worker that is alive to call this knows how its run ended, with one
+    // exception (U-01): it lost its SSH connection to the Ansible host while a
+    // step ran. Only that reason admits outcome_unknown here; `stale_heartbeat`
+    // stays the stale-job reaper's (WK-04/WK-07 A).
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN && $reasonCode !== VIRTUSPHERE_DEPLOY_TERMINAL_REASON_ANSIBLE_CONNECTION_LOST) {
+        throw new InvalidArgumentException('A worker concludes a deploy job with an unknown outcome only after a lost Ansible host connection.');
     }
 
     $reasonCode ??= match ($status) {
@@ -188,13 +190,17 @@ function repo_finish_deploy_job(
         VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT,
         VIRTUSPHERE_DEPLOY_STATUS_FAILED => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
         VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_OPERATOR_CANCELLED,
+        // Unreachable (refused above without its reason); kept for the exhaustive match.
+        VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_ANSIBLE_CONNECTION_LOST,
     };
     deploy_terminal_reason_assert($status, $reasonCode);
-    $lastError = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null;
+    // outcome_unknown keeps its diagnosis too, as the reaper's does: it outlives
+    // the log retention. The portal shows "Last error" only for failed.
+    $lastError = in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN], true) ? $lastError : null;
     // An unknown value is dropped rather than thrown: a throw here would cost
     // the job its terminal state, and NULL only means "plan the retry as before".
     $failedStep = $status === VIRTUSPHERE_DEPLOY_STATUS_FAILED && in_array($failedStep, VIRTUSPHERE_DEPLOY_FAILED_STEPS, true) ? $failedStep : null;
-    $reasonDetail = deploy_terminal_reason_detail($reasonDetail ?? ($status === VIRTUSPHERE_DEPLOY_STATUS_FAILED ? $lastError : null));
+    $reasonDetail = deploy_terminal_reason_detail($reasonDetail ?? $lastError);
     $terminalResultJson = $terminalResult === null ? null : repo_encode_deploy_preflight_result($terminalResult);
 
     return repo_transaction($db, static function () use ($db, $jobId, $workerId, $status, $lastError, $reasonCode, $reasonDetail, $terminalResultJson, $failedStep): bool {
@@ -214,6 +220,7 @@ function repo_finish_deploy_job(
             VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => 'Deploy job finished partially.',
             VIRTUSPHERE_DEPLOY_STATUS_FAILED => 'Deploy job failed.',
             VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => 'Deploy job cancelled.',
+            VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => 'Deploy job ended with an unknown remote outcome.',
         ];
         // PHPStan derives $status from VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES;
         // adding a terminal state without extending this map is a static error.

@@ -204,6 +204,11 @@ function ansible_connection_error_category(Throwable $exception): string
     if ($exception instanceof SshTransportConfigurationException) {
         return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
     }
+    // U-01: an established session that broke while a command ran. Its wording
+    // ("Connection closed by server") already read as a transport failure.
+    if ($exception instanceof SshTransportConnectionLost) {
+        return VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT;
+    }
 
     return ansible_connection_error_category_for_text($exception->getMessage());
 }
@@ -224,7 +229,8 @@ function ansible_connection_error_is_typed(Throwable $exception): bool
     return $exception instanceof SshHostIdentityRejected
         || $exception instanceof SshTransportBudgetExceeded
         || $exception instanceof SftpTransportFailed
-        || $exception instanceof SshTransportConfigurationException;
+        || $exception instanceof SshTransportConfigurationException
+        || $exception instanceof SshTransportConnectionLost;
 }
 
 /**

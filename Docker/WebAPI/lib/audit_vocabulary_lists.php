@@ -43,7 +43,13 @@ function audit_code_vocabularies(): array
         'rollout_effect' => audit_constants_with_prefix('VIRTUSPHERE_AUDIT_ROLLOUT_EFFECT_'),
         'deploy_mode' => [...array_keys(virtusphere_deploy_mode_labels()), VIRTUSPHERE_DEPLOY_MODE_INVENTORY],
         'deploy_status' => VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES,
-        'deploy_reason' => [VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT],
+        // The closed reason codes an outcome row carries: those of the unknown
+        // outcome (the reaper's and, since U-01, the worker's). Failed rows keep
+        // their free text.
+        'deploy_reason' => array_keys(array_filter(
+            VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES,
+            static fn (array $statuses): bool => in_array(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $statuses, true)
+        )),
         'claim_state' => VIRTUSPHERE_DEPLOY_CLAIM_STATES,
         'resolution_code' => VIRTUSPHERE_RECOVERY_RESOLUTION_CODES,
         'create_blocker' => VIRTUSPHERE_CREATE_RELEASE_BLOCKERS,

@@ -479,6 +479,8 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
     -- boundary or the reaper converges a dead worker to cancelled.
     -- outcome_unknown (migration 0065, WK-04/WK-07 A): the reaper ended a
     -- running mission job after a stale heartbeat; its remote effect is unknown.
+    -- Since migration 0071 (U-01) the worker writes it too, with reason
+    -- ansible_connection_lost, after losing the Ansible host mid-step.
     status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial','outcome_unknown') NOT NULL DEFAULT 'queued',
     locked_at TIMESTAMP NULL,
     locked_by VARCHAR(191) NULL,
@@ -555,7 +557,7 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
         (status = _utf8mb4'partial' AND terminal_reason_code = _utf8mb4'partial_result') OR
         (status = _utf8mb4'failed' AND terminal_reason_code IN (_utf8mb4'execution_failed',_utf8mb4'timeout',_utf8mb4'stale_heartbeat',_utf8mb4'ownership_lost',_utf8mb4'configuration_blocked')) OR
         (status = _utf8mb4'cancelled' AND terminal_reason_code IN (_utf8mb4'operator_cancelled',_utf8mb4'cancel_converged')) OR
-        (status = _utf8mb4'outcome_unknown' AND terminal_reason_code = _utf8mb4'stale_heartbeat')
+        (status = _utf8mb4'outcome_unknown' AND terminal_reason_code IN (_utf8mb4'stale_heartbeat',_utf8mb4'ansible_connection_lost'))
     ),
     CONSTRAINT deploy_jobs_failed_step_check CHECK (
         failed_step IS NULL OR failed_step IN (_ascii'powercycle',_ascii'export',_ascii'start',_ascii'autostart')
