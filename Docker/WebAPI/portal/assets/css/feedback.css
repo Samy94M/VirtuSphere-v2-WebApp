@@ -312,3 +312,19 @@ textarea.is-invalid {
         transform: translateY(8px);
     }
 }
+
+/* Conflict comparison of the mission and VM editors (lib/edit_conflict_view.php).
+   Here and not in tables.css: mission_details.php is no table page, and this
+   sheet loads on every page. The three columns are read side by side, so on a
+   phone the saved value must not hide behind a sideways scroll: the table drops
+   the shared 720px floor, and notes keep their line breaks while long values
+   wrap inside their cell. */
+.edit-conflict-table {
+    min-width: 0;
+    table-layout: fixed;
+}
+
+.edit-conflict-value {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

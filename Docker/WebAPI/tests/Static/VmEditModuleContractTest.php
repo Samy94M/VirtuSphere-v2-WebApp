@@ -35,6 +35,16 @@ final class VmEditModuleContractTest extends TestCase
         'vm_edit_ram_from_post',
         'render_vm_ram_field',
         'vm_edit_cpu_from_post',
+        'vm_edit_submitted_values',
+        'vm_edit_sticky_vm',
+        'vm_edit_location_inherit_label',
+        'vm_edit_conflict_fields',
+        'vm_edit_conflict_guest_label',
+        'vm_edit_conflict_interface_rows',
+        'vm_edit_conflict_disk_rows',
+        'vm_edit_conflict_package_rows',
+        'vm_edit_conflict_rows',
+        'vm_edit_conflict',
     ];
 
     public function testRegistryMatchesFilesystemInBothDirections(): void

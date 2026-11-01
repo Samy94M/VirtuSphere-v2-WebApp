@@ -66,7 +66,8 @@ final class PortalUnsavedChangesContractTest extends TestCase
 
         self::assertStringContainsString("form_unsaved_attrs('mission-settings', form_has_state('update'))", $mission);
         self::assertGreaterThanOrEqual(2, substr_count($mission, "form_remember('update', \$_POST"));
-        self::assertStringContainsString("form_unsaved_attrs('vm-editor', \$error !== '')", $vm);
+        // A refused save and the continue step after a conflict (QL-01/QL-03 B) both re-render unsaved input.
+        self::assertStringContainsString("form_unsaved_attrs('vm-editor', \$error !== '' || \$editConflict !== null)", $vm);
         self::assertStringContainsString('form_unsaved_status_html()', $mission);
         self::assertStringContainsString('form_unsaved_status_html()', $vm);
     }

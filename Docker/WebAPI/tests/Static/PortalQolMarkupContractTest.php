@@ -102,9 +102,11 @@ final class PortalQolMarkupContractTest extends TestCase
 
     public function testQl06TheEditorRefusesAnEmptiedCpuFieldInsteadOfDefaulting(): void
     {
-        $page = self::source('lib/vm_edit_page.php');
-        self::assertStringContainsString("'vm_cpu' => vm_edit_cpu_from_post(\$_POST),", $page);
-        self::assertStringNotContainsString("'vm_cpu' => request_string(\$_POST, 'vm_cpu'),", $page);
+        // The save path's field list lives in vm_edit_submitted_values() (SP5); the page saves in strict mode.
+        self::assertStringContainsString('$vmData = vm_edit_submitted_values($_POST);', self::source('lib/vm_edit_page.php'));
+        $values = self::source('lib/vm_edit_values.php');
+        self::assertStringContainsString("'vm_cpu' => \$strict ? vm_edit_cpu_from_post(\$post) : request_trimmed(\$post, 'vm_cpu'),", $values);
+        self::assertStringNotContainsString("'vm_cpu' => request_string(\$post, 'vm_cpu'),", $values);
     }
 
     public function testQl09TheBulkButtonsAreEnabledInTheMarkupAndTheSelectionIsNamed(): void

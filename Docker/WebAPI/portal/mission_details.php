@@ -84,6 +84,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         $action = request_string($_POST, 'action');
+        if ($action === 'update' && ($continueVersion = edit_conflict_continue_version($_POST)) !== null) {
+            // F5 (QL-01/QL-03 B): adopt the version the comparison showed; nothing is
+            // saved here, only the next ordinary save writes.
+            form_remember('update', edit_conflict_continue_state($_POST, $continueVersion), []);
+            redirect_to($detailsUrl);
+        }
         if ($action === 'update') {
             $name = request_trimmed($_POST, 'mission_name');
             if ($isTemplate && $name !== '' && !mission_name_is_template($name)) {
@@ -92,21 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$isTemplate && mission_name_is_template($name)) {
                 throw new ValidationException(['mission_name' => __t('mission_details.err_mission_prefix')]);
             }
-            $missionChanges = [
-                'mission_name' => $name,
-                'mission_notes' => request_string($_POST, 'mission_notes'),
-                'wds_vlan' => request_string($_POST, 'wds_vlan'),
-                'hypervisor_datastorage' => request_string($_POST, 'hypervisor_datastorage'),
-                'hypervisor_datacenter' => request_string($_POST, 'hypervisor_datacenter'),
-                'domain' => request_string($_POST, 'domain'),
-                // Autostart defaults (ADR-0025). The checkboxes ship a hidden "0",
-                // so an unchecked box arrives as 0 rather than as an absent key.
-                'autostart_enabled' => request_string($_POST, 'autostart_enabled', '0'),
-                'autostart_start_delay' => request_string($_POST, 'autostart_start_delay'),
-                'autostart_stop_delay' => request_string($_POST, 'autostart_stop_delay'),
-                'autostart_stop_action' => request_string($_POST, 'autostart_stop_action'),
-                'autostart_wait_for_heartbeat' => request_string($_POST, 'autostart_wait_for_heartbeat', '0'),
-            ];
+            // One column list for this save and the conflict comparison (lib/mission_details_page.php).
+            $missionChanges = mission_details_submitted_changes($_POST);
             // $mission holds the pre-update row (loaded before the POST branch), so
             // the diff names which columns changed and from what: this is the entry
             // that answers "who moved the mission to the wrong datastore". Notes are
@@ -190,6 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $viewState = mission_details_view_state($connection, $missionId, $mission, $isTemplate);
+$editConflict = can('missions.write', $user) ? mission_details_conflict($mission) : null;
 ['vlans' => $vlans, 'storedVlan' => $storedVlan, 'wdsImpactTotal' => $wdsImpactTotal,
     'wdsImpactCounts' => $wdsImpactCounts,
     'datacenterOptions' => $datacenterOptions, 'datastoreOptions' => $datastoreOptions,
@@ -222,10 +216,12 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
         <p class="muted"><?php echo h(__t('mission_details.export_hint')); ?></p>
     </section>
 
+    <?php if ($editConflict !== null) { edit_conflict_render($editConflict, 'mission-settings-form'); } ?>
+
     <section class="panel">
         <?php // The name is the page heading now; this one names the section. ?>
         <h2><?php echo h($isTemplate ? __t('mission_details.heading_settings_template') : __t('mission_details.heading_settings_mission')); ?></h2>
-        <form class="stack" method="post" action="<?php echo h($detailsUrl); ?>"<?php echo can('missions.write', $user) ? form_unsaved_attrs('mission-settings', form_has_state('update')) : ''; ?>>
+        <form class="stack" id="mission-settings-form" method="post" action="<?php echo h($detailsUrl); ?>"<?php echo can('missions.write', $user) ? form_unsaved_attrs('mission-settings', form_has_state('update')) : ''; ?>>
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="update">
             <?php // The token the save was submitted with, not the row's current one: after a conflict the next save must fail again until the page is reloaded (QL-01). ?>

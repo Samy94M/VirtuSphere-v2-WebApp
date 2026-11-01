@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
+require_once dirname(__DIR__, 2) . '/lib/vm_edit_conflict.php';
 
 /**
  * Two operators editing the same VM. repo_save_vm() takes an expected version
@@ -197,6 +198,103 @@ final class VmEditConflictTest extends TestCase
         self::assertSame('4', (string) repo_scalar($this->db, 'SELECT vm_cpu FROM deploy_vms WHERE id = ?', 'i', [$vmId]));
     }
 
+    /**
+     * QL-01/QL-03 B: the comparison after a refused save. The POST is built the
+     * way the editor renders the stored bundle, so an untouched form must match
+     * the stored row exactly; a second writer's change then shows up as exactly
+     * its field and its child-table count. The continue step adopts the shown
+     * version: a save with it goes through, and a change made after the
+     * comparison was shown makes that save fail again.
+     */
+    public function testConflictComparisonNamesOnlyTheChangedFieldsAndChildCounts(): void
+    {
+        [$missionId, $vmId] = $this->seedVm('cfl-diff');
+        $mission = repo_get_mission($this->db, $missionId);
+        $post = $this->postFromBundle(repo_get_vm_bundle($this->db, $vmId));
+        $opened = $post['edit_version'];
+
+        self::assertSame([], vm_edit_conflict_rows($post, repo_get_vm_bundle($this->db, $vmId), $mission), 'an untouched form differs from nothing');
+
+        // The second operator saves CPU 4 and a second disk.
+        repo_save_vm($this->db, $missionId, $vmId, $this->payload('cfl-diff', ['vm_cpu' => '4']),
+            [['id' => 0, 'ip' => '', 'subnet' => '', 'gateway' => '', 'dns1' => '', 'dns2' => '', 'vlan' => 'phpunit-vlan', 'mode' => 'dhcp', 'type' => 'vmxnet3']],
+            [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thin'], ['disk_name' => 'Data', 'disk_size' => 10, 'disk_type' => 'thin']],
+            [], $opened, $this->userId, true);
+        $post['vm_notes'] = 'first writer draft';
+
+        $conflict = vm_edit_conflict($this->db, $vmId, $mission, $post, $opened, false);
+        self::assertNotNull($conflict);
+        self::assertSame(VIRTUSPHERE_EDIT_CONFLICT_MODE_CONFLICT, $conflict['mode']);
+        self::assertSame($this->editVersion($vmId), $conflict['version'], 'the comparison carries the version it shows');
+        self::assertSame([
+            [__t('vm_edit.label_cpu'), '2', '4'],
+            [__t('vm_edit.label_notes'), 'first writer draft', __t('edit_conflict.empty')],
+            [__t('vm_edit.heading_disks'), __t('edit_conflict.row_count', ['count' => 1]), __t('edit_conflict.row_count', ['count' => 2])],
+        ], array_map(static fn (array $row): array => [$row['label'], $row['submitted'], $row['current']], $conflict['rows']));
+
+        // Continue adopts the shown version; nothing was written by it.
+        $shown = $conflict['version'];
+        $continued = vm_edit_conflict($this->db, $vmId, $mission, $post, $shown, true);
+        self::assertSame(VIRTUSPHERE_EDIT_CONFLICT_MODE_CONTINUED, $continued['mode']);
+        self::assertSame('', (string) repo_get_vm_bundle($this->db, $vmId)['vm_notes']);
+
+        // A third save after the comparison was shown: the adopted version is stale again.
+        $this->saveVm($missionId, $vmId, 'cfl-diff', ['vm_cpu' => '6'], $shown, true);
+        try {
+            $this->saveVm($missionId, $vmId, 'cfl-diff', ['vm_notes' => 'first writer draft'], $shown, true);
+            self::fail('A change after the comparison must refuse the continued save.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('changed by another user', $error->getMessage());
+        }
+        self::assertSame(VIRTUSPHERE_EDIT_CONFLICT_MODE_CONFLICT, vm_edit_conflict($this->db, $vmId, $mission, $post, $shown, true)['mode']);
+
+        // With the current version the continued input is saved.
+        $this->saveVm($missionId, $vmId, 'cfl-diff', ['vm_notes' => 'first writer draft'], $this->editVersion($vmId), true);
+        self::assertSame('first writer draft', (string) repo_get_vm_bundle($this->db, $vmId)['vm_notes']);
+    }
+
+    /**
+     * The editor POST for a stored bundle, field by field as vm_edit_panels.php
+     * renders it (RAM in MB, an inheriting delay as an empty field).
+     *
+     * @param array<string, mixed> $vm
+     * @return array<string, mixed>
+     */
+    private function postFromBundle(array $vm): array
+    {
+        $delay = static fn (string $key): string => (int) $vm[$key] >= 0 ? (string) (int) $vm[$key] : '';
+
+        return [
+            'edit_version' => (string) $vm['edit_version'],
+            'vm_name' => (string) $vm['vm_name'],
+            'vm_hostname' => (string) $vm['vm_hostname'],
+            'vm_domain' => (string) $vm['vm_domain'],
+            'vm_os' => (string) $vm['vm_os'],
+            'vm_ram' => (string) $vm['vm_ram'],
+            'vm_ram_unit' => 'mb',
+            'vm_cpu' => (string) $vm['vm_cpu'],
+            'vm_disk' => (string) ($vm['vm_disk'] ?? ''),
+            'vm_datastore' => (string) ($vm['vm_datastore'] ?? ''),
+            'vm_datacenter' => (string) ($vm['vm_datacenter'] ?? ''),
+            'vm_guest_id' => (string) $vm['vm_guest_id'],
+            'vm_notes' => (string) ($vm['vm_notes'] ?? ''),
+            'cpu_hotplug' => (string) $vm['cpu_hotplug'],
+            'ram_hotplug' => (string) $vm['ram_hotplug'],
+            'autostart_enabled' => (string) $vm['autostart_enabled'],
+            'autostart_start_delay' => $delay('autostart_start_delay'),
+            'autostart_stop_delay' => $delay('autostart_stop_delay'),
+            'interfaces' => array_map(static fn (array $row): array => [
+                'id' => (string) $row['id'], 'ip' => (string) ($row['ip'] ?? ''), 'subnet' => (string) ($row['subnet'] ?? ''),
+                'gateway' => (string) ($row['gateway'] ?? ''), 'dns1' => (string) ($row['dns1'] ?? ''), 'dns2' => (string) ($row['dns2'] ?? ''),
+                'vlan' => (string) ($row['vlan'] ?? ''), 'mode' => (string) ($row['mode'] ?? ''), 'type' => (string) ($row['type'] ?? ''),
+            ], $vm['interfaces']),
+            'disks' => array_map(static fn (array $row): array => [
+                'disk_name' => (string) $row['disk_name'], 'disk_size' => (string) $row['disk_size'], 'disk_type' => (string) $row['disk_type'],
+            ], $vm['disks']),
+            'packages' => array_map(static fn (array $row): string => (string) $row['id'], $vm['packages']),
+        ];
+    }
+
     /** @return array{0:int, 1:int} mission id, vm id */
     private function seedVm(string $vmName): array
     {
@@ -213,7 +311,24 @@ final class VmEditConflictTest extends TestCase
 
     private function saveVm(int $missionId, ?int $vmId, string $name, array $overrides, string $expectedVersion, bool $requireVersion = false): int
     {
-        $payload = $overrides + [
+        return repo_save_vm(
+            $this->db,
+            $missionId,
+            $vmId,
+            $this->payload($name, $overrides),
+            [['id' => 0, 'ip' => '', 'subnet' => '', 'gateway' => '', 'dns1' => '', 'dns2' => '', 'vlan' => 'phpunit-vlan', 'mode' => 'dhcp', 'type' => 'vmxnet3']],
+            [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thin']],
+            [],
+            $expectedVersion,
+            $this->userId,
+            $requireVersion
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function payload(string $name, array $overrides): array
+    {
+        return $overrides + [
             'vm_name' => $name,
             'vm_hostname' => 'cflhost',
             'vm_domain' => 'phpunit.example.local',
@@ -227,19 +342,6 @@ final class VmEditConflictTest extends TestCase
             'cpu_hotplug' => '1',
             'ram_hotplug' => '1',
         ];
-
-        return repo_save_vm(
-            $this->db,
-            $missionId,
-            $vmId,
-            $payload,
-            [['id' => 0, 'ip' => '', 'subnet' => '', 'gateway' => '', 'dns1' => '', 'dns2' => '', 'vlan' => 'phpunit-vlan', 'mode' => 'dhcp', 'type' => 'vmxnet3']],
-            [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thin']],
-            [],
-            $expectedVersion,
-            $this->userId,
-            $requireVersion
-        );
     }
 
     private function cleanupTestRows(): void
