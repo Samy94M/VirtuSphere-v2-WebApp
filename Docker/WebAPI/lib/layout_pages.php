@@ -29,6 +29,7 @@ const VIRTUSPHERE_LAYOUT_PAGES = [
     'users.php',
     'vlans.php',
     'vm_edit.php',
+    'vm_history.php',
     'vm_overview.php',
     'vms.php',
 ];

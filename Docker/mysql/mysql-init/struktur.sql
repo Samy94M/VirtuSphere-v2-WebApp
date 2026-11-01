@@ -329,6 +329,18 @@ CREATE TABLE IF NOT EXISTS deploy_logs (
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- SP3 (migration 0069): the VMs an audit row names in its context `vm_ids`
+-- (bulk change, convergence sweep), written by audit_event() with its row. The
+-- foreign key follows the log retention; no key to deploy_vms, because a bulk
+-- delete names VMs that are gone.
+CREATE TABLE IF NOT EXISTS deploy_log_vm_refs (
+    vm_id INT NOT NULL,
+    log_id INT NOT NULL,
+    PRIMARY KEY (vm_id, log_id),
+    INDEX deploy_log_vm_refs_log (log_id),
+    CONSTRAINT fk_deploy_log_vm_refs_log FOREIGN KEY (log_id) REFERENCES deploy_logs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS deploy_os (
     id INT AUTO_INCREMENT PRIMARY KEY,
     os_name VARCHAR(255) NOT NULL,

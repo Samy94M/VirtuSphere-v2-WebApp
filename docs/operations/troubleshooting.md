@@ -11,6 +11,8 @@ Dieses Runbook beginnt beim sichtbaren Symptom. Es ersetzt weder das Auftragspro
 5. Aufbewahrung mitdenken. Auditzeilen leben länger als Auftragsprotokolle, und ein missionsloser Systemauftrag wird nach eigenem Zeitplan bereinigt. Zu einer älteren Anfrage stehen deshalb legitim Auditzeilen ohne zugehörigen Auftrag; die Protokollseite sagt das an dieser Stelle ausdrücklich. Das bedeutet nicht, dass die Anfrage nichts eingereiht hat.
 6. Erst die erste Maßnahme aus der Tabelle ausführen. Ein Neustart ohne vorherigen Nachweis löscht flüchtige Hinweise und ist keine Diagnose.
 
+Betrifft das Symptom eine einzelne VM, ist ihre **Chronik** der Einstieg: im VM-Editor unter **Zeitleiste** den Link **Ganze Chronik** öffnen. Sie zeigt Status, Aufträge, Paketläufe und Client-Meldungen der VM in einer Reihenfolge, für Inhaber von `users.manage` zusätzlich das Änderungsprotokoll samt Sammeländerungen und Konvergenz-Sweep (Migration 0069). Quelle und Zeitraum lassen sich eingrenzen; jede Quelle nennt ihre Aufbewahrung, und eine nicht lesbare Quelle wird ausdrücklich gemeldet statt still zu fehlen.
+
 Hängt eine VM oder ein Paket an einer MECM-Aufgabe, zeigen die Diagramme in [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md), an welchem Schritt die Aufgabe stehen bleibt und welche Ursache sie dann meldet. Für Bereitstellungsaufträge leistet das [Bereitstellung: Abläufe](deploy-flows.md), für die Karten des Systemstatus [Systemstatus: Prüfungen](system-status-checks.md).
 
 ## Symptomtabelle

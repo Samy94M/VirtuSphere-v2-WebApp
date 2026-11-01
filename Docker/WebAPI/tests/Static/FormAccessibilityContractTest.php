@@ -27,6 +27,7 @@ final class FormAccessibilityContractTest extends TestCase
                 'lib/system_status_esxi_panels.php',
                 'lib/users_accounts_panels.php',
                 'lib/users_directory_panels.php',
+                'lib/vm_history_page.php',
                 'lib/vm_edit_names.php',
                 'lib/vm_edit_panels.php',
                 'lib/vm_edit_ram.php',

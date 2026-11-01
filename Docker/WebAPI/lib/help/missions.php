@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vm_phase.php';
 require_once __DIR__ . '/../help_vm_path.php';
+require_once __DIR__ . '/../vm_timeline.php';
 ?>
     <div class="stack" id="panel-missions" role="tabpanel" aria-labelledby="tab-missions" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -107,6 +108,9 @@ require_once __DIR__ . '/../help_vm_path.php';
                     ])); ?></li>
                 <?php } ?>
             </ul>
+            <h3><?php echo h(__t('help_missions.status_history_heading')); ?></h3>
+            <p><?php echo h(__t('help_missions.status_history_p1', ['limit' => VIRTUSPHERE_VM_TIMELINE_LIMIT])); ?></p>
+            <p><?php echo h(__t('help_missions.status_history_p2')); ?></p>
             <h3><?php echo h(__t('help_missions.status_axes_heading')); ?></h3>
             <p><?php echo h(__t('help_missions.status_axes_p1')); ?></p>
             <ul>

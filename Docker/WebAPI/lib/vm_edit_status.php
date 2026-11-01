@@ -13,6 +13,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/vm_phase.php';
 require_once __DIR__ . '/vm_phase_cells.php';
 require_once __DIR__ . '/vm_timeline.php';
+require_once __DIR__ . '/vm_history.php';
 require_once __DIR__ . '/vm_inventory_observation.php';
 require_once __DIR__ . '/deploy_display.php';
 require_once __DIR__ . '/deploy_mode_labels.php';
@@ -167,60 +168,76 @@ function vm_edit_inventory_text(array $observation): string
 }
 
 /**
- * The VM timeline (plan ST-2, section 4.4): status events, deploy jobs, package runs
- * and client events in one table, open without a click and hidden without entries.
- * The caller owns the visibility guard like the panel above.
+ * The event cell of one timeline entry (editor and chronicle, SP3). The job text
+ * links into the job log only for a reader with deploy.run, the permission
+ * deploy_log.php asks for (F2); everyone else reads the same words without a link.
+ * The caller decides that permission once per page.
  *
- * @param array{entries:list<array<string,mixed>>,truncated:bool} $timeline from virtusphere_vm_timeline()
+ * @param array{kind:string,row:array<string,mixed>} $entry from virtusphere_vm_timeline() or virtusphere_vm_history_merge()
  * @param array<string, mixed> $workContext
  */
-function render_vm_status_history(array $timeline, int $missionId, int $vmId, array $workContext): void
+function vm_timeline_event_html(array $entry, int $missionId, int $vmId, array $workContext, bool $canOpenJobLog): string
 {
-    if ($timeline['entries'] === []) {
-        return;
-    }
     $link = static fn (string $url, string $text): string => '<a href="' . h($url) . '">' . h($text) . '</a>';
-    $clientEvent = static fn (string $event): string => match ($event) {
+    $jobLink = static fn (int $jobId, string $text): string => $canOpenJobLog ? $link(deploy_job_log_url($jobId), $text) : h($text);
+    $row = (array) $entry['row'];
+    $jobId = (int) ($row['id'] ?? 0);
+    $mode = (string) ($row['mode'] ?? '');
+    $package = trim((string) ($row['project_name'] ?? '') . ' ' . (string) ($row['package_version'] ?? ''));
+    $runUrl = static fn (): string => package_report_detail_url($missionId, $vmId, (string) ($row['run_id'] ?? ''), $workContext);
+    $failed = (int) ($row['reported_failures'] ?? 0) > 0 || (string) ($row['wrapper_result'] ?? '') === 'failed';
+    $detail = (string) ($row['detail'] ?? '');
+    $note = (string) $entry['kind'] === VIRTUSPHERE_VM_TIMELINE_STATUS
+        ? virtusphere_vm_status_note_text((string) ($row['note'] ?? ''), Lang::locale())
+        : '';
+    $clientEvent = match ((string) ($row['event'] ?? '')) {
         VIRTUSPHERE_CLIENT_EVENT_STARTED => __t('vm_timeline.client_started'),
         VIRTUSPHERE_CLIENT_EVENT_FINISHED => __t('vm_timeline.client_finished'),
         VIRTUSPHERE_CLIENT_EVENT_FAILED => __t('vm_timeline.client_failed'),
         default => __t('vm_timeline.client_unknown'),
     };
-    $event = static function (array $entry) use ($missionId, $vmId, $workContext, $link, $clientEvent): string {
-        $row = (array) $entry['row'];
-        $jobId = (int) ($row['id'] ?? 0);
-        $mode = (string) ($row['mode'] ?? '');
-        $package = trim((string) ($row['project_name'] ?? '') . ' ' . (string) ($row['package_version'] ?? ''));
-        $runUrl = static fn (): string => package_report_detail_url($missionId, $vmId, (string) ($row['run_id'] ?? ''), $workContext);
-        $failed = (int) ($row['reported_failures'] ?? 0) > 0 || (string) ($row['wrapper_result'] ?? '') === 'failed';
-        $detail = (string) ($row['detail'] ?? '');
-        $note = (string) $entry['kind'] === VIRTUSPHERE_VM_TIMELINE_STATUS
-            ? virtusphere_vm_status_note_text((string) ($row['note'] ?? ''), Lang::locale())
-            : '';
 
-        return match ((string) $entry['kind']) {
-            VIRTUSPHERE_VM_TIMELINE_STATUS => lifecycle_badge((string) ($row['lifecycle_state'] ?? ''))
-                . ' ' . mecm_sync_badge((string) ($row['mecm_sync_state'] ?? ''))
-                . ($note === '' ? '' : ' <span>' . h($note) . '</span>'),
-            VIRTUSPHERE_VM_TIMELINE_JOB_STARTED => $link(deploy_job_log_url($jobId), $mode === ''
-                ? __t('vm_timeline.job_started_no_mode', ['id' => $jobId])
-                : __t('vm_timeline.job_started', ['id' => $jobId, 'mode' => deploy_mode_label($mode)])),
-            VIRTUSPHERE_VM_TIMELINE_JOB_FINISHED => $link(deploy_job_log_url($jobId), __t('vm_timeline.job_finished', ['id' => $jobId]))
-                . ' ' . deploy_job_status_badge((string) ($row['status'] ?? '')),
-            VIRTUSPHERE_VM_TIMELINE_PACKAGE_RECEIVED => $link($runUrl(), __t('vm_timeline.package_received', ['package' => $package])),
-            VIRTUSPHERE_VM_TIMELINE_PACKAGE_COMPLETED => $link($runUrl(), __t('vm_timeline.package_completed', ['package' => $package]))
-                . ' ' . ($failed
-                    ? portal_badge('warning', __t('vm_timeline.package_failed'))
-                    : portal_badge('success', __t('vm_timeline.package_ok'))),
-            VIRTUSPHERE_VM_TIMELINE_CLIENT => h(client_phase_label((string) ($row['phase'] ?? '')) . ': ' . $clientEvent((string) ($row['event'] ?? '')))
-                . ($detail === '' ? '' : ' <span class="muted">' . h($detail) . '</span>'),
-            default => '',
-        };
+    return match ((string) $entry['kind']) {
+        VIRTUSPHERE_VM_TIMELINE_STATUS => lifecycle_badge((string) ($row['lifecycle_state'] ?? ''))
+            . ' ' . mecm_sync_badge((string) ($row['mecm_sync_state'] ?? ''))
+            . ($note === '' ? '' : ' <span>' . h($note) . '</span>'),
+        VIRTUSPHERE_VM_TIMELINE_JOB_STARTED => $jobLink($jobId, $mode === ''
+            ? __t('vm_timeline.job_started_no_mode', ['id' => $jobId])
+            : __t('vm_timeline.job_started', ['id' => $jobId, 'mode' => deploy_mode_label($mode)])),
+        VIRTUSPHERE_VM_TIMELINE_JOB_FINISHED => $jobLink($jobId, __t('vm_timeline.job_finished', ['id' => $jobId]))
+            . ' ' . deploy_job_status_badge((string) ($row['status'] ?? '')),
+        VIRTUSPHERE_VM_TIMELINE_PACKAGE_RECEIVED => $link($runUrl(), __t('vm_timeline.package_received', ['package' => $package])),
+        VIRTUSPHERE_VM_TIMELINE_PACKAGE_COMPLETED => $link($runUrl(), __t('vm_timeline.package_completed', ['package' => $package]))
+            . ' ' . ($failed
+                ? portal_badge('warning', __t('vm_timeline.package_failed'))
+                : portal_badge('success', __t('vm_timeline.package_ok'))),
+        VIRTUSPHERE_VM_TIMELINE_CLIENT => h(client_phase_label((string) ($row['phase'] ?? '')) . ': ' . $clientEvent)
+            . ($detail === '' ? '' : ' <span class="muted">' . h($detail) . '</span>'),
+        default => '',
     };
+}
+
+/**
+ * The VM timeline (plan ST-2, section 4.4): status events, deploy jobs, package runs
+ * and client events in one table, open without a click and hidden without entries.
+ * The caller owns the visibility guard like the panel above. The whole chronicle
+ * with filters and paging is its own page (SP3, F3), linked from here.
+ *
+ * @param array{entries:list<array<string,mixed>>,truncated:bool} $timeline from virtusphere_vm_timeline()
+ * @param array<string, mixed> $workContext
+ */
+function render_vm_status_history(array $timeline, int $missionId, int $vmId, array $workContext, ?bool $canOpenJobLog = null): void
+{
+    if ($timeline['entries'] === []) {
+        return;
+    }
+    $canOpenJobLog ??= can('deploy.run');
+    $event = static fn (array $entry): string => vm_timeline_event_html($entry, $missionId, $vmId, $workContext, $canOpenJobLog);
     ?>
         <section class="panel" aria-labelledby="vm-timeline-heading">
             <h2 id="vm-timeline-heading"><?php echo h(__t('vm_timeline.heading')); ?></h2>
             <p class="muted"><?php echo h(__t('vm_timeline.hint', ['days' => VIRTUSPHERE_STATUS_EVENT_RETENTION_DAYS])); ?></p>
+            <p><a href="<?php echo h(vm_history_url($missionId, $vmId, $workContext)); ?>" data-vm-history-link><?php echo h(__t('vm_history.open_full')); ?></a></p>
             <?php if ($timeline['truncated']) { ?>
                 <p class="muted"><?php echo h(__t('vm_timeline.truncated', ['limit' => VIRTUSPHERE_VM_TIMELINE_LIMIT])); ?></p>
             <?php } ?>

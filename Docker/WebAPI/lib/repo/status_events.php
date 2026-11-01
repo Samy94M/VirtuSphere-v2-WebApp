@@ -98,7 +98,7 @@ function repo_vm_status_events(mysqli $db, int $vmId, int $limit = VIRTUSPHERE_S
     require_once __DIR__ . '/helpers.php';
     $limit = max(1, min(200, $limit));
     $stmt = $db->prepare(
-        'SELECT e.lifecycle_state, e.mecm_sync_state, e.legacy_status, e.note, e.created_at, u.name AS actor_name
+        'SELECT e.id, e.lifecycle_state, e.mecm_sync_state, e.legacy_status, e.note, e.created_at, u.name AS actor_name
          FROM deploy_vm_status_events e
          LEFT JOIN deploy_users u ON u.id = e.created_by
          WHERE e.vm_id = ?

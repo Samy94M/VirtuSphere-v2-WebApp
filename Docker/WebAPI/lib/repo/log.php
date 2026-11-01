@@ -6,6 +6,7 @@ require_once __DIR__ . '/../constants.php';
 require_once __DIR__ . '/../audit_registry.php';
 require_once __DIR__ . '/../audit_presenter.php';
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/audit_vm_refs.php';
 // log_category_labels()/log_tab_labels() call __t(). Every portal caller has the
 // bootstrap, but this module is also reachable from a CLI entrypoint that has
 // none: lib/seed.php loads db.php, whose error handler requires this file to
@@ -60,7 +61,8 @@ function audit_event(
         $contextJson
     );
 
-    return $stmt->execute();
+    // SP3: a context that names VMs (`vm_ids`) is indexed with its row (migration 0069).
+    return audit_vm_refs_execute($connection, $stmt, $context);
 }
 
 /**
@@ -79,20 +81,6 @@ function audit_event_required(mysqli $connection, string $eventCode, string $obj
     if (!audit_event($connection, $eventCode, $objectType, $objectId, $result, $context, $userId, $ip)) {
         throw new RuntimeException('Audit event ' . $eventCode . ' could not be stored; the change was rolled back.');
     }
-}
-
-/** @param array<string,mixed> $context */
-function audit(
-    mysqli $connection,
-    string $eventCode,
-    string $objectType,
-    string|int|null $objectId,
-    string $result,
-    array $context = [],
-    ?int $userId = null,
-    ?string $ip = null
-): bool {
-    return audit_event($connection, $eventCode, $objectType, $objectId, $result, $context, $userId, $ip);
 }
 
 function log_category_label(string $category): string
