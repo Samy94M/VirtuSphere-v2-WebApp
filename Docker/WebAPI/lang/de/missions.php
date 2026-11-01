@@ -20,6 +20,10 @@ return [
     'th_datastore' => 'Datastore',
     'th_datacenter' => 'Datacenter',
     'th_attention' => 'Prüfung fällig',
+    // Phasenspalte der Missionsliste (SP4 R1): je erreichter Phase die Zahl der VMs.
+    'th_phases' => 'Phasen',
+    'phase_count' => ':phase: :count',
+    'phases_link_title' => 'VM-Liste nach Phase sortiert öffnen',
     'attention_badge_one' => ':count VM',
     'attention_badge_many' => ':count VMs',
     'attention_filter_hint' => 'Es werden nur Missionen mit mindestens einer überfälligen VM-Fortschrittsbeobachtung angezeigt.',

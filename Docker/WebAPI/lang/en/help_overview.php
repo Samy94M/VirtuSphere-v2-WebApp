@@ -20,6 +20,7 @@ return [
     'copy_heading' => 'Copy displayed values',
     'copy_p1' => 'Copy buttons are available beside job IDs and correlation IDs, and in a package report beside the link to an attempt, the client log paths and the support copy.',
     'copy_p2' => 'On an HTTP portal or when browser permission is denied, the clipboard may be unavailable. The button then reports the failure without claiming success; the displayed value remains selectable for manual copying.',
+    'dashboard_groups_p1' => 'The "VM check due" tile appears only when something needs checking and gives the number of VMs per reason: "MECM waiting longer than :mecm_hours h", "OS installation longer than :install_hours h", "Job failed" (a job with an unknown outcome counts here too) and "Create unresolved". Each line opens the list with the filter of the same name; its "Finding" column shows the same finding. Templates count in no group. A VM can be in several groups.',
     'link_missions' => 'Go to missions',
     'link_credentials' => 'Go to credentials',
     'link_deploy' => 'Go to deploy',

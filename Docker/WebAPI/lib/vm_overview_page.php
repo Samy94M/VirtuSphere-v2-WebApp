@@ -3,7 +3,8 @@
 declare(strict_types=1);
 
 /**
- * Renderers of the dashboard VM overview: the two dashboard tiles, the filter
+ * Renderers of the dashboard VM overview: the two dashboard tiles and the
+ * "check due" group tile, the filter
  * navigation, the read-only table, its pagination and the one sentence that
  * explains a changed count. Every value is escaped here. The tile link, the filter
  * links and the page links come from vm_overview_url(); the sort headers come from
@@ -18,18 +19,29 @@ require_once __DIR__ . '/vm_urls.php';
 require_once __DIR__ . '/vm_overview.php';
 require_once __DIR__ . '/vm_phase_cells.php';
 
+/**
+ * The name of a filter. A dashboard group, its filter and its list share it
+ * (F6); the hours come from the clock constants, never from the catalog.
+ */
 function vm_overview_filter_label(string $filter): string
 {
-    return $filter === VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING
-        ? __t('vm_overview.filter_mecm_pending')
-        : __t('vm_overview.filter_all');
+    return match ($filter) {
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING => __t('vm_overview.filter_mecm_pending'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_OVERDUE => __t('vm_overview.filter_mecm_overdue', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)]),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_OS_INSTALL_OVERDUE => __t('vm_overview.filter_os_install_overdue', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)]),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_JOB_FAILED => __t('vm_overview.filter_job_failed'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_CREATE_UNCERTAIN => __t('vm_overview.filter_create_uncertain'),
+        default => __t('vm_overview.filter_all'),
+    };
 }
 
 function vm_overview_title(string $filter): string
 {
-    return $filter === VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING
-        ? __t('vm_overview.title_mecm_pending')
-        : __t('vm_overview.title_all');
+    return match ($filter) {
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL => __t('vm_overview.title_all'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING => __t('vm_overview.title_mecm_pending'),
+        default => vm_overview_filter_label($filter),
+    };
 }
 
 /**
@@ -43,9 +55,53 @@ function vm_overview_back_label(string $filter): string
 
 function vm_overview_intro(string $filter): string
 {
-    return $filter === VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING
-        ? __t('vm_overview.intro_mecm_pending')
-        : __t('vm_overview.intro_all');
+    return match ($filter) {
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING => __t('vm_overview.intro_mecm_pending'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_OVERDUE => __t('vm_overview.intro_mecm_overdue', ['hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)]),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_OS_INSTALL_OVERDUE => __t('vm_overview.intro_os_install_overdue', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)]),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_JOB_FAILED => __t('vm_overview.intro_job_failed'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_CREATE_UNCERTAIN => __t('vm_overview.intro_create_uncertain'),
+        default => __t('vm_overview.intro_all'),
+    };
+}
+
+/** The sentence of a list without rows, one per filter. */
+function vm_overview_empty_text(string $filter): string
+{
+    return match ($filter) {
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING => __t('vm_overview.empty_mecm_pending'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_OVERDUE => __t('vm_overview.empty_mecm_overdue'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_OS_INSTALL_OVERDUE => __t('vm_overview.empty_os_install_overdue'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_JOB_FAILED => __t('vm_overview.empty_job_failed'),
+        VIRTUSPHERE_VM_OVERVIEW_FILTER_CREATE_UNCERTAIN => __t('vm_overview.empty_create_uncertain'),
+        default => __t('vm_overview.empty_all'),
+    };
+}
+
+/**
+ * The dashboard's "check due" tile (SP4, F6): one line per group that has hits,
+ * each a link to the list with the same filter and the moment it was counted,
+ * like the other VM tiles. No group with hits, no tile. The tile itself is not
+ * a link, because it holds one per group.
+ *
+ * @param array<string,int> $counts filter => count (repo_vm_overview_attention_counts())
+ */
+function vm_overview_render_attention_tile(array $counts, int $countedAt): void
+{
+    $groups = array_filter($counts, static fn (int $count): bool => $count > 0);
+    if ($groups === []) {
+        return;
+    }
+    ?>
+    <div class="card kpi kpi-groups">
+        <span class="muted" id="kpi-vm-attention"><?php echo h(__t('dashboard.kpi_vm_attention')); ?></span>
+        <ul class="kpi-group-list" aria-labelledby="kpi-vm-attention">
+            <?php foreach ($groups as $filter => $count) { ?>
+                <li><a href="<?php echo h(vm_overview_url((string) $filter, ['snapshot' => ['counted' => $countedAt, 'expected' => $count]])); ?>"><span><?php echo h(vm_overview_filter_label((string) $filter)); ?></span> <span class="kpi-group-count"><?php echo h((string) $count); ?></span></a></li>
+            <?php } ?>
+        </ul>
+    </div>
+    <?php
 }
 
 /**
@@ -155,9 +211,7 @@ function vm_overview_render_table(array $rows, string $filter, string $sort, str
                 </tr>
             <?php } ?>
             <?php if ($rows === []) { ?>
-                <tr><td colspan="7"><?php echo h($filter === VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING
-                    ? __t('vm_overview.empty_mecm_pending')
-                    : __t('vm_overview.empty_all')); ?></td></tr>
+                <tr><td colspan="7"><?php echo h(vm_overview_empty_text($filter)); ?></td></tr>
             <?php } ?>
             </tbody>
         </table>

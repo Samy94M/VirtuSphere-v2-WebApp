@@ -33,6 +33,9 @@ final class PortalClosureAnalysisTest extends TestCase
         rmdir($this->fixture . '/lib');
         rmdir($this->fixture . '/portal');
         rmdir($this->fixture);
+        // The real-repo analysis leaves parsed trees as cyclic garbage; free it
+        // here instead of in whichever later test the engine happens to pick.
+        gc_collect_cycles();
     }
 
     private function put(string $relative, string $source): void

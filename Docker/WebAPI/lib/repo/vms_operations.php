@@ -124,26 +124,17 @@ function repo_restart_vm_progress_watch(mysqli $db, int $missionId, int $vmId, ?
 
 /**
  * The overdue predicate of virtusphere_vm_progress_attention() in SQL, shared
- * by both counts so they cannot drift apart. MECM pending is watched whatever
- * the lifecycle (VT-E1 C); the OS-install clock only for an installing,
- * registered VM.
+ * by both mission counts so they cannot drift apart: either half of
+ * repo_vm_progress_overdue_sql().
  *
  * @return array{0:string,1:string,2:list<int|string>}
  */
 function repo_vm_progress_attention_sql(): array
 {
-    return [
-        '((mecm_sync_state = ? AND mecm_pending_since IS NOT NULL AND mecm_pending_since < DATE_SUB(NOW(), INTERVAL ? SECOND))'
-            . ' OR (lifecycle_state = ? AND mecm_sync_state = ? AND os_install_watch_started_at IS NOT NULL AND os_install_watch_started_at < DATE_SUB(NOW(), INTERVAL ? SECOND)))',
-        'sissi',
-        [
-            VIRTUSPHERE_MECM_SYNC_PENDING,
-            VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS,
-            VIRTUSPHERE_LIFECYCLE_OS_INSTALLING,
-            VIRTUSPHERE_MECM_SYNC_REGISTERED,
-            VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS,
-        ],
-    ];
+    [$mecm, $mecmTypes, $mecmParams] = repo_vm_progress_overdue_sql(VIRTUSPHERE_VM_PROGRESS_MECM_PENDING);
+    [$install, $installTypes, $installParams] = repo_vm_progress_overdue_sql(VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING);
+
+    return ['(' . $mecm . ' OR ' . $install . ')', $mecmTypes . $installTypes, array_merge($mecmParams, $installParams)];
 }
 
 /** Count overdue display-only observations, optionally scoped to one mission. */
@@ -184,6 +175,42 @@ function repo_vm_progress_attention_counts_by_mission(mysqli $db): array
     $counts = [];
     foreach (repo_fetch_all($stmt->get_result()) as $row) {
         $counts[(int) $row['mission_id']] = (int) $row['attention_count'];
+    }
+
+    return $counts;
+}
+
+/**
+ * How far the VMs of each real mission are (SP4 R1): mission id => phase =>
+ * count, phases in chain order (VIRTUSPHERE_VM_PHASES), empty phases left out.
+ * One query over virtusphere_vm_phase_sql(), the exact twin of the PHP phase,
+ * restricted by the VM tile's predicate, so template VMs (which have no phase)
+ * are not counted and the template rule is not written twice.
+ *
+ * @return array<int,array<string,int>>
+ */
+function repo_vm_phase_counts_by_mission(mysqli $db): array
+{
+    [$where, $types, $params] = repo_vm_overview_predicate(VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL);
+    $stmt = $db->prepare(
+        'SELECT v.mission_id, ' . virtusphere_vm_phase_sql('v') . ' AS phase_rank, COUNT(*) AS vm_count'
+        . ' FROM deploy_vms v INNER JOIN deploy_missions m ON m.id = v.mission_id'
+        . ' WHERE ' . $where . ' GROUP BY v.mission_id, phase_rank'
+    );
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+
+    $ranked = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $ranked[(int) $row['mission_id']][(int) $row['phase_rank']] = (int) $row['vm_count'];
+    }
+    $counts = [];
+    foreach ($ranked as $missionId => $byRank) {
+        foreach (VIRTUSPHERE_VM_PHASES as $index => $phase) {
+            if (($byRank[$index + 1] ?? 0) > 0) {
+                $counts[$missionId][$phase] = $byRank[$index + 1];
+            }
+        }
     }
 
     return $counts;

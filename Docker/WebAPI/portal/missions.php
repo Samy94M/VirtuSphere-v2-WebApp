@@ -192,11 +192,7 @@ $rows = array_values(array_filter(getMissions($connection), static function (arr
     return $type === 'templates' ? $isTemplate : !$isTemplate;
 }));
 $attentionOnly = !$isTemplateView && request_string($_GET, 'attention') === '1';
-$attentionCounts = $isTemplateView ? [] : repo_vm_progress_attention_counts_by_mission($connection);
-foreach ($rows as &$missionRow) {
-    $missionRow['progress_attention_count'] = $attentionCounts[(int) $missionRow['id']] ?? 0;
-}
-unset($missionRow);
+$rows = missions_with_vm_counts($connection, $rows, $isTemplateView);
 if ($attentionOnly) {
     $rows = array_values(array_filter($rows, static fn (array $missionRow): bool => (int) $missionRow['progress_attention_count'] > 0));
 }
@@ -342,6 +338,7 @@ layout_header($title, $user, $active, 'missions');
                     if ($attentionOnly) { $missionSortParams['attention'] = '1'; }
                     echo portal_sort_header('missions.php', 'name', __t('common.name'), $sort, $dir, $missionSortParams);
                     echo portal_sort_header('missions.php', 'vms', __t('common.vms'), $sort, $dir, $missionSortParams);
+                    if (!$isTemplateView) { echo '<th>' . h(__t('missions.th_phases')) . '</th>'; }
                     echo portal_sort_header('missions.php', 'attention', __t('missions.th_attention'), $sort, $dir, $missionSortParams);
                 ?><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
                 <tbody>
@@ -353,6 +350,7 @@ layout_header($title, $user, $active, 'missions');
                             <?php } ?>
                         </td>
                         <td><?php echo h((string) ($mission['vm_count'] ?? 0)); ?></td>
+                        <?php if (!$isTemplateView) { ?><td><?php echo missions_phase_cell($mission, $workContext); ?></td><?php } ?>
                         <td><?php $attentionCount = (int) ($mission['progress_attention_count'] ?? 0); echo $attentionCount > 0
                             ? portal_badge('warning', __t($attentionCount === 1 ? 'missions.attention_badge_one' : 'missions.attention_badge_many', ['count' => $attentionCount]))
                             : '&mdash;'; ?></td>
@@ -389,7 +387,7 @@ layout_header($title, $user, $active, 'missions');
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if ($rows === []) { ?><tr><td colspan="5"><?php echo missions_empty_list_html($attentionOnly, $isTemplateView, can('missions.write', $user)); ?></td></tr><?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="<?php echo $isTemplateView ? '5' : '6'; ?>"><?php echo missions_empty_list_html($attentionOnly, $isTemplateView, can('missions.write', $user)); ?></td></tr><?php } ?>
                 </tbody>
             </table>
         </div>

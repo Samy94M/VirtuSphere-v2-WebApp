@@ -34,6 +34,10 @@ declare(strict_types=1);
         <section class="panel" id="help-dashboard-counts">
             <h2><?php echo h(__t('help_overview.dashboard_counts_heading')); ?></h2>
             <p><?php echo h(__t('help_overview.dashboard_counts_p1')); ?></p>
+            <p><?php echo h(__t('help_overview.dashboard_groups_p1', [
+                'mecm_hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
+                'install_hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
+            ])); ?></p>
         </section>
 
         <section class="panel">

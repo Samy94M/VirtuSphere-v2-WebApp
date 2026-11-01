@@ -297,6 +297,35 @@
     color: var(--info);
 }
 
+/* The "check due" tile (SP4, F6): one line per group, each a link with its
+   name and its count. The tile itself is no link, so each line carries the
+   hover and focus a link card has. */
+.kpi-group-list {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.kpi-group-list a {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-weight: 700;
+}
+
+.kpi-group-count {
+    color: var(--warning);
+    font-size: 20px;
+    font-weight: 800;
+}
+
+.kpi-groups {
+    align-content: start;
+}
+
 /* The dashboard's tile section has a fixed column count, so its tiles do not
    fall into an auto-fit row of four or five. The shared .grid stays auto-fit
    for the other pages. The steps use the System status strip's breakpoints. */

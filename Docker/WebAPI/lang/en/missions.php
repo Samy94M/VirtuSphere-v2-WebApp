@@ -20,6 +20,10 @@ return [
     'th_datastore' => 'Datastore',
     'th_datacenter' => 'Datacenter',
     'th_attention' => 'Check due',
+    // Phase column of the mission list (SP4 R1): the number of VMs per reached phase.
+    'th_phases' => 'Phases',
+    'phase_count' => ':phase: :count',
+    'phases_link_title' => 'Open the VM list sorted by phase',
     'attention_badge_one' => ':count VM',
     'attention_badge_many' => ':count VMs',
     'attention_filter_hint' => 'Only missions with at least one overdue VM progress observation are shown.',

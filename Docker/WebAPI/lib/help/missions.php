@@ -134,6 +134,7 @@ require_once __DIR__ . '/../vm_timeline.php';
             <p><?php echo h(__t('help_missions.badges_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_missions.badge_mission_attention')); ?></li>
+                <li><?php echo h(__t('help_missions.badge_mission_phases')); ?></li>
                 <li><?php echo h(__t('help_missions.badge_vm_attention', [
                     'mecm_hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
                     'install_hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),

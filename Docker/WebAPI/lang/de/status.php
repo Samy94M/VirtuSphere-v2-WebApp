@@ -110,4 +110,23 @@ return [
     'finding_unknown' => 'Unbekannter Befund',
     'finding_more' => '+:count',
     'finding_more_title' => ':count weitere Befunde, alle im VM-Editor',
+    // Kurzform je Befund für die Tabellen (SP4, F7): ohne Zeit, Zahl und Namen;
+    // der volle Satz steht im Tooltip und im VM-Editor.
+    'finding_short_create_uncertain' => 'Create ungeklärt',
+    'finding_short_job_failed' => 'Auftrag fehlgeschlagen',
+    'finding_short_create_failed' => 'Nicht angelegt',
+    'finding_short_job_outcome_unknown' => 'Ausgang unbekannt',
+    'finding_short_missing_from_inventory' => 'Nicht im Inventar',
+    'finding_short_job_running' => 'Auftrag läuft',
+    'finding_short_old_mecm_device' => 'Altes MECM-Gerät',
+    'finding_short_mecm_pending_overdue' => 'MECM überfällig',
+    'finding_short_mecm_pending' => 'Wartet auf MECM',
+    'finding_short_powered_off' => 'Ausgeschaltet',
+    'finding_short_os_install_overdue' => 'OS-Installation überfällig',
+    'finding_short_pxe_unwatched' => 'PXE-Beleg fehlt',
+    'finding_short_os_install_watching' => 'Beobachtung läuft',
+    'finding_short_client_phase_failed' => 'Clientphase fehlgeschlagen',
+    'finding_short_client_phase_unconfirmed' => 'Clientphase unbestätigt',
+    'finding_short_package_run_failed' => 'Paketbericht fehlgeschlagen',
+    'finding_short_mecm_sync_failed' => 'MECM-Abgleich offen',
 ];

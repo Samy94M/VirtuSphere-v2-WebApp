@@ -2,6 +2,59 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/vm_phase.php';
+require_once __DIR__ . '/portal_work_context.php';
+
+/**
+ * The per-mission VM counts of the mission list: the overdue observations of
+ * the "check due" column and, for real missions, the phase distribution of the
+ * "phases" column (SP4 R1). A template view reads neither: its VMs have no
+ * progress and no phase.
+ *
+ * @param list<array<string, mixed>> $rows
+ * @return list<array<string, mixed>>
+ */
+function missions_with_vm_counts(mysqli $connection, array $rows, bool $isTemplateView): array
+{
+    $attentionCounts = $isTemplateView ? [] : repo_vm_progress_attention_counts_by_mission($connection);
+    $phaseCounts = $isTemplateView ? [] : repo_vm_phase_counts_by_mission($connection);
+    foreach ($rows as &$missionRow) {
+        $missionRow['progress_attention_count'] = $attentionCounts[(int) $missionRow['id']] ?? 0;
+        $missionRow['phase_counts'] = $phaseCounts[(int) $missionRow['id']] ?? [];
+    }
+    unset($missionRow);
+
+    return $rows;
+}
+
+/**
+ * The phase cell of one mission: one badge per reached phase in chain order,
+ * coloured and named by the phase owners, with its VM count. All badges sit in
+ * one link, because every phase would open the same page: the mission's VM
+ * list sorted by phase, the VMs that lag behind first. No VM, no badge.
+ *
+ * @param array<string, mixed> $mission
+ * @param array<string, mixed> $workContext
+ */
+function missions_phase_cell(array $mission, array $workContext): string
+{
+    $counts = (array) ($mission['phase_counts'] ?? []);
+    if ($counts === []) {
+        return '&mdash;';
+    }
+    $badges = [];
+    foreach ($counts as $phase => $count) {
+        $badges[] = portal_badge(
+            (string) virtusphere_vm_phase_meta((string) $phase)['badge'],
+            __t('missions.phase_count', ['phase' => portal_vm_phase_label((string) $phase), 'count' => (int) $count])
+        );
+    }
+    $href = portal_work_context_vm_list_url((int) $mission['id'], portal_work_context_with_vm_list($workContext, 'status', 'asc'));
+
+    return '<a class="mission-phases" href="' . h($href) . '" title="' . h(__t('missions.phases_link_title')) . '">'
+        . implode(' ', $badges) . '</a>';
+}
+
 /**
  * Stream the already sorted mission list as CSV when the page requests it.
  *
