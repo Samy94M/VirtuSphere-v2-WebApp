@@ -153,3 +153,32 @@ The pin turns a certificate exchange into a visible decision instead of a silent
 change of the recipient. It does not replace the offline private key: a pin that
 names a key nobody holds makes every run fail, which is the intended loud
 failure.
+
+## Amendment 7 (2026-10-31, R1): wait for the final MySQL server, not the init server
+
+The drill waited with `SELECT 1` as root over the socket and then imported the
+dump. The image entrypoint initializes an empty data directory with a temporary
+server started with `--skip-networking` on the same socket. It sets the root
+password first, then creates the database and the app user, runs
+`/docker-entrypoint-initdb.d`, shuts the server down and only then starts the
+final server. A socket probe therefore already succeeds on the temporary server.
+Under load the import fell into the gap before the final server listened
+(`ERROR 2002` in the Release lanes of 2026.10.1 and 2026.10.2). The measurements
+are in the task register, section "Welle R1".
+
+- The drill probes over TCP (`--protocol=TCP -h127.0.0.1 -P3306`). The
+  temporary server has no network, so only the final server answers. The wait
+  has a fixed bound of 300 s; expiry ends the drill as a missing prerequisite
+  (`[restore.mysql-not-ready]`, exit 2) before any import. The import is never
+  retried: a failed import stays a finding, because a retry could hide a
+  partial one.
+- The production restore has the same gap, and a longer one: it restores into
+  an emptied data directory, and Compose mounts `struktur.sql` as init script,
+  so the temporary server also loads the full schema. Step 3 of the runbook
+  starts MySQL with `docker compose up -d --wait mysql`. The service healthcheck
+  (`mysqladmin ping -h 127.0.0.1`) uses TCP and passes only on the final server.
+  The same command applies when a restore follows the runbook of an older
+  source release; every release so far carries this healthcheck.
+- `VirtuSphere.RestoreRoot.Tests.ps1` pins both: the fake-Docker drill imports
+  only after the TCP probe answered, and the runbook waits with `--wait` before
+  the import while the healthcheck stays on TCP.

@@ -95,6 +95,9 @@ NET_ID=""
 MYSQL_ID=""
 SMOKE_ID=""
 SMOKE_PORT=8099
+# Obergrenze fuer die Initialisierung des Wegwerf-MySQL (temporaerer und
+# endgueltiger Server zusammen); ein Ablauf ist eine fehlende Umgebung.
+MYSQL_READY_SECONDS=300
 PW="restore-drill-$(date +%s)-$SUFFIX"
 DRILL_ADMIN_USER="restore-drill-admin"
 DRILL_ADMIN_PASS="Drill-Admin-Passw0rd-$SUFFIX"
@@ -323,14 +326,22 @@ verify_container "$MYSQL_ID" "$MYSQL_NAME" \
 docker start "$MYSQL_ID" >/dev/null \
   || envfail "Wegwerf-MySQL konnte nicht gestartet werden."
 
-echo "Warte auf MySQL im Wegwerf-Container ..."
-# Bewusst SELECT 1 statt mysqladmin ping: waehrend der Image-Initialisierung
-# antwortet ein temporaerer Server, bei dem das Root-Passwort noch nicht gesetzt
-# ist — ping meldet den faelschlich als bereit.
-i=0
-until docker exec "$MYSQL_ID" mysql -uroot -p"$PW" -N -e 'SELECT 1' >/dev/null 2>&1; do
-  i=$((i + 1))
-  [ "$i" -lt 60 ] || envfail "Wegwerf-MySQL wurde nicht bereit."
+echo "Warte auf den endgueltigen MySQL-Server im Wegwerf-Container ..."
+# Der Entrypoint des Images legt die leere Datenbank mit einem temporaeren
+# Server an, der nur ueber den Socket erreichbar ist (--skip-networking). Er
+# setzt dort zuerst das Root-Passwort, legt dann Datenbank und App-User an,
+# faehrt den Server herunter und startet erst danach den endgueltigen. Eine
+# Probe ueber den Socket gelingt deshalb schon am temporaeren Server, und der
+# Import fiel unter Last in die Luecke dazwischen (ERROR 2002; gemessen in R1,
+# ADR-0017 Nachtrag 7). Die Probe fragt darum ueber TCP auf 127.0.0.1, was nur
+# der endgueltige Server beantwortet. SELECT 1 mit dem Root-Passwort statt
+# mysqladmin ping, damit auch das Passwort bewiesen ist.
+ready_deadline=$(( $(date +%s) + MYSQL_READY_SECONDS ))
+until docker exec "$MYSQL_ID" mysql --protocol=TCP -h127.0.0.1 -P3306 -uroot -p"$PW" -N -e 'SELECT 1' >/dev/null 2>&1; do
+  if [ "$(date +%s)" -ge "$ready_deadline" ]; then
+    docker logs --tail 20 "$MYSQL_ID" 1>&2 || true
+    envfail "[restore.mysql-not-ready] Wegwerf-MySQL hat nach $MYSQL_READY_SECONDS s nicht ueber TCP geantwortet; der Dump wurde nicht eingespielt."
+  fi
   sleep 2
 done
 
