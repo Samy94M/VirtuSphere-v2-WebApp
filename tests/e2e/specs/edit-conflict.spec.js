@@ -110,6 +110,11 @@ test.beforeEach(() => cleanup());
 test.afterAll(() => cleanup());
 
 test('mission: comparison, continue without writing, a new conflict, then the deliberate save', async ({ page, browser }, testInfo) => {
+  // Two sessions, seven saves and four database reads share one budget.
+  // WebKit needed 11.6 to 15.8 s alone but timed out at 30.8 s in the release
+  // lane of 2026-11-02, where the whole WebKit run was 1.6 to 1.9 times
+  // slower; the budget, not the flow, decided the outcome under load (FX1).
+  test.setTimeout(90000);
   const ids = seed();
   const other = await browser.newContext({ storageState: ROLES.admin.storageState, baseURL: testInfo.project.use.baseURL });
   const second = await other.newPage();
@@ -168,6 +173,9 @@ test('mission: comparison, continue without writing, a new conflict, then the de
 });
 
 test('VM: comparison with the child count, continue without writing, then the deliberate save', async ({ page, browser }, testInfo) => {
+  // Same budget as the mission flow: WebKit needed 10.5 to 16.6 s alone and
+  // 27.4 s in the same release lane (FX1).
+  test.setTimeout(90000);
   const ids = seed();
   const other = await browser.newContext({ storageState: ROLES.admin.storageState, baseURL: testInfo.project.use.baseURL });
   const second = await other.newPage();

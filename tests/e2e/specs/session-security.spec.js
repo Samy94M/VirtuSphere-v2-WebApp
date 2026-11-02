@@ -199,6 +199,9 @@ test('the countdown sign-out returns to the same page after the next sign-in', a
 });
 
 test('a sign-in never returns to another host', async ({ browser }) => {
+  // Four fresh sessions with a full sign-in each. WebKit needed 22.4 s in the
+  // release lane of 2026-11-02 and 17.2 s alone (FX1).
+  test.setTimeout(90000);
   for (const target of ['https://example.invalid/', '//example.invalid/vms.php', '/\example.invalid', 'logout.php']) {
     const context = await browser.newContext();
     try {

@@ -404,6 +404,11 @@ Two changes address it without hiding anything:
 - All engines run with the same global test timeout of 30 s and expect
   timeout of 7 s (`tests/e2e/playwright.config.js`); the Firefox and WebKit
   projects set no per-project override. Navigation has its own 15 s limit.
+  A long flow that comes above about two thirds of the 30 s on any engine
+  sets its own `test.setTimeout(90000)` with the measured times in a comment
+  instead; the global limit stays. FX1 (02.11.2026) found the whole WebKit
+  run of a release lane 1.6 to 1.9 times slower than the same run alone, so
+  a flow of 12 s alone reached 30.8 s there.
   Retries stay at zero on purpose: a retry
   turns a genuine intermittent defect green and tells nobody, and no spec
   retries a request on its own either. `deploy-blocker-session.spec.js` used to

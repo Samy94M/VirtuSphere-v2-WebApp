@@ -505,6 +505,9 @@ test('Systemstatus overview: the deviation card and its section agree', async ({
 // e2e-covers-cancel: settings.php:save_backup_certificate
 // e2e-covers-cancel: settings.php:remove_backup_certificate
 test('backup encryption: no certificate reports unencrypted backups, a stored one lifts it', async ({ page }) => {
+  // WebKit needed 22.0 s in the release lane of 2026-11-02 and 20.9 s alone;
+  // over two thirds of the global 30 s (FX1).
+  test.setTimeout(90000);
   const libs = ['lib/constants.php', 'lib/repo/settings.php'];
   const stored = () => phpJson(`
 $v = repo_setting_value(db(), VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, '');

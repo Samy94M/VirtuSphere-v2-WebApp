@@ -265,6 +265,9 @@ test('save_ansible_test_interval: persists a changed diagnostic interval', async
 });
 
 test('save_esxi_inventory: multiple Ansible accounts require a valid global selection and cleanup orphans', async ({ page }) => {
+  // WebKit needed 26.0 s in the release lane of 2026-11-02 and 11.4 s alone;
+  // over two thirds of the global 30 s under load (FX1).
+  test.setTimeout(90000);
   const mark = 'e2esel-';
   const before = phpJson(`
 $row = repo_setting(db(), VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);

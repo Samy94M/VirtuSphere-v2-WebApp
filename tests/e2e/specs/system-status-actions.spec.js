@@ -170,6 +170,10 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
 // e2e-covers: system_status.php:reassign_vlan
 // e2e-covers-cancel: system_status.php:reassign_vlan
 test('reassign_vlan: renders only with a real deviation, Cancel keeps assignments, Confirm rewrites them', async ({ page }) => {
+  // Seven POSTs with confirmation dialogs, a reload and nine database calls
+  // share one budget. WebKit needed 26.4 s in the release lane and 28.3 s
+  // alone (FX1, 2026-11-02), too close to the global 30 s.
+  test.setTimeout(90000);
   const seed = phpJson(`
 $db = db();
 $admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
