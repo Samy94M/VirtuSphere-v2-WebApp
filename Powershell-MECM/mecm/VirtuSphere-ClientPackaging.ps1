@@ -266,6 +266,20 @@ function Get-VsClientAppSpecs {
     )
 }
 
+# DetectionType ist der Typname im Deployment-Type-Manifest (SDM-XML). Das Cmdlet
+# New-CMDetectionClauseRegistryKeyValue -PropertyType nimmt dagegen den Enum
+# SettingDataType: String, Integer, DateTime, FloatingPoint, Version, StringArray,
+# Boolean, IntegerArray (MECM 2603, Site-Lauf 02.11.2026). 'Int64' ist dort kein
+# Name und bricht das Anlegen ab; der Registry-Ganzzahltyp heisst 'Integer'.
+function Get-VsDetectionClausePropertyType {
+    param([Parameter(Mandatory)][string]$DetectionType)
+    switch -CaseSensitive ($DetectionType) {
+        'String' { return 'String' }
+        'Int64'  { return 'Integer' }
+        default  { throw ("Unbekannter Detection-Typ '{0}' ohne Cmdlet-Zuordnung." -f $DetectionType) }
+    }
+}
+
 function Assert-VsClientAppSpecGraph {
     param([Parameter(Mandatory)][object[]]$Specs)
     $byName = @{}
@@ -437,8 +451,17 @@ function Get-VsClientDeploymentTypeContractIssues {
             $issues += ('return-code:{0}' -f $expectedCode.Value)
             continue
         }
-        $actualType = Get-VsObjectPropertyText -Object $codeMatches[0] -Names @('CodeType', 'Type')
-        if ($actualType -ne [string]$expectedCode.Type) { $issues += ('return-code-type:{0}' -f $expectedCode.Value) }
+        # Get-CMDeploymentTypeReturnCode liefert ExitCode[]; der Typ ist ein
+        # ExitCodeClass-Wert (Microsoft-Doku). Am Standort CGN (02.11.2026) trug kein
+        # Objekt 'CodeType' oder 'Type', die Codes selbst wurden gefunden. 'Class' ist
+        # der vermutete SDK-Name, die Site-Bestaetigung steht aus. Ein nicht lesbares
+        # Typfeld ist ein eigener Befund, keine Abweichung vom Vertrag.
+        $actualType = Get-VsObjectPropertyText -Object $codeMatches[0] -Names @('CodeType', 'Type', 'Class')
+        if ([string]::IsNullOrEmpty($actualType)) {
+            $issues += ('return-code-type-unreadable:{0}' -f $expectedCode.Value)
+        } elseif ($actualType -ne [string]$expectedCode.Type) {
+            $issues += ('return-code-type:{0}' -f $expectedCode.Value)
+        }
     }
     return @($issues)
 }

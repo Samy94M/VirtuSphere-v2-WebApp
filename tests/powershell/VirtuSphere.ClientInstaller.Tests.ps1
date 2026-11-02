@@ -109,6 +109,10 @@ function Get-VsClientPreflightReport {
     Add-VsFixtureCall 'PREFLIGHT'
     [pscustomobject]@{ CanApply = $true; Findings = @(); PlanId = 'fixture' }
 }
+function Get-VsFileSystemRoot {
+    Add-VsFixtureCall 'FS_ROOT'
+    (Get-Location).ProviderPath
+}
 '@ | Set-Content -LiteralPath (Join-Path $mecmRoot 'VirtuSphere-ClientPreflight.ps1') -Encoding UTF8
 
             $previousLog = $env:VS_CLIENT_INSTALLER_CALL_LOG
@@ -200,6 +204,11 @@ Describe 'Clientinstaller: Manifestabnahme vor MECM' {
         $result.Calls | Should -Contain 'CM_READ Initialize-VsCmSite'
         $result.Calls | Should -Contain 'CM_WRITE New-CMFolder'
         ($result.Output -join "`n") | Should -Match 'fixture-stop-after-first-cm-write'
+        # Datei- und Share-Teil laeuft nach der Site-Initialisierung im Dateisystem.
+        $calls = @($result.Calls)
+        $fsAt = [array]::IndexOf($calls, 'FS_ROOT')
+        $fsAt | Should -BeGreaterThan ([array]::IndexOf($calls, 'CM_READ Initialize-VsCmSite'))
+        $fsAt | Should -BeLessThan ([array]::IndexOf($calls, ('SOURCE ' + $result.DefaultSourceDir)))
     }
 
     It 'weist einen SourceDir-Einzeloverride vor jedem Content-Write ab' {

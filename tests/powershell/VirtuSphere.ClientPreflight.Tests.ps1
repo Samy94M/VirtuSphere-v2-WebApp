@@ -358,6 +358,24 @@ Describe 'MC02 read-only client preflight inventory' {
         $script:InstallerSource | Should -Match 'if \(-not \$preflight.CanApply\) \{\s+throw'
     }
 
+    It 'runs content staging and the UNC manifest check from the file system, then returns before the CM writes' {
+        # Initialize-VsCmSite leaves the session in the CM drive, where Test-Path and
+        # Get-ChildItem cannot resolve UNC paths (seen at site CGN, 02.11.2026).
+        $siteAt = $script:InstallerSource.IndexOf('$siteCode = Initialize-VsCmSite')
+        $pushAt = $script:InstallerSource.IndexOf('Push-Location -LiteralPath (Get-VsFileSystemRoot)')
+        $copyAt = $script:InstallerSource.IndexOf('$dest = Copy-VsClientContent')
+        $compareAt = $script:InstallerSource.IndexOf('Compare-VsClientContentManifest -StagedPath')
+        $popAt = $script:InstallerSource.IndexOf('Pop-Location')
+        $cmWriteAt = $script:InstallerSource.IndexOf('New-CMFolder')
+        $siteAt | Should -BeGreaterThan 0
+        $pushAt | Should -BeGreaterThan $siteAt
+        $copyAt | Should -BeGreaterThan $pushAt
+        $compareAt | Should -BeGreaterThan $copyAt
+        $popAt | Should -BeGreaterThan $compareAt
+        $cmWriteAt | Should -BeGreaterThan $popAt
+        $script:InstallerSource | Should -Match '(?s)\}\s*finally\s*\{\s*Pop-Location\s*\}'
+    }
+
     BeforeEach {
         $script:sourceRoot = Join-Path $TestDrive 'source'
         $script:shareRoot = Join-Path $TestDrive 'share'

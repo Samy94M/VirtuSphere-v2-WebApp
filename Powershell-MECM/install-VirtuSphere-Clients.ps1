@@ -118,6 +118,12 @@ if ($clientLoggingVersion -ne $serverLoggingVersion) {
 }
 
 # --- Content bereitstellen (kein CM noetig, hier scharf pruefbar) -----------
+# Initialize-VsCmSite hat ins CM-Laufwerk gewechselt. Von dort loesen Test-Path
+# und Get-ChildItem keine UNC-Pfade auf (am Standort CGN am 02.11.2026 im
+# Notfalllauf umgangen). Der Datei- und Share-Teil laeuft deshalb wie im
+# Preflight an der Systemlaufwerkswurzel; danach zurueck ins CM-Laufwerk.
+Push-Location -LiteralPath (Get-VsFileSystemRoot)
+try {
 Write-Step 'Stelle Client-Content bereit (Skript + Common + Loggingmodul je Ordner)'
 $stagedContent = @{}
 foreach ($spec in $specs) {
@@ -163,6 +169,9 @@ $writableByUsers = Get-VsDangerousFileSystemAclEntries -Acl (Get-Acl -Path $Pack
 if ($writableByUsers) {
     Write-Hint ("PackagesBase '{0}' ist fuer normale Benutzer beschreibbar. Der Content laeuft als SYSTEM auf den Clients: Schreibrechte auf Administratoren/SYSTEM begrenzen." -f $PackagesBase)
 }
+} finally {
+    Pop-Location
+}
 
 # --- MECM-Site initialisieren -----------------------------------------------
 Write-Step 'MECM-Site aus Preflight bestaetigt'
@@ -188,7 +197,7 @@ function New-VsManagedClientDeploymentType {
     foreach ($val in $Spec.DetectionValues) {
         $clauses += New-CMDetectionClauseRegistryKeyValue -Hive LocalMachine `
             -KeyName $Spec.DetectionKey -ValueName $Spec.DetectionName `
-            -PropertyType $Spec.DetectionType -ExpressionOperator IsEquals `
+            -PropertyType (Get-VsDetectionClausePropertyType -DetectionType $Spec.DetectionType) -ExpressionOperator IsEquals `
             -ExpectedValue $val -Value
     }
     $dtParams = @{
@@ -287,7 +296,8 @@ foreach ($spec in $specs) {
 }
 
 # --- Abhaengigkeitskette verdrahten -----------------------------------------
-# getinfo -> hostname -> staticip -> disks. Every re-run verifies the graph;
+# Chain from Get-VsClientAppSpecs (getInfos -> hostname -> VMDisksOnline ->
+# staticip). Every re-run verifies the graph;
 # otherwise a half-created application remains permanently installable out of
 # order. Existing matching groups are preserved and never duplicated.
 Write-Step 'Pruefe und repariere Abhaengigkeitskette'

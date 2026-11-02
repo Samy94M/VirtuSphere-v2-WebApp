@@ -1048,6 +1048,22 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
         }
     }
 
+    It 'bildet jeden Detection-Typ auf einen Cmdlet-Enumnamen ab und der Installer nutzt nur diese Abbildung' {
+        # Enum SettingDataType von New-CMDetectionClauseRegistryKeyValue -PropertyType,
+        # aus der Fehlermeldung des Site-Laufs vom 02.11.2026 (MECM 2603).
+        $cmdletEnum = @('String', 'Integer', 'DateTime', 'FloatingPoint', 'Version', 'StringArray', 'Boolean', 'IntegerArray')
+        foreach ($spec in (Get-Specs)) {
+            $mapped = Invoke-InFileScope -Path $script:Packaging -Arguments @([string]$spec.DetectionType) -Body {
+                param($t) Get-VsDetectionClausePropertyType -DetectionType $t
+            }
+            $cmdletEnum -ccontains $mapped | Should -BeTrue -Because ("{0}: '{1}' -> '{2}'" -f $spec.AppName, $spec.DetectionType, $mapped)
+        }
+        { Invoke-InFileScope -Path $script:Packaging -Body { Get-VsDetectionClausePropertyType -DetectionType 'Int32' } } | Should -Throw '*Unbekannter Detection-Typ*'
+        $installer = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'install-VirtuSphere-Clients.ps1') -Raw
+        $installer | Should -Match '-PropertyType \(Get-VsDetectionClausePropertyType -DetectionType \$Spec\.DetectionType\)'
+        $installer | Should -Not -Match '-PropertyType \$Spec\.DetectionType'
+    }
+
     It 'jedes Spec-Skript existiert im clients-Ordner und alte Einstiegsskripte nicht' {
         foreach ($spec in (Get-Specs)) {
             Test-Path (Join-Path $script:ClientsDir $spec.Script) | Should -BeTrue
@@ -1163,6 +1179,27 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
                 param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
             })
             $issues | Should -Contain 'return-code-type:1641'
+
+            # SDK-Form ExitCode (Code/Class) wird gelesen; ohne jedes Typfeld ist der
+            # Befund "nicht lesbar" statt einer behaupteten Abweichung (Standort CGN).
+            $sdkCodes = @(
+                [pscustomobject]@{ Code = 0; Class = 'Success' }
+                [pscustomobject]@{ Code = 1641; Class = 'HardReboot' }
+                [pscustomobject]@{ Code = 3010; Class = 'SoftReboot' }
+            )
+            $issues = @(Invoke-InFileScope -Path $script:Packaging -Arguments @($dt, $spec, $content, $command, $sdkCodes) -Body {
+                param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
+            })
+            $issues.Count | Should -Be 0
+            $untyped = @(
+                [pscustomobject]@{ Code = 0 }
+                [pscustomobject]@{ Code = 1641 }
+                [pscustomobject]@{ Code = 3010 }
+            )
+            $issues = @(Invoke-InFileScope -Path $script:Packaging -Arguments @($dt, $spec, $content, $command, $untyped) -Body {
+                param($d, $s, $c, $i, $r) Get-VsClientDeploymentTypeContractIssues -DeploymentType $d -Spec $s -ContentLocation $c -InstallCommand $i -ReturnCodes $r
+            })
+            @($issues | Sort-Object) | Should -Be @('return-code-type-unreadable:0', 'return-code-type-unreadable:1641', 'return-code-type-unreadable:3010')
         }
 
         It 'blockiert abweichende oder fehlende Maximum Runtime und 32-Bit-Ausfuehrung' {
