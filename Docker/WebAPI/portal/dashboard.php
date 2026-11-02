@@ -31,7 +31,8 @@ $templateCount = (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_mis
 $kpiCountedAt = time();
 $vmCount = repo_vm_overview_count($connection, VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL);
 $mecmPending = repo_vm_overview_count($connection, VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING);
-$vmProgressAttention = repo_vm_progress_attention_count($connection);
+// The four "check due" groups (F6): each a filter of the overview, counted by it.
+$vmAttentionGroups = repo_vm_overview_attention_counts($connection);
 $healthSnapshot = integration_health_snapshot($connection);
 // The MECM tile shows two separate signals and never a common worst-of: a
 // critical MECM site must not present the data flow as failed, and a failed sync
@@ -94,9 +95,7 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
         <a class="card kpi" href="missions.php?type=templates"><span class="muted"><?php echo h(__t('dashboard.kpi_templates')); ?></span><span class="value"><?php echo h($templateCount); ?></span></a>
         <?php vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL, __t('dashboard.kpi_vms'), $vmCount, $kpiCountedAt); ?>
         <?php vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING, __t('dashboard.kpi_mecm_pending'), $mecmPending, $kpiCountedAt, $mecmPending > 0); ?>
-        <?php if ($vmProgressAttention > 0) { ?>
-            <a class="card kpi" href="missions.php?type=missions&attention=1"><span class="muted"><?php echo h(__t('dashboard.kpi_vm_attention')); ?></span><span class="value value-warning"><?php echo h($vmProgressAttention); ?></span></a>
-        <?php } ?>
+        <?php vm_overview_render_attention_tile($vmAttentionGroups, $kpiCountedAt); ?>
         <?php if ($activeDeploys > 0) { ?>
             <a class="card kpi" href="deploy.php"><span class="muted"><?php echo h(__t('dashboard.kpi_active_deploys')); ?></span><span class="value value-info"><?php echo h($activeDeploys); ?></span></a>
         <?php } ?>

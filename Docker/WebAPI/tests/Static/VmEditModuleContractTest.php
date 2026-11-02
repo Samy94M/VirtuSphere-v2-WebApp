@@ -28,12 +28,23 @@ final class VmEditModuleContractTest extends TestCase
         'vm_guest_os_option_label',
         'vm_edit_render_status_panel',
         'render_vm_status_history',
+        'vm_timeline_event_html',
         'vm_edit_finding_href',
         'vm_edit_inventory_text',
         'vm_edit_identity_fields',
         'vm_edit_ram_from_post',
         'render_vm_ram_field',
         'vm_edit_cpu_from_post',
+        'vm_edit_submitted_values',
+        'vm_edit_sticky_vm',
+        'vm_edit_location_inherit_label',
+        'vm_edit_conflict_fields',
+        'vm_edit_conflict_guest_label',
+        'vm_edit_conflict_interface_rows',
+        'vm_edit_conflict_disk_rows',
+        'vm_edit_conflict_package_rows',
+        'vm_edit_conflict_rows',
+        'vm_edit_conflict',
     ];
 
     public function testRegistryMatchesFilesystemInBothDirections(): void

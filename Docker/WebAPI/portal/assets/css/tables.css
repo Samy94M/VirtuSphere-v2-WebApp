@@ -274,3 +274,23 @@ tr.row-usage details > summary {
     color: var(--danger);
     white-space: nowrap;
 }
+
+/* The phase column of the mission list (SP4 R1): one badge per reached phase,
+   all in one link to the VM list sorted by phase. The badges wrap inside the
+   cell instead of widening the table; the phase word carries the meaning, so
+   forced colours lose nothing but the tint. */
+.mission-phases {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    color: inherit;
+}
+
+.mission-phases:hover,
+.mission-phases:focus-visible {
+    text-decoration: none;
+}
+
+.mission-phases:hover .badge {
+    border-color: var(--accent);
+}

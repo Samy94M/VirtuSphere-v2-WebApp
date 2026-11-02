@@ -70,7 +70,9 @@ final class DeployConvergenceContractTest extends TestCase
         self::assertStringContainsString('deploy_worker_redact_secrets($exception->getMessage(), [$esxiSecret, $ansibleSecret])', $worker);
         // A timeout is semantic because of its exception type, never because a
         // translated or remote string happened to contain the word.
-        self::assertStringContainsString('deploy_terminal_reason_for_exception($exception)', $worker);
+        self::assertStringContainsString('deploy_terminal_reason_for_exception($exception)', $this->source('lib/deploy_worker_inventory.php'));
+        // U-01: the mission path names a lost connection only while a step ran.
+        self::assertStringContainsString('deploy_terminal_reason_for_exception($exception, $remoteStepInFlight)', $this->source('lib/deploy_worker_mission.php'));
         // The partial verdict belongs to the outcome layer; neither the CLI
         // shell nor either job processor may decide it on its own.
         foreach (['lib/deploy_worker.php', 'lib/deploy_worker_loop.php', 'lib/deploy_worker_mission.php', 'lib/deploy_worker_inventory.php'] as $entry) {

@@ -3,7 +3,7 @@
   "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
   "platform": "win32",
   "arch": "x64",
-  "osRelease": "10.0.26200",
+  "osRelease": "10.0.26300",
   "browser": {
     "engine": "chromium",
     "revision": "1228",

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/audit_vocabulary.php';
 
 // K4b: after the FIRST failed pull of a series whose category is `host_error`
 // (the host answered with an HTTP 5xx), the scheduler tries once more after
@@ -99,9 +100,9 @@ function esxi_inventory_enqueue_for_credential(mysqli $db, int $esxiCredentialId
     $ansibleId = $resolution['credential_id'];
     if ($ansibleId === null) {
         $reason = match ($resolution['state']) {
-            'ambiguous' => 'ambiguous_ansible_credential',
-            'invalid' => 'invalid_ansible_credential',
-            default => 'no_ansible_credential',
+            'ambiguous' => VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_AMBIGUOUS_ANSIBLE,
+            'invalid' => VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_INVALID_ANSIBLE,
+            default => VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_NO_ANSIBLE,
         };
 
         return ['enqueued' => false, 'reason' => $reason];
@@ -110,11 +111,11 @@ function esxi_inventory_enqueue_for_credential(mysqli $db, int $esxiCredentialId
     try {
         $jobId = repo_create_system_job($db, VIRTUSPHERE_DEPLOY_MODE_INVENTORY, $esxiCredentialId, $ansibleId, $userId, $strictTrustProbe);
     } catch (Throwable $exception) {
-        return ['enqueued' => false, 'reason' => 'error', 'message' => $exception->getMessage()];
+        return ['enqueued' => false, 'reason' => VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_ERROR, 'message' => $exception->getMessage()];
     }
 
     if ($jobId === null) {
-        return ['enqueued' => false, 'reason' => 'already_pending'];
+        return ['enqueued' => false, 'reason' => VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_ALREADY_PENDING];
     }
 
     return ['enqueued' => true, 'job_id' => $jobId];

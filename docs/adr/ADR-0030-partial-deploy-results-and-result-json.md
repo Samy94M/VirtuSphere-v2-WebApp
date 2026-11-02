@@ -86,7 +86,7 @@ Scheitert nach einem erfolgreichen oder teilweisen MAC-Import noch ein späteres
 Playbook (`start`, `autostart`), dominiert `failed` den **Job**, aber die
 VM-Markierung ist **selektiv**: VMs aus `successful_vm_ids` behalten
 `deployed/pending` (ihre MACs sind importiert, MECM kann sie aufnehmen), nur die
-übrigen werden konsistent `failed/failed` (Lifecycle **und** MECM-State).
+übrigen werden konsistent `failed/failed` (Lifecycle **und** MECM-State). Nachtrag 01.11.2026 (MX0, Migration 0070): Der MECM-Wert heißt seitdem `deploy_failed`, weil der Abgleich nie lief; `failed` ist zurückgezogen, auf der Leitung bleibt er `failed` (ADR-0019 Amendment 5).
 
 ### Retry-Semantik
 

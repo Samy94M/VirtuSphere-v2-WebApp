@@ -395,9 +395,12 @@ echo 'SEEDED';
   ).toHaveAttribute('title', /2\/5 Registered/);
 
   // The worst finding of VM 2 is the overdue MECM wait, and it links to the MECM status.
-  const overdue = rowFor(page, 'E2EVM2').locator('a[href*="system_status.php#mecm"]', { hasText: /longer than 2 h|länger als 2 h/ });
+  // SP4 R3 (F7): the badge shows the short form, the tooltip keeps the full sentence.
+  const overdue = rowFor(page, 'E2EVM2').locator('a[href*="system_status.php#mecm"]', { hasText: /MECM overdue|MECM überfällig/ });
   await expect(overdue, 'the overdue wait links to the MECM status').toHaveCount(1);
   await expect(overdue).toHaveAttribute('href', /system_status\.php#mecm/);
+  await expect(overdue, 'the full sentence is the tooltip').toHaveAttribute('title', /longer than 2 h|länger als 2 h/);
+  await expect(overdue.locator('.badge'), 'the badge is the short form, not the sentence').not.toContainText(/longer than|länger als/);
 
   // VM 1 has no finding, so its row links nowhere.
   await expect(

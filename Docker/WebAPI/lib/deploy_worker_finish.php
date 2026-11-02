@@ -68,7 +68,7 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
             // A sequence without an export step produces no per-VM verdict, so the
             // `deploying` painted at claim time must be taken back by the worker
             // itself. Left alone, the convergence sweep would later mark the VMs
-            // of this GREEN job failed/failed - a false failure after a success.
+            // of this GREEN job failed/deploy_failed - a false failure after a success.
             deploy_worker_restore_deploying_vms($db, $job, 'deploy job ' . $jobId . ' succeeded without export step; lifecycle restored', $vmIds, $priorLifecycles);
         }
 
@@ -138,7 +138,7 @@ function deploy_worker_conclude_cancel_after_sequence(mysqli $db, array $job, ar
 
 /**
  * The worker-side cancel convergence. A cancel must not leave VMs behind in
- * `deploying`: whatever this job put there converges to failed/failed. VMs
+ * `deploying`: whatever this job put there converges to failed/deploy_failed. VMs
  * the import endpoint already finished stay deployed/pending, and stored
  * MACs are never touched. The job status itself stays `cancelled`.
  *
@@ -189,7 +189,7 @@ function deploy_worker_log_if_job_exists(mysqli $db, int $jobId, string $line): 
  * Fails a mission job with selective VM marking (E1): VMs whose MAC import
  * already committed keep their proven state: unbound imports stay
  * deployed/pending, unchanged bound exports keep their original state. Everything
- * else in the job scope becomes failed/failed - lifecycle and mecm_sync_state
+ * else in the job scope becomes failed/deploy_failed - lifecycle and mecm_sync_state
  * together, so no failed VM advertises a sync that can never happen.
  * $vmsMarked false (a failure before deploy_worker_mark_vms_deploying()) fails
  * only the job and leaves every VM as it was. $reasonDetail is the failure the
@@ -211,8 +211,13 @@ function deploy_worker_handle_failure(
 ): void
 {
     $reasonDetail ??= $message;
+    // U-01: after a lost Ansible host connection the end of the step is
+    // unknown, so the job ends outcome_unknown. VMs converge exactly as below
+    // (no MECM pickup without proof), and no failed step is stored, so a retry
+    // repeats the plan instead of resuming at a step nobody saw end.
+    $status = deploy_terminal_status_for_failure_reason($reasonCode);
     $reached = false;
-    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $vmsMarked, $reasonDetail, $exitCode, $failedStep, &$reached): ?string {
+    $terminalStatus = deploy_worker_owned_transaction($db, $job, static function (array $locked) use ($db, $job, $workerId, $vmIds, $message, $reasonCode, $status, $vmsMarked, $reasonDetail, $exitCode, $failedStep, &$reached): ?string {
         $reached = true;
         $jobId = (int) $job['id'];
         if ((string) $locked['locked_by'] !== $workerId) {
@@ -227,9 +232,13 @@ function deploy_worker_handle_failure(
                 repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR, $reasonDetail);
             }
             // A known exit code is named; without one the failure line is the account.
-            $cancelMessage = $exitCode === null ? null
-                : 'Cancelled after operator request; the step ended with exit code ' . $exitCode
-                    . ', so its changes on ESXi may be partly in place; no further step was started.';
+            $cancelMessage = match (true) {
+                $exitCode !== null => 'Cancelled after operator request; the step ended with exit code ' . $exitCode
+                    . ', so its changes on ESXi may be partly in place; no further step was started.',
+                $status === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => 'Cancelled after operator request; the connection to the Ansible host was lost '
+                    . 'while the step ran, so whether its changes on ESXi are in place is unknown; no further step was started.',
+                default => null,
+            };
 
             return deploy_worker_confirm_owned_cancel($db, $job, $cancelMessage) ? VIRTUSPHERE_DEPLOY_STATUS_CANCELLED : null;
         }
@@ -240,7 +249,7 @@ function deploy_worker_handle_failure(
             // mean "the whole mission" below, which is why this is a flag.
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, 'The job failed before any VM was marked deploying; VM states are unchanged.');
 
-            return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $reasonDetail);
+            return deploy_worker_finish_job($db, $job, $workerId, $status, $message, $reasonCode, $reasonDetail);
         }
         $macResult = deploy_worker_job_mac_result($db, $jobId);
         $keepVmIds = $macResult !== null ? $macResult['successful_vm_ids'] : [];
@@ -248,13 +257,14 @@ function deploy_worker_handle_failure(
         if ($keepVmIds !== []) {
             repo_append_deploy_job_log($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, count($keepVmIds) . ' VM(s) with a successful MAC result keep their state.');
         }
-        return deploy_worker_finish_job($db, $job, $workerId, VIRTUSPHERE_DEPLOY_STATUS_FAILED, $message, $reasonCode, $reasonDetail, null, true, $failedStep);
+        return deploy_worker_finish_job($db, $job, $workerId, $status, $message, $reasonCode, $reasonDetail, null, true, $failedStep);
     });
     if (!$reached) {
         deploy_worker_log_discarded_write((int) $job['id'], 'failure', $message);
     }
     if ($terminalStatus !== null) {
-        deploy_worker_audit_outcome($db, $job, $terminalStatus, $message);
+        // The unknown outcome names its closed reason code, like the reaper's row.
+        deploy_worker_audit_outcome($db, $job, $terminalStatus, $terminalStatus === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN ? $reasonCode : $message);
         deploy_worker_refresh_inventory_after_deploy($db, $job);
     }
 }
@@ -305,11 +315,27 @@ function deploy_worker_finish_job(
     return $published;
 }
 
-function deploy_terminal_reason_for_exception(Throwable $exception): string
+/**
+ * The terminal reason of a thrown failure. $remoteStepInFlight is true only
+ * while a playbook step of a mission job ran (U-01): a lost SSH connection then
+ * leaves the step's end on the Ansible host unknown. Anywhere else (host
+ * preflight, inventory pull) the same loss stays an execution failure.
+ */
+function deploy_terminal_reason_for_exception(Throwable $exception, bool $remoteStepInFlight = false): string
 {
-    return $exception instanceof SshTransportBudgetExceeded
-        ? VIRTUSPHERE_DEPLOY_TERMINAL_REASON_TIMEOUT
-        : VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED;
+    return match (true) {
+        $exception instanceof SshTransportBudgetExceeded => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_TIMEOUT,
+        $exception instanceof SshTransportConnectionLost && $remoteStepInFlight => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_ANSIBLE_CONNECTION_LOST,
+        default => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_EXECUTION_FAILED,
+    };
+}
+
+/** The status the failure path writes for its reason: unknown only after a lost connection. */
+function deploy_terminal_status_for_failure_reason(string $reasonCode): string
+{
+    return $reasonCode === VIRTUSPHERE_DEPLOY_TERMINAL_REASON_ANSIBLE_CONNECTION_LOST
+        ? VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN
+        : VIRTUSPHERE_DEPLOY_STATUS_FAILED;
 }
 
 /** Every terminal create/full path refreshes after a durable Create launch. */

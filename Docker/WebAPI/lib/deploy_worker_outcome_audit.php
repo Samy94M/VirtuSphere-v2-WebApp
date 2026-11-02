@@ -48,7 +48,8 @@ function deploy_worker_audit_outcome(mysqli $db, array $job, string $status, ?st
         return;
     }
     try {
-        $reason = in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL], true) ? $error : null;
+        // outcome_unknown from a worker (U-01) carries its reason code here.
+        $reason = in_array($status, [VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN], true) ? $error : null;
         deploy_worker_write_outcome_audit($db, $job, $status, $reason);
     } catch (Throwable $exception) {
         error_log('[deploy-worker] outcome audit failed for job ' . (int) ($job['id'] ?? 0) . ' with status ' . $status . ': ' . virtusphere_redact_log_text($exception->getMessage()));

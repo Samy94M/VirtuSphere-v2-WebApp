@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use phpseclib3\Exception\ConnectionClosedException;
 use phpseclib3\Net\SSH2;
 
 $autoload = __DIR__ . '/../vendor/autoload.php';
@@ -340,7 +341,15 @@ function ssh_stream_command_output(callable $readSlice, callable $stdoutLogger, 
     $lastDataAt = $startedAt;
 
     while (true) {
-        $slice = $readSlice();
+        try {
+            $slice = $readSlice();
+        } catch (ConnectionClosedException $exception) {
+            // U-01: the command was started and its channel was being read, so
+            // a closed connection leaves its end on the remote host unknown.
+            // Only this exact phpseclib type in this exact phase carries that
+            // meaning; login, exec request and SFTP keep their own types.
+            throw new SshTransportConnectionLost('SSH connection to the Ansible host was lost while the remote command ran: ' . $exception->getMessage(), 0, $exception);
+        }
         $now = $clock();
 
         if ($slice === false) {

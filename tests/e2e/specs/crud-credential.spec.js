@@ -432,6 +432,9 @@ echo 'CLEANED';
 // than in a unit test. Locale-independent on purpose: the assertions compare
 // rendered values against each other instead of quoting DE or EN prose.
 test('the status column says whether it refreshes itself, and an old Ansible result stops claiming OK', async ({ page }) => {
+  // Firefox needed 23.5 s and WebKit 20.6 s in the release lane of 2026-11-02
+  // (WebKit alone 12.7 s); over two thirds of the global 30 s (FX1).
+  test.setTimeout(90000);
   const esxiName = PREFIX + 'cadence-esxi';
   const ansibleName = PREFIX + 'cadence-ansible';
   const esxiId = seedCredential(esxiName);

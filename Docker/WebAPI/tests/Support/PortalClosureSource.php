@@ -24,6 +24,7 @@ final class PortalClosureSource
     private array $eager = [];
     /** @var array<string,array<string,true>> */
     private array $availableCache = [];
+    private int $evictions = 0;
 
     /** @param array<string,string> $overrides In-memory mutation fixtures only. */
     public function __construct(private array $overrides = []) {}
@@ -37,7 +38,15 @@ final class PortalClosureSource
             $this->cache[$file] = $traverser->traverse($nodes ?? []);
             // Keep the normal PHPUnit memory limit: owner indexing covers the
             // entire library, but only a small working set needs full bodies.
-            if (count($this->cache) > 8) { array_shift($this->cache); }
+            if (count($this->cache) > 8) {
+                array_shift($this->cache);
+                // A parsed tree is cyclic garbage once evicted, and the engine
+                // collects cycles late: without this the analysis carried about
+                // 40 MB of dead trees into the following tests (SP4 measured
+                // the 128 MB limit in phpunit-full). Every 16th eviction keeps
+                // the peak low without paying a collection per file.
+                if (++$this->evictions % 16 === 0) { gc_collect_cycles(); }
+            }
         }
         return $this->cache[$file];
     }

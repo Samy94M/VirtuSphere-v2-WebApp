@@ -91,7 +91,7 @@ final class VmStateMonotonicityTest extends TestCase
      */
     public function testAFailedVmCanBeRegisteredAgain(): void
     {
-        $vmId = $this->insertVm(VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED, VIRTUSPHERE_STATUS_DEPLOYED);
+        $vmId = $this->insertVm(VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, VIRTUSPHERE_STATUS_DEPLOYED);
 
         repo_set_vm_state_forward($this->db, $vmId, VIRTUSPHERE_LIFECYCLE_OS_INSTALLING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLING, 0, 'mecm update id', 'RES-2');
 

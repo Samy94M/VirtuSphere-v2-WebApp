@@ -259,11 +259,21 @@ final class VmEditStatusRenderTest extends TestCase
         self::assertSame($literal, $href);
     }
 
-    public function testTheHistoryIsHiddenWithoutEvents(): void
+    /** NL1 (user decision 01.11.2026): the chronicle link stays without timeline entries. */
+    public function testWithoutEventsTheHistoryStillLinksTheWholeChronicle(): void
     {
-        Lang::load('de');
+        foreach (['de', 'en'] as $locale) {
+            Lang::load($locale);
+            $html = $this->capture(static fn () => render_vm_status_history(['entries' => [], 'truncated' => false], self::MISSION_ID, self::VM_ID, []));
+            $visible = self::visible($html);
 
-        self::assertSame('', trim($this->capture(static fn () => render_vm_status_history(['entries' => [], 'truncated' => false], self::MISSION_ID, self::VM_ID, []))));
+            self::assertStringContainsString('<h2 id="vm-timeline-heading">', $html, $locale);
+            self::assertStringContainsString('<a href="' . h(vm_history_url(self::MISSION_ID, self::VM_ID)) . '" data-vm-history-link>', $html, $locale);
+            self::assertStringContainsString(__t('vm_history.open_full'), $visible, $locale);
+            self::assertStringContainsString(__t('vm_timeline.empty'), $visible, $locale . ': the empty timeline says so');
+            self::assertStringNotContainsString('<table', $html, $locale . ': no empty table');
+            self::assertStringNotContainsString('vm_timeline.', $visible, $locale . ': an untranslated key is shown');
+        }
     }
 
     public function testTheHistoryIsAnOpenTableThatNamesEachEventInWords(): void
@@ -316,6 +326,18 @@ final class VmEditStatusRenderTest extends TestCase
 
         $hrefs = array_column(self::anchors($html), 'href');
         self::assertContains(deploy_job_log_url(self::JOB_ID), $hrefs);
+        self::assertContains(package_report_detail_url(self::MISSION_ID, self::VM_ID, self::RUN_ID, []), $hrefs);
+        self::assertStringContainsString('<a href="' . h(vm_history_url(self::MISSION_ID, self::VM_ID)) . '" data-vm-history-link>', $html, 'the timeline links to the whole chronicle (SP3)');
+    }
+
+    public function testWithoutDeployRunTheJobKeepsItsWordsButLosesTheLogLink(): void
+    {
+        Lang::load('de');
+        $html = $this->history($this->timelineEntries(), false, false);
+
+        $hrefs = array_column(self::anchors($html), 'href');
+        self::assertNotContains(deploy_job_log_url(self::JOB_ID), $hrefs, 'deploy_log.php needs deploy.run (F2)');
+        self::assertStringContainsString(h(__t('vm_timeline.job_finished', ['id' => self::JOB_ID])), $html);
         self::assertContains(package_report_detail_url(self::MISSION_ID, self::VM_ID, self::RUN_ID, []), $hrefs);
     }
 
@@ -536,13 +558,14 @@ final class VmEditStatusRenderTest extends TestCase
     /**
      * @param list<array{at:string,source:string,kind:string,row:array<string,mixed>}> $entries
      */
-    private function history(array $entries, bool $truncated): string
+    private function history(array $entries, bool $truncated, bool $canOpenJobLog = true): string
     {
         return $this->capture(static fn () => render_vm_status_history(
             ['entries' => $entries, 'truncated' => $truncated],
             self::MISSION_ID,
             self::VM_ID,
-            []
+            [],
+            $canOpenJobLog
         ));
     }
 

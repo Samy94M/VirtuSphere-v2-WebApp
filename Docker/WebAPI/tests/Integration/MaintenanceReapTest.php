@@ -93,14 +93,14 @@ final class MaintenanceReapTest extends TestCase
         self::assertNull($job['locked_by']);
 
         // The committed import is the truth and survives the reap; only the
-        // VM without an import converges to failed/failed.
+        // VM without an import converges to failed/deploy_failed.
         $imported = $this->row('SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ' . $importedVmId);
         self::assertSame(VIRTUSPHERE_LIFECYCLE_DEPLOYED, $imported['lifecycle_state']);
         self::assertSame(VIRTUSPHERE_MECM_SYNC_PENDING, $imported['mecm_sync_state']);
 
         $stuck = $this->row('SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ' . $stuckVmId);
         self::assertSame(VIRTUSPHERE_LIFECYCLE_FAILED, $stuck['lifecycle_state']);
-        self::assertSame(VIRTUSPHERE_MECM_SYNC_FAILED, $stuck['mecm_sync_state']);
+        self::assertSame(VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, $stuck['mecm_sync_state']);
     }
 
     public function testMaintenanceReapLeavesFreshJobsAlone(): void

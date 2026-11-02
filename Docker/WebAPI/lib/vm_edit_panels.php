@@ -14,6 +14,7 @@ declare(strict_types=1);
 /** @var array<string, mixed> $vm */
 /** @var string $error */
 /** @var array<string, string> $fieldErrors */
+/** @var array{mode:string, version:string, rows:list<array{label:string, submitted:string, current:string, rows:bool}>}|null $editConflict */
 /** @var array<string, array<string, mixed>|null> $clientPhaseSummary */
 /** @var string $vmPhase */
 /** @var list<array<string, mixed>> $vmFindings */
@@ -141,7 +142,9 @@ declare(strict_types=1);
         </div>
     <?php } ?>
 
-    <form class="stack" method="post" action="<?php echo h($vmEditorUrl); ?>"<?php echo $canWrite ? form_unsaved_attrs('vm-editor', $error !== '') . vm_mecm_save_form_attrs($mecmView) : ''; ?>>
+    <?php if ($editConflict !== null) { edit_conflict_render($editConflict, 'vm-editor-form'); } ?>
+
+    <form class="stack" id="vm-editor-form" method="post" action="<?php echo h($vmEditorUrl); ?>"<?php echo $canWrite ? form_unsaved_attrs('vm-editor', $error !== '' || $editConflict !== null) . vm_mecm_save_form_attrs($mecmView) : ''; ?>>
         <?php echo csrf_field(); ?>
         <input type="hidden" name="mission_id" value="<?php echo h((string) $missionId); ?>">
         <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">

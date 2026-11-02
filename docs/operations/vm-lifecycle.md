@@ -32,7 +32,7 @@ Die Regeln 4 bis 6 sind dieselben Prädikate, aus denen die Maschinen-API den St
 
 ## Lebenszyklus
 
-Der Lebenszyklus wird nur vorwärts überschrieben, wenn ein Rückruf kommt: Device-Sync und Client-Ready-ACK lassen einen späteren Zustand stehen (`repo_set_vm_state_forward()`). Der Worker markiert eine VM beim Start eines Auftrags aus jedem Zustand außer `deploying`; eine VM mit ResourceID bleibt in einem Modus mit MAC-Ergebnis unmarkiert (`virtusphere_vm_is_mecm_bound()`). Was ein Auftrag angefasst hat, hält das Journal je Auftrag und VM fest (`deploy_job_vm_states`): Endet der Auftrag erfolgreich ohne MAC-Ergebnis oder wird er abgebrochen, stellt der Worker den Vorzustand wieder her; scheitert er, setzt er Lebenszyklus und MECM-Achse auf „Fehlgeschlagen“, auch bei einer VM, die er nicht markiert hat. Der Konvergenzlauf des Wartungsdienstes wendet dieselbe Regel auf eine VM an, die nach dem Ende ihres Auftrags noch `deploying` steht. `initializing` hat keinen Schreiber; der Wert bleibt im Katalog, damit ein alter Datensatz einen Namen hat.
+Der Lebenszyklus wird nur vorwärts überschrieben, wenn ein Rückruf kommt: Device-Sync und Client-Ready-ACK lassen einen späteren Zustand stehen (`repo_set_vm_state_forward()`). Der Worker markiert eine VM beim Start eines Auftrags aus jedem Zustand außer `deploying`; eine VM mit ResourceID bleibt in einem Modus mit MAC-Ergebnis unmarkiert (`virtusphere_vm_is_mecm_bound()`). Was ein Auftrag angefasst hat, hält das Journal je Auftrag und VM fest (`deploy_job_vm_states`): Endet der Auftrag erfolgreich ohne MAC-Ergebnis oder wird er abgebrochen, stellt der Worker den Vorzustand wieder her; scheitert er, setzt er den Lebenszyklus auf „Fehlgeschlagen“ und die MECM-Achse auf `deploy_failed`, auch bei einer VM, die er nicht markiert hat. Der Konvergenzlauf des Wartungsdienstes wendet dieselbe Regel auf eine VM an, die nach dem Ende ihres Auftrags noch `deploying` steht. `initializing` hat keinen Schreiber; der Wert bleibt im Katalog, damit ein alter Datensatz einen Namen hat.
 
 ```mermaid
 flowchart TD
@@ -56,19 +56,19 @@ Der MAC-Rückruf schreibt `deployed` nur für eine VM ohne ResourceID; eine scho
 
 ## MECM-Abgleich
 
-Die MECM-Achse sagt, wie weit die Übergabe an MECM ist. `registered` schreibt allein der Device-Sync; der Client-Ready-ACK lässt die Achse unverändert (VT-E1 C, ADR-0019 Amendment 4). Die Portalbeschriftung von `failed` lautet „MECM-Abgleich offen nach Fehler“, weil der Wert aus einem gescheiterten Auftrag stammt und nichts über MECM selbst sagt; ein gescheiterter Auftrag setzt ihn aus jedem Zustand der Achse.
+Die MECM-Achse sagt, wie weit die Übergabe an MECM ist. `registered` schreibt allein der Device-Sync; der Client-Ready-ACK lässt die Achse unverändert (VT-E1 C, ADR-0019 Amendment 4). Ein gescheiterter Auftrag setzt die Achse aus jedem Zustand auf `deploy_failed`, Portalbeschriftung „MECM-Abgleich offen nach Fehler“: Der Abgleich ist nicht gescheitert, er lief nie. Bis Migration 0070 hieß der Wert `failed`; die Maschinen-API liefert ihn unter diesem Namen weiter (ADR-0019 Amendment 5). Einen MECM-seitigen Fehlerwert gibt es nicht.
 
 ```mermaid
 flowchart TD
     not_ready[Noch nicht bereit] -->|MAC-Rückruf| pending[Wartet auf MECM]
     pending -->|Device-Sync meldet die ResourceID| registered[In MECM registriert]
     registered -.->|MECM-ID zurücksetzen| pending
-    not_ready -->|Auftrag scheitert| failed[MECM-Abgleich offen nach Fehler]
-    failed -->|MAC-Rückruf oder MECM-ID zurücksetzen| pending
+    not_ready -->|Auftrag scheitert| deploy_failed[MECM-Abgleich offen nach Fehler]
+    deploy_failed -->|MAC-Rückruf oder MECM-ID zurücksetzen| pending
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
     class not_ready,pending,registered step;
-    class failed blocked;
+    class deploy_failed blocked;
 ```
 
 ## Stufenwert x/5

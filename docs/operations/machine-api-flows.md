@@ -53,7 +53,7 @@ Eine fehlende Revision gilt nur für den Bestand vor dem Wechsel der Skripte als
 
 ## Geräte-Sync
 
-Der Devices Sync liest `getDeviceList`: alle VMs mit `updated = 1` oder MECM-Zustand `pending`, nur mit MAC und nie aus einer Vorlagenmission, mit dem eingefrorenen Rollout-Hostnamen unter `vm_hostname` und dem Stufenwert, den `virtusphere_legacy_status_from_states()` bei jeder Abfrage aus den Achsen berechnet. Die Abfrage schreibt nichts. Was der Sync danach in MECM tut, zeigt [Devices Sync](mecm-scheduled-tasks.md#devices-sync); sein Rückruf ist `updateDevice`:
+Der Devices Sync liest `getDeviceList`: alle VMs mit `updated = 1` oder MECM-Zustand `pending`, nur mit MAC und nie aus einer Vorlagenmission, mit dem eingefrorenen Rollout-Hostnamen unter `vm_hostname` und dem Stufenwert, den `virtusphere_legacy_status_from_states()` bei jeder Abfrage aus den Achsen berechnet. Den MECM-Zustand liefert die Spalte `mecm_sync_state`; der gespeicherte Wert `deploy_failed` eines gescheiterten Auftrags heißt auf der Leitung weiter `failed` (Migration 0070, ADR-0019 Amendment 5). Die Abfrage schreibt nichts. Was der Sync danach in MECM tut, zeigt [Devices Sync](mecm-scheduled-tasks.md#devices-sync); sein Rückruf ist `updateDevice`:
 
 ```mermaid
 flowchart TD

@@ -84,8 +84,8 @@ function vm_save_with_audit(
             $newHostname = (string) ($savedVm['vm_hostname'] ?? '');
             if (mecm_hostname_key($oldHostname) !== mecm_hostname_key($newHostname)) {
                 $snapshot = (string) ($savedVm['mecm_rollout_hostname'] ?? '');
-                $effect = mecm_hostname_same($snapshot, $newHostname) ? 'current_pending' : 'next_rollout';
-                if ($effect === 'next_rollout') {
+                $effect = mecm_hostname_same($snapshot, $newHostname) ? VIRTUSPHERE_AUDIT_ROLLOUT_EFFECT_CURRENT_PENDING : VIRTUSPHERE_AUDIT_ROLLOUT_EFFECT_NEXT_ROLLOUT;
+                if ($effect === VIRTUSPHERE_AUDIT_ROLLOUT_EFFECT_NEXT_ROLLOUT) {
                     $frozenSnapshot = $snapshot;
                 }
                 // Optional fields are omitted when empty: the registry refuses a

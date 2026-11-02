@@ -166,3 +166,67 @@ function vm_subnet_picker_value(string $subnet): string
 
     return '';
 }
+
+/**
+ * The scalar VM values one editor POST saves. The save path and the conflict
+ * comparison (lib/vm_edit_conflict.php) read the same list. Strict mode is the
+ * save path and throws on an unreadable RAM or an empty CPU field; the
+ * comparison passes false and keeps such a value as typed.
+ *
+ * vm_creator is deliberately absent: repo_save_vm() stamps it from the acting
+ * user on create and preserves it on update. A posted value is ignored, and the
+ * rendered field carries no name attribute.
+ *
+ * @param array<string, mixed> $post
+ * @return array<string, string>
+ */
+function vm_edit_submitted_values(array $post, bool $strict = true): array
+{
+    if ($strict) {
+        $ram = (string) vm_edit_ram_from_post($post);
+    } else {
+        $parsed = vm_ram_parse_input($post['vm_ram'] ?? '', array_key_exists('vm_ram_unit', $post) ? $post['vm_ram_unit'] : 'mb');
+        $ram = $parsed['ok'] ? (string) $parsed['mb'] : request_trimmed($post, 'vm_ram');
+    }
+
+    return [
+        'vm_name' => request_string($post, 'vm_name'),
+        'vm_hostname' => request_string($post, 'vm_hostname'),
+        'vm_domain' => request_string($post, 'vm_domain'),
+        'vm_os' => request_string($post, 'vm_os'),
+        'vm_ram' => $ram,
+        'vm_cpu' => $strict ? vm_edit_cpu_from_post($post) : request_trimmed($post, 'vm_cpu'),
+        'vm_disk' => request_string($post, 'vm_disk'),
+        'vm_datastore' => request_string($post, 'vm_datastore'),
+        'vm_datacenter' => request_string($post, 'vm_datacenter'),
+        'vm_guest_id' => request_string($post, 'vm_guest_id'),
+        'vm_notes' => request_string($post, 'vm_notes'),
+        'cpu_hotplug' => request_string($post, 'cpu_hotplug', '0'),
+        'ram_hotplug' => request_string($post, 'ram_hotplug', '0'),
+        // Autostart override (ADR-0025). An empty delay field is the editor's
+        // "inherit" state and repo_vm_delay_value() turns it into -1; it must
+        // never reach the INT NOT NULL column as ''.
+        'autostart_enabled' => request_string($post, 'autostart_enabled', '0'),
+        'autostart_start_delay' => request_string($post, 'autostart_start_delay'),
+        'autostart_stop_delay' => request_string($post, 'autostart_stop_delay'),
+    ];
+}
+
+/**
+ * The editor state re-rendered from a POST that saved nothing: a refused save
+ * or the continue step after a conflict. The posted rows replace the stored ones.
+ *
+ * @param array<string, mixed> $vm
+ * @param array<string, mixed> $post
+ * @param array<string, mixed> $mission
+ * @return array<string, mixed>
+ */
+function vm_edit_sticky_vm(array $vm, array $post, array $mission): array
+{
+    $vm = array_merge($vm, $post);
+    $vm['interfaces'] = is_array($post['interfaces'] ?? null) ? $post['interfaces'] : vm_default_interfaces($mission);
+    $vm['disks'] = is_array($post['disks'] ?? null) ? $post['disks'] : vm_default_disks();
+    $vm['packages'] = vm_parse_packages(is_array($post['packages'] ?? null) ? $post['packages'] : []);
+
+    return $vm;
+}

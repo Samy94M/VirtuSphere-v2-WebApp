@@ -125,6 +125,41 @@ final class MachineApiWireTest extends TestCase
         }
     }
 
+    /**
+     * MX0 (migration 0070, ADR-0019 amendment 5): a failed deploy marks the MECM
+     * axis `deploy_failed` in the database, but the wire keeps the name the
+     * device-sync always received. A queued VM is the case where it is listed.
+     */
+    public function testDeviceListKeepsTheWireNameOfTheDeployFailureMark(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'deploy-failed');
+
+        try {
+            repo_execute($db, 'UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, updated = 1 WHERE id = ?', 'ssi', [
+                VIRTUSPHERE_LIFECYCLE_FAILED,
+                VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED,
+                $fixture['vm_id'],
+            ]);
+            self::assertSame(VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, $this->vmState($db, $fixture['vm_id'])['mecm_sync_state']);
+
+            [$status, , $body] = $this->get('/mecm-api.php?action=getDeviceList');
+            self::assertSame(200, $status, $body);
+            $row = null;
+            foreach (json_decode($body, true, 512, JSON_THROW_ON_ERROR) as $candidate) {
+                if ((int) $candidate['id'] === $fixture['vm_id']) {
+                    $row = $candidate;
+                }
+            }
+            self::assertIsArray($row, 'a queued VM with a deploy failure mark must stay on getDeviceList');
+            self::assertSame('failed', $row['mecm_sync_state'], 'the wire value of the deploy failure mark changed');
+            self::assertSame(VIRTUSPHERE_STATUS_INITIALIZING, $row['vm_status'], 'the computed stage value changed');
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
     /** ADR-0019/E3: the mission already rides on getDeviceList. */
     public function testRetiredMissionNameActionUsesTheUnknownActionEnvelope(): void
     {

@@ -31,7 +31,7 @@ return [
     'mecm_not_ready' => 'Noch nicht bereit',
     'mecm_pending' => 'Wartet auf MECM',
     'mecm_registered' => 'In MECM registriert',
-    'mecm_failed' => 'MECM-Abgleich offen nach Fehler',
+    'mecm_deploy_failed' => 'MECM-Abgleich offen nach Fehler',
     'mecm_unknown' => 'Unbekannter Zustand',
 
     // Auftragsstatus (aktive und terminale Menge aus lib/deploy_constants.php).
@@ -86,7 +86,7 @@ return [
 
     // Befunde (VIRTUSPHERE_VM_FINDINGS, lib/vm_phase.php). Der Zeitbestandteil
     // fällt nur weg, wenn kein gültiger Serverzeitpunkt vorliegt; dann greift die
-    // Variante ohne Zeit oder ohne Herkunft. `mecm_sync_failed` nutzt `mecm_failed`.
+    // Variante ohne Zeit oder ohne Herkunft. `mecm_sync_deploy_failed` nutzt `mecm_deploy_failed`.
     'finding_create_uncertain' => 'Create ungeklärt (Auftrag :job_id, Einheit :position)',
     'finding_job_failed' => 'Auftrag fehlgeschlagen: :mode, :time',
     'finding_create_failed' => 'Auf ESXi nicht angelegt: :mode, :time',
@@ -110,4 +110,23 @@ return [
     'finding_unknown' => 'Unbekannter Befund',
     'finding_more' => '+:count',
     'finding_more_title' => ':count weitere Befunde, alle im VM-Editor',
+    // Kurzform je Befund für die Tabellen (SP4, F7): ohne Zeit, Zahl und Namen;
+    // der volle Satz steht im Tooltip und im VM-Editor.
+    'finding_short_create_uncertain' => 'Create ungeklärt',
+    'finding_short_job_failed' => 'Auftrag fehlgeschlagen',
+    'finding_short_create_failed' => 'Nicht angelegt',
+    'finding_short_job_outcome_unknown' => 'Ausgang unbekannt',
+    'finding_short_missing_from_inventory' => 'Nicht im Inventar',
+    'finding_short_job_running' => 'Auftrag läuft',
+    'finding_short_old_mecm_device' => 'Altes MECM-Gerät',
+    'finding_short_mecm_pending_overdue' => 'MECM überfällig',
+    'finding_short_mecm_pending' => 'Wartet auf MECM',
+    'finding_short_powered_off' => 'Ausgeschaltet',
+    'finding_short_os_install_overdue' => 'OS-Installation überfällig',
+    'finding_short_pxe_unwatched' => 'PXE-Beleg fehlt',
+    'finding_short_os_install_watching' => 'Beobachtung läuft',
+    'finding_short_client_phase_failed' => 'Clientphase fehlgeschlagen',
+    'finding_short_client_phase_unconfirmed' => 'Clientphase unbestätigt',
+    'finding_short_package_run_failed' => 'Paketbericht fehlgeschlagen',
+    'finding_short_mecm_sync_deploy_failed' => 'MECM-Abgleich offen',
 ];

@@ -164,7 +164,7 @@ function ansible_full_test_store_result(
         if (!$stored) {
             $testResult = VIRTUSPHERE_AUDIT_RESULT_WARNING;
             $testContext = [
-                'outcome' => 'discarded',
+                'outcome' => VIRTUSPHERE_AUDIT_CREDENTIAL_TEST_DISCARDED,
                 'evidence_stored' => false,
             ];
         } else {

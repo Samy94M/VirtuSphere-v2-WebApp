@@ -42,6 +42,10 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_vm_overview_count',
         'repo_vm_overview_sort_columns',
         'repo_vm_overview_page',
+        // SP4: the dashboard's "check due" groups and the mission list's phase column.
+        'repo_vm_overview_attention_counts',
+        'repo_vm_progress_overdue_sql',
+        'repo_vm_phase_counts_by_mission',
         'repo_vm_progress_attention_sql',
         'repo_vm_network_scope',
         'repo_vm_network_issues_for_scope',

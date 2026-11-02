@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/repo/log.php';
+require_once __DIR__ . '/audit_vocabulary.php';
 require_once __DIR__ . '/csrf.php';
 
 /**

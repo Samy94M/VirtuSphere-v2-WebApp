@@ -22,7 +22,8 @@ final class DeployOutcomeUnknownTest extends TestCase
         Lang::load(Lang::DEFAULT_LOCALE);
     }
 
-    public function testItIsTerminalNotActiveAndOnlyStaleHeartbeatExplainsIt(): void
+    /** The reaper's silence and, since U-01, the worker's lost Ansible host connection. */
+    public function testItIsTerminalNotActiveAndOnlyTheTwoUnknownReasonsExplainIt(): void
     {
         self::assertContains(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES);
         self::assertNotContains(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES);
@@ -32,7 +33,7 @@ final class DeployOutcomeUnknownTest extends TestCase
                 $reasons[] = $code;
             }
         }
-        self::assertSame([VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT], $reasons);
+        self::assertSame([VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT, VIRTUSPHERE_DEPLOY_TERMINAL_REASON_ANSIBLE_CONNECTION_LOST], $reasons);
         // Rows reaped before 0065 keep failed/stale_heartbeat (no backfill).
         deploy_terminal_reason_assert(VIRTUSPHERE_DEPLOY_STATUS_FAILED, VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT);
     }

@@ -6,6 +6,7 @@ return [
     'heading' => 'Zeitleiste',
     'hint' => 'Status, Aufträge, Paketläufe und Client-Meldungen dieser VM, neueste zuerst. Statuseinträge, die älter sind als :days Tage, werden automatisch entfernt.',
     'truncated' => 'Es werden nur die neuesten :limit Einträge gezeigt. Ältere Ereignisse können fehlen.',
+    'empty' => 'Keine Einträge.',
     'th_source' => 'Quelle',
     'source_status' => 'Status',
     'source_job' => 'Auftrag',

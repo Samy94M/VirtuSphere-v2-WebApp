@@ -47,6 +47,9 @@ test.beforeEach(() => seedFreshAdmin());
 test.afterEach(() => removeFreshAdmin());
 
 test('new admin completes password change, help, setup and operations click path', async ({ page }) => {
+  // WebKit needed 22.1 s in the release lane of 2026-11-02 and 12.9 s alone;
+  // over two thirds of the global 30 s under load (FX1).
+  test.setTimeout(90000);
   await page.goto('login.php');
   await page.locator('#username').fill(USERNAME);
   await page.locator('#password').fill(INITIAL_PASSWORD);

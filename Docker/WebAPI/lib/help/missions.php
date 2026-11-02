@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vm_phase.php';
 require_once __DIR__ . '/../help_vm_path.php';
+require_once __DIR__ . '/../vm_timeline.php';
 ?>
     <div class="stack" id="panel-missions" role="tabpanel" aria-labelledby="tab-missions" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -107,13 +108,16 @@ require_once __DIR__ . '/../help_vm_path.php';
                     ])); ?></li>
                 <?php } ?>
             </ul>
+            <h3><?php echo h(__t('help_missions.status_history_heading')); ?></h3>
+            <p><?php echo h(__t('help_missions.status_history_p1', ['limit' => VIRTUSPHERE_VM_TIMELINE_LIMIT])); ?></p>
+            <p><?php echo h(__t('help_missions.status_history_p2')); ?></p>
             <h3><?php echo h(__t('help_missions.status_axes_heading')); ?></h3>
             <p><?php echo h(__t('help_missions.status_axes_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_missions.status_axes_mecm_not_ready')); ?></li>
                 <li><?php echo h(__t('help_missions.status_axes_mecm_pending')); ?></li>
                 <li><?php echo h(__t('help_missions.status_axes_mecm_registered')); ?></li>
-                <li><?php echo h(__t('help_missions.status_axes_mecm_failed')); ?></li>
+                <li><?php echo h(__t('help_missions.status_axes_mecm_deploy_failed')); ?></li>
                 <li><?php echo h(__t('help_missions.status_axes_lifecycle')); ?></li>
             </ul>
             <h3><?php echo h(__t('help_missions.status_stuck_heading')); ?></h3>
@@ -130,6 +134,7 @@ require_once __DIR__ . '/../help_vm_path.php';
             <p><?php echo h(__t('help_missions.badges_p1')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_missions.badge_mission_attention')); ?></li>
+                <li><?php echo h(__t('help_missions.badge_mission_phases')); ?></li>
                 <li><?php echo h(__t('help_missions.badge_vm_attention', [
                     'mecm_hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
                     'install_hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),

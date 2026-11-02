@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // A wrong current password is a failed authentication, not a form typo.
         audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'scope' => 'own',
-            'reason' => 'current password is wrong',
+            'reason' => VIRTUSPHERE_AUDIT_PASSWORD_REASON_CURRENT_WRONG,
         ], (int) $user['id']);
         flash_set('error', __t('account.err_current_wrong'));
     } else {

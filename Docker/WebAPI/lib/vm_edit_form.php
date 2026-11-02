@@ -15,3 +15,5 @@ require_once __DIR__ . '/vm_edit_rows.php';
 require_once __DIR__ . '/vm_edit_status.php';
 require_once __DIR__ . '/vm_edit_names.php';
 require_once __DIR__ . '/vm_edit_ram.php';
+// QL-01/QL-03 B: the comparison after a POST that saved nothing.
+require_once __DIR__ . '/vm_edit_conflict.php';

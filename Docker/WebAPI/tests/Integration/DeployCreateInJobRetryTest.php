@@ -155,7 +155,7 @@ final class DeployCreateInJobRetryTest extends TestCase
 
         deploy_worker_handle_failure($this->db, $claim, self::WORKER, $vms, 'create section did not complete');
 
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->state($vms[0]));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->state($vms[0]));
 
         [$plain, $plainVms] = $this->createJob(1);
         $this->failBeforeLaunch($plain, 1, VIRTUSPHERE_CREATE_ERROR_TRANSPORT_LOST);

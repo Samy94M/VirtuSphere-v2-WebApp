@@ -168,3 +168,21 @@ Consequences:
 - What C does not close: a device that knows a MAC can still mark a VM 5/5,
   and for that VM the OS-install warning falls silent. That residue is what
   VT-E1 B is for.
+
+## Amendment 5 (2026-11-01): the deploy failure mark keeps its wire name (MX0)
+
+Migration 0070 renames the stored MECM sync value a failed deploy job writes
+from `failed` to `deploy_failed` and withdraws `failed`: the deploy worker was
+its only writer ever, and MECM never ran. `getDeviceList` projects
+`mecm_sync_state` as a column, so the rename would have changed a wire value.
+It does not: `virtusphere_mecm_sync_wire_value()` (`lib/status.php`) emits
+`failed` for `deploy_failed` and every other value unchanged, and
+`MachineApiWireTest` pins it.
+
+Consequences:
+
+- Request, response, the computed `vm_status` and the device-sync scripts are
+  unchanged; no MECM server update. No shipped script reads the field.
+- The wire alias must not collide with a stored value.
+  `MecmSyncDeployFailedContractTest` turns red if a real `failed` state is
+  reintroduced; a real MECM failure value decides its wire name on purpose.

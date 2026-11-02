@@ -319,7 +319,9 @@ function deploy_worker_process_job(mysqli $db, array $job, string $workerId, arr
                 $workerId,
                 $vmIds,
                 $failureMessage,
-                deploy_terminal_reason_for_exception($exception),
+                // U-01: a lost connection counts only while a playbook step was
+                // running. The read-only host preflight before it stays failed.
+                deploy_terminal_reason_for_exception($exception, $remoteStepInFlight),
                 $vmsMarked,
                 $exception instanceof DeployWorkerStepFailed ? $exception->detail : null,
                 $exception instanceof DeployWorkerStepFailed ? $exception->exitCode : null,
@@ -353,6 +355,9 @@ function deploy_worker_transport_failure_with_step(RuntimeException $exception, 
     }
     if ($exception instanceof SshTransportConfigurationException) {
         return new SshTransportConfigurationException($message, 0, $exception);
+    }
+    if ($exception instanceof SshTransportConnectionLost) {
+        return new SshTransportConnectionLost($message, 0, $exception);
     }
 
     return new RuntimeException($message, 0, $exception);

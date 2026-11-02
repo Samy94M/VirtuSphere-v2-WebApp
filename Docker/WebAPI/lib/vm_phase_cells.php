@@ -70,8 +70,34 @@ function vm_finding_href(array $finding, int $missionId, int $vmId, array $workC
 }
 
 /**
- * The findings cell: the most severe finding as a link with its badge, and "+n"
- * for the rest, which leads to the VM editor where all of them are listed.
+ * The short form of a finding for the tables (SP4 R3, F7): the kind in a few
+ * words, without time, number or name. The full sentence of
+ * portal_vm_finding_text() stays the tooltip and the editor's text. The two
+ * job_failed variants keep their own words, because an unknown outcome is not
+ * a failure (WK-04/WK-07 A). An unknown kind gets the neutral sentence.
+ *
+ * @param array<string,mixed> $finding one entry of virtusphere_vm_findings()
+ */
+function vm_finding_short_text(array $finding): string
+{
+    $kind = (string) ($finding['kind'] ?? '');
+    $params = (array) ($finding['params'] ?? []);
+    if ($kind === VIRTUSPHERE_VM_FINDING_JOB_FAILED && !empty($params['create_failed'])) {
+        return __t('status.finding_short_create_failed');
+    }
+    if ($kind === VIRTUSPHERE_VM_FINDING_JOB_FAILED && !empty($params['outcome_unknown'])) {
+        return __t('status.finding_short_job_outcome_unknown');
+    }
+
+    return isset(VIRTUSPHERE_VM_FINDINGS[$kind])
+        ? __t('status.finding_short_' . $kind)
+        : __t('status.finding_unknown');
+}
+
+/**
+ * The findings cell: the most severe finding as a link with its badge in the
+ * short form and the full sentence as tooltip, and "+n" for the rest, which
+ * leads to the VM editor where all of them are listed with their sentence.
  *
  * @param list<array<string,mixed>> $findings in severity order
  * @param array<string,mixed> $workContext
@@ -85,7 +111,7 @@ function vm_findings_cell(array $findings, int $missionId, int $vmId, array $wor
     $first = $findings[0];
     $html = '<a href="' . h(vm_finding_href($first, $missionId, $vmId, $workContext))
         . '" title="' . h(portal_vm_finding_text($first)) . '">'
-        . vm_finding_badge($first) . '</a>';
+        . portal_badge((string) virtusphere_vm_finding_meta($first)['badge'], vm_finding_short_text($first)) . '</a>';
 
     $more = count($findings) - 1;
     if ($more > 0) {

@@ -153,6 +153,31 @@ case "$1" in
         fi
         exit 96
         ;;
+      init-gap)
+        # R1: the image entrypoint first runs a temporary init server on the
+        # socket only (--skip-networking), then stops it and starts the final
+        # server. The socket answers early, TCP only from the final server on
+        # (here: the third TCP probe). An import in between hits no server.
+        case "$*" in
+          *'--protocol=TCP'*'SELECT 1'*)
+            count=$(read_saved tcp-probes)
+            count=$(( ${count:-0} + 1 ))
+            printf '%s' "$count" > "$state/tcp-probes"
+            if [ "$count" -lt 3 ]; then
+              echo "ERROR 2003 (HY000): Can't connect to MySQL server on '127.0.0.1:3306' (111)" >&2
+              exit 1
+            fi
+            touch "$state/final-server"
+            printf '1\n'
+            exit 0
+            ;;
+        esac
+        if [ "${2:-}" = -i ] && [ ! -f "$state/final-server" ]; then
+          cat >/dev/null
+          echo "ERROR 2002 (HY000): Can't connect to local MySQL server through socket '/var/run/mysqld/mysqld.sock' (2)" >&2
+          exit 1
+        fi
+        ;;
     esac
     case "$*" in
       *deploy_package_report_state*)

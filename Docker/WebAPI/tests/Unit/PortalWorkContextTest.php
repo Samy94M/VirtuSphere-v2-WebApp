@@ -16,7 +16,6 @@ final class PortalWorkContextTest extends TestCase
         self::assertSame([
             'work_list_sort' => 'attention',
             'work_list_dir' => 'desc',
-            'work_list_attention' => '1',
             'work_vm_sort' => 'ram',
         ], portal_work_context([
             'work_list_type' => 'missions',
@@ -38,27 +37,30 @@ final class PortalWorkContextTest extends TestCase
         ]));
     }
 
-    public function testTemplateContextCannotRetainMissionOnlyAttentionFilter(): void
+    public function testTheRemovedAttentionFilterIsIgnoredInOldLinks(): void
     {
-        self::assertSame([
-            'work_list_type' => 'templates',
-        ], portal_work_context_from_mission_list('templates', 'name', 'asc', true));
+        // NL1 (user decision 01.11.2026): the attention-only mission filter is gone.
+        // An old URL with work_list_attention=1 opens the normal list.
+        self::assertNotContains('work_list_attention', VIRTUSPHERE_WORK_CONTEXT_KEYS);
+        self::assertSame([], portal_work_context(['work_list_attention' => '1']));
+        self::assertSame(['work_list_type' => 'templates'], portal_work_context(['work_list_type' => 'templates', 'work_list_attention' => '1']));
+        self::assertSame('missions.php?type=missions', portal_work_context_mission_list_url(['work_list_attention' => '1']));
     }
 
     public function testMissionAndVmReturnUrlsRestoreSortAndStableFocus(): void
     {
         $context = portal_work_context_with_vm_list(
-            portal_work_context_from_mission_list('missions', 'vms', 'desc', true),
+            portal_work_context_from_mission_list('missions', 'vms', 'desc'),
             'ram',
             'asc'
         );
 
         self::assertSame(
-            'missions.php?type=missions&sort=vms&dir=desc&attention=1#mission-17',
+            'missions.php?type=missions&sort=vms&dir=desc#mission-17',
             portal_work_context_mission_list_url($context, 17)
         );
         self::assertSame(
-            'vms.php?mission_id=17&sort=ram&work_list_sort=vms&work_list_dir=desc&work_list_attention=1#vm-42',
+            'vms.php?mission_id=17&sort=ram&work_list_sort=vms&work_list_dir=desc#vm-42',
             portal_work_context_vm_list_url(17, $context, 42)
         );
     }
@@ -131,7 +133,7 @@ final class PortalWorkContextTest extends TestCase
         );
         self::assertSame('vm_overview.php?filter=all', vm_overview_return_url(['work_ov_filter' => 'all']));
         self::assertNull(vm_overview_return_url([]));
-        self::assertNull(vm_overview_return_url(portal_work_context_from_mission_list('missions', 'vms', 'desc', false), 42));
+        self::assertNull(vm_overview_return_url(portal_work_context_from_mission_list('missions', 'vms', 'desc'), 42));
     }
 
     public function testMissionScopedDestinationsDropTheOverviewOriginButTheEditorRoundTripKeepsIt(): void
@@ -232,7 +234,7 @@ final class PortalWorkContextTest extends TestCase
         );
         self::assertNull(vm_overview_details_return_url(vm_overview_editor_context('all', 'name', 'asc', 1)));
         self::assertNull(vm_overview_details_return_url([]));
-        self::assertNull(vm_overview_details_return_url(portal_work_context_from_mission_list('missions', 'vms', 'desc', false)));
+        self::assertNull(vm_overview_details_return_url(portal_work_context_from_mission_list('missions', 'vms', 'desc')));
     }
 
     public function testEveryMissionScopedDestinationDropsTheRowVmToo(): void

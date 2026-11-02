@@ -49,6 +49,7 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_worker_handle_failure',
         'deploy_worker_finish_job',
         'deploy_terminal_reason_for_exception',
+        'deploy_terminal_status_for_failure_reason',
         'deploy_worker_audit_outcome',
         // LG-07/LG-08: the one writer of a mission job's deploy.outcome row, used
         // by the worker's cancel confirmation and the reaper as well.

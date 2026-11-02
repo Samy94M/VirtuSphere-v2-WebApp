@@ -55,6 +55,9 @@ const PORTAL_PAGES = [
   { path: 'package_reports.php', access: 'user' },
   { path: 'package_run.php', access: 'user', query: (ids) => `mission_id=${ids.missionId}&vm_id=${ids.vmId}` },
 
+  // The VM chronicle (SP3): opened like the editor, read-only, with filters.
+  { path: 'vm_history.php', access: 'user', query: (ids) => `mission_id=${ids.missionId}&vm_id=${ids.vmId}` },
+
   // The job log needs a job id; without one it answers with its "not found"
   // state. The seed's job is a failed export, terminal, so the page does not
   // poll while the matrix scans it.

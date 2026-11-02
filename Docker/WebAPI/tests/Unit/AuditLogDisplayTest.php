@@ -75,4 +75,44 @@ final class AuditLogDisplayTest extends TestCase
 
         self::assertSame('Abmeldung', audit_log_display_message($row));
     }
+
+    /** @return array<string,mixed> */
+    private function outcomeRow(string $status, string $reason): array
+    {
+        return $this->structuredRow([
+            'event_code' => VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME,
+            'object_type' => 'deploy_job',
+            'object_id' => '812',
+            'result' => VIRTUSPHERE_AUDIT_RESULT_FAILURE,
+            'context_json' => json_encode(['mission_id' => 12, 'mode' => 'full', 'status' => $status, 'reason' => $reason]),
+            'log_message' => 'stored sentence',
+        ]);
+    }
+
+    public function testAHostTextInADeployOutcomeIsATechnicalDetailAndNotOnTheFirstLook(): void
+    {
+        $display = audit_log_display($this->outcomeRow('failed', 'fatal: [esx01]: 503 Service Unavailable'));
+
+        self::assertSame('Bereitstellungsauftrag mit ID 812 (Mission 12, Modus Vollständige Kette): fehlgeschlagen', $display['message']);
+        self::assertSame('fatal: [esx01]: 503 Service Unavailable', $display['detail']);
+
+        Lang::load('en');
+        $english = audit_log_display($this->outcomeRow('failed', 'fatal: [esx01]: 503 Service Unavailable'));
+        self::assertSame('deploy job id 812 (mission id 12, mode full) failed', $english['message'], 'the rule holds in every locale');
+        self::assertSame('fatal: [esx01]: 503 Service Unavailable', $english['detail']);
+    }
+
+    public function testAClosedDeployReasonStaysInTheSentence(): void
+    {
+        $display = audit_log_display($this->outcomeRow('outcome_unknown', 'stale_heartbeat'));
+
+        self::assertSame('Bereitstellungsauftrag mit ID 812 (Mission 12, Modus Vollständige Kette): Ausgang unbekannt: von der Überwachung nach veraltetem Heartbeat beendet', $display['message']);
+        self::assertSame('', $display['detail']);
+    }
+
+    public function testOtherRowsHaveNoTechnicalDetail(): void
+    {
+        self::assertSame('', audit_log_display($this->structuredRow())['detail']);
+        self::assertSame('', audit_log_display($this->structuredRow(['event_code' => null]))['detail']);
+    }
 }

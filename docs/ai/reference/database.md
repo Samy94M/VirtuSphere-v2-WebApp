@@ -14,7 +14,7 @@ ESXi object-name columns use binary collation because case and raw Unicode are o
 
 ## R3 PHP constants in Docker/WebAPI/lib/ are the SSoT for ENUM value sets; the struktur.sql and migr
 
-PHP constants in `Docker/WebAPI/lib/` are the SSoT for ENUM value sets; the `struktur.sql` and `migrate.php` ENUM columns are order-exact mirrors. Run `sh scripts/check-enum-sync.sh` after touching a mirrored ENUM or its constants (ADR-0016); it also runs quietly at session start. The `deploy_jobs.status` mirrors in `migrate.php` (0001, 0019, 0031) carry the current set; migration 0065 added `outcome_unknown` and its `stale_heartbeat` CHECK branch. The status preflight derives its allowed set from `VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES` and `VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES`, so older code stops before any DDL once a row carries a value it does not know.
+PHP constants in `Docker/WebAPI/lib/` are the SSoT for ENUM value sets; the `struktur.sql` and `migrate.php` ENUM columns are order-exact mirrors. Run `sh scripts/check-enum-sync.sh` after touching a mirrored ENUM or its constants (ADR-0016); it also runs quietly at session start. The `deploy_jobs.status` mirrors in `migrate.php` (0001, 0019, 0031) carry the current set; migration 0065 added `outcome_unknown` and its `stale_heartbeat` CHECK branch, migration 0071 (U-01) widened that branch to `ansible_connection_lost`; the CHECK text lives only in `struktur.sql` and the migration that last replaced it. The status preflight derives its allowed set from `VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES` and `VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES`, so older code stops before any DDL once a row carries a value it does not know.
 
 ## R4 The effective MECM rollout hostname is globally unique through deploy_vm_hostname_claims, not t
 
@@ -77,7 +77,7 @@ reconstructs a run from its permanent replay marker.
 
 ## R9 Deploy VM prestate is an immutable per-job journal, not a history backfill
 
-Migration 0060 creates `deploy_job_vm_states`, keyed by durable `id` with unique `(job_id, vm_id)`. `lifecycle_before` and `mecm_before` are captured once and never overwritten; `marked_deploying`, `esxi_touched`, `create_launch_intent` and `touch_phase` record the current job's evidence. There is no historical backfill. A sweep chooses the newest owner by journal `id`, then checks that job's generation still matches `deploy_runtime_identity` before writing the VM. A missing or stale-generation journal proves no authority to repair. Failure/cancel/reaper/sweep consumers share the same locked journal decision, and imported successful VM IDs remain excluded.
+Migration 0060 creates `deploy_job_vm_states`, keyed by durable `id` with unique `(job_id, vm_id)`. `lifecycle_before` and `mecm_before` are captured once and never overwritten (the one exception is a token rename: migration 0070 renamed a stored `failed` to `deploy_failed` in `mecm_before` together with the VM and its status events, so restore and sweep compare like with like; the captured fact is unchanged); `marked_deploying`, `esxi_touched`, `create_launch_intent` and `touch_phase` record the current job's evidence. There is no historical backfill. A sweep chooses the newest owner by journal `id`, then checks that job's generation still matches `deploy_runtime_identity` before writing the VM. A missing or stale-generation journal proves no authority to repair. Failure/cancel/reaper/sweep consumers share the same locked journal decision, and imported successful VM IDs remain excluded.
 
 ## R10 VM host binding is evidence, never a guess
 

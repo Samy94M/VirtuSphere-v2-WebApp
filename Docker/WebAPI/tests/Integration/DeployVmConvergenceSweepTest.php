@@ -14,7 +14,7 @@ if (is_file($vmJournalRepo)) {
 
 /**
  * The convergence sweep the maintenance worker runs: VMs stuck in `deploying`
- * whose mission has no queued/running job converge to failed/failed, while an
+ * whose mission has no queued/running job converge to failed/deploy_failed, while an
  * active job protects its mission's VMs and non-deploying states stay whatever
  * they are. Stored MACs must survive the sweep.
  */
@@ -67,7 +67,7 @@ final class DeployVmConvergenceSweepTest extends TestCase
 
         $sweptVmIds = array_column($swept, 'vm_id');
         self::assertContains($vmId, $sweptVmIds);
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($vmId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vmId));
         self::assertSame($mac, $this->interfaceMac($vmId), 'a sweep must never touch stored MACs');
         self::assertSame(1, $this->sweepEventCount($vmId), 'the convergence must leave a status event');
     }
@@ -175,7 +175,7 @@ final class DeployVmConvergenceSweepTest extends TestCase
         repo_sweep_orphaned_deploying_vms($this->db);
 
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->vmState($touched));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($touched));
         self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($untouched));
         self::assertSame([$imported], json_decode((string) $this->job($jobId)['result_json'], true)['successful_vm_ids']);
     }

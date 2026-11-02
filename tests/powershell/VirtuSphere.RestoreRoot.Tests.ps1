@@ -578,6 +578,37 @@ Describe 'Restore and backup resource safety' {
         ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
     }
 
+    It 'R1: imports the dump only after the final MySQL server answers over TCP' {
+        # The image's temporary init server answers on the socket but has no
+        # network. Waiting on the socket let the import fall into the gap
+        # before the final server (ERROR 2002 under load).
+        $result = Invoke-RestoreSafety -Mode init-gap -FullDump
+        $result.ExitCode | Should -Be 0
+        ($result.Output -join "`n") | Should -Not -Match 'ERROR 2002'
+        $calls = @($result.DockerCalls)
+        $probes = @(0..($calls.Count - 1) | Where-Object { $calls[$_] -match '^exec b{64} mysql --protocol=TCP -h127\.0\.0\.1 -P3306 -uroot -p\S+ -N -e SELECT 1$' })
+        $probes.Count | Should -Be 3 -Because 'two refused TCP probes, then the final server'
+        $imports = @(0..($calls.Count - 1) | Where-Object { $calls[$_] -match '^exec -i b{64} mysql -uroot -p\S+$' })
+        $imports.Count | Should -BeGreaterThan 0
+        $imports[0] | Should -BeGreaterThan $probes[-1] -Because 'the dump import starts only after the final server answered'
+        @(0..($imports[0] - 1) | Where-Object { $calls[$_] -match '^exec b{64} mysql -uroot -p\S+ -N -e SELECT 1$' }).Count | Should -Be 0 -Because 'before the import a socket probe reaches the temporary server too'
+    }
+
+    It 'R1: the production restore starts the dump import only after the healthy final MySQL server' {
+        # Production restores into an emptied data directory, so the entrypoint
+        # runs its temporary init server (with struktur.sql) first. Only the
+        # TCP healthcheck tells the final server apart; --wait waits for it.
+        $runbook = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docs\operations\backup.md') -Raw -Encoding UTF8
+        $section = [regex]::Match($runbook, '(?ms)^## Echter Restore.*?(?=^## )').Value
+        $section | Should -Not -BeNullOrEmpty
+        $section | Should -Match 'docker compose up -d --wait mysql'
+        $section | Should -Not -Match 'docker compose up -d mysql`'
+        $section.IndexOf('docker compose up -d --wait mysql') | Should -BeLessThan $section.IndexOf('gunzip -c')
+        $compose = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docker-compose.yml') -Raw
+        $mysqlService = [regex]::Match($compose, '(?ms)^  mysql:\r?\n.*?(?=^  \S)').Value
+        $mysqlService | Should -Match 'healthcheck:\s*\r?\n\s*test: \["CMD-SHELL", "mysqladmin ping -h 127\.0\.0\.1 ' -Because 'the temporary init server has no network, so only a TCP healthcheck waits for the final server'
+    }
+
     It 'keeps ownership after create when database start fails and cleans by exact ID' {
         $result = Invoke-RestoreSafety -Mode start-failure
         $result.ExitCode | Should -Be 2

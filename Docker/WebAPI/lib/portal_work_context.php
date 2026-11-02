@@ -15,7 +15,6 @@ const VIRTUSPHERE_WORK_CONTEXT_KEYS = [
     'work_list_type',
     'work_list_sort',
     'work_list_dir',
-    'work_list_attention',
     'work_vm_sort',
     'work_vm_dir',
     'work_ov_filter',
@@ -50,9 +49,10 @@ function portal_work_context(array $input): array
 
     $rawType = $scalar('work_list_type');
     $type = $allowed($rawType, ['missions', 'templates']);
+    // NL1 (user decision 01.11.2026): the attention-only mission filter is gone;
+    // an old work_list_attention in a bookmark is not a list value and is dropped.
     $hasListValues = $scalar('work_list_sort') !== ''
-        || $scalar('work_list_dir') !== ''
-        || $scalar('work_list_attention') !== '';
+        || $scalar('work_list_dir') !== '';
     $context = [];
     if ($type !== '' || ($rawType === '' && $hasListValues)) {
         $type = $type !== '' ? $type : 'missions';
@@ -64,9 +64,6 @@ function portal_work_context(array $input): array
         }
         if ($dir !== '') {
             $context['work_list_dir'] = $dir;
-        }
-        if ($type === 'missions' && $scalar('work_list_attention') === '1') {
-            $context['work_list_attention'] = '1';
         }
     }
 
@@ -104,13 +101,12 @@ function portal_work_context(array $input): array
 }
 
 /** @return array<string,string> */
-function portal_work_context_from_mission_list(string $type, string $sort, string $dir, bool $attentionOnly): array
+function portal_work_context_from_mission_list(string $type, string $sort, string $dir): array
 {
     return portal_work_context([
         'work_list_type' => $type,
         'work_list_sort' => $sort,
         'work_list_dir' => $dir,
-        'work_list_attention' => $attentionOnly ? '1' : '',
     ]);
 }
 
@@ -168,9 +164,6 @@ function portal_work_context_mission_list_url(array $context, ?int $focusMission
     }
     if (isset($context['work_list_dir'])) {
         $params['dir'] = $context['work_list_dir'];
-    }
-    if (($context['work_list_attention'] ?? '') === '1') {
-        $params['attention'] = '1';
     }
 
     $url = 'missions.php?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);

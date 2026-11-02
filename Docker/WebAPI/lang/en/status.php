@@ -31,7 +31,7 @@ return [
     'mecm_not_ready' => 'Not ready yet',
     'mecm_pending' => 'Waiting for MECM',
     'mecm_registered' => 'Registered in MECM',
-    'mecm_failed' => 'MECM sync open after failure',
+    'mecm_deploy_failed' => 'MECM sync open after failure',
     'mecm_unknown' => 'Unknown state',
 
     // Job status (the active and terminal sets from lib/deploy_constants.php).
@@ -82,7 +82,7 @@ return [
 
     // VM findings (VIRTUSPHERE_VM_FINDINGS, lib/vm_phase.php). The time part drops
     // out only when no valid server time exists; then the variant without time or
-    // origin applies. `mecm_sync_failed` reuses `mecm_failed`.
+    // origin applies. `mecm_sync_deploy_failed` reuses `mecm_deploy_failed`.
     'finding_create_uncertain' => 'Create unresolved (job :job_id, unit :position)',
     'finding_job_failed' => 'Job failed: :mode, :time',
     'finding_create_failed' => 'Not created on ESXi: :mode, :time',
@@ -106,4 +106,23 @@ return [
     'finding_unknown' => 'Unknown finding',
     'finding_more' => '+:count',
     'finding_more_title' => ':count more findings, all in the VM editor',
+    // Short form per finding for the tables (SP4, F7): no time, number or name;
+    // the full sentence is the tooltip and the VM editor's text.
+    'finding_short_create_uncertain' => 'Create unresolved',
+    'finding_short_job_failed' => 'Job failed',
+    'finding_short_create_failed' => 'Not created',
+    'finding_short_job_outcome_unknown' => 'Outcome unknown',
+    'finding_short_missing_from_inventory' => 'Not in the inventory',
+    'finding_short_job_running' => 'Job running',
+    'finding_short_old_mecm_device' => 'Old MECM device',
+    'finding_short_mecm_pending_overdue' => 'MECM overdue',
+    'finding_short_mecm_pending' => 'Waiting for MECM',
+    'finding_short_powered_off' => 'Powered off',
+    'finding_short_os_install_overdue' => 'OS installation overdue',
+    'finding_short_pxe_unwatched' => 'PXE evidence missing',
+    'finding_short_os_install_watching' => 'Observation running',
+    'finding_short_client_phase_failed' => 'Client phase failed',
+    'finding_short_client_phase_unconfirmed' => 'Client phase unconfirmed',
+    'finding_short_package_run_failed' => 'Package report failed',
+    'finding_short_mecm_sync_deploy_failed' => 'MECM sync open',
 ];

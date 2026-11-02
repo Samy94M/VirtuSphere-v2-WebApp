@@ -93,6 +93,18 @@ function atMission(missionId) {
   return new RegExp('mission_id=' + missionId + '(&|$)');
 }
 
+// Filtering to the mission already shown submits to a URL that the current
+// page already matches, so waitForURL(atMission(...)) resolved before the GET
+// landed and the next reads could see the old document (red once on WebKit,
+// FX1 2026-11-02). Wait for the main frame to commit a new document instead.
+async function reloadByFilter(page, filter) {
+  await Promise.all([
+    page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame()),
+    filter.locator('button[type="submit"]').click(),
+  ]);
+  await page.waitForLoadState('load');
+}
+
 function localDatetimeIn(hours) {
   const dt = new Date(Date.now() + hours * 3600 * 1000);
   const pad = (n) => String(n).padStart(2, '0');
@@ -210,11 +222,8 @@ test('same-mission job filtering preserves a VM subset through blockers, preview
   // this subset from a mission change before PHP rebuilds the checkbox list.
   const filter = page.locator('form[data-deploy-filter]');
   await filter.locator('select[name="mission_id"]').selectOption(String(ids.a));
-  await Promise.all([
-    page.waitForURL(atMission(ids.a)),
-    filter.locator('button[type="submit"]').click(),
-  ]);
-  await page.waitForLoadState('load');
+  await reloadByFilter(page, filter);
+  await expect(page).toHaveURL(atMission(ids.a));
 
   await expectQueueFormIntact(page, ids, scheduledAt, 'the job filter carried the field along');
   expect(await checkedVmIds(page), 'the same-mission filter keeps the exact subset').toEqual([missionAVmIds[0]]);
@@ -261,10 +270,8 @@ test('same-mission job filtering preserves an explicitly empty VM selection', as
 
   const filter = page.locator('form[data-deploy-filter]');
   await filter.locator('select[name="mission_id"]').selectOption(String(ids.a));
-  await Promise.all([
-    page.waitForURL(atMission(ids.a)),
-    filter.locator('button[type="submit"]').click(),
-  ]);
+  await reloadByFilter(page, filter);
+  await expect(page).toHaveURL(atMission(ids.a));
 
   expect(await checkedVmIds(page), 'the same-mission render keeps no VM checked').toEqual([]);
   const url = new URL(page.url());

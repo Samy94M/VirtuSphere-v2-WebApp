@@ -93,22 +93,22 @@ const VIRTUSPHERE_LIFECYCLE_STATES = [
     VIRTUSPHERE_LIFECYCLE_FAILED,
 ];
 
-// MECM sync states. Must stay in sync with the mecm_sync_state ENUM.
-// `submitted` used to sit between pending and registered. It was read in four
-// places and written in none, so no code path could ever put a VM there. A state
-// that half exists is worse than one that does not: every reader carried it and
-// every new reader had to guess what it meant. Withdrawn in migration 0028; do
-// not reintroduce a value without the writer that reaches it.
+// MECM sync states. Must stay in sync with the mecm_sync_state ENUM. A state
+// without a writer is withdrawn, never kept: `submitted` (0028) and `failed`
+// (0070, which only ever meant "a deploy job failed", now `deploy_failed`; MECM
+// itself never wrote it). Do not reintroduce a value without the writer that
+// reaches it. getDeviceList still emits `failed` for `deploy_failed`
+// (virtusphere_mecm_sync_wire_value()); keep the ENUM order, the list sorts by it.
 const VIRTUSPHERE_MECM_SYNC_NOT_READY = 'not_ready';
 const VIRTUSPHERE_MECM_SYNC_PENDING = 'pending';
 const VIRTUSPHERE_MECM_SYNC_REGISTERED = 'registered';
-const VIRTUSPHERE_MECM_SYNC_FAILED = 'failed';
+const VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED = 'deploy_failed';
 
 const VIRTUSPHERE_MECM_SYNC_STATES = [
     VIRTUSPHERE_MECM_SYNC_NOT_READY,
     VIRTUSPHERE_MECM_SYNC_PENDING,
     VIRTUSPHERE_MECM_SYNC_REGISTERED,
-    VIRTUSPHERE_MECM_SYNC_FAILED,
+    VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED,
 ];
 
 // Rollout hostname (Etappe 14D, ADR-0043). The NetBIOS computer-name length is

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 /** VM editor request, action and view-model owner. Loaded by portal/vm_edit.php. */
 
+require_once __DIR__ . '/edit_conflict_view.php';
+
 /** @var mysqli $connection Provided by portal/bootstrap.php. */
 /** @var array<string, mixed> $user Authenticated portal user from the shell. */
 
@@ -64,82 +66,75 @@ if ($vmId > 0 && !$isTemplate) {
 
 $error = '';
 $fieldErrors = [];
+// QL-01/QL-03 B: the comparison of a POST that saved nothing (lib/vm_edit_conflict.php).
+$editConflict = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     portal_guard_post($connection, $user);
     if (!can('vms.write', $user)) {
         portal_forbid($connection, $user, 'vms.write');
     }
 
-    try {
-        $vmData = [
-            'vm_name' => request_string($_POST, 'vm_name'),
-            'vm_hostname' => request_string($_POST, 'vm_hostname'),
-            'vm_domain' => request_string($_POST, 'vm_domain'),
-            'vm_os' => request_string($_POST, 'vm_os'),
-            'vm_ram' => (string) vm_edit_ram_from_post($_POST),
-            'vm_cpu' => vm_edit_cpu_from_post($_POST),
-            'vm_disk' => request_string($_POST, 'vm_disk'),
-            'vm_datastore' => request_string($_POST, 'vm_datastore'),
-            'vm_datacenter' => request_string($_POST, 'vm_datacenter'),
-            'vm_guest_id' => request_string($_POST, 'vm_guest_id'),
-            // vm_creator is deliberately absent: repo_save_vm() stamps it from the
-            // acting user on create and preserves it on update. A posted value is
-            // ignored, and the rendered field carries no name attribute.
-            'vm_notes' => request_string($_POST, 'vm_notes'),
-            'cpu_hotplug' => request_string($_POST, 'cpu_hotplug', '0'),
-            'ram_hotplug' => request_string($_POST, 'ram_hotplug', '0'),
-            // Autostart override (ADR-0025). An empty delay field is the editor's
-            // "inherit" state and repo_vm_delay_value() turns it into -1; it must
-            // never reach the INT NOT NULL column as ''.
-            'autostart_enabled' => request_string($_POST, 'autostart_enabled', '0'),
-            'autostart_start_delay' => request_string($_POST, 'autostart_start_delay'),
-            'autostart_stop_delay' => request_string($_POST, 'autostart_stop_delay'),
-        ];
-        // One transaction for the save and its audit rows (vm_save_with_audit).
-        // $vm is the pre-save bundle on update and the diff base of vm.changed.
-        $saved = vm_save_with_audit(
-            $connection,
-            $missionId,
-            $vmId,
-            $vmId > 0 ? (array) $vm : [],
-            $isTemplate,
-            $vmData,
-            vm_parse_interfaces(is_array($_POST['interfaces'] ?? null) ? $_POST['interfaces'] : [], $mission),
-            vm_parse_disks(is_array($_POST['disks'] ?? null) ? $_POST['disks'] : []),
-            vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []),
-            request_string($_POST, 'edit_version'),
-            (int) $user['id'],
-            vm_mecm_save_mode($_POST)
-        );
-        $savedVmId = $saved['vm_id'];
-        $frozenSnapshot = $saved['frozen_snapshot'];
+    // F5: "continue with my input" adopts the version the comparison showed and
+    // saves nothing; only the next ordinary save writes. Never a save fallback.
+    $continueVersion = $vmId > 0 ? edit_conflict_continue_version($_POST) : null;
+    if ($continueVersion !== null) {
+        $vm = vm_edit_sticky_vm($vm ?? [], $_POST, $mission);
+        if ($continueVersion !== '') {
+            $vm['edit_version'] = $continueVersion;
+        }
+    } else {
+        try {
+            $vmData = vm_edit_submitted_values($_POST);
+            // One transaction for the save and its audit rows (vm_save_with_audit).
+            // $vm is the pre-save bundle on update and the diff base of vm.changed.
+            $saved = vm_save_with_audit(
+                $connection,
+                $missionId,
+                $vmId,
+                $vmId > 0 ? (array) $vm : [],
+                $isTemplate,
+                $vmData,
+                vm_parse_interfaces(is_array($_POST['interfaces'] ?? null) ? $_POST['interfaces'] : [], $mission),
+                vm_parse_disks(is_array($_POST['disks'] ?? null) ? $_POST['disks'] : []),
+                vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []),
+                request_string($_POST, 'edit_version'),
+                (int) $user['id'],
+                vm_mecm_save_mode($_POST)
+            );
+            $savedVmId = $saved['vm_id'];
+            $frozenSnapshot = $saved['frozen_snapshot'];
 
-        // What a queued transfer sends is named here (AV-R12); a plain save keeps its sentence.
-        flash_set('success', vm_mecm_save_success_message($saved['mecm']));
-        // A frozen snapshot means the correction was stored and changes nothing
-        // about the machine that is already handed over. Saying so here is the
-        // whole point: without it the operator leaves the page believing the
-        // rename took effect, and finds out at the next rollout that it did not.
-        if ($frozenSnapshot !== '') {
-            flash_set('info', __t('vm_edit.flash_rollout_frozen', ['hostname' => $frozenSnapshot]));
+            // What a queued transfer sends is named here (AV-R12); a plain save keeps its sentence.
+            flash_set('success', vm_mecm_save_success_message($saved['mecm']));
+            // A frozen snapshot means the correction was stored and changes nothing
+            // about the machine that is already handed over. Saying so here is the
+            // whole point: without it the operator leaves the page believing the
+            // rename took effect, and finds out at the next rollout that it did not.
+            if ($frozenSnapshot !== '') {
+                flash_set('info', __t('vm_edit.flash_rollout_frozen', ['hostname' => $frozenSnapshot]));
+            }
+            // AV-R12: an OS that deviates from MECM was saved in the portal only, unless
+            // the operator chose the transfer button. The flash says so whenever MECM still
+            // lacks a difference that this save held back.
+            if ($saved['mecm']['held']) {
+                flash_set('info', __t('vm_edit.flash_mecm_portal_only'));
+            }
+            redirect_to(vm_overview_return_url($workContext, $savedVmId)
+                ?? portal_work_context_vm_list_url($missionId, $workContext, $savedVmId));
+        } catch (Throwable $exception) {
+            $error = portal_error_message($exception);
+            if ($exception instanceof ValidationException) {
+                $fieldErrors = $exception->errors();
+            }
+            $vm = vm_edit_sticky_vm($vm ?? [], $_POST, $mission);
         }
-        // AV-R12: an OS that deviates from MECM was saved in the portal only, unless
-        // the operator chose the transfer button. The flash says so whenever MECM still
-        // lacks a difference that this save held back.
-        if ($saved['mecm']['held']) {
-            flash_set('info', __t('vm_edit.flash_mecm_portal_only'));
+    }
+    if ($vmId > 0) {
+        $editConflict = vm_edit_conflict($connection, $vmId, $mission, $_POST, (string) ($vm['edit_version'] ?? ''), $continueVersion !== null);
+        if ($editConflict !== null && $editConflict['mode'] === VIRTUSPHERE_EDIT_CONFLICT_MODE_CONFLICT && $error === '') {
+            // A continue whose shown version went stale meanwhile: say so like a refused save.
+            $error = __t('vm_edit.err_conflict');
         }
-        redirect_to(vm_overview_return_url($workContext, $savedVmId)
-            ?? portal_work_context_vm_list_url($missionId, $workContext, $savedVmId));
-    } catch (Throwable $exception) {
-        $error = portal_error_message($exception);
-        if ($exception instanceof ValidationException) {
-            $fieldErrors = $exception->errors();
-        }
-        $vm = array_merge($vm ?? [], $_POST);
-        $vm['interfaces'] = is_array($_POST['interfaces'] ?? null) ? $_POST['interfaces'] : vm_default_interfaces($mission);
-        $vm['disks'] = is_array($_POST['disks'] ?? null) ? $_POST['disks'] : vm_default_disks();
-        $vm['packages'] = vm_parse_packages(is_array($_POST['packages'] ?? null) ? $_POST['packages'] : []);
     }
 }
 
@@ -170,14 +165,9 @@ $vmDatacenterValue = (string) ($vm['vm_datacenter'] ?? '');
 $vmDatastoreValue = (string) ($vm['vm_datastore'] ?? '');
 $missionDatastore = trim((string) ($mission['hypervisor_datastorage'] ?? ''));
 $missionDatacenter = trim((string) ($mission['hypervisor_datacenter'] ?? ''));
-// An empty mission datacenter is the derived case, so the plain label is the
-// truthful one: there is no concrete value to promise.
-$datastoreInheritLabel = $missionDatastore !== ''
-    ? __t('vm_edit.location_inherit_value', ['value' => $missionDatastore])
-    : __t('vm_edit.location_inherit');
-$datacenterInheritLabel = $missionDatacenter !== ''
-    ? __t('vm_edit.location_inherit_value', ['value' => $missionDatacenter])
-    : __t('vm_edit.location_inherit');
+// The same empty-option label names the inherited value in the conflict comparison.
+$datastoreInheritLabel = vm_edit_location_inherit_label($mission, 'hypervisor_datastorage');
+$datacenterInheritLabel = vm_edit_location_inherit_label($mission, 'hypervisor_datacenter');
 // A standalone ESXi exposes exactly one (implicit) datacenter, so an override
 // could not point anywhere else. Hide the control, but keep posting the value:
 // an unrendered field would come back as '' and wipe an existing override.

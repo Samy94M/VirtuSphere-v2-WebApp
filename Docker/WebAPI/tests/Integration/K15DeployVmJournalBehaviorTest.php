@@ -141,7 +141,7 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
         deploy_worker_handle_failure($this->db, $claim, self::WORKER, [$imported, $touched, $untouched], 'post-callback failure');
 
         self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->state($imported));
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->state($touched));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->state($touched));
         self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->state($untouched));
         self::assertSame([$imported], json_decode((string) $this->jobRow($jobId)['result_json'], true)['successful_vm_ids']);
     }
@@ -159,7 +159,7 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
         self::assertTrue($this->touch($claim, $vm, 'export'));
         deploy_worker_handle_failure($this->db, $claim, self::WORKER, [$vm], 'export failed after access attempt');
 
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->state($vm));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->state($vm));
     }
 
     public function testCreatePreparedWithoutLaunchIntentRestoresButWithIntentRemainsUnknown(): void
@@ -232,7 +232,7 @@ final class K15DeployVmJournalBehaviorTest extends TestCase
 
         deploy_worker_handle_failure($this->db, $claim, self::WORKER, [$vm], 'create sequence failed');
 
-        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_FAILED], $this->state($vm));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->state($vm));
     }
 
     private function mission(string $suffix): int
