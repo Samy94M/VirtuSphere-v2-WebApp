@@ -167,13 +167,17 @@ final class MacImportBoundsTest extends TestCase
         ] as $size => $rejected) {
             $body = str_repeat('x', $size);
             self::assertSame($rejected, strlen($body) > VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 'ascii ' . $size);
+            // Each body is 16 MiB: hold one at a time, not three (PM1 measured
+            // +48 MB in this test against the 128 MB limit of phpunit-full).
+            unset($body);
         }
 
         // Half as many two-byte characters is exactly the same number of bytes.
         $umlauts = str_repeat('ä', intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2));
         self::assertSame(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, strlen($umlauts));
         self::assertLessThanOrEqual(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, strlen($umlauts));
-        self::assertTrue(strlen($umlauts . 'ä') > VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES);
+        $umlauts .= 'ä';
+        self::assertTrue(strlen($umlauts) > VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES);
     }
 
     public function testIdentifierBoundsCutOnCodepointBoundariesAndStayEncodable(): void

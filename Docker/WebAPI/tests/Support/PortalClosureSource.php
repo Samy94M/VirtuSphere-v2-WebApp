@@ -5,7 +5,9 @@ declare(strict_types=1);
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\CloningVisitor;
 use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\NodeVisitorAbstract;
 use PhpParser\ParserFactory;
 use PhpParser\ConstExprEvaluator;
 
@@ -24,7 +26,7 @@ final class PortalClosureSource
     private array $eager = [];
     /** @var array<string,array<string,true>> */
     private array $availableCache = [];
-    private int $evictions = 0;
+    private ?NodeTraverser $detach = null;
 
     /** @param array<string,string> $overrides In-memory mutation fixtures only. */
     public function __construct(private array $overrides = []) {}
@@ -39,13 +41,9 @@ final class PortalClosureSource
             // Keep the normal PHPUnit memory limit: owner indexing covers the
             // entire library, but only a small working set needs full bodies.
             if (count($this->cache) > 8) {
+                // The tree is acyclic and is freed at once. PortalClosureCalls
+                // must not hold it in a reference cycle (PM1).
                 array_shift($this->cache);
-                // A parsed tree is cyclic garbage once evicted, and the engine
-                // collects cycles late: without this the analysis carried about
-                // 40 MB of dead trees into the following tests (SP4 measured
-                // the 128 MB limit in phpunit-full). Every 16th eviction keeps
-                // the peak low without paying a collection per file.
-                if (++$this->evictions % 16 === 0) { gc_collect_cycles(); }
             }
         }
         return $this->cache[$file];
@@ -84,24 +82,41 @@ final class PortalClosureSource
                 }
             }
             foreach ((new NodeFinder())->findInstanceOf($this->nodes($file), Node\Stmt\ClassMethod::class) as $method) {
-                $signature = clone $method;
-                $signature->stmts = [];
-                $this->methods[strtolower((string) $method->name)][] = $signature;
+                $this->methods[strtolower((string) $method->name)][] = $this->signature($method);
             }
             foreach ((new NodeFinder())->findInstanceOf($this->nodes($file), Node\Stmt\Function_::class) as $node) {
                 $name = strtolower((string) ($node->namespacedName ?? $node->name));
                 if (isset($owners[$name]) && $owners[$name]['file'] !== $file) {
                     throw new RuntimeException('[portal-closure.duplicate-owner] ' . $name);
                 }
-                $signature = clone $node;
-                $signature->stmts = [];
-                $owners[$name] = ['file' => $file, 'node' => $signature];
+                $owners[$name] = ['file' => $file, 'node' => $this->signature($node)];
             }
         }
         if ($owners === []) {
             throw new RuntimeException('[portal-closure.zero-match] Empty function owner index');
         }
         return $owners;
+    }
+
+    /**
+     * Callers read parameters, return type and doc comment only. A detached
+     * copy without body and source positions keeps the index of the whole
+     * library small: the index fell from 22 to 15 MB (PM1).
+     */
+    private function signature(Node\Stmt\Function_|Node\Stmt\ClassMethod $node): Node\Stmt\Function_|Node\Stmt\ClassMethod
+    {
+        $signature = clone $node;
+        $signature->stmts = [];
+        $this->detach ??= new NodeTraverser(new CloningVisitor(), new class extends NodeVisitorAbstract {
+            public function leaveNode(Node $node): null { $node->setAttributes([]); return null; }
+        });
+        [$signature] = $this->detach->traverse([$signature]);
+        if (!$signature instanceof Node\Stmt\Function_ && !$signature instanceof Node\Stmt\ClassMethod) {
+            throw new LogicException('[portal-closure.signature] cloning changed the declaration type');
+        }
+        $doc = $node->getDocComment();
+        $signature->setAttributes($doc === null ? [] : ['comments' => [$doc]]);
+        return $signature;
     }
 
     /** @return list<string> */

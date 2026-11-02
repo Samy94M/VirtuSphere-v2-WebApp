@@ -184,6 +184,11 @@ final class PortalClosureCalls
             }
         }
         $this->available = $outerAvailable;
+        // Both walkers reference themselves, and $visit holds $this with the
+        // owner index. Left alone, every scope is a reference cycle that keeps
+        // trees and index alive until the engine collects cycles, well into
+        // later tests (PM1). Releasing them here frees everything at once.
+        $collect = $visit = null;
     }
 
     /** @param array<string,true> $guards */

@@ -33,9 +33,17 @@ final class PortalClosureAnalysisTest extends TestCase
         rmdir($this->fixture . '/lib');
         rmdir($this->fixture . '/portal');
         rmdir($this->fixture);
-        // The real-repo analysis leaves parsed trees as cyclic garbage; free it
-        // here instead of in whichever later test the engine happens to pick.
+    }
+
+    public function testAnalysisLeavesNoReferenceCycles(): void
+    {
+        // The real-repo analysis must free its trees and owner index when it
+        // ends, not whenever the engine next collects cycles (PM1 measured
+        // 20 MB carried into later tests of phpunit-full).
+        $this->put('portal/index.php', '<?php require_once __DIR__ . "/../lib/bootstrap.php"; function wrap(callable $f): void { $f(); } wrap(static fn () => app_helper()); if (true) { app_helper(); }');
         gc_collect_cycles();
+        self::assertSame([], $this->problems());
+        self::assertSame(0, gc_collect_cycles());
     }
 
     private function put(string $relative, string $source): void
