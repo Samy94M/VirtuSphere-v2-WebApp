@@ -51,6 +51,27 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
     randomSeed: contract.randomSeed,
     sessionRemainingSeconds: contract.sessionRemainingSeconds,
   });
+  // The badge fixture is applied while the document is parsed, never after the
+  // page has painted. Changing a painted badge makes Chromium re-raster only the
+  // invalidated area, and that partial raster drew the round badge caps (and
+  // sometimes text edges) in byte-different ways between identical runs (BK1,
+  // 02.11.2026: 30 replays per theme with the old post-load change gave three
+  // variants each, 40 per theme with this observer gave one, and so did 10 with
+  // --disable-partial-raster). A MutationObserver callback runs as a microtask
+  // at the end of the parser task that inserted the node, before the event
+  // loop's next rendering step, so the badge is painted only in its fixture
+  // state; a text node appended later is corrected the same way.
+  await page.addInitScript((overviewBadges) => {
+    const applyOverviewBadges = () => {
+      for (const fixture of overviewBadges) {
+        const node = document.querySelector(`.status-overview-card[href="${fixture.href}"] .badge`);
+        if (!node) continue;
+        if (node.className !== fixture.className) node.className = fixture.className;
+        if (node.textContent !== fixture.text) node.textContent = fixture.text;
+      }
+    };
+    new MutationObserver(applyOverviewBadges).observe(document, { childList: true, subtree: true, characterData: true });
+  }, contract.pages.flatMap((entry) => entry.fixture?.overviewBadges || []));
   await page.emulateMedia({ colorScheme: theme, reducedMotion: contract.reducedMotion });
 
   const sessionClockText = [
@@ -78,10 +99,9 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
         const count = await badge.count();
         if (badgeFixture.optional && count === 0) continue;
         expect(count, `visual fixture target ${badgeFixture.href}`).toBe(1);
-        await badge.evaluate((node, fixture) => {
-          node.className = fixture.className;
-          node.textContent = fixture.text;
-        }, badgeFixture);
+        // Verified, not set: the init-script observer above owns the change.
+        await expect(badge).toHaveClass(badgeFixture.className);
+        await expect(badge).toHaveText(badgeFixture.text);
       }
       await expect(page.locator('[data-session-timer]')).toHaveAttribute(
         'data-expires-in',

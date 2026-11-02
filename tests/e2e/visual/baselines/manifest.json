@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "updatedAt": "2026-11-01T05:02:49.677Z",
-  "reason": "SP4 R1: Missionsliste mit neuer Spalte „Phasen“ (Phasenverteilung je Mission, Fixture ohne VMs zeigt „—“); nur missions-*, Nutzerentscheidung F10 (28.10.2026), Register Welle SP4",
+  "updatedAt": "2026-11-02T08:00:00.356Z",
+  "reason": "BK1 (Nutzerentscheidung 01.11.2026): Die Badge-Fixture der System-Status-Aufnahme wird vor dem ersten Zeichnen gesetzt statt nach dem Laden per evaluate; nur light/system-status-desktop wechselt auf die eine stabile Kantenvariante (40 von 40 Aufnahmen), alle anderen Bilder byte-gleich; Messung im Register Welle BK1",
   "runner": {
     "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
     "platform": "win32",
@@ -142,7 +142,7 @@
     "light/missions-desktop.png": "22c18e756e1f4d8ec6a1cf9530cfd8c246613796a079b847deeceeff518c6d14",
     "light/missions-mobile.png": "84c89ca07e241cd4552d70862ee480b1b3820d903724d8dd5d40b862ef2fb719",
     "light/missions-wrap.png": "6af5cc94d5ee17257da81c975d55d386504b26b3924d543cb5ad898716ee5a4d",
-    "light/system-status-desktop.png": "36aef5f37957616f815a72539ead514ab30b62851d8c137dbf1e27afb29814b3",
+    "light/system-status-desktop.png": "c344c69c656f60d53171d5f65a8843e360e0dbee305bbedf6e48f17dd2a83b6b",
     "light/system-status-mobile.png": "4b70c53e1434541fe6d49ef343442b805dca366698bfc577102c4b6d971139f9",
     "light/system-status-wrap.png": "b6ddfd973f3900872990cb045ca9ed717f88027efcd62aeb4f152ab2f912fbb2"
   }

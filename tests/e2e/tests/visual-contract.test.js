@@ -92,6 +92,18 @@ test('visual capture pins the session countdown contract before navigation', () 
   assert.match(spec, /expect\(page\.locator\('\[data-session-clock\]'\)\)\.toHaveText\(sessionClockText\)/);
 });
 
+test('visual capture applies the badge fixture before the first paint, never after load', () => {
+  // BK1 (02.11.2026): changing an already painted badge left Chromium's partial
+  // re-raster to draw the round badge caps in several byte-different ways; the
+  // fixture set while the document is parsed gave one image in 40 replays.
+  const spec = fs.readFileSync(path.join(__dirname, '..', 'specs', 'visual', 'portal.visual.spec.js'), 'utf8');
+  assert.match(spec, /new MutationObserver\(applyOverviewBadges\)\.observe\(document, \{ childList: true, subtree: true, characterData: true \}\)/);
+  assert.match(spec, /contract\.pages\.flatMap\(\(entry\) => entry\.fixture\?\.overviewBadges \|\| \[\]\)/);
+  assert.doesNotMatch(spec, /badge\.evaluate\(/);
+  assert.match(spec, /await expect\(badge\)\.toHaveClass\(badgeFixture\.className\)/);
+  assert.match(spec, /await expect\(badge\)\.toHaveText\(badgeFixture\.text\)/);
+});
+
 test('visual runner pins the deterministic software compositor arguments', () => {
   assert.deepEqual(contract.launchArgs, [
     '--no-sandbox',
