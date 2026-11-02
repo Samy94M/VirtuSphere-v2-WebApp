@@ -31,8 +31,7 @@ if (!in_array($requestedMissionSort, ['name', 'vms', 'attention'], true)) {
     $requestedMissionSort = 'name';
 }
 $requestedMissionDir = request_string($_GET, 'dir', 'asc') === 'desc' ? 'desc' : 'asc';
-$requestedAttentionOnly = !$isTemplateView && request_string($_GET, 'attention') === '1';
-$workContext = portal_work_context_from_mission_list($type, $requestedMissionSort, $requestedMissionDir, $requestedAttentionOnly);
+$workContext = portal_work_context_from_mission_list($type, $requestedMissionSort, $requestedMissionDir);
 $missionListActionUrl = portal_work_context_mission_list_url($workContext);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -191,11 +190,9 @@ $rows = array_values(array_filter(getMissions($connection), static function (arr
     $isTemplate = mission_name_is_template((string) ($mission['mission_name'] ?? ''));
     return $type === 'templates' ? $isTemplate : !$isTemplate;
 }));
-$attentionOnly = !$isTemplateView && request_string($_GET, 'attention') === '1';
+// NL1 (user decision 01.11.2026): no attention-only filter; the dashboard tile
+// "VM check due" with its four groups replaces it. An old attention parameter is ignored.
 $rows = missions_with_vm_counts($connection, $rows, $isTemplateView);
-if ($attentionOnly) {
-    $rows = array_values(array_filter($rows, static fn (array $missionRow): bool => (int) $missionRow['progress_attention_count'] > 0));
-}
 
 // Column sorting (Name, VMs): whitelisted keys keep GET input safe and let the
 // CSV export and the rendered table share the same order.
@@ -204,7 +201,7 @@ if ($attentionOnly) {
     'vms' => portal_sort_number('vm_count'),
     'attention' => portal_sort_number('progress_attention_count'),
 ], 'name');
-$workContext = portal_work_context_from_mission_list($type, $sort, $dir, $attentionOnly);
+$workContext = portal_work_context_from_mission_list($type, $sort, $dir);
 
 missions_export_csv_if_requested($connection, $user, $rows, $isTemplateView);
 
@@ -320,22 +317,19 @@ layout_header($title, $user, $active, 'missions');
 
     <section class="panel">
         <?php // Two lists, two addresses: page navigation (lib/mission_nav.php).
-              // The reset and the export act on the list and stay in the action
-              // row, which is rendered only when it holds something: an empty
-              // one still occupies its gap above the table. ?>
+              // The export acts on the list and stays in the action row, which is
+              // rendered only when it holds something: an empty one still occupies
+              // its gap above the table. ?>
         <?php echo mission_list_nav($type); ?>
-        <?php if ($attentionOnly || $rows !== []) { ?>
+        <?php if ($rows !== []) { ?>
         <div class="actions">
-            <?php if ($attentionOnly) { ?><a class="button button-secondary" href="missions.php?type=missions"><?php echo h(__t('missions.attention_clear')); ?></a><?php } ?>
-            <?php if ($rows !== []) { ?><a class="button button-secondary" href="missions.php?type=<?php echo h($type); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?><?php echo $attentionOnly ? '&attention=1' : ''; ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
+            <a class="button button-secondary" href="missions.php?type=<?php echo h($type); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a>
         </div>
         <?php } ?>
-        <?php if ($attentionOnly) { ?><p class="muted"><?php echo h(__t('missions.attention_filter_hint')); ?></p><?php } ?>
         <div class="table-wrap" tabindex="0">
             <table>
                 <thead><tr><?php
                     $missionSortParams = ['type' => $type];
-                    if ($attentionOnly) { $missionSortParams['attention'] = '1'; }
                     echo portal_sort_header('missions.php', 'name', __t('common.name'), $sort, $dir, $missionSortParams);
                     echo portal_sort_header('missions.php', 'vms', __t('common.vms'), $sort, $dir, $missionSortParams);
                     if (!$isTemplateView) { echo '<th>' . h(__t('missions.th_phases')) . '</th>'; }
@@ -387,7 +381,7 @@ layout_header($title, $user, $active, 'missions');
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if ($rows === []) { ?><tr><td colspan="<?php echo $isTemplateView ? '5' : '6'; ?>"><?php echo missions_empty_list_html($attentionOnly, $isTemplateView, can('missions.write', $user)); ?></td></tr><?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="<?php echo $isTemplateView ? '5' : '6'; ?>"><?php echo missions_empty_list_html($isTemplateView, can('missions.write', $user)); ?></td></tr><?php } ?>
                 </tbody>
             </table>
         </div>

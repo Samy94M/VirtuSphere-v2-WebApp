@@ -616,7 +616,15 @@
             if (!form || typeof form.querySelector !== 'function' || event.defaultPrevented) {
                 return;
             }
-            var button = form.querySelector('button[data-busy-label]');
+            // The submitter decides (NL1): a button without its own busy label,
+            // such as "Continue with my input" after an edit conflict, saves
+            // nothing and must not turn a save button into "Saving...". Only a
+            // submit without a submitter (a script) falls back to the form's
+            // first busy button.
+            var submitter = event.submitter;
+            var button = submitter
+                ? (typeof submitter.matches === 'function' && submitter.matches('button[data-busy-label]') ? submitter : null)
+                : form.querySelector('button[data-busy-label]');
             if (!button || button.disabled) {
                 return;
             }

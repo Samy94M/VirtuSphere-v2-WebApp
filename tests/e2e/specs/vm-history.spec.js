@@ -62,6 +62,17 @@ test.describe('as admin', () => {
     await expect(page).toHaveURL(new RegExp(`vm_edit\\.php\\?mission_id=${ids.mission}&vm_id=${ids.vm}`));
   });
 
+  test('without timeline entries the editor still links to the chronicle (NL1)', async ({ page }) => {
+    const ids = seed(0);
+    await page.goto(`vm_edit.php?mission_id=${ids.mission}&vm_id=${ids.vm}`);
+    const timeline = page.locator('section', { has: page.locator('#vm-timeline-heading') });
+    await expect(timeline).toBeVisible();
+    await expect(timeline.locator('table')).toHaveCount(0);
+    await timeline.locator('[data-vm-history-link]').click();
+    await expect(page).toHaveURL(new RegExp(`vm_history\\.php\\?mission_id=${ids.mission}&vm_id=${ids.vm}`));
+    await expect(page.locator('[data-vm-history-entry^="audit-"]'), 'the change log reaches the chronicle through the editor').toHaveCount(1);
+  });
+
   test('paging continues one snapshot and a later entry waits for "Show newest"', async ({ page }) => {
     const ids = seed(60);
     await page.goto(`vm_history.php?mission_id=${ids.mission}&vm_id=${ids.vm}`);

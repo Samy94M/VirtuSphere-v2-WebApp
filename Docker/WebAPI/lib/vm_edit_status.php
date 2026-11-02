@@ -219,18 +219,17 @@ function vm_timeline_event_html(array $entry, int $missionId, int $vmId, array $
 
 /**
  * The VM timeline (plan ST-2, section 4.4): status events, deploy jobs, package runs
- * and client events in one table, open without a click and hidden without entries.
- * The caller owns the visibility guard like the panel above. The whole chronicle
- * with filters and paging is its own page (SP3, F3), linked from here.
+ * and client events in one table, open without a click. The whole chronicle with
+ * filters and paging is its own page (SP3, F3), linked from here; the section and
+ * its link stay without entries (NL1, user decision 01.11.2026), because the
+ * chronicle also holds sources the timeline does not show. The caller owns the
+ * visibility guard like the panel above.
  *
  * @param array{entries:list<array<string,mixed>>,truncated:bool} $timeline from virtusphere_vm_timeline()
  * @param array<string, mixed> $workContext
  */
 function render_vm_status_history(array $timeline, int $missionId, int $vmId, array $workContext, ?bool $canOpenJobLog = null): void
 {
-    if ($timeline['entries'] === []) {
-        return;
-    }
     $canOpenJobLog ??= can('deploy.run');
     $event = static fn (array $entry): string => vm_timeline_event_html($entry, $missionId, $vmId, $workContext, $canOpenJobLog);
     ?>
@@ -238,6 +237,9 @@ function render_vm_status_history(array $timeline, int $missionId, int $vmId, ar
             <h2 id="vm-timeline-heading"><?php echo h(__t('vm_timeline.heading')); ?></h2>
             <p class="muted"><?php echo h(__t('vm_timeline.hint', ['days' => VIRTUSPHERE_STATUS_EVENT_RETENTION_DAYS])); ?></p>
             <p><a href="<?php echo h(vm_history_url($missionId, $vmId, $workContext)); ?>" data-vm-history-link><?php echo h(__t('vm_history.open_full')); ?></a></p>
+            <?php if ($timeline['entries'] === []) { ?>
+                <p class="muted"><?php echo h(__t('vm_timeline.empty')); ?></p>
+            <?php } else { ?>
             <?php if ($timeline['truncated']) { ?>
                 <p class="muted"><?php echo h(__t('vm_timeline.truncated', ['limit' => VIRTUSPHERE_VM_TIMELINE_LIMIT])); ?></p>
             <?php } ?>
@@ -260,6 +262,7 @@ function render_vm_status_history(array $timeline, int $missionId, int $vmId, ar
                     </tbody>
                 </table>
             </div>
+            <?php } ?>
         </section>
     <?php
 }

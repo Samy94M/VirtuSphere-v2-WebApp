@@ -17,7 +17,9 @@ final class PortalWorkContextContractTest extends TestCase
         preg_match("/const VIRTUSPHERE_WORK_CONTEXT_KEYS = \[(.*?)\];/s", $helper, $match);
         self::assertArrayHasKey(1, $match);
         preg_match_all("/'work_[a-z_]+' /x", $match[1], $keys);
-        self::assertCount(11, $keys[0]);
+        // Ten closed keys; work_list_attention left with the mission filter (NL1).
+        self::assertCount(10, $keys[0]);
+        self::assertStringNotContainsString("'work_list_attention'", $match[1]);
     }
 
     public function testConsumersUseCanonicalUrlsAndStableRowTargets(): void

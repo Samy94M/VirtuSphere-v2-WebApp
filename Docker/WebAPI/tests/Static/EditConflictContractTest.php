@@ -76,6 +76,11 @@ final class EditConflictContractTest extends TestCase
         // It writes nothing, so it carries no confirm and no busy label of a save.
         self::assertStringNotContainsString('data-confirm', $view);
         self::assertStringNotContainsString('data-busy-label', $view);
+        // NL1: the busy handler follows the submitter, so continuing does not turn
+        // the editor's save button into its busy label (edit-conflict.spec.js).
+        $core = self::source('portal/assets/core.js');
+        self::assertStringContainsString('var submitter = event.submitter;', $core);
+        self::assertStringContainsString("submitter.matches('button[data-busy-label]') ? submitter : null", $core);
     }
 
     public function testTheTextsExistInBothLocalesWithoutDashes(): void

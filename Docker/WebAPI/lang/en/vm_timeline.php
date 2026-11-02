@@ -6,6 +6,7 @@ return [
     'heading' => 'Timeline',
     'hint' => 'Status, jobs, package runs and client reports of this VM, newest first. Status entries older than :days days are removed automatically.',
     'truncated' => 'Only the newest :limit entries are shown. Older events may be missing.',
+    'empty' => 'No entries.',
     'th_source' => 'Source',
     'source_status' => 'Status',
     'source_job' => 'Job',

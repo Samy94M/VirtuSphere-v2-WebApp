@@ -134,6 +134,21 @@ test('server-rendered return links work without JavaScript and direct entry stay
   }
 });
 
+test('an old link with the removed attention filter opens the normal mission list (NL1)', async ({ page }) => {
+  const ids = seed();
+  const response = await page.goto('missions.php?type=missions&sort=vms&dir=desc&attention=1');
+  expect(response.status()).toBe(200);
+  const row = page.locator(`#mission-${ids.mission.id}`);
+  await expect(row, 'a mission without an overdue VM is listed: the parameter has no effect').toBeVisible();
+  await expect(page.getByRole('link', { name: 'Clear filter' })).toHaveCount(0);
+  const vmList = await row.getByRole('link', { name: 'VMs', exact: true }).getAttribute('href');
+  expect(vmList).not.toContain('attention');
+
+  await page.goto(`mission_details.php?id=${ids.mission.id}&work_list_sort=vms&work_list_attention=1`);
+  const back = await page.getByRole('link', { name: 'Back' }).getAttribute('href');
+  expect(back, 'an old work_list_attention is dropped from the way back').toBe(`missions.php?type=missions&sort=vms#mission-${ids.mission.id}`);
+});
+
 test('a VM opened from the VM overview returns to the same list view after save and back', async ({ page }) => {
   const ids = seed();
   // The MECM-pending list holds template rows too; queuing the template VM puts it there.

@@ -88,6 +88,24 @@ async function submitAndWait(page, button, path) {
   await page.waitForLoadState('domcontentloaded');
 }
 
+// NL1: the busy handler in core.js must mark only the button that submits. The
+// listener on window runs after the handler on document and records which
+// buttons carry the busy state when the submit leaves the page.
+async function recordBusyOnSubmit(page) {
+  await page.evaluate(() => {
+    sessionStorage.removeItem('nl1-busy');
+    window.addEventListener('submit', (event) => {
+      if (event.defaultPrevented) { return; }
+      const busy = Array.from(document.querySelectorAll('button.is-busy'), (button) => button.textContent.trim());
+      sessionStorage.setItem('nl1-busy', JSON.stringify(busy));
+    });
+  });
+}
+
+async function recordedBusy(page) {
+  return JSON.parse(await page.evaluate(() => sessionStorage.getItem('nl1-busy') || 'null'));
+}
+
 test.beforeEach(() => cleanup());
 test.afterAll(() => cleanup());
 
@@ -133,8 +151,14 @@ test('mission: comparison, continue without writing, a new conflict, then the de
   expect(storedMission(ids.mission).mission_notes).toBe('');
 
   // Continue, then the ordinary save writes the operator's input as shown.
+  // Continue saves nothing and shows no busy save button; the save does (NL1).
+  await recordBusyOnSubmit(page);
   await submitAndWait(page, page.locator('[data-edit-conflict] button[name="edit_conflict"]'), '/mission_details.php');
+  expect(await recordedBusy(page), 'continue marks no button busy').toEqual([]);
+  const busyLabel = await save(page).getAttribute('data-busy-label');
+  await recordBusyOnSubmit(page);
   await submitAndWait(page, save(page), '/mission_details.php');
+  expect(await recordedBusy(page), 'the save button shows its busy label').toEqual([busyLabel]);
   await expect(page.locator('[data-edit-conflict]')).toHaveCount(0);
   await expect(page.locator('.alert-success')).toBeVisible();
   const saved = storedMission(ids.mission);
@@ -169,12 +193,17 @@ test('VM: comparison with the child count, continue without writing, then the de
   const afterRefusal = storedVm(ids.vm);
   expect(afterRefusal.vm_notes).toBe('');
 
+  await recordBusyOnSubmit(page);
   await submitAndWait(page, page.locator('[data-edit-conflict] button[name="edit_conflict"]'), '/vm_edit.php');
+  expect(await recordedBusy(page), 'continue marks no button busy (NL1)').toEqual([]);
   await expect(page.locator('[data-edit-conflict="continued"]')).toBeVisible();
   await expect(page.locator('#vm-editor-form input[name="edit_version"]')).toHaveValue(String(afterRefusal.edit_version));
   expect(storedVm(ids.vm)).toEqual(afterRefusal);
 
+  const busyLabel = await save(page).getAttribute('data-busy-label');
+  await recordBusyOnSubmit(page);
   await submitAndWait(page, save(page), '/vm_edit.php');
+  expect(await recordedBusy(page), 'the save button shows its busy label (NL1)').toEqual([busyLabel]);
   await expect(page).not.toHaveURL(/vm_edit\.php/);
   const saved = storedVm(ids.vm);
   expect(saved.vm_notes).toBe('first draft');

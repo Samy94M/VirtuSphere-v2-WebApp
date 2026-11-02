@@ -96,11 +96,8 @@ function missions_export_csv_if_requested(mysqli $connection, array $user, array
  * sits above the table, so the sentence links to it, but only to a user who can
  * submit it: a reader without missions.write still learns that nothing exists.
  */
-function missions_empty_list_html(bool $attentionOnly, bool $templateView, bool $canCreate): string
+function missions_empty_list_html(bool $templateView, bool $canCreate): string
 {
-    if ($attentionOnly) {
-        return h(__t('missions.attention_empty'));
-    }
     $sentence = h(__t($templateView ? 'missions.empty_template' : 'missions.empty_mission'));
     if (!$canCreate) {
         return $sentence;

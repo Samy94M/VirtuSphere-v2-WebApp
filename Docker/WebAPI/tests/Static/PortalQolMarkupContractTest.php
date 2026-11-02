@@ -187,7 +187,7 @@ final class PortalQolMarkupContractTest extends TestCase
     public function testQl16TheEmptyListLinksToTheCreateFormForAWriter(): void
     {
         $missions = self::source('portal/missions.php');
-        self::assertStringContainsString('missions_empty_list_html($attentionOnly, $isTemplateView, can(\'missions.write\', $user))', $missions);
+        self::assertStringContainsString('missions_empty_list_html($isTemplateView, can(\'missions.write\', $user))', $missions);
         self::assertStringContainsString('id="mission-create"', $missions);
         self::assertStringContainsString('#mission-create', self::source('lib/missions_page.php'));
         self::texts('missions', 'empty_mission');
