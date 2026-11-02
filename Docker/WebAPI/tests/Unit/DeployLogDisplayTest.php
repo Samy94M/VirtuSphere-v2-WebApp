@@ -199,6 +199,26 @@ final class DeployLogDisplayTest extends TestCase
         self::assertStringContainsString(h(__t('help_deploy_figures.step_create')), $finished);
         self::assertStringNotContainsString(VIRTUSPHERE_PLAYBOOKS['create'], $finished, 'a person reads the step, not the file');
         self::assertSame('inventoryESXi_playbook.yml', deploy_log_phase_label('inventoryESXi_playbook.yml'));
+        // An open step names its start only, never an empty end.
+        $openTimes = h(__t('deploy.phase_started', ['start' => portal_format_timestamp('2026-10-29 10:36:17')]));
+        self::assertStringContainsString($openTimes, $finished);
+        self::assertStringNotContainsString(h(__t('deploy_history.phase_times', [
+            'start' => portal_format_timestamp('2026-10-29 10:36:17'),
+            'end' => '',
+        ])), $finished);
+    }
+
+    public function testAnEmptySequenceSaysNotYetOnlyWhileTheJobRuns(): void
+    {
+        $empty = ['phases' => [], 'current' => null];
+
+        $running = deploy_log_phases_html($empty, false);
+        $finished = deploy_log_phases_html($empty, true);
+        self::assertStringContainsString(h(__t('deploy.phases_empty')), $running);
+        self::assertStringContainsString(h(__t('deploy.phases_empty_terminal')), $finished);
+        self::assertStringNotContainsString(h(__t('deploy.phases_empty')), $finished);
+        // The legend explains badges; with no step there is nothing to explain.
+        self::assertStringNotContainsString(h(__t('deploy.phases_hint')), $finished);
     }
 
     public function testErrorLinesAreClassifiedOnceAndCaseSensitively(): void

@@ -44,20 +44,26 @@ function deploy_log_render_phases(array $timeline, bool $jobTerminal = false): v
     ?>
     <section class="panel">
         <h2><?php echo h(__t('deploy.phases_heading')); ?></h2>
-        <p class="muted"><?php echo h(__t('deploy.phases_hint')); ?></p>
-        <?php if ($timeline['phases'] === []) { ?>
-            <p class="muted"><?php echo h(__t('deploy.phases_empty')); ?></p>
+        <?php if ($timeline['phases'] === []) {
+            // An ended job without markers never started a step, or its log
+            // has passed retention; "not yet" would promise one is coming.
+            ?>
+            <p class="muted"><?php echo h(__t($jobTerminal ? 'deploy.phases_empty_terminal' : 'deploy.phases_empty')); ?></p>
         <?php } else { ?>
+            <p class="muted"><?php echo h(__t('deploy.phases_hint')); ?></p>
             <ol class="phase-list">
                 <?php foreach ($timeline['phases'] as $phase) {
                     $isCurrent = !$jobTerminal && !$phase['complete'] && $timeline['current'] === $phase['playbook'];
                     ?>
                     <li>
                         <span class="phase-name"><?php echo h(deploy_log_phase_label($phase['playbook'])); ?></span>
-                        <span class="muted"><?php echo h(__t('deploy_history.phase_times', [
-                            'start' => portal_format_timestamp($phase['started_at'] ?? null),
-                            'end' => portal_format_timestamp($phase['finished_at'] ?? null),
-                        ])); ?></span>
+                        <span class="muted"><?php echo h(($phase['finished_at'] ?? null) === null
+                            // An open step has no end yet; an empty "End:" reads as a missing value.
+                            ? __t('deploy.phase_started', ['start' => portal_format_timestamp($phase['started_at'] ?? null)])
+                            : __t('deploy_history.phase_times', [
+                                'start' => portal_format_timestamp($phase['started_at'] ?? null),
+                                'end' => portal_format_timestamp($phase['finished_at']),
+                            ])); ?></span>
                         <?php
                         // Three distinguishable outcomes, never a colour alone:
                         // an unfinished step is not the same thing as the one
