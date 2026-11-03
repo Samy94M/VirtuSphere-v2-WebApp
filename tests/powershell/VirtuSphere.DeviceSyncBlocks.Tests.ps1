@@ -7,7 +7,9 @@
 #    vorhanden behandelt;
 #  - das Nachlesen nach einem Import wirft bei einem Providerfehler;
 #  - jede Laufkategorie stammt aus Phase oder Markierung, und der Detailtext
-#    ist geschwaerzt und gekuerzt.
+#    ist geschwaerzt und gekuerzt;
+#  - die Ursache je VM fuer reportDeviceCauses (MX1) entsteht am Abschnitt der
+#    VM und beim Replay einer gesperrten VM.
 #
 # Die Funktionen des Device-Syncs werden aus dem Quelltext per AST uebernommen, damit
 # die Suite die Produktionsfassung prueft und kein Duplikat pflegt.
@@ -312,6 +314,141 @@ Describe 'Abschluss einer VM: Zustandswechsel statt Dauerfeuer (AV-F16)' {
         $causes.Count | Should -Be 1
         $replayed.DataWarnings | Should -Be 2
         $replayed.ItemFailures | Should -Be 0
+    }
+}
+
+# MX1 (FM-05): Paare fuer reportDeviceCauses entstehen am Abschnitt einer VM, nicht
+# an den Aufrufstellen von Add-VsRunCause. Eine gesperrte, nicht faellige VM
+# bekommt ihr Paar beim Replay; sonst loeschte jeder vollstaendige Bericht genau
+# die dauerhaften Ursachen.
+Describe 'Ursache je VM am Abschnitt der VM (MX1)' {
+
+    BeforeEach {
+        $script:CapturedLog.Clear()
+        $script:VsPendingDevice = $null
+        $script:VsDeviceLogBuffer = $null
+        $script:VsDeviceCauseAcknowledged = $null
+        $script:VsDeviceCausePausedUntil = $null
+        $script:VsDeviceCauseLastNoticeLog = $null
+    }
+
+    It 'bildet das Paar aus den Ursachen ab CauseStart, nicht aus denen einer anderen VM' {
+        $path = Join-Path $TestDrive 'pair-window.json'
+        $states = @{}
+        $set = New-VsDeviceCauseSet
+        $causes = New-VsRunCauseList
+        Add-VsRunCause -Causes $causes -Cause 'collection_folder_failed' -Collection 'Win11'
+        Add-VsRunCause -Causes $causes -Cause 'mission_missing' -Target 'VM-Z'
+        Add-VsRunCause -Causes $causes -Cause 'mac_conflict' -Target 'VM-A'
+        Add-VsRunCause -Causes $causes -Cause 'collection_missing' -Target 'VM-A' -Collection 'Mission A'
+        $pending = New-TestPendingDevice -CauseStart 2
+        $pending['RolloutRevision'] = 4
+        $script:VsPendingDevice = $pending
+        Complete-VsPendingDeviceBlock -Causes $causes -ItemFailures 1 -BlockStates $states -StatePath $path -DeviceCauses $set
+        @($set.Values).Count | Should -Be 1
+        $set['17']['vm_id'] | Should -Be 17
+        $set['17']['rollout_revision'] | Should -Be 4
+        $set['17']['code'] | Should -Be 'mac_conflict'
+    }
+
+    It 'paart auch eine voruebergehende Ursache, die keine Sperre wird' {
+        $set = New-VsDeviceCauseSet
+        $causes = New-VsRunCauseList
+        Add-VsRunCause -Causes $causes -Cause 'resource_id_pending' -Target 'VM-A'
+        $pending = New-TestPendingDevice
+        $pending['RolloutRevision'] = 2
+        $script:VsPendingDevice = $pending
+        $states = @{}
+        Complete-VsPendingDeviceBlock -Causes $causes -BlockStates $states -StatePath (Join-Path $TestDrive 'pair-transient.json') -DeviceCauses $set
+        $states.Count | Should -Be 0
+        $set['17']['code'] | Should -Be 'resource_id_pending'
+    }
+
+    It 'bildet kein Paar fuer eine VM ohne Ursache und keines bei einem Abbruch' {
+        $set = New-VsDeviceCauseSet
+        $pending = New-TestPendingDevice
+        $pending['RolloutRevision'] = 2
+        $script:VsPendingDevice = $pending
+        Complete-VsPendingDeviceBlock -Causes (New-VsRunCauseList) -BlockStates @{} -StatePath (Join-Path $TestDrive 'pair-none.json') -DeviceCauses $set
+        $set.Count | Should -Be 0
+
+        $causes = New-VsRunCauseList
+        Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target 'VM-A'
+        $script:VsPendingDevice = $pending
+        Complete-VsPendingDeviceBlock -Abort -Causes $causes -BlockStates @{} -StatePath (Join-Path $TestDrive 'pair-abort.json') -DeviceCauses $set
+        $set.Count | Should -Be 0
+    }
+
+    It 'aendert das Schema des Sperrzustands nicht' {
+        $script:VsDeviceBlockStateSchema | Should -Be 1
+        $states = @{}
+        $causes = New-VsRunCauseList
+        Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target 'VM-A'
+        $pending = New-TestPendingDevice
+        $pending['RolloutRevision'] = 9
+        $script:VsPendingDevice = $pending
+        Complete-VsPendingDeviceBlock -Causes $causes -DataWarnings 1 -BlockStates $states -StatePath (Join-Path $TestDrive 'pair-schema.json') -DeviceCauses (New-VsDeviceCauseSet)
+        (@($states['17'].Keys) -join ',') | Should -Be 'fingerprint,checked_at,since,signature,name,causes,item_failures,data_failures'
+    }
+
+    It 'gesperrt und nicht faellig: das Paar bleibt ueber viele Laeufe, complete=true loescht es nicht' {
+        $path = Join-Path $TestDrive 'pair-held.json'
+        $states = @{}
+        $causes = New-VsRunCauseList
+        Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target 'VM-A'
+        $pending = New-TestPendingDevice
+        $pending['RolloutRevision'] = 5
+        $script:VsPendingDevice = $pending
+        Complete-VsPendingDeviceBlock -Causes $causes -DataWarnings 1 -BlockStates $states -StatePath $path -DeviceCauses (New-VsDeviceCauseSet)
+        $record = $states['17']
+        $record | Should -Not -BeNullOrEmpty
+
+        $script:SentBodies = New-Object System.Collections.Generic.List[object]
+        Mock Invoke-VsApi {
+            $sent = [Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json
+            $script:SentBodies.Add($sent)
+            [pscustomobject]@{ success = $true; run_id = $sent.run_id }
+        }
+        $start = [datetime]'2026-11-03T12:00:00'
+        foreach ($run in 0..60) {
+            # Lauf alle 10 s ueber zehn Minuten; die VM bleibt nicht faellig, ihre
+            # Ursache kommt jedes Mal aus dem gespeicherten Zustand.
+            $now = $start.AddSeconds(10 * $run)
+            $set = New-VsDeviceCauseSet
+            $runCauses = New-VsRunCauseList
+            $replayed = Add-VsReplayedDeviceBlock -Record $record -Causes $runCauses -DeviceCauses $set -VmId 17 -RolloutRevision 5
+            $replayed.DataWarnings | Should -Be 1
+            $set['17']['code'] | Should -Be 'mac_missing' -Because "Lauf $run muss das Paar tragen"
+            $set['17']['rollout_revision'] | Should -Be 5
+            [void](Send-VsDeviceCauseReport -Config ([pscustomobject]@{ ReportToken = 'T' }) -RunId ('{0:x32}' -f $run) -Complete $true -DeviceCauses $set -Now $now)
+        }
+        # Gesendet: erster Lauf und je eine Auffrischung nach 300 s (0, 300, 600 s).
+        $script:SentBodies.Count | Should -Be 3
+        foreach ($body in $script:SentBodies) {
+            $body.complete | Should -BeTrue
+            @($body.causes | Where-Object { $_.vm_id -eq 17 -and $_.code -eq 'mac_missing' -and $_.rollout_revision -eq 5 }).Count | Should -Be 1
+        }
+    }
+
+    It 'nimmt beim Replay den ersten gespeicherten Code (dieselbe Wahl wie im Durchgang)' {
+        $set = New-VsDeviceCauseSet
+        $record = @{ causes = @('collection_missing target=VM-A collection=Mission A', 'membership_identity_ambiguous target=VM-A'); item_failures = 1; data_failures = 1 }
+        [void](Add-VsReplayedDeviceBlock -Record $record -Causes (New-VsRunCauseList) -DeviceCauses $set -VmId '17' -RolloutRevision 2)
+        $set['17']['code'] | Should -Be 'collection_missing'
+    }
+
+    It 'hat jeder Sperrgrund einen geraetebezogenen Code' {
+        foreach ($code in $script:VsDeviceGatedCauses) {
+            $script:VsDeviceCauseCodes | Should -Contain $code -Because "die Sperre $code muss als Paar ans Portal gehen"
+        }
+    }
+
+    It 'reicht der Sync die Sammlung an beide Replay-Stellen und beide regulaeren Abschluesse' {
+        $text = Get-Content -LiteralPath $script:DeviceSyncPath -Raw
+        ([regex]::Matches($text, 'Add-VsReplayedDeviceBlock -Record [^\r\n]*-DeviceCauses \$deviceCauses -VmId \$device\.id -RolloutRevision \$device\.rollout_revision')).Count | Should -Be 2
+        ([regex]::Matches($text, 'Complete-VsPendingDeviceBlock -Causes \$causes [^\r\n]*-DeviceCauses \$deviceCauses')).Count | Should -Be 2
+        $text | Should -Match 'Complete-VsPendingDeviceBlock -Abort -Causes \$causes -BlockStates \$deviceBlockStates -StatePath \$deviceBlockStatePath\r?\n'
+        $text | Should -Match '\$deviceCauses = New-VsDeviceCauseSet'
     }
 }
 

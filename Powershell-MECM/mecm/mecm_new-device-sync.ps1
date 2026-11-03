@@ -282,12 +282,23 @@ function Write-VsDeviceLog {
 
 # Uebernimmt die gespeicherte Sperre einer nicht faelligen VM in den Lauf: dieselben
 # Ursachen und Zaehler wie beim letzten Durchgang, damit der Report gelb bleibt.
+# Mit -DeviceCauses entsteht dazu ihr Paar fuer reportDeviceCauses (MX1): der erste
+# gespeicherte Code und die Revision aus der aktuellen getDeviceList-Zeile. Ohne
+# dieses Paar loeschte ein vollstaendiger Bericht die Ursache genau der dauerhaft
+# gesperrten VMs bei fast jedem Lauf; der Sperrzustand bekommt dafuer kein neues
+# Feld.
 function Add-VsReplayedDeviceBlock {
     param(
         [Parameter(Mandatory)]$Record,
-        [Parameter(Mandatory)]$Causes
+        [Parameter(Mandatory)]$Causes,
+        [System.Collections.IDictionary]$DeviceCauses,
+        $VmId,
+        $RolloutRevision
     )
     foreach ($cause in @($Record.causes)) { $Causes.Add([string]$cause) }
+    if ($null -ne $DeviceCauses) {
+        Add-VsDeviceCause -DeviceCauses $DeviceCauses -VmId $VmId -RolloutRevision $RolloutRevision -Causes @($Record.causes)
+    }
     return [pscustomobject]@{ ItemFailures = [int]$Record.item_failures; DataWarnings = [int]$Record.data_failures }
 }
 
@@ -297,6 +308,8 @@ function Add-VsReplayedDeviceBlock {
 #  - Neue oder geaenderte Sperre: Pufferzeilen schreiben (ERROR/WARN wie bisher).
 #  - Aufgehobene Sperre: Pufferzeilen schreiben und einmal INFO.
 # -Abort schreibt nur den Puffer (Lauf bricht mitten in der VM ab, Zustand bleibt).
+# Mit -DeviceCauses entsteht aus den Ursachen ab CauseStart das Paar der VM fuer
+# reportDeviceCauses (MX1), gesperrt oder nicht; ohne Ursache entsteht keines.
 function Complete-VsPendingDeviceBlock {
     param(
         [Parameter(Mandatory)]$Causes,
@@ -304,6 +317,7 @@ function Complete-VsPendingDeviceBlock {
         [int]$DataWarnings = 0,
         [Parameter(Mandatory)][hashtable]$BlockStates,
         [Parameter(Mandatory)][string]$StatePath,
+        [System.Collections.IDictionary]$DeviceCauses,
         [switch]$Abort
     )
     $pending = $script:VsPendingDevice
@@ -321,6 +335,9 @@ function Complete-VsPendingDeviceBlock {
 
     $newCauses = @()
     for ($index = [int]$pending.CauseStart; $index -lt $Causes.Count; $index++) { $newCauses += [string]$Causes[$index] }
+    if ($null -ne $DeviceCauses) {
+        Add-VsDeviceCause -DeviceCauses $DeviceCauses -VmId $pending.Id -RolloutRevision $pending.RolloutRevision -Causes $newCauses
+    }
     $gated = $newCauses.Count -gt 0
     foreach ($cause in $newCauses) {
         if ($script:VsDeviceGatedCauses -notcontains ([string]$cause).Split(' ')[0]) { $gated = $false }
@@ -397,6 +414,11 @@ while ($true) {
     # Ursachen dieses Laufs mit VM- und Collection-Namen. Ohne sie zeigte die
     # Portalkarte "Datenwarnungen: 3" ohne eine einzige VM zu nennen.
     $causes = New-VsRunCauseList
+    # Ursache je VM fuer reportDeviceCauses (MX1): Paare entstehen am Abschnitt
+    # einer VM, nicht an den Aufrufstellen von Add-VsRunCause. complete wird erst
+    # am Ende eines Durchgangs ohne Ausnahme wahr.
+    $deviceCauses = New-VsDeviceCauseSet
+    $deviceCausesComplete = $false
 
     try {
         # --- VirtuSphere-Geraeteliste laden --------------------------------
@@ -441,7 +463,7 @@ while ($true) {
             # Keine VM ist faellig: keine MECM-Inventur, nur die Ursachen der
             # gesperrten VMs aus dem Zustand in den Lauf-Report uebernehmen.
             foreach ($device in $devices) {
-                $replayed = Add-VsReplayedDeviceBlock -Record $deviceBlockStates[[string]$device.id] -Causes $causes
+                $replayed = Add-VsReplayedDeviceBlock -Record $deviceBlockStates[[string]$device.id] -Causes $causes -DeviceCauses $deviceCauses -VmId $device.id -RolloutRevision $device.rollout_revision
                 $itemFailures += $replayed.ItemFailures
                 $dataWarnings += $replayed.DataWarnings
             }
@@ -523,11 +545,11 @@ while ($true) {
             foreach ($device in $devices) {
                 # Die vorige VM abschliessen, dann: gesperrt und nicht faellig -> nur
                 # die gespeicherten Ursachen uebernehmen (AV-F16).
-                Complete-VsPendingDeviceBlock -Causes $causes -ItemFailures $itemFailures -DataWarnings $dataWarnings -BlockStates $deviceBlockStates -StatePath $deviceBlockStatePath
+                Complete-VsPendingDeviceBlock -Causes $causes -ItemFailures $itemFailures -DataWarnings $dataWarnings -BlockStates $deviceBlockStates -StatePath $deviceBlockStatePath -DeviceCauses $deviceCauses
                 $deviceBlockKey = [string]$device.id
                 $deviceDecision = $dueByDevice[$deviceBlockKey]
                 if (-not $deviceDecision.Due) {
-                    $replayed = Add-VsReplayedDeviceBlock -Record $deviceBlockStates[$deviceBlockKey] -Causes $causes
+                    $replayed = Add-VsReplayedDeviceBlock -Record $deviceBlockStates[$deviceBlockKey] -Causes $causes -DeviceCauses $deviceCauses -VmId $device.id -RolloutRevision $device.rollout_revision
                     $itemFailures += $replayed.ItemFailures
                     $dataWarnings += $replayed.DataWarnings
                     continue
@@ -544,6 +566,7 @@ while ($true) {
                 $script:VsPendingDevice = @{
                     Id                = $deviceBlockKey
                     Name              = [string]$device.vm_name
+                    RolloutRevision   = $device.rollout_revision
                     Fingerprint       = [string]$fingerprintByDevice[$deviceBlockKey]
                     Reason            = [string]$deviceDecision.Reason
                     PreviousSignature = $previousBlockSignature
@@ -1095,7 +1118,7 @@ while ($true) {
             }
 
             # Die letzte VM des Durchgangs abschliessen (Sperrzustand und Puffer).
-            Complete-VsPendingDeviceBlock -Causes $causes -ItemFailures $itemFailures -DataWarnings $dataWarnings -BlockStates $deviceBlockStates -StatePath $deviceBlockStatePath
+            Complete-VsPendingDeviceBlock -Causes $causes -ItemFailures $itemFailures -DataWarnings $dataWarnings -BlockStates $deviceBlockStates -StatePath $deviceBlockStatePath -DeviceCauses $deviceCauses
 
             # Collection-Updates gesammelt anstossen (einmal je geaenderter Collection)
             foreach ($name in $collectionsToUpdate.Keys) {
@@ -1124,6 +1147,9 @@ while ($true) {
         # successful API read must not hide a repeatedly broken SMS Provider.
         # Per-item data warnings still prove the provider itself answered.
         $consecutiveErrors = 0
+        # Jede VM des getDeviceList-Schnappschusses lief durch (geprueft oder aus
+        # dem Sperrzustand uebernommen): erst jetzt darf das Portal ersetzen.
+        $deviceCausesComplete = $true
     } catch {
         $consecutiveErrors++
         # Die VM im Durchgang abbrechen: ihre Zeilen werden geschrieben, ihr Sperrzustand
@@ -1156,6 +1182,11 @@ while ($true) {
             -IntervalSeconds $intervalSeconds -Outcome $outcome -ErrorCategory $category `
             -DurationMs $durationMs -Detail $detail -Summary $summary -ScriptVersion $SCRIPT_VERSION
     }
+
+    # Ursache je VM (MX1): nach der Abschlussmeldung und ausserhalb von finally.
+    # Die Funktion wirft nie und aendert weder outcome noch Zaehler; ein altes
+    # Portal (400/413) laesst den Versand 15 Minuten ruhen.
+    [void](Send-VsDeviceCauseReport -Config $config -RunId $runId -Complete $deviceCausesComplete -DeviceCauses $deviceCauses)
 
     if ($loop % 100 -eq 0) { [System.GC]::Collect() }
     Start-Sleep -Seconds $sleepSeconds
