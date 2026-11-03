@@ -239,7 +239,7 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 - `portal_copy_value()` emits selectable escaped text and the shared accelerator only for a non-empty static value. `portal_copy_input_button()` emits no cached field value: its `data-copy-source` points to the source control's `id`, and the delegated handler reads `.value` at activation time. Exact Unicode and punctuation are passed to `navigator.clipboard.writeText()` without trimming or concatenating the visible label.
 - Source-backed buttons are synchronized on input; an empty source stays hidden.
-- Callers are `portal/deploy_log.php` (job id), `lib/correlation_display.php` (correlation id) and `lib/package_report_page.php` (attempt link, client log paths, support copy). `portal/vms.php`, `portal/vm_edit.php` and the `lib/vm*.php` renderers carry none, which `PortalCopyControlContractTest` holds.
+- Callers are `portal/deploy_log.php` (job id), `lib/correlation_display.php` (correlation id) and `lib/package_report_page.php` (attempt link, client log paths, support copy) and `lib/credentials_host_identity.php` (the `ssh-keygen` command per host-key family). `portal/vms.php`, `portal/vm_edit.php` and the `lib/vm*.php` renderers carry none, which `PortalCopyControlContractTest` holds.
 - The button is an optional accelerator. It neither submits a surrounding form nor moves focus, and failure is an explicit localized status rather than a caught success. With no JavaScript or Clipboard API, the static text/input remains selectable. `help-copying-values` in the Overview help owns this fallback explanation once.
 
 ## R53 Package reports are received evidence, not live installation state
