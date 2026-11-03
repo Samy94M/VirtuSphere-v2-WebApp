@@ -16,7 +16,7 @@ final class PortalClosureSource
 {
     /** @var array<string,array<Node>> */
     private array $cache = [];
-    /** @var array<string,Node\Expr> */
+    /** @var array<string,Node\Expr\Array_> */
     private array $constants = [];
     /** @var array<string,list<Node\Stmt\ClassMethod>> */
     public array $methods = [];
@@ -27,6 +27,7 @@ final class PortalClosureSource
     /** @var array<string,array<string,true>> */
     private array $availableCache = [];
     private ?NodeTraverser $detach = null;
+    private ?Node\Stmt\Function_ $plain = null;
 
     /** @param array<string,string> $overrides In-memory mutation fixtures only. */
     public function __construct(private array $overrides = []) {}
@@ -78,7 +79,11 @@ final class PortalClosureSource
             }
             foreach ((new NodeFinder())->findInstanceOf($this->nodes($file), Node\Stmt\Const_::class) as $declaration) {
                 foreach ($declaration->consts as $constant) {
-                    $this->constants[(string) ($constant->namespacedName ?? $constant->name)] = $constant->value;
+                    // registryPaths() reads array registries only.
+                    $registry = $constant->value instanceof Node\Expr\Array_ ? $this->detached($constant->value) : null;
+                    if ($registry instanceof Node\Expr\Array_) {
+                        $this->constants[(string) ($constant->namespacedName ?? $constant->name)] = $registry;
+                    }
                 }
             }
             foreach ((new NodeFinder())->findInstanceOf($this->nodes($file), Node\Stmt\ClassMethod::class) as $method) {
@@ -99,24 +104,54 @@ final class PortalClosureSource
     }
 
     /**
-     * Callers read parameters, return type and doc comment only. A detached
-     * copy without body and source positions keeps the index of the whole
-     * library small: the index fell from 22 to 15 MB (PM1).
+     * PortalClosureCalls reads a signature only for callable parameters
+     * (type or @param) and callable returns. A declaration without either
+     * gets one shared empty signature: its checks find no callable position
+     * with the full one either. The others are detached copies without body,
+     * defaults and source positions. PM1: index of the library 22 to 7 MB.
      */
     private function signature(Node\Stmt\Function_|Node\Stmt\ClassMethod $node): Node\Stmt\Function_|Node\Stmt\ClassMethod
     {
+        if (!$this->hasCallableContract($node)) {
+            return $this->plain ??= new Node\Stmt\Function_('plain');
+        }
         $signature = clone $node;
         $signature->stmts = [];
-        $this->detach ??= new NodeTraverser(new CloningVisitor(), new class extends NodeVisitorAbstract {
-            public function leaveNode(Node $node): null { $node->setAttributes([]); return null; }
-        });
-        [$signature] = $this->detach->traverse([$signature]);
+        $signature = $this->detached($signature);
         if (!$signature instanceof Node\Stmt\Function_ && !$signature instanceof Node\Stmt\ClassMethod) {
             throw new LogicException('[portal-closure.signature] cloning changed the declaration type');
         }
+        foreach ($signature->params as $param) { $param->default = null; }
         $doc = $node->getDocComment();
         $signature->setAttributes($doc === null ? [] : ['comments' => [$doc]]);
         return $signature;
+    }
+
+    /** Superset of what PortalClosureCalls treats as callable: any mention, any case. */
+    private function hasCallableContract(Node\Stmt\Function_|Node\Stmt\ClassMethod $node): bool
+    {
+        if (str_contains(strtolower((string) $node->getDocComment()), 'callable')) {
+            return true;
+        }
+        $types = array_map(static fn (Node\Param $param): ?Node => $param->type, $node->getParams());
+        $types[] = $node->getReturnType();
+        foreach (array_filter($types) as $type) {
+            $mention = (new NodeFinder())->findFirst([$type], static fn (Node $part): bool
+                => ($part instanceof Node\Identifier || $part instanceof Node\Name) && str_contains(strtolower((string) $part), 'callable'));
+            if ($mention !== null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Deep copy without attributes; the parsed tree in the cache stays untouched. */
+    private function detached(Node $node): Node
+    {
+        $this->detach ??= new NodeTraverser(new CloningVisitor(), new class extends NodeVisitorAbstract {
+            public function leaveNode(Node $node): null { $node->setAttributes([]); return null; }
+        });
+        return $this->detach->traverse([$node])[0];
     }
 
     /** @return list<string> */

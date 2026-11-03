@@ -63,6 +63,16 @@ final class MessageLinkContractTest extends TestCase
         'ESXi credential not found.' => 'The credential was deleted meanwhile; the redirect reloads the credentials page, which no longer lists it.',
     ];
 
+    /** @var array<string,string>|null All first-party sources, shared by this class only. */
+    private static ?array $sources = null;
+
+    public static function tearDownAfterClass(): void
+    {
+        // About 4 MB of source text; a function-level static kept it until the
+        // end of phpunit-full (PM1).
+        self::$sources = null;
+    }
+
     public function testEveryMessageThatNamesAPageIsRenderedNextToALink(): void
     {
         self::assertSame([], $this->pageViolations($this->sources()));
@@ -264,9 +274,8 @@ final class MessageLinkContractTest extends TestCase
     /** @return array<string,string> relative path => source, first-party PHP only */
     private function sources(): array
     {
-        static $cached = null;
-        if ($cached !== null) {
-            return $cached;
+        if (self::$sources !== null) {
+            return self::$sources;
         }
         $root = dirname(__DIR__, 2);
         $sources = [];
@@ -281,6 +290,6 @@ final class MessageLinkContractTest extends TestCase
         }
         self::assertArrayHasKey('lib/layout_response.php', $sources);
 
-        return $cached = $sources;
+        return self::$sources = $sources;
     }
 }
