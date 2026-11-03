@@ -5,7 +5,7 @@
 > dürfen nicht ausgeführt werden: Der Clientinstaller blockiert vor jedem
 > Content-/MECM-Write und akzeptiert keine `-WebApi`-/`-ContentShare`-Overrides
 > mehr. Common verwendet keinen DNS-/IP-Fallback. Der lesende MC02-Preflight
-> prüft seit 15.10.2026 auch RBAC-Sicht, Quellzuordnung, Rückwärtsreferenzen
+> prüft auch RBAC-Sicht, Quellzuordnung, Rückwärtsreferenzen
 > und Deployment-Policy (am Standort noch nicht gelaufen); erst MC03 liefert den
 > geordneten Cutover. Bestehende MECM-Objekte bleiben unberührt.
 > Auch `install-VirtuSphere-MECM.ps1` ist vor allen Writes gesperrt, weil sein
@@ -47,7 +47,7 @@ verknüpfen                  Rolloutnamen, weist
   ist noch nicht freigegeben.
 - Zeitstempel der WebApp sind maßgeblich; Client-Uhren werden nicht vertraut.
 - **Was MECM als Gerätenamen bekommt, ist der Windows-Hostname, nicht der
-  ESXi-Name** (Etappe 14D, ADR-0043). Genauer: der für diesen Rollout
+  ESXi-Name** (ADR-0043). Genauer: der für diesen Rollout
   eingefrorene Snapshot `mecm_rollout_hostname`, den `getDeviceList` unter dem
   unveränderten Wire-Key `vm_hostname` liefert. `vm_name` bleibt die
   ESXi-Identität und wandert nicht nach MECM.
@@ -248,7 +248,7 @@ inkompatibler Satz bricht danach schon beim Prozessstart eindeutig ab.
 
 ### 4b. Reines Serverupdate mit eingefrorener Paketvorlage
 
-Bis zum gemeinsamen Core- und Reporter-Cutover (MC-R4, verengt am 15.10.2026)
+Bis zum gemeinsamen Core- und Reporter-Cutover (MC-R4)
 ist das der einzige freigegebene Installeraufruf:
 
 ```powershell
@@ -270,8 +270,8 @@ Zulässig sind zwei Formen:
 - ein vollständiger, gültiger `reporting\current.json`-Satz: der Autoimporter
   gleicht Wrapper und Reporter-Generation wie gewohnt ab;
 - eine **Altvorlage** ganz ohne `reporting`-Ordner, also eine Vorlage aus einem
-  Stand vor dem Paketreporter (22.09.2026): Bis zum Cutover gleicht der
-  Autoimporter wie damals nur `install.ps1` ab (Übergangsmodus). Pakete,
+  Stand vor dem Paketreporter: Bis zum Cutover gleicht der
+  Autoimporter nur `install.ps1` ab (Übergangsmodus). Pakete,
   Wrapper und Clients bleiben unverändert, es gibt keine Neuverteilung. Das
   Tageslog des Autoimporters nennt den Modus beim Start.
 
@@ -313,7 +313,7 @@ vergleicht die Release-Nummer mit der des Portals:
 | `…+unbekannt` | Altstand aus einem Git-Checkout ohne Release-Nummer |
 | `…+ohne-manifest` | nicht über diesen Installer installiert (Altstand oder Handkopie) |
 
-Der Commit steht seit der Release-Nummer nicht mehr in der Kennung: Das Feld ist
+Der Commit steht nicht in der Kennung: Das Feld ist
 auf 32 Zeichen begrenzt, und Nummer, Commit und `-abw` zusammen passen nicht
 hinein. Er bleibt im Manifest und in der Registry.
 
@@ -358,7 +358,7 @@ Loggingausfall: Installer beziehungsweise Aufgabe brechen mit einem konkreten
 Paketfehler ab. Der fachliche Lauf bleibt dagegen aktiv, wenn ausschließlich das
 Zielverzeichnis vorübergehend nicht schreibbar ist.
 
-**Das muss man nicht mehr erraten.** Jede abgewiesene Maschinenanfrage schreibt
+**Das muss man nicht erraten.** Jede abgewiesene Maschinenanfrage schreibt
 eine Zeile in die Logkategorie `machine_api` (Protokolle → Sicherheit), gedrosselt
 pro IP, mit der abgewiesenen IP und dem Endpunkt. Steht dort etwas, während die
 Systemstatus-Zeilen grau bleiben, ist die Antwort eindeutig: die Aufgaben laufen,
@@ -425,7 +425,7 @@ automatisch aus aktualisiertem Content.
 | Paket-Katalog (was existiert) | MECM → gespiegelt in `deploy_packages` (Portal read-only) |
 | MECM-Server-Konfiguration | Registry `HKLM:\SOFTWARE\VirtuSphere\MECM` (vom Installer geschrieben) |
 | Client-Laufzeitdaten | Registry `HKLM:\SOFTWARE\VirtuSphere` (von `client_getinfo` geschrieben) |
-| Deploy-Fortschritt (Ist-Zustand) | WebApp: `deploy_client_events` + Heartbeats (ab Etappe 1) |
+| Deploy-Fortschritt (Ist-Zustand) | WebApp: `deploy_client_events` + Heartbeats |
 | Ersteller einer Mission / VM | WebApp-Session beim Anlegen; danach unveränderlich (`mission_creator`, `vm_creator`) |
 
 > **Wire-Hinweis (ADR-0019/E3):** Nur `getDeviceList` bettet für den MECM-Server
@@ -435,7 +435,7 @@ automatisch aus aktualisiertem Content.
 > `getMissionName` ist entfernt; das ausgelieferte Device-Sync-Skript verwendete
 > schon vorher ausschließlich die eingebettete Mission.
 >
-> **Etappe 14D (ADR-0043, ADR-0019-Amendment 3):** `getDeviceList` hat sein
+> **Rolloutname (ADR-0043, ADR-0019-Amendment 3):** `getDeviceList` hat sein
 > `SELECT *` verloren; die gelieferten Spalten stehen als
 > `VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS` fest und werden von
 > `MachineApiWireTest` in beide Richtungen gegen die echte Antwort geprüft.
@@ -467,9 +467,8 @@ Verwaltungssuite). Vorgehen:
 Wird Schritt 2 vergessen, entsteht beim Neuanlegen einer VM mit gleichem Namen
 und neuer MAC ein MAC-Konflikt, den der Device-Sync im Log meldet.
 
-<!-- Die folgenden Abschnitte werden je Umsetzungs-Etappe gefüllt. -->
 
-## Rückkanal & Heartbeats (Etappe 1)
+## Rückkanal & Heartbeats
 
 Der Endpoint `mecm_report.php` nimmt POST-Meldungen entgegen (JSON). Der optionale
 Header `X-VirtuSphere-Token` gilt für die Server-Aufgaben (`action=heartbeat` und
@@ -564,7 +563,7 @@ rein anzeigend und best effort bleiben.
   „MECM-Integration" (nur Admins); Heartbeats und Phase-Events werden dort
   bewusst nicht dupliziert.
 
-### Registry-Konvention (MECM-Server, ab Etappe 4 vom Installer geschrieben)
+### Registry-Konvention (MECM-Server, vom Installer geschrieben)
 
 | Registry-Wert (`HKLM:\SOFTWARE\VirtuSphere\MECM`) | Bedeutung |
 |---|---|
@@ -577,7 +576,7 @@ rein anzeigend und best effort bleiben.
 | `DeviceSyncIntervalSeconds` | Intervall Device-Sync (DWord, Standard 10, erlaubt 5–3600) |
 | `PackagesSyncIntervalSeconds` | Intervall Packages-Sync (DWord, Standard 60, erlaubt 10–3600) |
 | `ImporterIntervalSeconds` | Intervall Autoimporter (DWord, Standard 60, erlaubt 30–3600) |
-| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health und die Prüfung der Verteilungskopien (neu; leer = lokale Ermittlung) |
+| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health und die Prüfung der Verteilungskopien (leer = lokale Ermittlung) |
 | `SiteHealthIntervalSeconds` | Intervall Site Health (DWord, neu, Standard 300, erlaubt 60–3600) |
 | `MECM_SiteCode` | erkannter Site-Code (nur wenn automatisch ermittelbar) |
 | `SetupCompleted` | Zeitstempel der erfolgreichen Erstinstallation |
@@ -623,7 +622,7 @@ zugehörige Freigabe müssen daher schreibgeschützt für normale Benutzer sein
 (nur `SYSTEM`/`Administratoren` schreibend), sonst ist beliebige Codeausführung als
 `SYSTEM` möglich. Der Installer warnt, falls der Ordner für Benutzer beschreibbar ist.
 
-## Überwachung & Wartungs-Worker (Etappe 1b)
+## Überwachung & Wartungs-Worker
 
 Der Datenfluss läuft ausschließlich in einer Richtung: **MECM → Portal**. Die vier
 SYSTEM-Aufgaben auf dem MECM-Server melden ihren Zustand per HTTP-POST an
@@ -644,8 +643,8 @@ Deploy-Worker und erledigt:
 2. **Aufräumjobs** (stündlich): Client-Events älter als 30 Tage,
    Sicherheits-Protokolle (Anmeldung, Benutzer, Zugangsdaten) älter als 365 Tage,
    übrige Portal-Logs älter als 90 Tage, Anmeldeversuchs-Zähler älter als 7 Tage
-   (gestaffelt nach Kategorie, siehe ADR-0026). (Früher lief die Log-Bereinigung
-   huckepack bei API-Requests; jetzt läuft sie auch ohne Traffic.)
+   (gestaffelt nach Kategorie, siehe ADR-0026). Die Bereinigung läuft auch ohne
+   Traffic.
 3. **Zustandswechsel-Audits**: die MECM-Quellen schreiben nur Übergänge von/nach
    problematisch in „MECM-Integration" (OK → Warnung/Fehler/Fehlt und zurück,
    Site healthy → warning/critical/unknown und zurück, sowie einmalig der Wechsel
@@ -676,7 +675,7 @@ docker compose up -d maintenance-worker    # startet/erneuert den Dienst
 docker compose logs -f maintenance-worker  # Live-Log
 ```
 
-## Rolloutname, Reset und Tombstone (Etappe 14D, ADR-0043)
+## Rolloutname, Reset und Tombstone (ADR-0043)
 
 `vm_hostname` ist der Sollwert und das einzige editierbare Feld. Was MECM
 bekommt, ist `mecm_rollout_hostname`: der für den laufenden Rollout eingefrorene
@@ -725,7 +724,7 @@ Der wirksame Rolloutname ist portalweit eindeutig, erzwungen in
 VM). Eine VM darf gleichzeitig ihren eingefrorenen und ihren neuen Namen halten;
 eine andere VM bekommt den alten erst im Reset-Commit.
 
-## Namensregeln für VMs und Hostnamen (Etappe 2)
+## Namensregeln für VMs und Hostnamen
 
 Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
 
@@ -737,7 +736,7 @@ Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
   würde); erst eine Änderung muss die Regel erfüllen.
 - **VM-Name (`vm_name`)**: der VM-Name in ESXi, global eindeutig über alle
   normalen Missionen hinweg. Das ist eine Portal-/ESXi-Namenspolitik und
-  **nicht** der MECM-Gerätename: MECM importiert seit Etappe 14D den
+  **nicht** der MECM-Gerätename: MECM importiert den
   Rollout-Snapshot des Windows-Hostnamens. Templates dürfen Namen doppeln;
   beim Klonen eines Templates werden Kollisionen vorab als Liste gemeldet.
 - **Missionsname**: ist gleichzeitig der MECM-Collection-Name. Sobald VMs der
@@ -754,7 +753,7 @@ Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
   pro erwarteter VM Outcome, Updatezahl, WDS-Evidenz, feste Fehlercodes und den
   semantischen Callback-Fingerprint.
 
-## Paket-Lebenszyklus (Etappe 3)
+## Paket-Lebenszyklus
 
 **Konvention:** Paket-Collections heißen `Name-Version`; die **Version darf
 keinen Bindestrich enthalten** (der Katalog splittet am letzten Bindestrich).
@@ -766,7 +765,7 @@ Lebenszyklus eines Katalogeintrags:
 2. **Zurückgezogen (Retired)**: fehlt ein Eintrag im Sync-Payload (z. B.
    Versionswechsel mit `removeOldVersion`), wird er markiert statt gelöscht.
    VM-Zuweisungen bleiben erhalten. **VirtuSphere hängt eine VM nie selbst auf
-   eine neue Version um** (AV-R08, seit 15.10.2026): Die neue Version würde ihr
+   eine neue Version um** (AV-R08): Die neue Version würde ihr
    `install.ps1` auf einem eingerichteten System erneut ausführen und
    überschreiben, was danach von Hand eingestellt wurde. Der Rückzug einer
    Version, die noch VMs zugewiesen ist, steht im Log (Kategorie
@@ -844,7 +843,7 @@ Application-Deployments, anschließend Applications und zuletzt Collections.
 Ein Einzelfehler stoppt die restlichen Einheiten und meldet
 `package_cleanup_failed`; der nächste Scan plant aus dem aktuellen Bestand neu.
 
-### Transport, TLS, ACL und Site-Health seit 07.09.2026
+### Transport, TLS, ACL und Site-Health
 
 Server- und Client-POSTs senden JSON als explizites UTF-8-`byte[]` mit Charset.
 Beide ausgelieferten `ConvertTo-VsUtf8JsonBytes`-Helper emittieren dieses Array
@@ -876,7 +875,7 @@ vier Aufgaben werden vor dem Integercast auf den Reportvertrag begrenzt; das
 Intervall bezeichnet den Schlafabstand zusätzlich zur Laufzeit und keine exakte
 Wanduhrkadenz.
 
-## MECM-Server: Installation & Aufgabenplanung (Etappe 4)
+## MECM-Server: Installation & Aufgabenplanung
 
 Die vier Server-Skripte liegen versioniert unter `Powershell-MECM/mecm/` und
 teilen sich `VirtuSphere-Common.ps1` (Konfiguration, Logging, Ergebnisberichte,
@@ -1031,14 +1030,14 @@ tägliche Bereinigung verwendet einen gemeinsamen Marker und einen exklusiven Lo
 gegeneinander löschen. Die Korrelations-ID entsteht einmal pro Prozess und wird
 als Diagnoseheader mitgesendet; sie ist kein Authentisierungsmerkmal.
 
-## Client-Anwendungen (Etappe 5)
+## Client-Anwendungen
 
 > MC01-Zwischenstand (27.09.2026): Im lokalen Quellstand ist der Zielgraph
 > `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`
 > als Vertrag definiert; die Einstiegsskripte wurden entsprechend umbenannt.
 > Der mutierende Clientinstaller stoppt vor Content- und MECM-Änderungen, bis
 > der geordnete Cutover (MC03) umgesetzt ist; der Read-only-Preflight (MC02)
-> liefert seit 15.10.2026 für alle vier Prüfungen echte Befunde. Die nachfolgende
+> liefert für alle vier Prüfungen echte Befunde. Die nachfolgende
 > Beschreibung dokumentiert den bisherigen Betrieb, nicht eine Freigabe zur
 > Anwendung des neuen Graphen. `client_getinfo`/`client_getinfo_2.1` werden
 > niemals stillschweigend übernommen.
@@ -1527,11 +1526,11 @@ Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
 
 ## Zurückgestellte Prüfpunkte (sobald Systemzugriff besteht)
 
-1. **Ubuntu-Produktionsparität** (bei Abnahme Etappe 1): auf dem Ubuntu-Host
+1. **Ubuntu-Produktionsparität**: auf dem Ubuntu-Host
    prüfen: `docker compose ps` (Container-Namen `virtusphere-v2-webapp-*-1`),
    `.env` (`WEB_HTTP_PORT=8021`), Migrationsstand
    `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --status`.
-2. **DNS-Name für die API** (vor Etappe 5): Eintrag wie `virtusphere.lan`
+2. **DNS-Name für die API** (vor dem Client-Cutover): Eintrag wie `virtusphere.lan`
    → IP des Ubuntu-Hosts im Deploy-Netz anlegen.
-3. **Schwellwert der Paket-Bremse** (bei Abnahme Etappe 3): Default 30 % gegen
+3. **Schwellwert der Paket-Bremse**: Standardwert `VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT` gegen
    die reale Kataloggröße prüfen (Portal → Einstellungen).
