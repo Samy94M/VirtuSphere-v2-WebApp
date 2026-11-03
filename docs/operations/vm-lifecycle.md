@@ -1,6 +1,6 @@
 # Lebenszyklus einer VM
 
-Eine VM trägt drei gespeicherte Werte: den Lebenszyklus (`lifecycle_state`), den MECM-Abgleich (`mecm_sync_state`) und den Stufenwert x/5 (`vm_status`), den die MECM-Schnittstelle liest. Die Phase, die VM-Liste, VM-Übersicht und VM-Editor zeigen, wird beim Lesen aus diesen Werten und weiteren Belegen abgeleitet (`Docker/WebAPI/lib/vm_phase.php`, Referenz R56 in [`docs/ai/reference/portal.md`](../ai/reference/portal.md)); sie wird nicht gespeichert und nicht übertragen. Dieses Dokument zeichnet die Phasen und die beiden Achsen mit ihren Schreibern. Die Portalhilfe zeigt denselben Weg im Abschnitt „Der Weg einer VM“ (Hilfe, Reiter Missionen). Einstieg: [Abläufe](flows.md); die Gesamtkette steht in der [Bereitstellungskette](deploy-chain.md).
+Eine VM trägt drei gespeicherte Werte: den Lebenszyklus (`lifecycle_state`), den MECM-Abgleich (`mecm_sync_state`) und den Stufenwert x/5 (`vm_status`), den die MECM-Schnittstelle liest. Die Phase, die VM-Liste, VM-Übersicht und VM-Editor zeigen, wird beim Lesen aus diesen Werten und weiteren Belegen abgeleitet (`Docker/WebAPI/lib/vm_phase.php`, Referenz R56 in [`docs/ai/reference/portal.md`](../ai/reference/portal.md)); sie wird nicht gespeichert und nicht übertragen. Dieses Dokument zeichnet die Phasen und die beiden Achsen mit ihren Schreibern. Die Portalhilfe zeigt denselben Weg im Abschnitt „Der Weg einer VM“ (Hilfe, Reiter „Missionen & VMs“). Einstieg: [Abläufe](flows.md); die Gesamtkette steht in der [Bereitstellungskette](deploy-chain.md).
 
 ## Der Weg einer VM
 
@@ -40,6 +40,9 @@ flowchart TD
     ready[Bereit] -->|Worker markiert die VM| deploying[Wird bereitgestellt]
     deploying -.->|Erfolg ohne MAC-Ergebnis oder Abbruch: Vorzustand| ready
     deploying -->|Auftrag scheitert| failed[Fehlgeschlagen]
+    deployed -->|Auftrag scheitert, auch ohne Markierung| failed
+    os_installing -->|Auftrag scheitert, auch ohne Markierung| failed
+    os_installed -->|Auftrag scheitert, auch ohne Markierung| failed
     failed -->|neuer Auftrag| deploying
     deploying -->|MAC-Rückruf| deployed[Bereitgestellt]
     deployed -->|Device-Sync meldet die ResourceID| os_installing[Betriebssystem wird installiert]
@@ -56,7 +59,7 @@ Der MAC-Rückruf schreibt `deployed` nur für eine VM ohne ResourceID; eine scho
 
 ## MECM-Abgleich
 
-Die MECM-Achse sagt, wie weit die Übergabe an MECM ist. `registered` schreibt allein der Device-Sync; der Client-Ready-ACK lässt die Achse unverändert (VT-E1 C, ADR-0019 Amendment 4). Ein gescheiterter Auftrag setzt die Achse aus jedem Zustand auf `deploy_failed`, Portalbeschriftung „MECM-Abgleich offen nach Fehler“: Der Abgleich ist nicht gescheitert, er lief nie. Bis Migration 0070 hieß der Wert `failed`; die Maschinen-API liefert ihn unter diesem Namen weiter (ADR-0019 Amendment 5). Einen MECM-seitigen Fehlerwert gibt es nicht.
+Die MECM-Achse sagt, wie weit die Übergabe an MECM ist. `registered` schreibt allein der Device-Sync; der Client-Ready-ACK lässt die Achse unverändert (VT-E1 C, ADR-0019 Amendment 4). Ein gescheiterter Auftrag setzt die Achse aus jedem Zustand auf `deploy_failed`, Portalbeschriftung „MECM-Abgleich offen nach Fehler“: Der Abgleich ist nicht gescheitert, er lief nie. Die Maschinen-API liefert den Wert unter dem Namen `failed` aus (ADR-0019 Amendment 5). Einen MECM-seitigen Fehlerwert gibt es nicht.
 
 ```mermaid
 flowchart TD
@@ -64,6 +67,8 @@ flowchart TD
     pending -->|Device-Sync meldet die ResourceID| registered[In MECM registriert]
     registered -.->|MECM-ID zurücksetzen| pending
     not_ready -->|Auftrag scheitert| deploy_failed[MECM-Abgleich offen nach Fehler]
+    pending -->|Auftrag scheitert| deploy_failed
+    registered -->|Auftrag scheitert| deploy_failed
     deploy_failed -->|MAC-Rückruf oder MECM-ID zurücksetzen| pending
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
