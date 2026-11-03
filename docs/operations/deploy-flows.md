@@ -153,7 +153,7 @@ flowchart TD
     queued -->|Abbruch oder Gruppenabbruch durch den Bediener| cancelled["Abgebrochen"]
     running -->|Bediener fordert den Abbruch an| cancelling["Abbruch angefordert"]
     running -->|alle Schritte mit Exitcode 0, MAC-Ergebnis vollständig oder nicht verlangt| succeeded["Erfolgreich"]
-    running -->|MAC-Ergebnis teilweise| partial["Teilweise erfolgreich"]
+    running -->|MAC-Ergebnis teilweise, oder nur ein Teil der VMs angelegt| partial["Teilweise erfolgreich"]
     running -->|Sperre, Schrittfehler, Zeitbudget, kein MAC-Ergebnis; veralteter Herzschlag nur beim Inventarabruf| failed["Fehlgeschlagen"]
     running -->|veralteter Herzschlag (Aufsicht) oder SSH-Verbindung zum Ansible-Host mitten im Schritt verloren (Worker)| outcome_unknown["Ausgang unbekannt"]
     cancelling -->|Worker bestätigt an der Schrittgrenze, oder die Aufsicht konvergiert| cancelled
