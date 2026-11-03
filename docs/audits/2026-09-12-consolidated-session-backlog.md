@@ -3027,7 +3027,7 @@ Cloud-Session, Branch `claude/da1-drift-2026-11-03` auf `be281a17` (Schnappschus
 - `help_system_status.php` `system_status_identity_4` nennt „Ab Skript device-sync/2.1 … ältere Version“: beschreibt einen gemischten MECM-Serverstand, bleibt bis zum Serverupdate handlungsrelevant; Datei gehört MX1.
 - `upgrade-recovery.md:89,156` („jetzt auch gültig“, „in jedem bisherigen Release“): Migrationsbeschreibung, Datei gehört MX1, nicht angefasst.
 - `help_deploy.php:21`, `help_missions.php:79`, `lang/de/*.php` PHP-Kommentare mit „Etappe“: für Bediener unsichtbar, nicht angefasst.
-- Öffentliches Repo: Im Abschnitt „Notfall 02.11.2026“ dieses Registers stehen ein UNC-Servername und ein lokaler Pfad vom Standort. Nicht angefasst (Register ist Historie); die Koordination entscheidet, ob das so öffentlich bleiben darf.
+- Öffentliches Repo: Im Abschnitt „Notfall 02.11.2026“ dieses Registers standen ein UNC-Servername und zwei Pfade vom Standort; auf Nutzerwunsch (03.11.2026, wörtlich „1ja ersetzen“) durch `<MECM-Server>` und `<Pfad>` ersetzt. Im Branch `claude/cloud-snapshot-2026-11-03` stehen sie weiter. Das Standortkürzel steht außerdem in Code-Kommentaren und Pester-Fixtures (`Powershell-MECM/install-VirtuSphere-Clients.ps1:122`, `mecm/VirtuSphere-ClientPackaging.ps1:455`, `tests/powershell/VirtuSphere.ClientPreflight.Tests.ps1:363`, `VirtuSphere.Common.Tests.ps1:1184`, `VirtuSphere.RunReport.Tests.ps1:296-319`); nicht angefasst.
 
 **Nutzerfragen**
 
