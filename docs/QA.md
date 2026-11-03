@@ -50,6 +50,19 @@ edge removal run in `PortalClosureAnalysisTest` and in the existing
 `guard-harness` family (`portal-require-closure.probes`). The AST cache is bounded
 so the normal PHPUnit memory limit remains sufficient.
 
+**Memory of `phpunit-full` (PM1, 03.11.2026).** The gate keeps PHP's 128 MB
+`memory_limit`. Its closing "Memory: … MB" line is not the suite peak: PHPUnit
+resets the peak whenever a test is prepared, so the line shows the last test and
+the reports only. Measure with the PM1 peak meter (`Pm1PeakMeter`, reads
+`memory_get_peak_usage(true)` per test, in `qa-artifacts/welle-pm1-2026-11-02/tool/`)
+and prove a buffer by running the same container command with a lower
+`memory_limit`: the full suite passed at 96M and failed at 92M on `aaef82d6`. Test
+code keeps the buffer by freeing what it builds: no self-referencing closures
+left alive (`PortalClosureAnalysisTest::testAnalysisLeavesNoReferenceCycles`),
+no file contents or parsed trees in function-level statics, one large string
+at a time. The floor is set by `InventoryCaptureBoundTest` and
+`MacImportBoundsTest`, which each need one 16 MiB string of the real constant.
+
 ## Canonical Check Runner
 
 O08 measured the apparent overlap between `phpunit-unit` and the unfiltered
