@@ -61,7 +61,8 @@
     "--disable-lcd-text",
     "--disable-threaded-animation",
     "--disable-threaded-scrolling",
-    "--disable-checker-imaging"
+    "--disable-checker-imaging",
+    "--disable-partial-raster"
   ],
   "screenshotScale": "css",
   "clock": "2026-08-27T08:15:00.000Z",

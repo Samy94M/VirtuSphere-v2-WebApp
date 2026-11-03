@@ -105,6 +105,10 @@ test('visual capture applies the badge fixture before the first paint, never aft
 });
 
 test('visual runner pins the deterministic software compositor arguments', () => {
+  // --disable-partial-raster (BK2, 03.11.2026): whether Chromium re-rastered a
+  // painted tile in part or whole decided the round corners of the session
+  // button (deploy-desktop) and the queue card (deploy-mobile); with whole-tile
+  // raster every one of the 18 images had one form in 30 of 30 replays per theme.
   assert.deepEqual(contract.launchArgs, [
     '--no-sandbox',
     '--disable-gpu',
@@ -115,6 +119,7 @@ test('visual runner pins the deterministic software compositor arguments', () =>
     '--disable-threaded-animation',
     '--disable-threaded-scrolling',
     '--disable-checker-imaging',
+    '--disable-partial-raster',
   ]);
   const config = fs.readFileSync(path.join(__dirname, '..', 'playwright.config.js'), 'utf8');
   assert.match(config, /launchOptions: \{ \.\.\.CHROMIUM_LAUNCH, args: visualContract\.launchArgs \}/);
