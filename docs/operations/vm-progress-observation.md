@@ -7,9 +7,14 @@ werden.
 
 ## Wirkung
 
-- MECM-pending wird nach mehr als zwei Stunden gelb markiert.
+- MECM-pending wird nach mehr als `VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS`
+  gelb markiert.
 - Eine OS-Installation erhält erst nach der bestätigten Aktion „PXE jetzt
-  beobachten“ eine Uhr und wird nach mehr als sechs Stunden gelb markiert.
+  beobachten“ eine Uhr und wird nach mehr als
+  `VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS` gelb markiert (beide in
+  `lib/constants.php`).
+- Die Dashboard-Kachel „VM-Prüfung fällig“ zählt überfällige VMs je Grund und
+  öffnet die VM-Übersicht mit dem passenden Filter.
 - Keine Warnung setzt eine VM fehl, löscht sie oder startet eine externe Aktion.
 - Missionsliste und Dashboard zeigen aktuelle empfangene Clientphasenfehler mit
   VM-Anzahl und Links. `repo_client_phase_failures()` liest je VM und Phase nur
@@ -33,7 +38,8 @@ werden.
    Worker-Neustart stellt nur einen einheitlichen Release-Stand sicher.
 5. Die nachstehenden SQL-Abfragen als App-Datenbankbenutzer ausführen und die
    Resultate mit Datum, Commit und Bediener ins Rollout-Protokoll übernehmen.
-6. Portal-Smoke: Dashboard, gefilterte Missionsliste, VM-Liste und eine
+6. Portal-Smoke: Dashboard mit der Kachel „VM-Prüfung fällig“, Missionsliste mit
+   der Spalte „Prüfung fällig“, VM-Liste und eine
    `os_installing`-VM im Editor öffnen. Eine echte PXE-Beobachtung nur starten,
    wenn PXE für genau diese VM ausgelöst wurde.
 
@@ -74,7 +80,8 @@ SELECT
 FROM deploy_vms;
 ```
 
-Erwartung: genau eine Migrationszeile, genau zwei nullable Zeitspalten, genau
+Die Sekundenwerte der letzten Abfrage entsprechen den beiden Konstanten oben;
+weichen diese ab, die Abfrage mit ihren Werten ausführen. Erwartung: genau eine Migrationszeile, genau zwei nullable Zeitspalten, genau
 zwei Indizes und `pending_without_clock = 0`. `install_clock_outside_state = 0`
 ist der Normalfall; ein anderer Wert blockiert den Rollout nicht automatisch,
 muss aber vor Freigabe anhand der Statushistorie erklärt werden. Die beiden
