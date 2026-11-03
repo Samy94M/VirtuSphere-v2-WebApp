@@ -64,8 +64,8 @@ flowchart TD
     known -->|nein| unknown["404 und Auditzeile mecm.unknown_vm_reported; der Sync behält das Gerät in seiner Liste"]
     known -->|ja| fence{"Rollout-Fence"}
     fence -->|stale| stale["409, nichts geschrieben"]
-    fence -->|noop| noop["Warteschlange leeren, wenn transfer_generation der gelesenen entspricht; 200"]
-    fence -->|accept| bind["Vorwärts auf os_installing, MECM registered, 4/5; ResourceID binden, Tombstone löschen; 200"]
+    fence -->|noop| noop["Warteschlange leeren, wenn transfer_generation der gelesenen entspricht; 200 mit success"]
+    fence -->|accept| bind["Vorwärts auf os_installing, MECM registered, 4/5; ResourceID binden, Tombstone löschen; 200 mit success, nur diese Antwort gilt dem Devices Sync als Quittung"]
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
     classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
@@ -157,7 +157,7 @@ flowchart TD
     class forbidden,bad,rejected,failed blocked;
 ```
 
-Die Bremse (`packages_retire_guard()`) läuft vor jedem Schreiben. Die Schwelle ist die Einstellung `VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD` (5 bis 90 %, Standard `VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT`). Ein Paketname, den dieselbe Lieferung durch eine höhere Version desselben Pakets ersetzt, zählt nicht als Verlust (AV-R14). Ein zurückgezogenes Paket wird nicht gelöscht; das tut erst der [Wartungsdienst](maintenance-flows.md#aufbewahrung) nach Frist. Die Vorlagenregel (`packages_follow_first_versions_in_templates()`) zählt nur Einträge, die diese Lieferung neu angelegt hat; ein vorübergehend fehlender und wieder aufgetauchter Name bewegt nichts. Der Rückzug einer Version, die VMs noch tragen, erscheint einmal als Auditzeile mit der höheren aktiven Version als Arbeitsliste (`packages_audit_retired_assignments()`); verschoben wird dabei nichts.
+Die Bremse (`packages_retire_guard()`) läuft vor jedem Schreiben. Die Schwelle ist die Einstellung `VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD` (5 bis 90 %, Standard `VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT`). Ein Paketname, den dieselbe Lieferung durch eine höhere Version desselben Pakets ersetzt, zählt nicht als Verlust. Ein zurückgezogenes Paket wird nicht gelöscht; das tut erst der [Wartungsdienst](maintenance-flows.md#aufbewahrung) nach Frist. Die Vorlagenregel (`packages_follow_first_versions_in_templates()`) zählt nur Einträge, die diese Lieferung neu angelegt hat; ein vorübergehend fehlender und wieder aufgetauchter Name bewegt nichts. Der Rückzug einer Version, die VMs noch tragen, erscheint einmal als Auditzeile mit der höheren aktiven Version als Arbeitsliste (`packages_audit_retired_assignments()`); verschoben wird dabei nichts.
 
 ## Rückrufe des Ansible-Hosts
 
