@@ -292,6 +292,17 @@ final class AuditProducerContractTest extends TestCase
         self::assertNotSame('', $heartbeat, 'the heartbeat branch scan matched nothing');
         self::assertDoesNotMatchRegularExpression('/\baudit_event\s*\(|machine_api_audit_warning\s*\(/', $heartbeat);
 
+        // The device-cause branch (MX1) sits before reportPhase and is display
+        // data too: no audit producer, not even for a stale entry (ADR-0043
+        // amendment). Its refusals are audited by the shared token/IP gates.
+        $causes = $this->slice($report, "if (\$action === 'reportDeviceCauses')", "if (\$action === 'reportPhase')");
+        self::assertNotSame('', $causes, 'the reportDeviceCauses branch scan matched nothing');
+        self::assertDoesNotMatchRegularExpression('/\baudit_event\s*\(|machine_api_audit_warning\s*\(/', $causes);
+        self::assertDoesNotMatchRegularExpression(
+            '/\baudit_event(?:_required)?\s*\(|machine_api_audit_warning\s*\(/',
+            $this->withoutComments($this->source('lib/repo/vm_sync_causes.php'))
+        );
+
         // The reportRun branch may audit exactly one thing: the one-time
         // legacy-to-V2 ratchet, which is gated on `legacy_to_v2`.
         $runBranch = substr($report, (int) strpos($report, "if (\$action === 'reportRun')"));

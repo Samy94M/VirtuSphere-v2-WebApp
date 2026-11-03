@@ -287,3 +287,27 @@ to the report contract's integer. A clock step backwards yields zero and a run
 longer than the one-day wire bound yields the bound, so the diagnostic path
 cannot overflow while reporting the original fault. The interval remains a
 cadence setting plus the run time, not a promise of exact wall-clock spacing.
+
+## Amendment (2026-11-03, MX1): per-VM device-sync causes
+
+`mecm_report.php?action=reportDeviceCauses` is a fourth server report, separate
+from `reportRun`. `reportRun` stays unchanged: its validator ignores unknown
+fields, so a cause list there would be dropped silently by an older portal and
+the script could not tell "delivered" from "discarded". The new action is
+token-gated like `heartbeat` and `reportRun`, uses the `server_report` IP gate
+(role `mecm_server`) and its own 64-KiB body bound, and accepts only a closed V1
+body: `schema_version`, a 32-hex `run_id`, `complete` and at most 500 entries
+`{vm_id, rollout_revision, code}`, one per VM, each code from the 23 device
+codes in `lib/device_sync_cause_constants.php`. The response repeats
+`schema_version`, `run_id` and `complete` and counts `accepted`, `stale` and
+`unknown_vm`, plus `deduplicated` when the report changed nothing.
+
+`deploy_vm_sync_causes` holds one row per VM, written only by
+`lib/repo/vm_sync_causes.php` in one transaction. `complete = true` is the
+producer's explicit statement that the report is the whole set after a full
+pass, so the rows of other runs are removed with it; `complete = false` only
+upserts. Arrival order is truth, as for `reportRun`. Rows expire seven days
+after their last observation through the maintenance retention. Like every
+routine report it writes no audit row; the fence decides per entry (ADR-0043
+Amendment 2). Portal first: an older portal answers the new script with 400 or
+413, and the script pauses its reports instead of turning every run yellow.

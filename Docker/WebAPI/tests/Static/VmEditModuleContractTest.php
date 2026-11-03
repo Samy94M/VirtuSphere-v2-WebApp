@@ -30,6 +30,7 @@ final class VmEditModuleContractTest extends TestCase
         'render_vm_status_history',
         'vm_timeline_event_html',
         'vm_edit_finding_href',
+        'vm_edit_sync_cause_html',
         'vm_edit_inventory_text',
         'vm_edit_identity_fields',
         'vm_edit_ram_from_post',

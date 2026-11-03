@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 // The page size of the audit table is the one constant the logs text states.
+require_once __DIR__ . '/../device_sync_cause_constants.php';
 require_once __DIR__ . '/../log_filter.php';
 
 // Uses $user from the page scope: the cross reference to the deploy help is
@@ -98,6 +99,7 @@ require_once __DIR__ . '/../log_filter.php';
                     ])); ?></li>
                 <?php } ?>
             </ul>
+            <p><?php echo h(__t('help_system_status.system_status_identity_p2', ['days' => VIRTUSPHERE_DEVICE_SYNC_CAUSE_RETENTION_DAYS])); ?></p>
             <h3><?php echo h(__t('help_system_status.system_status_work_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_work_0')); ?></p>
             <ol>

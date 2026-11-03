@@ -97,7 +97,7 @@ require_once __DIR__ . '/../vm_timeline.php';
             <h3><?php echo h(__t('help_missions.status_findings_heading')); ?></h3>
             <p><?php echo h(__t('help_missions.status_findings_p1')); ?></p>
             <?php // The finding keys follow the closed kind table; each sentence takes only the
-                  // placeholders its own text uses. The two overdue limits come from their constants. ?>
+                  // placeholders its own text uses. The two overdue limits and the cause's as-of age come from their constants. ?>
             <ul>
                 <?php foreach (array_keys(VIRTUSPHERE_VM_FINDINGS) as $kind) { ?>
                     <li><?php echo h(__t('help_missions.status_finding_' . $kind, [
@@ -105,6 +105,7 @@ require_once __DIR__ . '/../vm_timeline.php';
                             ? intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)
                             : intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
                         'minutes' => intdiv(VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS, 60),
+                        'as_of_minutes' => intdiv(VIRTUSPHERE_VM_SYNC_CAUSE_AS_OF_AFTER_SECONDS, 60),
                     ])); ?></li>
                 <?php } ?>
             </ul>

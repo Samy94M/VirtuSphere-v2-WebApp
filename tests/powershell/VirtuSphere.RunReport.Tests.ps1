@@ -1313,3 +1313,313 @@ Describe 'Get-VsConfig-Notnagel und Installer-Default sind dieselbe Angabe (PS-2
         $fallbackValue | Should -Be $installerValue -Because "Notnagel und Default fuer $setting duerfen nicht auseinanderlaufen"
     }
 }
+
+# MX1 (FM-05): eigener Anzeigekanal reportDeviceCauses neben reportRun. Die
+# Portaldatei lib/device_sync_cause_constants.php ist die SSoT der Codemenge und
+# der Zahlen; Common spiegelt sie. Der Versand wirft nie, faerbt keinen Lauf,
+# ruht nach 400/404/413 und merkt sich den Stand erst nach der Quittung.
+Describe 'Ursache je VM: reportDeviceCauses (MX1)' {
+    BeforeAll {
+        $script:DeviceCausePhpPath = Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'lib') 'device_sync_cause_constants.php'
+        $script:DeviceCauseRunId = '0123456789abcdef0123456789abcdef'
+
+        # Liest die Portaldatei; fehlt sie, ist der Spiegel rot (Portal first).
+        function Get-DeviceCausePhpText {
+            if (-not (Test-Path -LiteralPath $script:DeviceCausePhpPath)) {
+                throw ('Portaldatei fehlt: {0} (MX1-C1, portal first)' -f $script:DeviceCausePhpPath)
+            }
+            return (Get-Content -LiteralPath $script:DeviceCausePhpPath -Raw)
+        }
+        function Get-DeviceCausePhpInt {
+            param([string]$Text, [string]$Name)
+            $match = [regex]::Match($Text, ('const\s+{0}\s*=\s*(\d+)\s*;' -f [regex]::Escape($Name)))
+            if (-not $match.Success) { throw "PHP-Konstante fehlt: $Name" }
+            return [int]$match.Groups[1].Value
+        }
+
+        # Fuehrt Send-VsDeviceCauseReport in EINEM Common-Scope mehrfach aus. Jeder
+        # Schritt: @{ Now; Complete; Entries = @(@(vm, rev, code), ...); Reply }
+        # mit Reply = 'ack' | 'ack-other-run' | 'no-success' | 'html' | <int Status> | 'timeout'.
+        # Liefert je Schritt Status, Anzahl der Aufrufe und den letzten Body.
+        function Invoke-DeviceCauseSteps {
+            param([object[]]$Steps)
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments @(, $Steps) -Body {
+                param($steps)
+                $script:dcCalls = 0
+                $script:dcBody = $null
+                $script:dcReply = $null
+                $script:dcLog = New-Object System.Collections.Generic.List[string]
+                function Write-VsLog { param($Message, $Level, $Context, $Color) $script:dcLog.Add(('{0} {1}' -f $Level, $Message)) }
+                function Invoke-VsApi {
+                    param($Config, $Path, $Method, $Body, $TimeoutSec)
+                    $script:dcCalls++
+                    $script:dcBody = $Body
+                    $script:dcPath = $Path
+                    $reply = $script:dcReply
+                    if ($reply -is [int]) {
+                        $exception = New-Object System.Exception ('The remote server returned an error: ({0}).' -f $reply)
+                        $exception | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{ StatusCode = $reply }) -Force
+                        throw (New-Object System.Management.Automation.ErrorRecord $exception, 'HttpError', 'InvalidOperation', $null)
+                    }
+                    switch ($reply) {
+                        'timeout' { throw (New-Object System.Net.WebException 'The operation has timed out') }
+                        'html' { return '<html>proxy</html>' }
+                        'no-success' { return [pscustomobject]@{ run_id = '0123456789abcdef0123456789abcdef' } }
+                        'ack-other-run' { return [pscustomobject]@{ success = $true; run_id = 'ffffffffffffffffffffffffffffffff' } }
+                        default {
+                            $sent = [Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json
+                            return [pscustomobject]@{ success = $true; schema_version = 1; run_id = $sent.run_id; complete = $sent.complete; accepted = @($sent.causes).Count; stale = 0; unknown_vm = 0; deduplicated = $false }
+                        }
+                    }
+                }
+                $start = [datetime]'2026-11-03T12:00:00'
+                foreach ($step in $steps) {
+                    $set = New-VsDeviceCauseSet
+                    foreach ($entry in @($step.Entries)) {
+                        Add-VsDeviceCause -DeviceCauses $set -VmId $entry[0] -RolloutRevision $entry[1] -Causes @(('{0} target=VM' -f $entry[2]))
+                    }
+                    $script:dcReply = if ($step.ContainsKey('Reply')) { $step.Reply } else { 'ack' }
+                    $before = $script:dcCalls
+                    $complete = if ($step.ContainsKey('Complete')) { [bool]$step.Complete } else { $true }
+                    $status = Send-VsDeviceCauseReport -Config ([pscustomobject]@{ ReportToken = 'T' }) -RunId '0123456789abcdef0123456789abcdef' `
+                        -Complete $complete -DeviceCauses $set -Now $start.AddSeconds([double]$step.At)
+                    $text = if ($script:dcBody -is [byte[]]) { [Text.Encoding]::UTF8.GetString($script:dcBody) } else { $null }
+                    [pscustomobject]@{
+                        Status = $status
+                        Called = ($script:dcCalls -gt $before)
+                        BodyType = if ($null -ne $script:dcBody) { $script:dcBody.GetType().FullName } else { $null }
+                        BodyText = $text
+                        BodyBytes = if ($script:dcBody -is [byte[]]) { $script:dcBody.Length } else { 0 }
+                        Path = $script:dcPath
+                        Log = @($script:dcLog)
+                    }
+                }
+            }
+        }
+    }
+
+    It 'spiegelt VIRTUSPHERE_DEVICE_SYNC_CAUSES der Portaldatei in Reihenfolge und Menge' {
+        $php = Get-DeviceCausePhpText
+        $block = [regex]::Match($php, '(?s)const VIRTUSPHERE_DEVICE_SYNC_CAUSES = \[\r?\n(.*?)\r?\n\];')
+        $block.Success | Should -BeTrue -Because 'die Liste steht als ein Block mit einem Code je Zeile'
+        $phpCodes = @([regex]::Matches($block.Groups[1].Value, "(?m)^    '([a-z_]+)',\r?$") | ForEach-Object { $_.Groups[1].Value })
+        $psCodes = Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsDeviceCauseCodes }
+
+        $phpCodes.Count | Should -Be 23
+        ($psCodes -join ',') | Should -Be ($phpCodes -join ',')
+    }
+
+    It 'spiegelt Schema-Version, Eintrags-, Byte- und ID-Grenze der Portaldatei' {
+        $php = Get-DeviceCausePhpText
+        $ps = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            [pscustomobject]@{ Schema = $script:VsDeviceCauseSchemaVersion; Max = $script:VsDeviceCauseMaxEntries; Bytes = $script:VsDeviceCauseMaxBodyBytes; VmMax = $script:VsDeviceCauseVmIdMax }
+        }
+        $ps.Schema | Should -Be (Get-DeviceCausePhpInt -Text $php -Name 'VIRTUSPHERE_DEVICE_SYNC_CAUSE_SCHEMA_VERSION')
+        $ps.Max | Should -Be (Get-DeviceCausePhpInt -Text $php -Name 'VIRTUSPHERE_DEVICE_SYNC_CAUSE_MAX_ENTRIES')
+        $ps.Bytes | Should -Be (Get-DeviceCausePhpInt -Text $php -Name 'VIRTUSPHERE_DEVICE_SYNC_CAUSE_MAX_BODY_BYTES')
+        $ps.VmMax | Should -Be (Get-DeviceCausePhpInt -Text $php -Name 'VIRTUSPHERE_DEVICE_SYNC_CAUSE_VM_ID_MAX')
+    }
+
+    It 'steht die PowerShell-Liste in der Zeilenform, die der PHP-Spiegel liest' {
+        # Gegenrichtung (C2): ein PHP-Static-Test liest genau diese Form.
+        $text = Get-Content -LiteralPath $script:MecmCommon -Raw
+        $block = [regex]::Match($text, '(?s)\$script:VsDeviceCauseCodes = @\(\r?\n(.*?)\r?\n\)')
+        $block.Success | Should -BeTrue
+        $lines = @($block.Groups[1].Value -split '\r?\n')
+        foreach ($line in $lines) { $line | Should -Match "^    '[a-z_]+'$" }
+        $evaluated = Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsDeviceCauseCodes }
+        (@($lines | ForEach-Object { $_.Trim().Trim("'") }) -join ',') | Should -Be ($evaluated -join ',')
+    }
+
+    It 'ist eine Teilmenge des Laufvokabulars ohne Paket- und reine Collection-Codes' {
+        $sets = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            [pscustomobject]@{ Device = @($script:VsDeviceCauseCodes); Vocabulary = @($script:VsRunCauseVocabulary) }
+        }
+        @($sets.Device).Count | Should -Be 23
+        @($sets.Device | Select-Object -Unique).Count | Should -Be 23
+        foreach ($code in $sets.Device) { $sets.Vocabulary | Should -Contain $code }
+        $sets.Device | Should -Not -Contain 'collection_update_failed'
+        @($sets.Device | Where-Object { $_ -like 'package_*' }).Count | Should -Be 0
+    }
+
+    It 'sendet einen kompakten, geschlossenen Body; eine Ursache bleibt ein JSON-Array (PS 5.1)' {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(@{ At = 0; Entries = @(, @(17, 3, 'mac_missing')) }))
+        $r[0].Status | Should -Be 'sent'
+        $r[0].Path | Should -Be '/mecm_report.php?action=reportDeviceCauses'
+        $r[0].BodyType | Should -Be 'System.Byte[]'
+        $r[0].BodyText | Should -Be '{"schema_version":1,"run_id":"0123456789abcdef0123456789abcdef","complete":true,"causes":[{"vm_id":17,"rollout_revision":3,"code":"mac_missing"}]}'
+    }
+
+    It 'sendet complete=true auch ohne Ursache (leere Warteschlange ersetzt die Tabelle)' {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(@{ At = 0; Entries = @() }))
+        $r[0].Status | Should -Be 'sent'
+        $r[0].BodyText | Should -Match '"complete":true,"causes":\[\]'
+    }
+
+    It 'schweigt ohne vollstaendigen Durchgang und ohne Ursache' {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(@{ At = 0; Complete = $false; Entries = @() }))
+        $r[0].Status | Should -Be 'skipped'
+        $r[0].Called | Should -BeFalse
+    }
+
+    It 'sendet bei Aenderung sofort und sonst erst nach 300 s zur Auffrischung (Q3)' {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(
+            @{ At = 0;   Entries = @(, @(17, 3, 'mac_missing')) }
+            @{ At = 10;  Entries = @(, @(17, 3, 'mac_missing')) }
+            @{ At = 299; Entries = @(, @(17, 3, 'mac_missing')) }
+            @{ At = 300; Entries = @(, @(17, 3, 'mac_missing')) }
+            @{ At = 310; Entries = @(, @(17, 3, 'resource_id_pending')) }
+            @{ At = 320; Entries = @(, @(17, 4, 'resource_id_pending')) }
+            @{ At = 330; Complete = $false; Entries = @(, @(17, 4, 'resource_id_pending')) }
+        ))
+        @($r | ForEach-Object { $_.Status }) -join ',' | Should -Be 'sent,unchanged,unchanged,sent,sent,sent,sent'
+        @($r | ForEach-Object { $_.Called }) -join ',' | Should -Be 'True,False,False,True,True,True,True'
+    }
+
+    It 'haengt den Rhythmus nicht an die Reihenfolge der Warteschlange' {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(
+            @{ At = 0;  Entries = @(@(17, 3, 'mac_missing'), @(18, 1, 'mission_missing')) }
+            @{ At = 10; Entries = @(@(18, 1, 'mission_missing'), @(17, 3, 'mac_missing')) }
+        ))
+        $r[1].Status | Should -Be 'unchanged'
+    }
+
+    It 'ruht nach HTTP <status> 15 Minuten und sendet danach wieder' -ForEach @(
+        @{ status = 400 }
+        @{ status = 404 }
+        @{ status = 413 }
+    ) {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(
+            @{ At = 0;   Entries = @(, @(17, 3, 'mac_missing')); Reply = $status }
+            @{ At = 10;  Entries = @(, @(17, 3, 'resource_id_pending')) }
+            @{ At = 899; Entries = @(, @(17, 3, 'resource_id_pending')) }
+            @{ At = 900; Entries = @(, @(17, 3, 'resource_id_pending')) }
+        ))
+        @($r | ForEach-Object { $_.Status }) -join ',' | Should -Be 'failed,paused,paused,sent'
+        @($r | ForEach-Object { $_.Called }) -join ',' | Should -Be 'True,False,False,True'
+        @($r[0].Log | Where-Object { $_ -like 'WARN *' -and $_ -match "HTTP $status" -and $_ -match '15 Minuten' }).Count | Should -Be 1
+    }
+
+    It 'ruht nach <reply> nicht und versucht es beim naechsten Lauf erneut' -ForEach @(
+        @{ reply = 'timeout' }
+        @{ reply = 500 }
+    ) {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(
+            @{ At = 0;  Entries = @(, @(17, 3, 'mac_missing')); Reply = $reply }
+            @{ At = 10; Entries = @(, @(17, 3, 'mac_missing')) }
+        ))
+        @($r | ForEach-Object { $_.Status }) -join ',' | Should -Be 'failed,sent'
+        $r[1].Called | Should -BeTrue
+    }
+
+    It 'merkt sich den Stand nur nach Quittung (<reply>)' -ForEach @(
+        @{ reply = 'no-success' }
+        @{ reply = 'ack-other-run' }
+        @{ reply = 'html' }
+    ) {
+        $r = @(Invoke-DeviceCauseSteps -Steps @(
+            @{ At = 0;  Entries = @(, @(17, 3, 'mac_missing')); Reply = $reply }
+            @{ At = 10; Entries = @(, @(17, 3, 'mac_missing')) }
+            @{ At = 20; Entries = @(, @(17, 3, 'mac_missing')) }
+        ))
+        @($r | ForEach-Object { $_.Status }) -join ',' | Should -Be 'unconfirmed,sent,unchanged'
+    }
+
+    It 'wirft nie und loggt Zustellfehler gedrosselt' {
+        $outcome = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $script:logs = 0
+            function Write-VsLog { param($Message, $Level, $Context, $Color) $script:logs++ }
+            function Invoke-VsApi { throw 'network down' }
+            $threw = $false
+            $statuses = @()
+            try {
+                foreach ($second in 0, 10, 20) {
+                    $set = New-VsDeviceCauseSet
+                    Add-VsDeviceCause -DeviceCauses $set -VmId 17 -RolloutRevision 3 -Causes @('mac_missing target=VM')
+                    $statuses += Send-VsDeviceCauseReport -Config ([pscustomobject]@{ ReportToken = 'T' }) -RunId '0123456789abcdef0123456789abcdef' `
+                        -Complete $true -DeviceCauses $set -Now ([datetime]'2026-11-03T12:00:00').AddSeconds($second)
+                }
+            } catch { $threw = $true }
+            [pscustomobject]@{ Threw = $threw; Logs = $script:logs; Statuses = ($statuses -join ',') }
+        }
+        $outcome.Threw | Should -BeFalse
+        $outcome.Statuses | Should -Be 'failed,failed,failed'
+        $outcome.Logs | Should -Be 1
+    }
+
+    It 'kuerzt ueber 500 Eintraege hinten, sendet complete=false und bleibt unter 64 KiB' {
+        $entries = @(1..501 | ForEach-Object { , @((2147483647 - $_), 2147483647, 'membership_operation_uncertain') })
+        $r = @(Invoke-DeviceCauseSteps -Steps @(@{ At = 0; Entries = $entries }))
+        $r[0].Status | Should -Be 'sent'
+        $sent = $r[0].BodyText | ConvertFrom-Json
+        @($sent.causes).Count | Should -Be 500
+        $sent.complete | Should -BeFalse
+        $sent.causes[0].vm_id | Should -Be 2147483646
+        $r[0].BodyBytes | Should -BeLessOrEqual 65536
+        @($r[0].Log | Where-Object { $_ -match 'gekuerzt: 500 von 501' }).Count | Should -Be 1
+    }
+
+    It 'nimmt je VM nur die erste geraetebezogene Ursache und laesst andere Codes weg (Q4)' {
+        $pairs = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $set = New-VsDeviceCauseSet
+            Add-VsDeviceCause -DeviceCauses $set -VmId 17 -RolloutRevision 3 -Causes @('collection_update_failed collection=X', 'collection_missing target=VM collection=Mission A', 'mac_missing target=VM')
+            Add-VsDeviceCause -DeviceCauses $set -VmId 17 -RolloutRevision 3 -Causes @('mission_missing target=VM')
+            Add-VsDeviceCause -DeviceCauses $set -VmId 18 -RolloutRevision 1 -Causes @('package_content_failed target=X')
+            , @($set.Values)
+        }
+        @($pairs).Count | Should -Be 1
+        $pairs[0]['vm_id'] | Should -Be 17
+        $pairs[0]['code'] | Should -Be 'collection_missing'
+    }
+
+    It 'bildet kein Paar ohne gueltige VM-ID oder Revision (<why>)' -ForEach @(
+        @{ why = 'Revision fehlt (Portal vor 14D)'; vm = 17; rev = $null }
+        @{ why = 'Revision 0'; vm = 17; rev = 0 }
+        @{ why = 'Revision negativ'; vm = 17; rev = -1 }
+        @{ why = 'Revision kein Ganzzahltext'; vm = 17; rev = '3a' }
+        @{ why = 'VM-ID ueber int32'; vm = 2147483648; rev = 1 }
+        @{ why = 'VM-ID leer'; vm = ''; rev = 1 }
+        @{ why = 'VM-ID bool'; vm = $true; rev = 1 }
+    ) {
+        $count = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($vm, $rev) -Body {
+            param($v, $r)
+            $set = New-VsDeviceCauseSet
+            Add-VsDeviceCause -DeviceCauses $set -VmId $v -RolloutRevision $r -Causes @('mac_missing target=VM')
+            $set.Count
+        }
+        $count | Should -Be 0
+    }
+
+    It 'sendet der Device-Sync nach der Abschlussmeldung, ausserhalb jedes finally' {
+        $ast = Get-ScriptAst -Name 'mecm_new-device-sync.ps1'
+        $calls = @($ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Send-VsDeviceCauseReport'
+        }, $true))
+        $calls.Count | Should -Be 1
+        $parent = $calls[0].Parent
+        while ($null -ne $parent) {
+            if ($parent -is [System.Management.Automation.Language.TryStatementAst]) {
+                $parent.Finally | Should -BeNullOrEmpty -Because 'der Versand steht nicht im try, dessen finally den Laufbericht sendet'
+            }
+            $parent = $parent.Parent
+        }
+        $text = Get-ScriptText -Name 'mecm_new-device-sync.ps1'
+        $text.IndexOf('Send-VsDeviceCauseReport') | Should -BeGreaterThan $text.LastIndexOf('Send-VsRunReport')
+        $calls[0].Extent.Text | Should -Match '-Complete \$deviceCausesComplete'
+    }
+
+    It 'setzt complete nur am Ende des Durchgangs ohne Ausnahme' {
+        $text = Get-ScriptText -Name 'mecm_new-device-sync.ps1'
+        ([regex]::Matches($text, '\$deviceCausesComplete = \$true')).Count | Should -Be 1
+        $text | Should -Match '(?s)\$consecutiveErrors = 0\s*\r?\n(\s*#[^\r\n]*\r?\n)*\s*\$deviceCausesComplete = \$true\s*\r?\n\s*\} catch \{'
+        $text | Should -Match '\$deviceCausesComplete = \$false'
+    }
+
+    It 'faerbt den Lauf nicht: der Versand kennt weder outcome noch Zaehler' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:MecmCommon, [ref]$null, [ref]$null)
+        $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Send-VsDeviceCauseReport' }, $true)
+        $fn | Should -Not -BeNullOrEmpty
+        $fn.Body.Extent.Text | Should -Not -Match '\$(outcome|dataWarnings|itemFailures|category)\b'
+        $fn.Body.Extent.Text | Should -Not -Match 'Add-VsRunCause|Send-VsRunReport'
+    }
+}

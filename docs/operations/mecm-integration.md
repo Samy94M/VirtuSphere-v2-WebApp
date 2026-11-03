@@ -471,8 +471,8 @@ und neuer MAC ein MAC-Konflikt, den der Device-Sync im Log meldet.
 ## Rückkanal & Heartbeats
 
 Der Endpoint `mecm_report.php` nimmt POST-Meldungen entgegen (JSON). Der optionale
-Header `X-VirtuSphere-Token` gilt für die Server-Aufgaben (`action=heartbeat` und
-`action=reportRun`) und wird nur geprüft, wenn im Portal unter Einstellungen ein
+Header `X-VirtuSphere-Token` gilt für die Server-Aufgaben (`action=heartbeat`,
+`action=reportRun` und `action=reportDeviceCauses`) und wird nur geprüft, wenn im Portal unter Einstellungen ein
 Token generiert wurde. `action=reportPhase` (Clients) authentifiziert ausschließlich
 über IP-Allowlist bzw. bekannte MAC und braucht nie einen Token.
 
@@ -499,6 +499,38 @@ Die Common-Funktion `Send-VsHeartbeat` ist entfernt, weil kein Skript sie mehr
 aufruft; es gibt keinen Heartbeat je Scan mehr, nur noch den Ergebnisbericht.
 `heartbeat` bleibt für Alt-Skripte kompatibel, erscheint im Portal dann aber gelb
 als „Legacy: Ergebnis nicht bestätigt".
+
+### Ursache je VM (Devices Sync, MX1)
+
+Neben dem Ergebnisbericht meldet der Devices Sync an
+`mecm_report.php?action=reportDeviceCauses` je VM der Warteschlange die eine
+Ursache, die sie gerade aufhält. Der Kanal dient nur der Anzeige an der VM und
+ändert `reportRun` nicht. Token und IP-Freigabe gelten wie bei `reportRun`. Der
+Body ist geschlossen und kompakt (höchstens 500 Einträge, 64 KiB):
+
+```json
+{"schema_version":1,"run_id":"<Lauf-ID>","complete":true,"causes":[{"vm_id":17,"rollout_revision":3,"code":"mac_missing"}]}
+```
+
+- **Paar:** VM-ID und Rollout-Revision aus derselben `getDeviceList`-Zeile, dazu
+  der erste gerätebezogene Code des Durchgangs dieser VM (23 Codes,
+  `$script:VsDeviceCauseCodes` in `VirtuSphere-Common.ps1`, Spiegel von
+  `VIRTUSPHERE_DEVICE_SYNC_CAUSES`). Eine gesperrte, nicht fällige VM trägt ihren
+  gespeicherten Code mit der aktuellen Revision. Ohne Revision (Portal vor
+  Etappe 14D) entfällt das Paar. Ursachen ohne VM (Ordner, Task-Sequence-Collections,
+  Collection-Aktualisierung) bleiben im Ergebnisbericht.
+- **`complete`:** nur nach einem Lauf ohne Fehler über die ganze Warteschlange;
+  dann ersetzt das Portal seinen Stand. Ein abgebrochener oder gekürzter Bericht
+  sendet `false`, ein abgebrochener Lauf ohne Ursache sendet nichts.
+- **Rhythmus:** bei geändertem Inhalt sofort, sonst alle 5 Minuten zur
+  Auffrischung. Als gesendet gilt ein Stand erst nach einer Antwort mit `success`
+  und derselben `run_id`.
+- **Fehler:** Der Versand wirft nie und färbt den Lauf nicht. Nach 400, 404 oder
+  413 ruht er 15 Minuten; so antwortet ein Portal, das die Aktion noch nicht kennt.
+- **Auslieferung (portal first):** erst das Portal-Release, dann die Serverskripte
+  über `-Upgrade -ServerOnly` (Abschnitt 4b). In der Zwischenzeit zeigt das
+  Portal an der VM keine Ursache; neue Skripte an einem alten Portal ruhen wie
+  oben beschrieben.
 
 ### Client-Phase (Windows-Client, authentifiziert per bekannter MAC)
 
@@ -1309,6 +1341,9 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten MECM-Zyklus | WARN |
 | ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter, VM bleibt in der Warteschlange | WARN |
 | MECM-Vollabfrage (Devices/Task Sequences/Collections) scheitert | Lauf bricht ab und meldet `mecm_unavailable`; **kein** Weiterlaufen mit leeren Caches | ERROR |
+| Ursachenbericht `reportDeviceCauses` abgelehnt (Portal ohne die Aktion: 400, über 8 KB 413; 404) | Versand ruht 15 Minuten; Lauf, Zähler und Ampel bleiben unberührt | WARN je Pause (gedrosselt) |
+| Ursachenbericht nicht zugestellt oder ohne Quittung (Timeout, 5xx, Antwort ohne `success` oder fremde Lauf-ID) | keine Pause; der nächste Lauf sendet erneut, gemerkt wird nur ein quittierter Stand | WARN gedrosselt |
+| Mehr als 500 VMs mit Ursache | die ersten 500 der Warteschlange mit `complete=false`; das Portal ergänzt dann nur und löscht nichts | WARN gedrosselt |
 
 **Die ResourceID ist die Tür aus der Warteschlange.** `mecm_updateid.php` setzt die VM auf `registered`, und `getDeviceList` liefert sie danach nicht mehr; nichts schiebt sie erneut ein. Deshalb meldet der Device-Sync die ResourceID nur, wenn **jede** Zuweisung dieser VM gesessen hat, also OS-, Paket- und Mission-Collection. Vorher lief die Meldung unbedingt: eine VM mit fehlender Paket-Collection fiel dauerhaft aus der Warteschlange, bootete per PXE ohne Task Sequence oder installierte ohne ihre Pakete, und im Portal stand sie als fertig registriert. Ein unvollständiger Lauf zählt jetzt `item_failures`, meldet `warning`/`partial_failure` und nennt im `detail` VM und Collection.
 

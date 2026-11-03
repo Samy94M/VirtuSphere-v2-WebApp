@@ -19,11 +19,12 @@ Jeder Eintrag der Freigabeliste trägt eine Rolle; ein Gate lässt nur IPs seine
 | `mecm_report.php` | `reportPhase` | `client_phase` | `client` | ja | Clientereignis zur Anzeige |
 | `mecm_report.php` | `heartbeat` | `server_report` | `mecm_server` | nein | Statuszeile der Quelle |
 | `mecm_report.php` | `reportRun` | `server_report` | `mecm_server` | nein | Laufbericht der Serveraufgabe |
+| `mecm_report.php` | `reportDeviceCauses` | `server_report` | `mecm_server` | nein | Wartegrund je VM aus dem Devices Sync zur Anzeige |
 | `mecm_report.php` | `reportPackageRun` | `package_report` | `client` | nein | Diagnose eines Paketlaufs |
 | `mecm_updateid.php` | `updateDevice` | `device_update` | `mecm_server` | nein | ResourceID, Lebenszyklus `os_installing`, MECM `registered`, Stufenwert 4/5 |
 | `mecm_updateid.php` | `reportMembership` | `device_update` | `mecm_server` | nein | Herkunft der Collection-Mitgliedschaften |
 
-`heartbeat` und `reportRun` verlangen zusätzlich den Berichtstoken im Kopf `X-VirtuSphere-Token`, sobald einer eingestellt ist (`machine_api_report_token_ok()`). Die übrigen Dateien in `Docker/WebAPI/` (`function.php`, `index.php`, `intern.php`, `mysql.php`) sind Einbindungen oder Weiterleitungen, keine Endpunkte. Die Liste der Endpunkte führt `VIRTUSPHERE_MACHINE_API_ENDPOINTS`.
+`heartbeat`, `reportRun` und `reportDeviceCauses` verlangen zusätzlich den Berichtstoken im Kopf `X-VirtuSphere-Token`, sobald einer eingestellt ist (`machine_api_report_token_ok()`). Die übrigen Dateien in `Docker/WebAPI/` (`function.php`, `index.php`, `intern.php`, `mysql.php`) sind Einbindungen oder Weiterleitungen, keine Endpunkte. Die Liste der Endpunkte führt `VIRTUSPHERE_MACHINE_API_ENDPOINTS`.
 
 ## Rollout-Fence
 
@@ -105,33 +106,35 @@ Der ACK lässt den MECM-Zustand und das Flag `updated` stehen; `registered` schr
 
 ## Berichtskanal
 
-`mecm_report.php` nimmt Berichte entgegen, die nur angezeigt werden: Phasen der Clients, Lebenszeichen und Laufberichte der MECM-Serveraufgaben und Berichte des Paketwrappers. Er ändert nie den Lebenszyklus einer VM.
+`mecm_report.php` nimmt Berichte entgegen, die nur angezeigt werden: Phasen der Clients, Lebenszeichen, Laufberichte und Wartegründe je VM der MECM-Serveraufgaben und Berichte des Paketwrappers. Er ändert nie den Lebenszyklus einer VM.
 
 ```mermaid
 flowchart TD
-    post["POST mecm_report.php?action=…"] --> token{"heartbeat oder reportRun: Berichtstoken gültig, falls eingestellt?"}
+    post["POST mecm_report.php?action=…"] --> token{"heartbeat, reportRun oder reportDeviceCauses: Berichtstoken gültig, falls eingestellt?"}
     token -->|nein| denied["401 und Auditzeile mecm.report_token_rejected"]
     token -->|ja oder andere Aktion| body{"Body innerhalb der Grenze und JSON-Objekt?"}
-    body -->|nein| bad["413 oder 400"]
+    body -->|nein| bad["413 oder 400; 400 Invalid action specified bei unbekannter Aktion"]
     body -->|ja| action{"Aktion?"}
     action -->|reportPhase| phase["Phase und Ereignis aus der geschlossenen Liste, IP-Rolle client oder bekannte MAC; Duplikat binnen VIRTUSPHERE_CLIENT_EVENT_DEDUPE_SECONDS bestätigt, ab VIRTUSPHERE_CLIENT_EVENT_MAX_PER_DAY Ereignissen je VM und Tag 429"]
     action -->|heartbeat| beat["IP-Rolle mecm_server, Quelle aus der Liste, Intervall im erlaubten Bereich; Statuszeile der Quelle berühren"]
     action -->|reportRun| run["IP-Rolle mecm_server, Bericht prüfen und speichern; der erste V2-Bericht einer Quelle schreibt mecm.reporter_upgraded"]
     action -->|reportPackageRun| pkg["IP-Rolle client, V1-Ereignis prüfen, genau eine VM aus den MACs, Zäune und Wiederholung in einer Transaktion"]
-    action -->|andere| unknown["400 Invalid action specified"]
+    action -->|reportDeviceCauses| causes["IP-Rolle mecm_server, V1-Bericht prüfen; je Eintrag Revision und Geräteliste prüfen, sonst stale oder unknown_vm zählen; complete ersetzt den Rest, in einer Transaktion"]
+    action -->|andere| bad
     phase --> ok["200, gegebenenfalls mit deduplicated; kein Lebenszyklus geändert"]
     beat --> ok
     run --> ok
     pkg --> ok
+    causes --> ok
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
     classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
-    class post,phase,beat,run,pkg,ok step;
+    class post,phase,beat,run,pkg,causes,ok step;
     class token,action,body decision;
-    class denied,bad,unknown blocked;
+    class denied,bad blocked;
 ```
 
-Die Grenze ist `VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES`, für `reportPackageRun` `VIRTUSPHERE_PACKAGE_REPORT_MAX_BODY_BYTES`. Ein abgelehntes Gate ergibt 403. `reportPhase` prüft MAC, Phase und Ereignis vor dem Gate; eine unbekannte MAC ist 404. Duplikat, Tagesgrenze und Einfügen teilen sich eine Transaktion (`repo_client_event_record_once()`); eine erreichte Tagesgrenze schreibt eine je VM gedrosselte Auditzeile `mecm.client_event_cap_reached`. `reportRun` prüft den Bericht gegen die geschlossene Liste der Ursachen (`run_report_validate()`) und speichert ihn (`repo_record_run_report()`); einzelne Läufe werden nicht auditiert. `reportPackageRun` prüft das Ereignis (`package_run_report_validate()`), löst die MACs zu genau einer VM auf (`repo_package_report_resolve_vm()`) und speichert es (`repo_package_report_record()`); eine identische Wiederholung wird bestätigt, ohne Zeitstempel oder Ablauf zu erneuern, eine widersprüchliche abgelehnt. Paketberichte ändern weder Lebenszyklus noch Statuszeilen noch Katalog und schreiben keine Auditzeilen.
+Die Grenze ist `VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES`, für `reportPackageRun` `VIRTUSPHERE_PACKAGE_REPORT_MAX_BODY_BYTES` und für `reportDeviceCauses` `VIRTUSPHERE_DEVICE_SYNC_CAUSE_MAX_BODY_BYTES`. Ein abgelehntes Gate ergibt 403. `reportPhase` prüft MAC, Phase und Ereignis vor dem Gate; eine unbekannte MAC ist 404. Duplikat, Tagesgrenze und Einfügen teilen sich eine Transaktion (`repo_client_event_record_once()`); eine erreichte Tagesgrenze schreibt eine je VM gedrosselte Auditzeile `mecm.client_event_cap_reached`. `reportRun` prüft den Bericht gegen die geschlossene Liste der Ursachen (`run_report_validate()`) und speichert ihn (`repo_record_run_report()`); einzelne Läufe werden nicht auditiert. `reportPackageRun` prüft das Ereignis (`package_run_report_validate()`), löst die MACs zu genau einer VM auf (`repo_package_report_resolve_vm()`) und speichert es (`repo_package_report_record()`); eine identische Wiederholung wird bestätigt, ohne Zeitstempel oder Ablauf zu erneuern, eine widersprüchliche abgelehnt. Paketberichte ändern weder Lebenszyklus noch Statuszeilen noch Katalog und schreiben keine Auditzeilen. `reportDeviceCauses` prüft den geschlossenen Bericht (`device_sync_causes_validate()`, höchstens `VIRTUSPHERE_DEVICE_SYNC_CAUSE_MAX_ENTRIES` Einträge, eine Ursache je VM) und speichert ihn (`repo_vm_sync_causes_record()`). Die Rollout-Fence entscheidet hier je Eintrag statt mit 409 für den ganzen Bericht: Eine ältere oder höhere Revision und eine VM, die nicht mehr auf der Geräteliste steht, zählen als `stale`, eine gelöschte VM als `unknown_vm`; beides schreibt nichts und keine Auditzeile (ADR-0043 Nachtrag). Nur `complete = true` entfernt die Ursachen anderer Läufe; eine identische Wiederholung ändert nichts und meldet `deduplicated`. Der Bericht schreibt nie in `deploy_vms`.
 
 ## Paketkatalog
 

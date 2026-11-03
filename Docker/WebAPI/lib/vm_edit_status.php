@@ -104,6 +104,7 @@ function vm_edit_render_status_panel(array $vm, string $phase, array $findings, 
                 echo $item('vm_edit.technical_resource_id', $code($vm['mecm_id'] ?? null));
                 echo $item('vm_edit.technical_tombstone', $code($vm['mecm_previous_id'] ?? null));
                 echo $item('vm_edit.technical_rollout_revision', $text($vm['mecm_rollout_revision'] ?? null));
+                echo $item('vm_edit.technical_sync_cause', vm_edit_sync_cause_html($findings) ?? $notSet);
                 echo $item('vm_edit.technical_instance_uuid', $code($vm['vm_instance_uuid'] ?? null));
                 echo $item('vm_edit.technical_moid', $code($vm['vm_moid'] ?? null));
                 echo $item('vm_edit.technical_host', $text($vm['vm_bound_esxi_host'] ?? null));
@@ -134,6 +135,33 @@ function vm_edit_finding_href(array $finding, int $missionId, int $vmId, array $
         VIRTUSPHERE_VM_FINDING_PXE_UNWATCHED, VIRTUSPHERE_VM_FINDING_OS_INSTALL_WATCHING, VIRTUSPHERE_VM_FINDING_OS_INSTALL_OVERDUE => '#vm-progress-watch',
         default => '#vm-technical',
     };
+}
+
+/**
+ * The device sync's cause in the technical block (MX1): code, rollout revision
+ * and observation time. It is read from the MECM-wait finding, so the block
+ * shows a cause exactly where the finding names it (Q7: a pending VM only), and
+ * null otherwise. The code is the token of the system status cause line; the
+ * finding above carries its words.
+ *
+ * @param list<array<string, mixed>> $findings in severity order
+ */
+function vm_edit_sync_cause_html(array $findings): ?string
+{
+    foreach ($findings as $finding) {
+        $params = (array) ($finding['params'] ?? []);
+        $code = (string) ($params['cause'] ?? '');
+        if ($code === '' || !in_array((string) ($finding['kind'] ?? ''), [VIRTUSPHERE_VM_FINDING_MECM_PENDING, VIRTUSPHERE_VM_FINDING_MECM_PENDING_OVERDUE], true)) {
+            continue;
+        }
+        $observedAt = (string) ($params['cause_observed_at'] ?? '');
+
+        return '<code>' . h($code) . '</code> ' . h($observedAt === ''
+            ? __t('vm_edit.technical_sync_cause_detail_no_time', ['revision' => (int) ($params['cause_revision'] ?? 0)])
+            : __t('vm_edit.technical_sync_cause_detail', ['revision' => (int) ($params['cause_revision'] ?? 0), 'time' => portal_format_timestamp($observedAt)]));
+    }
+
+    return null;
 }
 
 /**

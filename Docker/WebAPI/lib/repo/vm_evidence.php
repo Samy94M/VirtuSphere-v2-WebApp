@@ -11,7 +11,8 @@ declare(strict_types=1);
  * Every source is a table that already exists and is written by its existing
  * owner; this module adds no writer and changes no row. Per VM it reads the
  * newest journal row with its job, the unresolved Create units, the latest
- * client event per phase and the newest package run; per bound ESXi access it
+ * client event per phase, the newest package run and the device sync's current
+ * cause (repo_vm_sync_causes_current(), MX1); per bound ESXi access it
  * reads the cached `vm` inventory with its freshness.
  */
 
@@ -24,6 +25,7 @@ require_once __DIR__ . '/../status_evidence.php';
 require_once __DIR__ . '/../vm_timeline.php';
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/vm_sync_causes.php';
 
 // Bounds each prepared IN list independently of the number of VMs on a page.
 const VIRTUSPHERE_VM_EVIDENCE_BATCH_SIZE = 500;
@@ -34,11 +36,11 @@ const VIRTUSPHERE_VM_EVIDENCE_BATCH_SIZE = 500;
  * repo_vm_evidence_for_vm() can slice it per row without another query.
  *
  * @param list<array<string,mixed>> $vms
- * @return array{jobs:array<int,array<string,mixed>>,create_uncertain:array<int,list<array{job_id:int,position:int}>>,create_failed:array<int,array{job_id:int,position:int,total:int}>,client_phases:array<int,array<string,array<string,mixed>>>,package_runs:array<int,array<string,mixed>>,inventory:array<int,array<string,mixed>>}
+ * @return array{jobs:array<int,array<string,mixed>>,create_uncertain:array<int,list<array{job_id:int,position:int}>>,create_failed:array<int,array{job_id:int,position:int,total:int}>,client_phases:array<int,array<string,array<string,mixed>>>,package_runs:array<int,array<string,mixed>>,inventory:array<int,array<string,mixed>>,sync_causes:array<int,array<string,mixed>>}
  */
 function repo_vm_evidence(mysqli $db, array $vms, ?int $now = null): array
 {
-    $evidence = ['jobs' => [], 'create_uncertain' => [], 'create_failed' => [], 'client_phases' => [], 'package_runs' => [], 'inventory' => []];
+    $evidence = ['jobs' => [], 'create_uncertain' => [], 'create_failed' => [], 'client_phases' => [], 'package_runs' => [], 'inventory' => [], 'sync_causes' => []];
     $vmIds = [];
     $credentialIds = [];
     foreach ($vms as $vm) {
@@ -57,6 +59,7 @@ function repo_vm_evidence(mysqli $db, array $vms, ?int $now = null): array
         $evidence['create_failed'] += repo_vm_evidence_create_failed($db, $batch);
         $evidence['client_phases'] += repo_vm_evidence_client_phases($db, $batch);
         $evidence['package_runs'] += repo_vm_evidence_package_runs($db, $batch);
+        $evidence['sync_causes'] += repo_vm_sync_causes_current($db, $batch);
     }
     $credentialIds = array_values(array_unique($credentialIds));
     if ($credentialIds !== []) {
@@ -94,6 +97,7 @@ function repo_vm_evidence_for_vm(array $evidence, array $vm, bool $isTemplate): 
         'client_phases' => $clientPhases,
         'last_package_run' => $evidence['package_runs'][$vmId] ?? null,
         'inventory' => $credentialId > 0 ? ($evidence['inventory'][$credentialId] ?? null) : null,
+        'sync_cause' => $evidence['sync_causes'][$vmId] ?? null,
     ];
 }
 

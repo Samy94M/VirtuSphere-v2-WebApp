@@ -129,4 +129,34 @@ return [
     'finding_short_client_phase_unconfirmed' => 'Clientphase unbestätigt',
     'finding_short_package_run_failed' => 'Paketbericht fehlgeschlagen',
     'finding_short_mecm_sync_deploy_failed' => 'MECM-Abgleich offen',
+    // Grund des Devices Sync am Befund „Wartet auf MECM“ (MX1). Er steht im vollen
+    // Satz (VM-Editor und Tooltip der Tabellenzelle), nie in der Kurzform; ab
+    // einem gewissen Alter mit „Stand“ und Beobachtungszeit.
+    'finding_mecm_cause' => ':finding; Grund: :cause',
+    'finding_mecm_cause_as_of' => ':finding; Grund (Stand :time): :cause',
+    // Je Code der Gerätecodes (VIRTUSPHERE_DEVICE_SYNC_CAUSES) ein Satzteil, was
+    // die VM aufhält. Die Maßnahme nennt die Hilfe zum Systemstatus.
+    'sync_cause_mission_missing' => 'VM ohne Mission',
+    'sync_cause_mac_missing' => 'keine MAC auf der WDS-Portgruppe',
+    'sync_cause_pxe_nic_ambiguous' => 'mehrere Netzwerkkarten auf der WDS-Portgruppe',
+    'sync_cause_mac_conflict' => 'Name und MAC zeigen auf verschiedene MECM-Geräte',
+    'sync_cause_device_name_invalid' => 'Windows-Hostname taugt nicht als Gerätename',
+    'sync_cause_device_identity_ambiguous' => 'mehrere MECM-Datensätze passen auf die VM',
+    'sync_cause_previous_resource_present' => 'altes MECM-Gerät besteht noch',
+    'sync_cause_resource_id_missing' => 'gebundenes MECM-Gerät wurde gelöscht',
+    'sync_cause_resource_mac_conflict' => 'gebundenes MECM-Gerät trägt eine andere MAC',
+    'sync_cause_device_import_failed' => 'Import in MECM fehlgeschlagen',
+    'sync_cause_resource_id_pending' => 'MECM hat noch keine ResourceID vergeben',
+    'sync_cause_stale_rollout_revision' => 'Scan mit veraltetem Stand, der nächste läuft neu',
+    'sync_cause_collection_missing' => 'eine Collection der VM fehlt in MECM',
+    'sync_cause_collection_folder_failed' => 'Ordner einer Collection nicht angelegt oder nicht verschoben',
+    'sync_cause_collection_assign_failed' => 'Zuordnung zu einer Collection fehlgeschlagen',
+    'sync_cause_collection_remove_failed' => 'eigene Collection-Zuordnung nicht entfernt',
+    'sync_cause_membership_provenance_invalid' => 'Herkunft einer Collection-Zuordnung unvollständig',
+    'sync_cause_membership_identity_ambiguous' => 'Collection nicht eindeutig',
+    'sync_cause_membership_query_failed' => 'Collection-Mitgliedschaften nicht sicher lesbar',
+    'sync_cause_membership_operation_uncertain' => 'Collection-Zuordnung nach Abbruch unbestätigt',
+    'sync_cause_membership_report_pending' => 'Collection-Zuordnung bestätigt, Meldung folgt',
+    'sync_cause_membership_report_failed' => 'Meldung der Collection-Zuordnung ans Portal fehlgeschlagen',
+    'sync_cause_resource_update_failed' => 'Meldung der ResourceID ans Portal fehlgeschlagen',
 ];

@@ -28,6 +28,10 @@ return [
     'technical_resource_id' => 'MECM-ID',
     'technical_tombstone' => 'Altes MECM-Gerät',
     'technical_rollout_revision' => 'Rollout-Revision',
+    // Grund des Devices Sync (MX1): nur an einer VM, die auf MECM wartet.
+    'technical_sync_cause' => 'Wartegrund (Device-Sync)',
+    'technical_sync_cause_detail' => '(Revision :revision, beobachtet :time)',
+    'technical_sync_cause_detail_no_time' => '(Revision :revision)',
     'technical_instance_uuid' => 'Instanz-UUID',
     'technical_moid' => 'MOID',
     'technical_host' => 'ESXi-Host',
