@@ -259,8 +259,8 @@ Namenspräfix.
    Produktionshost ist der Weg in Schritt 4.1 der bessere, weil das Passwort dann
    nicht in einer Datei liegen bleibt.
 
-3. Stack starten und **alle fünf** Container prüfen, besonders den in E1b neu
-   hinzugekommenen `maintenance-worker`:
+3. Stack starten und **alle fünf** Container prüfen, besonders den
+   `maintenance-worker`:
 
    ```bash
    docker compose up -d
@@ -447,7 +447,7 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    später über den Admin-Config-Flow (ADR-0012, Runbook
    `docs/operations/https.md`).
 
-## Schritt 5: MECM-Server anbinden (E4, erster echter Funktionstest)
+## Schritt 5: MECM-Server anbinden (erster echter Funktionstest)
 
 Vorher prüfen, ob der MECM-Installer dieses Stands freigegeben ist:
 `grep -n "throw 'MC01" Powershell-MECM/install-VirtuSphere-MECM.ps1`. Zeigt die
@@ -492,7 +492,7 @@ funktionieren ohne MECM weiter.
    - Site-Health-Task beenden: nur MECM-Site wird stale/rot, die Integration bleibt
      grün.
 
-   Das ist die erste echte Abnahme von E1/E1b/E4.
+   Das ist die erste echte Abnahme von Rückkanal, Wartungsdienst und MECM-Anbindung.
 
 > **Rollout-Reihenfolge (der Zwischenzustand ist erwartet):** Zuerst Portal und
 > Migration `0025_mecm_result_reporting` deployen (der Maintenance-Worker wird dabei
@@ -504,7 +504,7 @@ funktionieren ohne MECM weiter.
 > Portal → MECM:445 entfernen. Nicht „neue Skripte zuerst": ein altes Portal kennt
 > `reportRun` nicht und lehnt die Berichte mit HTTP 400 ab.
 
-## Schritt 6: Paket-Pipeline (E3, hier lag das Datenverlust-Risiko)
+## Schritt 6: Paket-Pipeline (hier liegt das Datenverlust-Risiko)
 
 1. **Autoimporter + Packages-Sync live** beobachten: `config.json`-Ordner
    (`D:\VirtuSphere\Packages\files`) → Katalog füllt sich in `deploy_packages`.
@@ -537,9 +537,9 @@ funktionieren ohne MECM weiter.
    ACL-Ebenen (Freigabe *und* NTFS): eine „Everyone: Vollzugriff"-Freigabe ist
    unkritisch, solange NTFS normale Benutzer auf Lesen beschränkt.
 
-## Schritt 7: Client-Deployment (E5, erster echter Funktionstest)
+## Schritt 7: Client-Deployment (erster echter Funktionstest)
 
-1. **DNS-Eintrag** `virtusphere.lan` → Ubuntu-Host-IP im Deploy-Netz muss jetzt
+1. **DNS-Eintrag** `virtusphere.lan` → Ubuntu-Host-IP im Deploy-Netz muss
    existieren (sonst greift nur die hartkodierte IP-Fallback-Stufe).
 2. **Eine Test-VM durch alle vier Phasen** ausrollen
    (heute ausgerollt: `getinfo → hostname → staticip → disks`) und die Zeitleiste
@@ -547,11 +547,11 @@ funktionieren ohne MECM weiter.
    `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip` ist
    im Packaging verdrahtet, aber noch nicht freigegeben; die Portal-Anzeige bleibt
    bei `getinfo`, `hostname`, `staticip`, `disks`.
-3. Dabei die kritischen E5-Fixes real bestätigen: staticip-Idempotenz (Re-Run
-   stirbt nicht mehr), ehrlicher Erfolgsstatus, getinfo-Stale-Registry-Bereinigung,
+3. Dabei real bestätigen: staticip-Idempotenz (ein Re-Run bricht nicht
+   ab), ehrlicher Erfolgsstatus, getinfo-Stale-Registry-Bereinigung,
    Set-VMDisksOnline-try/finally.
 
-## Schritt 8: Datenqualität gegen echten Bestand (E2)
+## Schritt 8: Datenqualität gegen echten Bestand
 
 Reale VM-/Missionsnamen und MAC-Adressen gegen die neuen Regeln prüfen:
 NetBIOS-Hostname ≤15 Zeichen (Bestandsschutz greift), globale VM-Namen-
@@ -646,7 +646,7 @@ neue Aktionen mit HTTP 400 ab, ein neues Portal nimmt alte Meldungen weiter an.
 |---|---|
 | Alt-Credential aus der Git-Historie (Schritt 0) | **muss rotiert werden**, unabhängig vom Löschen der Datei |
 | Admin-Passwort (Schritt 4) | Entscheidung des Betreibers |
-| PowerShell E4/E5 | Restrisiko deutlich gesunken (ADR-0029: PSScriptAnalyzer + Pester in CI, MAC-Kanonisierung sprachübergreifend gepinnt), aber der erste echte MECM-Lauf bleibt die Bewährungsprobe: Collections, Task Sequences und WMI sind weiter ungetestet |
+| PowerShell (MECM-Server und Clients) | Restrisiko deutlich gesunken (ADR-0029: PSScriptAnalyzer + Pester in CI, MAC-Kanonisierung sprachübergreifend gepinnt), aber der erste echte MECM-Lauf bleibt die Bewährungsprobe: Collections, Task Sequences und WMI sind weiter ungetestet |
 | Portal auf HTTPS umstellen | Die PS-Skripte unterstützen es (`Scheme`-Registry-Wert, `-Scheme`-Parameter im Installer). Wer HTTP **abschaltet**, muss den Wert auf `https` setzen, sonst steht die MECM-Integration und die PXE-Client-Kette still |
 | Frische-DB-Migration (Schritt 2) | zweithöchstes Risiko: Konvergenz nie produktiv gelaufen |
 | Deploy-Worker/Ansible gegen echtes ESXi | Teil des ungetesteten Kerns, nicht nur MECM |
