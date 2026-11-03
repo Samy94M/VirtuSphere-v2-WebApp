@@ -37,6 +37,14 @@ replication or point-in-time-recovery consumer, so Compose starts MySQL with
 binlog files from the data directory. Enabling it again requires a separately
 accepted archive, retention and restore proof.
 
+Both restore paths import only into the final MySQL server. With an empty data
+directory the image first runs a temporary init server that answers only on the
+socket; the drill therefore waits on a TCP probe (`--protocol=TCP`, bounded by
+`MYSQL_READY_SECONDS` in `scripts/restore_test.sh`) and ends as a missing
+prerequisite without importing, and the production runbook starts MySQL with
+`docker compose up -d --wait mysql`, whose healthcheck pings `127.0.0.1`
+(`docs/operations/backup.md` step 3, ADR-0017 amendment 7).
+
 ## R6 Audit category pagination uses the composite category/id index.
 
 `deploy_logs_category_lookup` is exactly `(category, id)`. Migration 0054
@@ -92,3 +100,10 @@ Migration 0062 adds `deploy_jobs.started_at` (UTC `DATETIME`, after `scheduled_a
 Migration 0064 adds `deploy_remote_secret_files` (`job_id`, `credential_ansible_id`, `remote_dir`, `target_host`, `target_port`, `target_fingerprint`, `uploaded_at`, `last_attempt_at`, `lease_until`, unique on `job_id` and `remote_dir`). A row means: `accounts.yml` may still be on the Ansible host `target_host`:`target_port` with the pinned host key `target_fingerprint` under `remote_dir`, and its removal is not confirmed. `deploy_remote_secret_remember()` (`lib/deploy_remote_secret.php`) writes the row before every upload that carries the file and reads the target from the credential row at that moment; a second upload of the same job directory to another target is refused. `deploy_remote_secret_forget()` deletes the row only after the host confirmed the removal: exit 0 plus the state line `removed` or `absent` of `ansible_remote_secret_remove_command()`. A failed removal sets `last_attempt_at` and clears `lease_until`. `job_id` deliberately has no foreign key to the job, so a mission delete leaves the row and the file for the next contact. `credential_ansible_id` references `deploy_credentials(id)` with `ON DELETE SET NULL`; a row whose credential was deleted cannot be resolved by any contact. The next contact sweeps only rows of its own credential whose target equals the credential's target now, whose job is not active (a missing job counts as inactive) and whose lease is not running, rows never tried first and then by `last_attempt_at`. Rows on another target stay and are named in the worker's error log. There is no backfill: files uploaded before migration 0064 are not remembered.
 
 K21-F (ADR-0046) adds three rules on the same table, without a new column. `repo_remote_secret_fence_credential_change()` (`lib/repo/deploy_remote_secret_fence.php`) refuses a delete or a target change (type, host, effective port, pinned key) of a credential while any of its rows is open, in the writer's transaction after the job lock of the create fence; a password, name or username change on the same target passes. `deploy_remote_secret_remember()` locks the same credential row, so a remember and a target change serialise. `repo_remote_secret_acknowledge()` deletes the open rows of one credential (or of `credential_ansible_id IS NULL`) on one host and port, except rows under a running lease and rows of an active job, and writes `deploy.remote_secret_acknowledged` in the same `repo_transaction()`; zero rows write nothing. The System status notice (`repo_remote_secret_notice_groups()`, `lib/repo/deploy_remote_secret_notice.php`) only reads: orphaned and moved rows are due at once, overdue rows after `VIRTUSPHERE_REMOTE_SECRET_NOTICE_AFTER_SECONDS`, and leased or active rows are never due.
+
+## R13 Create attempts, failure origin, failed step and audit VM references
+
+- Migration 0066 gives `deploy_create_vm_results` an `attempt` (1 to `VIRTUSPHERE_CREATE_MAX_ATTEMPTS`) and the first attempt's `first_error_code`, `first_error_detail` and `first_async_jid`. A CHECK keeps them a unit: attempt 1 carries none, a later attempt all three. The row stays the same row, because the position is the identity portal, log and retry share; the attempt only derives the step key and async directory (`create.vm.<n>.attemptN`).
+- Migration 0067 adds `error_detail_from_host` (NULL, 0 or 1, only with an `error_detail`). The status reader decides the origin when it writes; no reader compares the text (i18n R13).
+- Migration 0068 adds `deploy_jobs.failed_step` (`powercycle`, `export`, `start`, `autostart` or NULL), written in the same terminal write as `last_error`. Only a retry of a failed full pipeline with a complete export reads it to resume at start or autostart.
+- Migration 0069 creates `deploy_log_vm_refs` (`vm_id`, `log_id`), filled by `audit_event()` in the audit row's transaction from the context's `vm_ids` and backfilled once from stored rows. Its foreign key to `deploy_logs` cascades, so log retention removes the references with their row; there is no foreign key to `deploy_vms`, because a bulk delete names VMs that are gone. The VM chronicle reads it.
