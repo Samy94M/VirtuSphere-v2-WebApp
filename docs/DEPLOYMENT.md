@@ -313,11 +313,10 @@ Migration `0042_remote_execution_foundation` ist dieselbe fail-closed Grenze in
 der Datenbank: Sie erzeugt die Runtime-Generation genau einmal, speichert die
 globale Claim-Pause und legt Aktivierungszeilen ausschließlich als `disabled`
 ohne Vertrag an. Die neuen Job-, Lease-, Handle- und Recoveryspalten sind
-additiv; bestehende Claims, Reaper und SSH-Schritte lesen sie in 8R-O-2 noch
-nicht. Vor einer späteren Verdrahtung bleiben Backup, Claim-Pause/Drain,
+additiv; bestehende Claims, Reaper und SSH-Schritte lesen sie nicht. Vor einer späteren Verdrahtung bleiben Backup, Claim-Pause/Drain,
 einheitliche Revision und 8R-S-Standortevidenz zwingend.
 
-Der 8R-O-3-Inventarconsumer liegt als unverdrahtete Bibliothek vor. Selbst ein
+Der Inventarconsumer des Durable Runners liegt als unverdrahtete Bibliothek vor. Selbst ein
 direkter Aufruf benötigt eine `pilot_remote`- oder `remote_enabled`-Zeile mit
 `remote_v1`, aktuelle Generation sowie übereinstimmende Worker-ID, Lock-Token
 und Lease-Epoch. Der ausgelieferte Zustand erfüllt diese Bedingungen nicht:

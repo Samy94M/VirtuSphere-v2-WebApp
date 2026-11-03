@@ -57,7 +57,7 @@ Cleanup bleibt bis zu terminalem Controller und belegter Reconciliation
 gesperrt. Diese Bibliothek ist im aktiven Worker nicht required und daher kein
 neuer Transportpfad.
 
-8R-O-4 ergänzt daneben nur die spätere Recoveryentscheidung. Sie klassifiziert
+Daneben liegt nur die spätere Recoveryentscheidung vor. Sie klassifiziert
 stale Remoteevidenz, kann eine idempotente Recoveryanforderung speichern und
 liefert eine remote-sichere Kandidatenabfrage für den späteren VM-Sweep. Aktive,
 verlorene, fremde oder manuell zu prüfende Läufe bleiben aktiv und Cleanup ist
@@ -65,8 +65,8 @@ verboten. Diese Module sind weder im Deploy-Reaper noch im Maintenance-Worker
 required. Reaper, Recoveryconsumer und VM-Sweep dürfen erst gemeinsam im
 8R-S-Fenster wechseln; bis dahin gilt unverändert der bestehende Legacy-Reaper.
 
-8R-O-5 beschreibt zusätzlich die späteren Stepgrenzen für Export, Start,
-Autostart und Powercycle in `lib/remote_step_policy.php`. Die Registry übernimmt
+Die späteren Stepgrenzen für Export, Start, Autostart und Powercycle
+beschreibt `lib/remote_step_policy.php`. Die Registry übernimmt
 die Reihenfolge aus `ansible_playbooks_for_mode()`: Powercycle bleibt deshalb
 zwei getrennte Steps aus Powercycle und Export. Export reconciliert über den
 jobgebundenen MAC-Import und notfalls eine read-only Live-Inventarisierung;

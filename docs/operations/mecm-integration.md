@@ -54,7 +54,7 @@ verknüpfen                  Rolloutnamen, weist
 
 ## Admin-Runbook: MECM erstmals anbinden
 
-Dieser Abschnitt beschreibt den früheren Installationsablauf und ist im
+Dieser Abschnitt beschreibt den Installationsablauf ohne Cutover und ist im
 MC01-Zwischenstand nicht ausführbar. Die späteren Abschnitte erklären
 Architektur, Fehlerbilder und Sonderfälle. Vor einem neuen Server- oder
 Client-Apply sind der gemeinsame Core-/Reporter-Cutover und seine Prüfungen
@@ -659,10 +659,10 @@ zugehörige Freigabe müssen daher schreibgeschützt für normale Benutzer sein
 Der Datenfluss läuft ausschließlich in einer Richtung: **MECM → Portal**. Die vier
 SYSTEM-Aufgaben auf dem MECM-Server melden ihren Zustand per HTTP-POST an
 `mecm_report.php`; das Portal selbst baut **keine** ausgehende Verbindung zum
-MECM-Server auf. Der frühere 5-Minuten-TCP-Check auf Port 445 im Wartungsdienst
-ist entfernt (ADR-0018, Amendment 2026-07-23): Eine offene TCP-Verbindung bewies
-keine MECM-Anmeldung, WMI, Aufgabenplanung oder Katalog-Synchronisation. An seine
-Stelle tritt die vierte Aufgabe „VirtuSphere MECM Site Health", die den offiziellen
+MECM-Server auf. Einen TCP-Check auf Port 445 gibt es bewusst nicht (ADR-0018,
+Amendment 2026-07-23): Eine offene TCP-Verbindung beweist keine MECM-Anmeldung,
+WMI, Aufgabenplanung oder Katalog-Synchronisation. Den Zustand meldet die
+vierte Aufgabe „VirtuSphere MECM Site Health", die den offiziellen
 Site-Zustand aus `SMS_SummarizerSiteStatus` meldet.
 
 Der Compose-Service `maintenance-worker` (Container
@@ -807,8 +807,7 @@ Lebenszyklus eines Katalogeintrags:
 3. **Endgültig gelöscht**: erst nach 30 Tagen im Zustand „Zurückgezogen"
    **und** ohne verbleibende VM-Verknüpfung (Wartungsdienst). Verknüpfte
    zurückgezogene Pakete bleiben dauerhaft erhalten, ebenso Pakete, deren
-   Zuweisungen einmal automatisch umgehängt wurden (heute nur bei Vorlagen,
-   früher auch bei VMs).
+   Zuweisungen einmal automatisch umgehängt wurden (etwa bei Vorlagen).
 
 **Neue Version für eine VM:** Der VM-Editor zeigt „Update verfügbar“, sobald
 eine echt höhere Version desselben Pakets aktiv ist, auch solange die alte noch
@@ -827,10 +826,10 @@ verknüpft“ nennt sie. Wird eine Vorlage danach von Hand auf eine ältere Vers
 gesetzt, bleibt sie dort. Neue Missionen aus einer Vorlage übernehmen deren
 Paketauswahl beim Klonen.
 
-**Bis das Portal mit AV-R08 auf Prod läuft:** In `config.json` kein
-`removeOldVersion` setzen. Ältere Portalstände hängen VMs sonst um, wenn das
-Löschen der alten und das Erscheinen der neuen Version in denselben Paket-Sync
-fallen.
+**Portalstand ohne AV-R08:** Solange ein Portal ohne AV-R08 läuft, in
+`config.json` kein `removeOldVersion` setzen. Ein solcher Stand hängt VMs sonst
+um, wenn das Löschen der alten und das Erscheinen der neuen Version in denselben
+Paket-Sync fallen.
 
 **Schutzschwelle:** Würde ein einzelner Sync mehr als X % (Standard 30 %,
 Portal → Einstellungen → Tab „Kataloge und Inventar") der aktiven Pakete zurückziehen (typisch bei
@@ -1070,7 +1069,7 @@ als Diagnoseheader mitgesendet; sie ist kein Authentisierungsmerkmal.
 > Der mutierende Clientinstaller stoppt vor Content- und MECM-Änderungen, bis
 > der geordnete Cutover (MC03) umgesetzt ist; der Read-only-Preflight (MC02)
 > liefert für alle vier Prüfungen echte Befunde. Die nachfolgende
-> Beschreibung dokumentiert den bisherigen Betrieb, nicht eine Freigabe zur
+> Beschreibung dokumentiert den Betrieb ohne Cutover, nicht eine Freigabe zur
 > Anwendung des neuen Graphen. `client_getinfo`/`client_getinfo_2.1` werden
 > niemals stillschweigend übernommen.
 

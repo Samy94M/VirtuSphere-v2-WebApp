@@ -83,7 +83,7 @@ return [
     // line when it cannot resolve a device. Each names exactly one measure;
     // without that mapping the code is just a word to the operator.
     'system_status_identity_heading' => 'When the device sync cannot resolve a VM',
-    'system_status_identity_p1' => 'When the "MECM device sync" row reports failures, the cause line under "Technical details" names the reason as a short code. These codes concern the identity of a device. They always mean: nothing was changed, and the VM stays in the queue until the named step is done. The device sync checks a VM blocked this way again only after a change to it in the portal or after its fixed retry interval; a correction made only in MECM therefore takes effect after a few minutes.',
+    'system_status_identity_p1' => 'When the "MECM device sync" row reports failures, the cause line under "Technical details" names the reason as a short code. These codes concern the identity of a device. They always mean: nothing was changed, and the VM stays in the queue until the named step is done. Except for stale_rollout_revision, the device sync checks a VM blocked this way again only after a change to it in the portal or after its fixed retry interval; a correction made only in MECM therefore takes effect after a few minutes.',
     'system_status_identity_1' => 'device_name_invalid: the VM\'s Windows hostname cannot be used as a MECM device name. Correct it in the VM editor: at most :max characters, only letters, digits and internal hyphens, no dot.',
     'system_status_identity_2' => 'previous_resource_present: the previous rollout\'s device still exists in MECM. Delete it in the MECM console; the device sync then imports the new name by itself as soon as it checks the VM again.',
     'system_status_identity_3' => 'resource_id_missing: the bound ResourceID no longer exists in MECM, so the device was deleted there. Run "Reset MECM ID" so the VM is imported again.',
@@ -175,7 +175,7 @@ return [
     'esxi_cause_fix_ansible_transport' => 'Check the job log plus the SSH service and transport path to the Ansible host.',
     'esxi_cause_fix_ansible_host_identity' => 'In Credentials, independently compare the observed host key directly on the Ubuntu host and explicitly confirm it. A mismatch keeps authentication blocked; the ESXi credential is not paused.',
     'esxi_cause_fix_http' => 'Readable legacy value only. A fresh pull classifies an old record with the current vocabulary.',
-    'esxi_cause_fix_ssh' => 'No fresh pull writes this value any more; it comes from a pull that predates the origin split and names no culprit. The job log of that pull states the real cause; a fresh pull replaces the value with a category that names the culprit.',
+    'esxi_cause_fix_ssh' => 'Readable legacy value only; it names no culprit. The job log of that pull states the real cause; a fresh pull replaces the value with a category that names the culprit.',
     'esxi_cause_fix_worker' => 'Check the deploy worker, database connection and job log; this category does not claim a transport cause.',
     'esxi_cause_fix_parse' => 'Check the job log for a missing marker, unexpected output or a broken result contract.',
     'esxi_cause_fix_config' => 'Check portal and job configuration, the effective Ansible source path and its requirements.yml. This code applies before the remote run; Ansible-side prerequisites have their own category.',
