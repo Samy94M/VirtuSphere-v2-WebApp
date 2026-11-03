@@ -3031,8 +3031,8 @@ Cloud-Session, Branch `claude/da1-drift-2026-11-03` auf `be281a17` (Schnappschus
 
 **Nutzerfragen**
 
-- F1 Namensfeld der Anmeldung: Ein Passwort aus Buchstaben, Ziffern und `._@\-` mit höchstens 64 Zeichen landet weiter im Klartext in der Audit-Spur (`lib/log_redaction.php:141-149`). Optionen: (a) so lassen, Doku sagt es genau (umgesetzt im CHANGELOG); (b) eigenes Paket mit Test, das nur Namen eines bekannten Kontos oder eines gültigen AD-Formats speichert. Empfehlung (a) für 2026.11.3, (b) danach. Antwort: ausstehend, in der Session gestellt; bis zur Antwort gilt die Empfehlung, Code unverändert.
-- F2 `lib/seed.php` nimmt weiter die alte Form `<user> <password> [email]` an (Passwort in der Befehlszeile, `lib/seed.php:21,38`). Optionen: (a) lassen, dokumentiert ist nur STDIN; (b) eigenes Paket mit Test, das die Form abweist. Empfehlung (b) nach dem Rollout. Antwort: ausstehend, in der Session gestellt; bis zur Antwort gilt die Empfehlung, Code unverändert.
+- F1 Namensfeld der Anmeldung: Ein Passwort aus Buchstaben, Ziffern und `._@\-` mit höchstens 64 Zeichen landet weiter im Klartext in der Audit-Spur (`lib/log_redaction.php:141-149`). Optionen: (a) so lassen, Doku sagt es genau (umgesetzt im CHANGELOG); (b) eigenes Paket mit Test, das nur Namen eines bekannten Kontos oder eines gültigen AD-Formats speichert. Empfehlung (a) für 2026.11.3, (b) danach. Antwort 03.11.2026 (wörtlich): „ist sowas best practice, prüfe online im internet, fragren?“. Geprüft: [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) zählt „Authentication passwords“ zu dem, was nicht ins Log gehört, und verlangt, Authentifizierungsfehler zu protokollieren; [OWASP ASVS 4.0 V7.1.1](https://owasp-aasvs4.readthedocs.io/en/latest/V7.1.html): „Credentials or payment details are not logged“. Die heutige Formregel erfüllt das nur für Passwörter mit Sonderzeichen. Nachfrage mit Vorschlag (Name nur bei bekanntem Konto speichern, sonst Platzhalter mit Länge, optional HMAC mit APP_KEY zur Zuordnung von Wiederholungen); Antwort (wörtlich): „Eigenes Paket nach Rollout (Recommended)“. Damit: 2026.11.3 unverändert, eigenes Paket mit Test nach dem Rollout.
+- F2 `lib/seed.php` nimmt weiter die alte Form `<user> <password> [email]` an (Passwort in der Befehlszeile, `lib/seed.php:21,38`). Optionen: (a) lassen, dokumentiert ist nur STDIN; (b) eigenes Paket mit Test, das die Form abweist. Empfehlung (b) nach dem Rollout. Antwort 03.11.2026 (wörtlich): „Nach dem Rollout abweisen (Recommended)“. Damit: eigenes Paket mit Test nach 2026.11.3.
 
 **Konfliktkandidaten (MX1-Dateien, je eigener Commit)**
 
@@ -3061,6 +3061,8 @@ Cloud-Session, Branch `claude/da1-drift-2026-11-03` auf `be281a17` (Schnappschus
 
 - `scripts/check.ps1` mit `lang-parity`, `doc-hygiene`, `doc-semantics`, `file-size`, `phpunit-unit`, `phpstan`, `js-syntax`; wegen Hilfe- und Seitentext `e2e-portal` mit Bildvergleich; dazu nach dem Cherry-Pick der MX1-Commits erneut `doc-semantics` und `phpunit-unit` (Dokuwächter `MachineApiFlowsDocContractTest`, `MecmScheduledTasksDocContractTest`, `VmLifecycleDocContractTest`, `DeployJobStatesDocContractTest`).
 - PHP-Version im gepinnten PHP-Image prüfen (siehe offen).
+
+**Offene Pakete nach dem Rollout:** Namensfeld im Anmeldeprotokoll (F1), alte Seed-Form abweisen (F2), PHP-Version im Image belegen.
 
 **Nächster Schritt:** Koordination übernimmt die Commits per Cherry-Pick auf `main` (Reihenfolge wie unten; bei Konflikten mit MX1 die MX1-Fassung behalten und die DA1-Änderung des Commits nachziehen), fährt die Gates und baut 2026.11.3.
 
