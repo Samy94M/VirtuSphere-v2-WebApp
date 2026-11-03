@@ -74,9 +74,15 @@ flowchart TD
     UD -.->|abgelehnt oder Antwort ohne success| UD1["Warnung resource_update_failed, bei überholter Rollout-Revision stale_rollout_revision; VM bleibt in der Warteschlange"]
   end
   UD --> CU["Aktualisierung geänderter Collections anstoßen"]
-  CU --> R["„completed“ melden (empfangen, importiert, Fehler, Warnungen); Pause = Takt (Standard 10 s)"]
-  R -.->|nächster Lauf| S
+  CU --> R["„completed“ melden (empfangen, importiert, Fehler, Warnungen)"]
+  R --> DC{"Ursache je VM: Stand seit der letzten Quittung geändert oder diese älter als 5 Minuten, und keine Versandpause?"}
+  DC -->|nein| P["Pause = Takt (Standard 10 s)"]
+  DC -->|ja| DS["Ursache je VM melden (reportDeviceCauses): je VM die erste gerätebezogene Ursache ihres Durchgangs mit VM-ID und Rollout-Revision ihrer Zeile, gesperrte und nicht fällige VMs aus dem gespeicherten Sperrzustand; complete nur nach einem Lauf ohne Fehler über die ganze Warteschlange; höchstens 500 VMs, sonst complete=false; Zustellfehler nur im Log, nach 400, 404 oder 413 ruht der Versand 15 Minuten; das Laufergebnis bleibt unberührt"]
+  DS --> P
+  P -.->|nächster Lauf| S
 ```
+
+Die Ursache je VM ist ein eigener Anzeigekanal neben dem Laufbericht. Gepaart wird am Abschnitt einer VM: Ursachen, die nur eine Collection betreffen (Ordner, Task-Sequence-Collections, Collection-Aktualisierung), gehen nicht in den Bericht. Ein Lauf, der vor dem Ende abbricht, meldet nur die schon gesammelten Ursachen mit complete=false; ohne Ursache sendet er nichts. Den gesendeten Stand merkt sich das Skript erst, wenn das Portal mit `success` und derselben Lauf-ID quittiert.
 
 ## Packages Sync
 

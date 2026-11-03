@@ -418,7 +418,15 @@ function Invoke-VsApi {
         # ueber die Werte des Objekts iteriert und Strings statt Eintraege
         # findet. Dieselbe 5.1-Eigenart ist in mecm_new-device-sync.ps1 fuer die
         # Empfangsrichtung dokumentiert; hier ist die Senderichtung.
-        $params['Body'] = ConvertTo-VsUtf8JsonBytes -Value $Body -Depth 6
+        # Ein fertiges byte[] geht unveraendert durch: Send-VsDeviceCauseReport
+        # misst seinen kompakten Body vor dem Senden gegen die Bytegrenze, und
+        # gesendet werden muss genau das Gemessene. Zuweisung je Zweig, nicht als
+        # if-Ausdruck: dessen Pipeline wuerde das byte[] zu object[] aufzaehlen.
+        if ($Body -is [byte[]]) {
+            $params['Body'] = $Body
+        } else {
+            $params['Body'] = ConvertTo-VsUtf8JsonBytes -Value $Body -Depth 6
+        }
         $params['ContentType'] = 'application/json; charset=utf-8'
     }
 
@@ -774,6 +782,41 @@ $script:VsRunCauseVocabulary = @(
     'package_cleanup_failed',    # Alt-Version nicht vollstaendig entfernt
     'package_folder_failed',     # Application nicht in den Ordner VirtuSphere_Applications verschoben (PS-09, AV-F28)
     'package_template_failed'    # Vorlagen-install.ps1 nicht ueberschrieben
+)
+
+# Geraetebezogene Ursachen (MX1, FM-05): die 23 Codes des Vokabulars, die genau
+# eine VM in der MECM-Warteschlange halten. Nur sie gehen als Paar aus VM-ID,
+# Rolloutrevision und Code an reportDeviceCauses. Spiegel von
+# VIRTUSPHERE_DEVICE_SYNC_CAUSES (Docker/WebAPI/lib/device_sync_cause_constants.php)
+# in derselben Reihenfolge; ein Code je Zeile ohne Kommentar, weil beide Seiten
+# die Liste der anderen per Regex lesen. collection_update_failed fehlt bewusst:
+# es betrifft nur eine Collection. collection_missing und collection_folder_failed
+# stehen hier, gepaart werden sie aber nur am Abschnitt einer VM (die Stelle
+# entscheidet, nicht der Code).
+$script:VsDeviceCauseCodes = @(
+    'mission_missing'
+    'mac_missing'
+    'pxe_nic_ambiguous'
+    'mac_conflict'
+    'device_name_invalid'
+    'device_identity_ambiguous'
+    'previous_resource_present'
+    'resource_id_missing'
+    'resource_mac_conflict'
+    'device_import_failed'
+    'resource_id_pending'
+    'stale_rollout_revision'
+    'collection_missing'
+    'collection_folder_failed'
+    'collection_assign_failed'
+    'collection_remove_failed'
+    'membership_provenance_invalid'
+    'membership_identity_ambiguous'
+    'membership_query_failed'
+    'membership_operation_uncertain'
+    'membership_report_pending'
+    'membership_report_failed'
+    'resource_update_failed'
 )
 
 function New-VsRunCauseList {
@@ -2112,6 +2155,212 @@ function Send-VsRunReport {
         Invoke-VsApi -Config $Config -Path '/mecm_report.php?action=reportRun' -Method POST -Body $body -TimeoutSec 5 | Out-Null
     } catch {
         Write-VsRunReportFailure -ErrorRecord $_
+    }
+}
+
+# ===========================================================================
+# Ursache je VM (MX1, FM-05): mecm_report.php?action=reportDeviceCauses
+# ----------------------------------------------------------------------------
+# Eigener Anzeigekanal neben reportRun (reportRun bleibt unveraendert). Der
+# Device-Sync meldet je VM aus getDeviceList die eine Ursache, die sie gerade in
+# der Warteschlange haelt: VM-ID, Rolloutrevision aus derselben Zeile und den
+# ersten geraetebezogenen Code ihres Durchgangs. Geschlossenes Schema wie
+# reportPackageRun; das Portal (lib/device_sync_cause_constants.php) ist die SSoT
+# der Zahlen unten, Pester haelt den Spiegel. Portal first: ein altes Portal
+# antwortet 400 (unbekannte Aktion) oder bei mehr als 8 KB 413; dann ruht der
+# Versand 15 Minuten. Ein Zustellfehler ist nie ein Lauffehler und faerbt den
+# Laufbericht nicht: sonst waere bei altem Portal jeder Lauf gelb.
+# ===========================================================================
+$script:VsDeviceCauseSchemaVersion = 1          # VIRTUSPHERE_DEVICE_SYNC_CAUSE_SCHEMA_VERSION
+$script:VsDeviceCauseMaxEntries = 500           # VIRTUSPHERE_DEVICE_SYNC_CAUSE_MAX_ENTRIES
+$script:VsDeviceCauseMaxBodyBytes = 65536       # VIRTUSPHERE_DEVICE_SYNC_CAUSE_MAX_BODY_BYTES
+$script:VsDeviceCauseVmIdMax = 2147483647       # VIRTUSPHERE_DEVICE_SYNC_CAUSE_VM_ID_MAX
+# Rhythmus (Q3): bei geaendertem Inhalt sofort, sonst alle 300 s zur Auffrischung.
+$script:VsDeviceCauseRefreshSeconds = 300
+# Pause nach einer Antwort, die ein Portal ohne diese Aktion gibt.
+$script:VsDeviceCausePauseSeconds = 900
+$script:VsDeviceCausePauseStatusCodes = @(400, 404, 413)
+# Zustand im Prozess: zuletzt quittierter Stand, Pause, gedrosseltes Log.
+$script:VsDeviceCauseAcknowledged = $null
+$script:VsDeviceCausePausedUntil = $null
+$script:VsDeviceCauseLastNoticeLog = $null
+
+# Sammlung eines Laufs: VM-ID (Text) -> Eintrag, in Reihenfolge von getDeviceList.
+function New-VsDeviceCauseSet {
+    return (New-Object System.Collections.Specialized.OrderedDictionary)
+}
+
+# Positive Ganzzahl aus einem getDeviceList-Feld (JSON-Zahl oder Ziffernfolge),
+# sonst $null. Nichts wird geraten: leer, 0, negativ, Bruch oder zu gross ergibt
+# kein Paar. Fehlt die Revision (Portal vor Etappe 14D), entfaellt das Paar.
+function ConvertTo-VsDeviceCauseNumber {
+    param($Value)
+    if ($null -eq $Value -or $Value -is [bool]) { return $null }
+    $text = ([string]$Value).Trim()
+    if ($text -cnotmatch '^[0-9]{1,10}$') { return $null }
+    $number = [long]$text
+    if ($number -lt 1 -or $number -gt $script:VsDeviceCauseVmIdMax) { return $null }
+    return [int]$number
+}
+
+# Haengt die Ursache einer VM an (Q4: eine je VM, die erste geraetebezogene der
+# uebergebenen Ursachenzeilen). Eine VM, die schon einen Eintrag hat, behaelt ihn.
+# Die Zeilen sind die von Add-VsRunCause ("<code> target=..."); gepaart wird nur
+# ein Code aus $script:VsDeviceCauseCodes.
+function Add-VsDeviceCause {
+    param(
+        [System.Collections.IDictionary]$DeviceCauses,
+        $VmId,
+        $RolloutRevision,
+        [object[]]$Causes = @()
+    )
+    if ($null -eq $DeviceCauses) { return }
+    $vm = ConvertTo-VsDeviceCauseNumber -Value $VmId
+    $revision = ConvertTo-VsDeviceCauseNumber -Value $RolloutRevision
+    if ($null -eq $vm -or $null -eq $revision) { return }
+    $key = [string]$vm
+    if ($DeviceCauses.Contains($key)) { return }
+    foreach ($cause in @($Causes)) {
+        $code = ([string]$cause).Split(' ')[0]
+        if ($script:VsDeviceCauseCodes -ccontains $code) {
+            $DeviceCauses[$key] = [ordered]@{ vm_id = $vm; rollout_revision = $revision; code = $code }
+            return
+        }
+    }
+}
+
+# Body als kompaktes UTF-8 (ohne BOM). Kompakt, weil Windows PowerShell 5.1 sonst
+# so tief einrueckt, dass 500 Eintraege rund 107 statt 46 KB brauchen.
+function ConvertTo-VsDeviceCauseBodyBytes {
+    param([Parameter(Mandatory)][string]$RunId, [bool]$Complete, [object[]]$Entries = @())
+    $body = [ordered]@{
+        schema_version = $script:VsDeviceCauseSchemaVersion
+        run_id         = $RunId
+        complete       = $Complete
+        causes         = [object[]]@($Entries)
+    }
+    $json = ConvertTo-Json -InputObject $body -Depth 6 -Compress
+    return , ([Text.Encoding]::UTF8.GetBytes($json))
+}
+
+# Inhalt eines Berichts fuer den Rhythmus: unabhaengig von der Reihenfolge der
+# Warteschlange und ohne run_id (die ist je Lauf neu).
+function Get-VsDeviceCauseSignature {
+    param([bool]$Complete, [object[]]$Entries = @())
+    $parts = @($Entries | Sort-Object { [int]$_['vm_id'] } | ForEach-Object {
+        '{0}:{1}:{2}' -f $_['vm_id'], $_['rollout_revision'], $_['code']
+    })
+    return ('complete={0};{1}' -f $Complete.ToString().ToLowerInvariant(), ($parts -join ','))
+}
+
+# Eine 2xx-Antwort ist erst mit success und dem Echo dieser run_id eine Quittung
+# (wie Assert-VsPortalSuccess; Echo wie bei reportPackageRun, ADR-0044).
+function Test-VsDeviceCauseAcknowledgement {
+    param($Response, [Parameter(Mandatory)][string]$RunId)
+    try { Assert-VsPortalSuccess -Response $Response -Operation 'reportDeviceCauses' } catch { return $false }
+    $echo = $null
+    if ($Response -is [System.Collections.IDictionary]) {
+        $echo = $Response['run_id']
+    } else {
+        $property = $Response.PSObject.Properties['run_id']
+        if ($null -ne $property) { $echo = $property.Value }
+    }
+    return ([string]$echo -ceq $RunId)
+}
+
+# Gedrosseltes Tageslog des Ursachenkanals (eigenes Fenster neben dem Run-Report).
+function Write-VsDeviceCauseNotice {
+    param([Parameter(Mandatory)][string]$Message, [Parameter(Mandatory)][datetime]$Now)
+    $last = $script:VsDeviceCauseLastNoticeLog
+    if ($null -ne $last) {
+        $elapsed = ($Now - $last).TotalSeconds
+        if ($elapsed -ge 0 -and $elapsed -lt $script:VsReportThrottleSeconds) {
+            Write-Debug $Message
+            return
+        }
+    }
+    Write-VsLog -Level WARN -Message $Message
+    $script:VsDeviceCauseLastNoticeLog = $Now
+}
+
+# Sendet die Ursachen eines Laufs. Wirft nie und aendert keinen Laufzustand.
+# -Complete heisst: der Durchgang lief ohne Ausnahme ueber den vollstaendigen
+# getDeviceList-Schnappschuss, das Portal darf damit seine Tabelle ersetzen. Mehr
+# als 500 Eintraege oder mehr als 64 KiB kuerzen hinten und senden complete=false
+# (das Portal ergaenzt dann nur). Den gesendeten Stand merkt sich die Funktion
+# erst nach der Quittung. Rueckgabe fuer Tests und Diagnose: skipped, paused,
+# unchanged, sent, unconfirmed oder failed.
+function Send-VsDeviceCauseReport {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$RunId,
+        [bool]$Complete = $false,
+        [System.Collections.IDictionary]$DeviceCauses,
+        [datetime]$Now = (Get-Date)
+    )
+    try {
+        $entries = @()
+        if ($null -ne $DeviceCauses) { $entries = @($DeviceCauses.Values) }
+        # Ohne vollstaendigen Durchgang und ohne Ursache gibt es nichts zu sagen.
+        if (-not $Complete -and $entries.Count -eq 0) { return 'skipped' }
+
+        $paused = $script:VsDeviceCausePausedUntil
+        if ($null -ne $paused -and $Now -lt $paused -and ($paused - $Now).TotalSeconds -le $script:VsDeviceCausePauseSeconds) { return 'paused' }
+
+        $effectiveComplete = $Complete
+        $sendEntries = $entries
+        if ($sendEntries.Count -gt $script:VsDeviceCauseMaxEntries) {
+            $sendEntries = @($sendEntries | Select-Object -First $script:VsDeviceCauseMaxEntries)
+            $effectiveComplete = $false
+        }
+        $bytes = ConvertTo-VsDeviceCauseBodyBytes -RunId $RunId -Complete $effectiveComplete -Entries $sendEntries
+        if ($bytes.Length -gt $script:VsDeviceCauseMaxBodyBytes) {
+            # Laengster Praefix, der passt (binaere Suche; der Body waechst mit
+            # jedem Eintrag).
+            $effectiveComplete = $false
+            $lo = 0
+            $hi = $sendEntries.Count
+            while ($lo -lt $hi) {
+                $mid = [int][Math]::Floor(($lo + $hi + 1) / 2)
+                $probe = ConvertTo-VsDeviceCauseBodyBytes -RunId $RunId -Complete $false -Entries @($sendEntries | Select-Object -First $mid)
+                if ($probe.Length -le $script:VsDeviceCauseMaxBodyBytes) { $lo = $mid } else { $hi = $mid - 1 }
+            }
+            $sendEntries = @($sendEntries | Select-Object -First $lo)
+            $bytes = ConvertTo-VsDeviceCauseBodyBytes -RunId $RunId -Complete $false -Entries $sendEntries
+        }
+        if ($sendEntries.Count -lt $entries.Count) {
+            Write-VsDeviceCauseNotice -Now $Now -Message ('Ursachenbericht gekuerzt: {0} von {1} VMs gesendet, complete=false.' -f $sendEntries.Count, $entries.Count)
+        }
+
+        $signature = Get-VsDeviceCauseSignature -Complete $effectiveComplete -Entries $sendEntries
+        $acknowledged = $script:VsDeviceCauseAcknowledged
+        if ($null -ne $acknowledged -and [string]$acknowledged.Signature -ceq $signature) {
+            $age = ($Now - [datetime]$acknowledged.At).TotalSeconds
+            if ($age -ge 0 -and $age -lt $script:VsDeviceCauseRefreshSeconds) { return 'unchanged' }
+        }
+
+        try {
+            $response = Invoke-VsApi -Config $Config -Path '/mecm_report.php?action=reportDeviceCauses' -Method POST -Body $bytes -TimeoutSec 5
+        } catch {
+            $status = Get-VsErrorStatusCode -ErrorRecord $_
+            if ($null -ne $status -and $script:VsDeviceCausePauseStatusCodes -contains [int]$status) {
+                $script:VsDeviceCausePausedUntil = $Now.AddSeconds($script:VsDeviceCausePauseSeconds)
+                Write-VsDeviceCauseNotice -Now $Now -Message ('Ursachenbericht abgelehnt (HTTP {0}), Versand ruht {1} Minuten; kennt das Portal reportDeviceCauses noch nicht? {2}' -f $status, [int]($script:VsDeviceCausePauseSeconds / 60), (Get-VsErrorDetail -ErrorRecord $_))
+            } else {
+                Write-VsDeviceCauseNotice -Now $Now -Message ('Ursachenbericht nicht zugestellt: {0}' -f (Get-VsErrorDetail -ErrorRecord $_))
+            }
+            return 'failed'
+        }
+        if (-not (Test-VsDeviceCauseAcknowledgement -Response $response -RunId $RunId)) {
+            Write-VsDeviceCauseNotice -Now $Now -Message 'Ursachenbericht ohne Quittung (success oder run_id fehlt); der naechste Lauf sendet erneut.'
+            return 'unconfirmed'
+        }
+        $script:VsDeviceCauseAcknowledged = [pscustomobject]@{ Signature = $signature; At = $Now }
+        return 'sent'
+    } catch {
+        # Letzte Sicherung: auch ein Programmierfehler hier darf den Sync nicht stoppen.
+        try { Write-VsDeviceCauseNotice -Now (Get-Date) -Message ('Ursachenbericht nicht gebaut: {0}' -f $_.Exception.Message) } catch { Write-Debug $_ }
+        return 'failed'
     }
 }
 

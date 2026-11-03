@@ -289,6 +289,55 @@ Describe 'Wire-Vertrag des Device-Sync' {
     }
 }
 
+# MX1 (FM-05): Eine Ursache gilt im Portal nur fuer die gemeldete Rolloutrevision
+# (ADR-0043-Fence). Der Sync nimmt sie deshalb je Geraet aus derselben
+# getDeviceList-Zeile, nie aus dem gespeicherten Sperrzustand und nie geraten.
+Describe 'Rolloutrevision je Geraet im Ursachenbericht (MX1)' {
+    BeforeAll {
+        $script:SyncText = Get-Content -Path $script:DeviceSyncPath -Raw
+        $syncAst = [System.Management.Automation.Language.Parser]::ParseFile($script:DeviceSyncPath, [ref]$null, [ref]$null)
+        foreach ($name in @('Add-VsReplayedDeviceBlock', 'Get-VsDeviceFingerprint')) {
+            $fn = $syncAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
+            if (-not $fn) { throw "Funktion fehlt im Device-Sync: $name" }
+            . ([scriptblock]::Create($fn.Extent.Text))
+        }
+    }
+
+    It 'traegt jedes Paar die Revision seines eigenen Geraets' {
+        $set = New-VsDeviceCauseSet
+        $record = @{ causes = @('mac_missing target=VM'); item_failures = 0; data_failures = 1 }
+        foreach ($device in @(
+            [pscustomobject]@{ id = 17; rollout_revision = 3 },
+            [pscustomobject]@{ id = 18; rollout_revision = 7 },
+            [pscustomobject]@{ id = 19; rollout_revision = 1 }
+        )) {
+            [void](Add-VsReplayedDeviceBlock -Record $record -Causes (New-VsRunCauseList) -DeviceCauses $set -VmId $device.id -RolloutRevision $device.rollout_revision)
+        }
+        (@($set.Values | ForEach-Object { '{0}:{1}' -f $_['vm_id'], $_['rollout_revision'] }) -join ',') | Should -Be '17:3,18:7,19:1'
+    }
+
+    It 'erfindet keine Revision, wenn die Zeile keine traegt' {
+        # Portal vor dem Cutover: ohne Revision kein Paar. Eine gesendete 0 oder 1
+        # waere eine Behauptung ueber einen Rollout, den es nicht gibt.
+        $set = New-VsDeviceCauseSet
+        $record = @{ causes = @('mac_missing target=VM'); item_failures = 0; data_failures = 1 }
+        [void](Add-VsReplayedDeviceBlock -Record $record -Causes (New-VsRunCauseList) -DeviceCauses $set -VmId 17 -RolloutRevision $null)
+        $set.Count | Should -Be 0
+    }
+
+    It 'macht eine neue Revision die gesperrte VM sofort faellig (kein Replay mit alter Revision)' {
+        $before = [pscustomobject]@{ id = 17; vm_name = 'VM-A'; rollout_revision = 3 }
+        $after = [pscustomobject]@{ id = 17; vm_name = 'VM-A'; rollout_revision = 4 }
+        (Get-VsDeviceFingerprint -Device $before) | Should -Not -Be (Get-VsDeviceFingerprint -Device $after)
+    }
+
+    It 'liest der Sync die Revision je Geraet aus der aktuellen Zeile' {
+        $script:SyncText | Should -Match 'RolloutRevision\s+=\s+\$device\.rollout_revision'
+        $script:SyncText | Should -Match '-VmId \$pending\.Id -RolloutRevision \$pending\.RolloutRevision'
+        ([regex]::Matches($script:SyncText, '-VmId \$device\.id -RolloutRevision \$device\.rollout_revision')).Count | Should -Be 2
+    }
+}
+
 Describe 'Client-Kette traegt die Rolloutrevision' {
     BeforeAll {
         $script:GetInfoText = Get-Content -Path $script:ClientGetInfoPath -Raw
