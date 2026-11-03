@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "updatedAt": "2026-11-02T08:00:00.356Z",
-  "reason": "BK1 (Nutzerentscheidung 01.11.2026): Die Badge-Fixture der System-Status-Aufnahme wird vor dem ersten Zeichnen gesetzt statt nach dem Laden per evaluate; nur light/system-status-desktop wechselt auf die eine stabile Kantenvariante (40 von 40 Aufnahmen), alle anderen Bilder byte-gleich; Messung im Register Welle BK1",
+  "updatedAt": "2026-11-03T07:05:48.309Z",
+  "reason": "BK2 (Nutzerentscheidung 03.11.2026: D uebernehmen): --disable-partial-raster in den launchArgs; jedes der 18 Bilder in 30 von 30 Aufnahmen je Theme eine Fassung; nur light/dark deploy-mobile wechseln auf ihre bekannte Kantenvariante (13/16 px), alle anderen byte-gleich; Messung im Register Welle BK2",
   "runner": {
     "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
     "platform": "win32",
@@ -56,7 +56,8 @@
       "--disable-lcd-text",
       "--disable-threaded-animation",
       "--disable-threaded-scrolling",
-      "--disable-checker-imaging"
+      "--disable-checker-imaging",
+      "--disable-partial-raster"
     ],
     "screenshotScale": "css",
     "themes": [
@@ -128,7 +129,7 @@
   },
   "files": {
     "dark/deploy-desktop.png": "670b6bb52f3b90aa78f50eb103cdfbc92384e3808f31c0adcd85a15d97236b0c",
-    "dark/deploy-mobile.png": "334da4e0bcd1009ace4f6c43ef17df75f130c237ef29c1f06d4ef0123310dd56",
+    "dark/deploy-mobile.png": "3e846ac0269d599e9cce6723f98b004d52e3b3556dbffbc2373693008ad932af",
     "dark/deploy-wrap.png": "1ee2512fa9d5e4ad254dc124282bbfab670b3ff510d3976b718c938ceef774a6",
     "dark/missions-desktop.png": "f701b746f49f44eec1b9462e1fd8f1c5abdfb8932b5e9dad859b5e88b5f0db02",
     "dark/missions-mobile.png": "24ed4455c3cfdb419054fca3703ae8c56b8116bebcf3858cf3f81acf799b288c",
@@ -137,7 +138,7 @@
     "dark/system-status-mobile.png": "766d8e2d20d01af4850d6493ea1a1f9cdd392dd9d672374f709e5ba3b72f0d92",
     "dark/system-status-wrap.png": "1f46a964596285f9dd6ac03a724c189192592445e05287bbbacf654e1470bc79",
     "light/deploy-desktop.png": "f441c95e1194980e095d51912aa487631915c43bdb3a4a81cb7be85de242b0e8",
-    "light/deploy-mobile.png": "f19337e687331df816f295cf4235c1020cdf9d4e9f641f0e0f89deb9749b1297",
+    "light/deploy-mobile.png": "96082ed88e5f276e7964471bbd5d5c53034e4ace7e1aacf92cae58a8627aa71a",
     "light/deploy-wrap.png": "50928b0135310af26657efbeb4b48a987a496d0dd51676611473cc8df50afe4c",
     "light/missions-desktop.png": "22c18e756e1f4d8ec6a1cf9530cfd8c246613796a079b847deeceeff518c6d14",
     "light/missions-mobile.png": "84c89ca07e241cd4552d70862ee480b1b3820d903724d8dd5d40b862ef2fb719",
