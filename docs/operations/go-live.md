@@ -179,9 +179,9 @@ starten; sein Audit bleibt unter Protokolle → Sicherheit, Kategorie
 
 Ein Container, der sein Stoppsignal nicht beantwortet, wird nach der Frist hart
 gekillt, und beim Deploy-Worker bedeutet das: mitten in einem Playbook, ohne
-letzte Protokollzeile und ohne Freigabe des Auftragsbesitzes. Das war bis
-Etappe 14C der Normalfall, weil ein Prozess als PID 1 jedes Signal ohne eigenen
-Handler ignoriert und dieses Image `STOPSIGNAL SIGQUIT` erbt. Einmal belegen:
+letzte Protokollzeile und ohne Freigabe des Auftragsbesitzes. Ein Prozess als
+PID 1 ignoriert jedes Signal ohne eigenen Handler, und dieses Image erbt
+`STOPSIGNAL SIGQUIT`; deshalb einmal belegen, dass der Worker antwortet:
 
 ```bash
 time docker compose stop deploy-worker
@@ -558,7 +558,7 @@ NetBIOS-Hostname ≤15 Zeichen (Bestandsschutz greift), globale VM-Namen-
 Eindeutigkeit, MAC-Kanonisierung und Dubletten-Guard. Prüfen, ob Bestandsdaten
 Warnungen auslösen, und diese bereinigen.
 
-Für Etappe 14A kommt vor der Freigabe der Netzwerk-/MAC-Bestandsnachweis hinzu:
+Vor der Freigabe kommt der Netzwerk-/MAC-Bestandsnachweis hinzu:
 
 1. Backup und Restore-Check ausführen, alle Writer und externen MECM-Aufgaben
    drainieren beziehungsweise pausieren und Migration 0046 nur im gemeinsamen
@@ -582,7 +582,7 @@ Für Etappe 14A kommt vor der Freigabe der Netzwerk-/MAC-Bestandsnachweis hinzu:
 
 Bei einem fehlenden Standortzugang wird dieser reale Canary nicht simuliert und
 nicht als grün eingetragen. Die lokale Revision bleibt dann vollständig
-fail-closed; Create/Full werden vor Etappe 14B nicht remote aktiviert.
+fail-closed.
 
 ## Code auf den Host bringen
 
@@ -647,7 +647,7 @@ neue Aktionen mit HTTP 400 ab, ein neues Portal nimmt alte Meldungen weiter an.
 | Alt-Credential aus der Git-Historie (Schritt 0) | **muss rotiert werden**, unabhängig vom Löschen der Datei |
 | Admin-Passwort (Schritt 4) | Entscheidung des Betreibers |
 | PowerShell E4/E5 | Restrisiko deutlich gesunken (ADR-0029: PSScriptAnalyzer + Pester in CI, MAC-Kanonisierung sprachübergreifend gepinnt), aber der erste echte MECM-Lauf bleibt die Bewährungsprobe: Collections, Task Sequences und WMI sind weiter ungetestet |
-| Portal auf HTTPS umstellen | Die PS-Skripte können es jetzt (`Scheme`-Registry-Wert, `-Scheme`-Parameter im Installer). Wer HTTP **abschaltet**, muss den Wert auf `https` setzen, sonst steht die MECM-Integration und die PXE-Client-Kette still |
+| Portal auf HTTPS umstellen | Die PS-Skripte unterstützen es (`Scheme`-Registry-Wert, `-Scheme`-Parameter im Installer). Wer HTTP **abschaltet**, muss den Wert auf `https` setzen, sonst steht die MECM-Integration und die PXE-Client-Kette still |
 | Frische-DB-Migration (Schritt 2) | zweithöchstes Risiko: Konvergenz nie produktiv gelaufen |
 | Deploy-Worker/Ansible gegen echtes ESXi | Teil des ungetesteten Kerns, nicht nur MECM |
 | Paket-Schwellwert 30 % | gegen reale Kataloggröße bestätigen (Schritt 6) |

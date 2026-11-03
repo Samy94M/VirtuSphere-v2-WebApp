@@ -121,7 +121,7 @@ Der Host-Schlüssel des Ansible-Hosts wird im Portal bestätigt. Dafür liegt im
 
 ## Schritt 4: deaktivierten Durable Runner installieren und prüfen (Ansible-Host)
 
-Das Bundle enthält unter `runner/` den in Etappe 8R-O entwickelten Runner. Der
+Das Bundle enthält unter `runner/` den vorbereiteten Durable Runner. Der
 Installer prüft dessen eigenes `SHA256SUMS`, kopiert den geschlossenen Dateisatz
 nach `~/.local/libexec/virtusphere` und legt den Zustands-Root mit Modus `0700`
 an. Er überschreibt keine bestehende Installation, ändert keine Privilegien und
@@ -147,8 +147,8 @@ revisions- und bundlegebundenen 8R-S-Import bleibt jeder neue Remote-Modus
 `disabled`. Auf Entwicklungs- oder Ersatzhosts erzeugte Ergebnisse sind keine
 Standortevidenz.
 
-`create` und `full` laufen unabhängig davon weiterhin über den bestehenden
-SSH-Weg, seit Etappe 14B aber mit einem Aufruf je VM. Dafür gilt offline dasselbe
+`create` und `full` laufen unabhängig davon über den direkten
+SSH-Weg, mit einem Aufruf je VM. Dafür gilt offline dasselbe
 wie sonst: Es wird zur Laufzeit nichts nachgeladen. `ansible-core`, `pyvmomi`,
 `requests` und der vollständige Collectionstand kommen als gepinnte Wheels
 beziehungsweise Collectionarchive aus `deps/wheels` und `collections/` des
