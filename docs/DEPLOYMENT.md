@@ -183,21 +183,19 @@ The `Ansible/` copies are the web-app deploy source; the former desktop `bin/` b
 
 The `deploy-worker`, `maintenance-worker`, `php`, `webserver` and `mysql` services run with `restart: unless-stopped` so the stack recovers after a host reboot or a container crash without manual intervention. Every runtime service carries a healthcheck (AP8): MySQL answers `mysqladmin ping`, PHP answers the FPM FastCGI ping, nginx answers its own `/nginx-health` location, and both workers keep a liveness file fresh that `lib/worker_healthcheck.php` judges. `webserver` waits for real PHP readiness (`service_healthy`), so a cold `docker compose up -d --wait` only returns green when the whole chain accepts work. phpMyAdmin is admin tooling in the optional `tools` profile (`docker compose --profile tools up -d phpmyadmin`, loopback-only) and is not part of the runtime stack.
 
-**Stopping a worker is answered rather than waited out.** Until Etappe 14C a
-`docker stop` on `deploy-worker` or `maintenance-worker` took the full grace
-period and ended in exit 137 (measured: 30.4 s), on every restart, stack update
-and host reboot. Two individually harmless facts combined into that. A process
-that is PID 1 ignores every signal it has installed no handler for, because the
-kernel applies no default actions there; and this container inherits
-`STOPSIGNAL SIGQUIT` from the `php:*-fpm` base image, where that is php-fpm's
-graceful shutdown. So SIGQUIT arrived, nobody listened, and Docker eventually
-sent SIGKILL, leaving the worker no chance to write a last line or release
-ownership while its playbook kept changing ESXi. All three loop processes now
-install the shared handler from `lib/worker_stop_signal.php` and stop in 0.4 s
-with exit 0. The promise is deliberately modest: an IDLE process exits at once,
-which is the vast majority of stops; a BUSY one records the request, logs one
-line and keeps going, because no signal to this process can stop a playbook on
-another host.
+**Stopping a worker is answered rather than waited out.** A process that is
+PID 1 ignores every signal it has installed no handler for, because the kernel
+applies no default actions there; and this container inherits `STOPSIGNAL
+SIGQUIT` from the `php:*-fpm` base image, where that is php-fpm's graceful
+shutdown. Without a handler `docker stop` on `deploy-worker` or
+`maintenance-worker` takes the full grace period and ends in exit 137, leaving
+the worker no chance to write a last line or release ownership while its
+playbook keeps changing ESXi. All three loop processes therefore install the
+shared handler from `lib/worker_stop_signal.php` and stop within a fraction of
+a second with exit 0. The promise is deliberately modest: an IDLE process exits
+at once, which is the vast majority of stops; a BUSY one records the request,
+logs one line and keeps going, because no signal to this process can stop a
+playbook on another host.
 
 **Two process shapes (ADR-0042).** `docker-compose.yml` runs the worker directly
 and stays that way. `docker-compose.supervisor.yml` runs a supervisor that holds
@@ -282,7 +280,7 @@ The legacy machine API remains wire-compatible during migration, but the WP1 hot
 
 ## Operational preflight
 
-Etappe 8R-O enthält außerdem den rein lesenden Standortpreflight
+Zum vorbereiteten Durable Runner gehört außerdem der rein lesende Standortpreflight
 `Ansible/runner/virtusphere_remote_preflight.py`. Er prüft Python/Ansible,
 systemd-User-Manager, Linger, cgroup v2, Besitzer/Modi, freien Speicher und die
 Runner-Prüfsummen und gibt nur redigiertes JSON mit gehashtem Hostfingerprint
@@ -292,7 +290,7 @@ Mindestfreiplatz hat absichtlich keinen Default: Ohne einen autorisierten
 Remote-Modi `disabled`; der bestehende SSH-Pfad ändert sich dadurch nicht.
 
 Migration `0050_mecm_rollout_hostname` ist eine Grenze mit einer eigenen
-Reihenfolge (Etappe 14D, ADR-0043). Vor der DDL prüft sie alle
+Reihenfolge (ADR-0043). Vor der DDL prüft sie alle
 Nicht-Vorlagen-VMs case-insensitiv auf kollidierende **gültige**
 `vm_hostname`-Werte und bricht ab, wenn zwei VMs denselben beanspruchen: Welche
 davon den Namen behält, ist eine Betreiberentscheidung, und hier eine zu treffen
@@ -327,7 +325,7 @@ Aktivierungen bleiben `disabled`, Claim-Pause bleibt gesetzt und kein Worker
 lädt den Consumer. Das ist die beabsichtigte Installationslage bis zum
 autorisierten 8R-S-Lauf; lokale Tests sind keine Aktivierungsevidenz.
 
-Dasselbe gilt für die in 8R-O-5 ergänzte Step-Policy für Export, Start,
+Dasselbe gilt für die Step-Policy für Export, Start,
 Autostart und Powercycle: Sie hält ausschließlich die geschlossenen
 Reconciliationanforderungen fest. Geladen wird sie nur vom MAC-Rückruf, der aus
 ihr die erwartete Rückrufart des Exportschritts liest
@@ -335,10 +333,10 @@ ihr die erwartete Rückrufart des Exportschritts liest
 Produktpfad als Aufrufer. Sie
 enthält keinen Setter für `deploy_remote_mode_activations`; Runtimebudgets sind
 ausdrücklich `site_acceptance_required`. Ein Deployment dieser Revision
-aktiviert daher keinen Remote-Modus. Create und Full bleiben unabhängig davon
-bis 14B gesperrt. Falls niemals eine autorisierte 8R-S-Abnahme stattfindet,
-bleiben alle Aktivierungen dauerhaft `disabled` und die Etappe wird nicht als
-Standortfreigabe ausgewiesen.
+aktiviert daher keinen Remote-Modus; Create und Full laufen unabhängig davon
+über den direkten SSH-Weg mit einer Einheit je VM. Falls niemals eine
+autorisierte 8R-S-Abnahme stattfindet, bleiben alle Aktivierungen dauerhaft
+`disabled` und der Runner wird nicht als Standortfreigabe ausgewiesen.
 
 Use the migration checker before deployments or after changing `.env`:
 
@@ -414,7 +412,7 @@ When testing deploy-worker failure handling, a failed probe should leave the job
 
 ## Portal validation UX
 
-`Docker/WebAPI/lib/forms.php` provides session-backed sticky-form helpers. On a `ValidationException` the POST handler stashes submitted values and per-field errors, redirects, and the next render consumes the stash exactly once. `_csrf`, `password` and `secret` fields are never stashed. The helpers back the OS, VLAN, package, credential, user, mission and settings forms; the VM editor renders inline errors on its main fields plus an aggregated list for interface/disk rows. `portal/logs.php` groups the audit log into four server-rendered tabs (security, resources, deployment, system and integrations) defined by `VIRTUSPHERE_LOG_TABS` in `lib/constants.php`, so the protocol is not one undifferentiated table; each tab scopes a `deploy_logs.category IN (...)` filter and the category dropdown is limited to that tab's categories. Within a tab it adds a full-text search over message/user, an exact IP filter (LIKE wildcards are escaped) and a per-category filter. The table walks globally `id DESC` through bounded 50-row `before`/`after` keyset windows; filter and tab links deliberately omit the cursor, invalid or retained-away positions offer an explicit return to the newest window, and no numeric page total is claimed across concurrent inserts or retention. Since Etappe 10C no call site chooses a category any more: a producer names a registered event code (`lib/audit_event_definitions.php`) and the registry maps it to exactly one `VIRTUSPHERE_LOG_CATEGORY_*` constant, along with the allowed object types, results and typed context fields. New rows therefore carry `event_code`, `object_type`, `object_id`, `result` and `context_json` next to the rendered description; historical rows keep those five columns NULL and their unchanged text, with no backfill. `audit_event()` in `lib/repo/log.php` is the only writer, and `scripts/check-audit-contract.php` fails the build on a second one. The tab's CSV export uses the same validated filter struct as the table (`lib/log_filter.php`), starts its independent bounded snapshot at the newest match rather than at the table cursor, counts before it streams, caps at `VIRTUSPHERE_LOG_EXPORT_MAX_ROWS` data rows, announces that cap on the page and in `X-VirtuSphere-Total-Rows`/`-Export-Limit`/`-Truncated`, and writes exactly one audit row carrying the counts and a keyed filter fingerprint but neither the search term nor the IP filter.
+`Docker/WebAPI/lib/forms.php` provides session-backed sticky-form helpers. On a `ValidationException` the POST handler stashes submitted values and per-field errors, redirects, and the next render consumes the stash exactly once. `_csrf`, `password` and `secret` fields are never stashed. The helpers back the OS, VLAN, package, credential, user, mission and settings forms; the VM editor renders inline errors on its main fields plus an aggregated list for interface/disk rows. `portal/logs.php` groups the audit log into four server-rendered tabs (security, resources, deployment, system and integrations) defined by `VIRTUSPHERE_LOG_TABS` in `lib/constants.php`, so the protocol is not one undifferentiated table; each tab scopes a `deploy_logs.category IN (...)` filter and the category dropdown is limited to that tab's categories. Within a tab it adds a full-text search over message/user, an exact IP filter (LIKE wildcards are escaped) and a per-category filter. The table walks globally `id DESC` through bounded 50-row `before`/`after` keyset windows; filter and tab links deliberately omit the cursor, invalid or retained-away positions offer an explicit return to the newest window, and no numeric page total is claimed across concurrent inserts or retention. No call site chooses a category: a producer names a registered event code (`lib/audit_event_definitions.php`) and the registry maps it to exactly one `VIRTUSPHERE_LOG_CATEGORY_*` constant, along with the allowed object types, results and typed context fields. New rows therefore carry `event_code`, `object_type`, `object_id`, `result` and `context_json` next to the rendered description; historical rows keep those five columns NULL and their unchanged text, with no backfill. `audit_event()` in `lib/repo/log.php` is the only writer, and `scripts/check-audit-contract.php` fails the build on a second one. The tab's CSV export uses the same validated filter struct as the table (`lib/log_filter.php`), starts its independent bounded snapshot at the newest match rather than at the table cursor, counts before it streams, caps at `VIRTUSPHERE_LOG_EXPORT_MAX_ROWS` data rows, announces that cap on the page and in `X-VirtuSphere-Total-Rows`/`-Export-Limit`/`-Truncated`, and writes exactly one audit row carrying the counts and a keyed filter fingerprint but neither the search term nor the IP filter.
 
 Remaining frontend work is purely visual (navigation, settings styling, form layout); those files can still be iterated separately without touching the validation flow.
 

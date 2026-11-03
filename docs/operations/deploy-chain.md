@@ -19,8 +19,8 @@ Was Device-Sync, Paket-Sync und Autoimporter auf dem MECM-Server Schritt für Sc
 
 ## Aktiver Transport und vorbereiteter Durable Runner
 
-Der aktive Produktpfad ist weiterhin die in der Tabelle beschriebene direkte
-SSH-/SFTP-Kette. Etappe 8R-O liefert zusätzlich ein offline installierbares,
+Der aktive Produktpfad ist die in der Tabelle beschriebene direkte
+SSH-/SFTP-Kette. Daneben liegt ein offline installierbares,
 geschlossenes Protokoll unter `Ansible/runner/`: genau ein erlaubter
 Playbook-Schritt, eine aus Job/Attempt/Step/Run-Token abgeleitete systemd-Unit,
 gehashte Artefakte und atomare `started.json`-, `heartbeat.json`- und
@@ -32,18 +32,18 @@ passende 8R-S-Standortevidenz ist kein Produktivjob an den neuen Launcher
 verdrahtet und es gibt keinen stillen Fallback von einem Remote-Modus auf die
 Legacy-Kette. Linger, User-Bus, cgroup-Enforcement, Kapazitätsgrenzen, reale
 Faults und Rückbau bleiben am echten Air-Gap-/Ansible-/ESXi-Ziel nachzuweisen.
-Create und Full wurden in der späteren Etappe 14B für den aktiven direkten
-`legacy_v1`-Pfad als eine persistente Einheit je VM umgesetzt. Der vorbereitete
-Durable Runner bleibt davon unberührt und weiterhin nicht aktiviert.
+Create und Full laufen im aktiven direkten `legacy_v1`-Pfad als eine
+persistente Einheit je VM. Der vorbereitete Durable Runner bleibt davon
+unberührt und nicht aktiviert.
 
 Migration 0042 bereitet dafür nur persistente Identität und Fencing vor. Die
 Runtime-Generation wird einmal zufällig erzeugt; Lease, Epoch, Jobtoken,
 Ausführungsvertrag, Remotehandle und Recoveryzustände besitzen getrennte
 Felder. Die globale Claim-Pause und jede Credential-/Moduszeile starten
-fail-closed. Der aktive Worker liest davon seit Etappe 14B nur, was das Fencing
+fail-closed. Der aktive Worker liest davon nur, was das Fencing
 seines Claims braucht (Runtime-Generation, Lease-Epoch, Claim-Pause), und
-schreibt jeden Auftrag weiterhin als `legacy`; er läuft damit verhaltensgleich
-auf dem bisherigen Pfad (`lib/repo/deploy_job_worker.php`). Das Umschalten von
+schreibt jeden Auftrag als `legacy`; er läuft damit auf dem direkten Pfad
+(`lib/repo/deploy_job_worker.php`). Das Umschalten von
 Claim, Reaper und Recovery ist ein gemeinsames späteres 8R-S-Fenster und darf
 nicht stückweise erfolgen.
 
@@ -77,7 +77,7 @@ bleiben mit `site_acceptance_required` markiert und werden nicht lokal geraten.
 Die Datei besitzt keinen Aktivierungswriter und keinen Aufrufer im Worker. Auch
 diese Grundlage ändert daher den unten beschriebenen Legacy-Produktpfad nicht.
 
-## Netzwerk-/MAC-Preflight (Etappe 14A)
+## Netzwerk-/MAC-Preflight
 
 `lib/vm_network_contract.php` ist die pure SSoT für Interface-Issues,
 Fingerprint, WDS/PXE-Verdict und die aus der Playbookfolge abgeleitete
@@ -128,7 +128,7 @@ gleichzeitiger Abbruch, endet der Auftrag ohne Preflight-Resultat als
 Der MAC-Rückruf akzeptiert nur den aktuellen exportfähigen Auftrag und dessen
 Attempt/Generation. Unter der Lockreihenfolge Mission, Job, Runtimeidentität,
 gegebenenfalls Remote-Exporthandle, VM und Interfaces muss exakt eine WDS-Karte
-mit gültiger MAC passen. Eine VM ohne gespeicherte ResourceID wird wie bisher
+mit gültiger MAC passen. Eine VM ohne gespeicherte ResourceID wird
 `deployed/pending`. Bei gespeicherter ResourceID vergleicht der Rückruf die
 MAC-Adressen aller zugeordneten Karten nur mit den gespeicherten Werten
 (WM-E1). Gleiche MACs ergeben `success` mit `updated_interfaces=0`; das Portal
@@ -149,14 +149,14 @@ schreibt der Rückruf je VM eine Systemzeile ins Auftragslog. Aus ihr zeigt
 das Auftragsergebnis den DE/EN-Hinweis „MAC erstmals übernommen“ mit dem Rat,
 bei einem Ersatz das Gerät in MECM zu löschen und die MECM-ID zurückzusetzen.
 Ein V2-Feld kommt dafür nicht hinzu. Nach der Log-Retention entfällt der
-Hinweis, die VM steht dann als „erfolgreich“ da. Weil jetzt eine MAC
+Hinweis, die VM steht dann als „erfolgreich“ da. Weil dann eine MAC
 gespeichert ist, gelingt „MECM-ID zurücksetzen“ (Sperre `no_mac`), und der
 nächste Export importiert ungebunden.
 Eine abweichende, nicht leere gespeicherte MAC ergibt `bound_mac_changed` und
 ein fehlgeschlagenes VM-Ergebnis, ohne MAC oder ResourceID zu überschreiben.
 Das Format zählt nicht: Gespeicherte und gemeldete MAC werden normalisiert
 verglichen. Der reguläre Worker-Abschluss konvergiert die fehlgeschlagene VM
-wie bisher nach `failed/deploy_failed` (bis Migration 0070 hieß der MECM-Wert `failed`). Sie verliert damit `registered` und
+nach `failed/deploy_failed`. Sie verliert damit `registered` und
 `os_installed` und mit ihnen die Umbenennungssperre; MECM-ID und gespeicherte
 MAC bleiben. Ein Abbruch folgt derselben K15-Journalregel: bestätigte Exportversuche scheitern nur ihre eigene VM, unberührte markierte VMs erhalten beide Vorzustände zurück, und erfolgreiche MAC-IDs bleiben geschützt. Der DE/EN-Hinweis erklärt, dass MECM noch die alte
 MAC kennt, und nennt die Reihenfolge: altes Gerät in der MECM-Konsole löschen,
@@ -184,9 +184,8 @@ Sie bleibt bei nur eingereihten Jobs erlaubt, wird aber während
 `running`/`cancelling` unter demselben Missions-/Joblock mit einem Link auf das
 aktive Jobprotokoll abgewiesen.
 
-Etappe 14A aktivierte noch keinen neuen Remote-Create-Pfad. Die danach
-umgesetzte Etappe 14B führt Create und Full je VM im aktiven direkten
-`legacy_v1`-Pfad aus; sie aktiviert den separaten Durable Runner nicht.
+Create und Full laufen je VM im aktiven direkten `legacy_v1`-Pfad; der
+separate Durable Runner bleibt dabei inaktiv.
 
 ## Zwei Ansible-Nachweise, zwei Aussagen
 
@@ -211,7 +210,7 @@ keine technische Diagnose aus dem inzwischen überholten Lauf.
 
 Der Missionsnachweis wird direkt aus `deploy_jobs` gelesen: neuester terminaler Auftrag je `credential_ansible_id`, nur mit Mission; `queued`, `running`, `cancelling` und missionslose Inventaraufträge zählen nicht. Sein Status, Zeitpunkt und Jobprotokoll belegen den tatsächlich gelaufenen Modus. Ein erfolgreicher Start- oder Shutdown-Auftrag beweist beispielsweise weder SFTP-Neuaufbau noch MAC-Rückkanal und färbt daher die Volltest-Ampel nicht grün. Bei Zeitgleichheit entscheidet die höhere Job-ID. Es gibt keine zweite Statuskopie und kein zusätzliches Laufzeitprotokoll.
 
-„Volltest jetzt starten“ im Systemstatus verwendet denselben CSRF-/RBAC-geschützten Handler wie die Seite Zugangsdaten. Das Ergebnis aktualisiert `deploy_ansible_preflight_state` und schreibt wie bisher genau eine Auditzeile in **Protokolle → Sicherheit**, Kategorie `credentials`; **Prüfprotokolle öffnen** führt dorthin. Missionsausgabe bleibt ausschließlich in `deploy_job_logs`, erreichbar über den direkten Link am Missionsnachweis.
+„Volltest jetzt starten“ im Systemstatus verwendet denselben CSRF-/RBAC-geschützten Handler wie die Seite Zugangsdaten. Das Ergebnis aktualisiert `deploy_ansible_preflight_state` und schreibt genau eine Auditzeile in **Protokolle → Sicherheit**, Kategorie `credentials`; **Prüfprotokolle öffnen** führt dorthin. Missionsausgabe bleibt ausschließlich in `deploy_job_logs`, erreichbar über den direkten Link am Missionsnachweis.
 
 ## SSH-/SFTP-Budgets und Fehlerherkunft
 
@@ -219,17 +218,17 @@ Ein technischer Text allein entscheidet nicht, ob ein VirtuSphere-Budget abgelau
 
 Was von diesen Typen nicht erkannt wird, geht durch die eine gemeinsame Funktion `ansible_connection_error_category()` (`lib/connection_errors.php`): sie qualifiziert das generische Ergebnis von `connection_error_category()` als Ansible-Host-Ursache, bevor der Inventarworker (SSH-/Transport-Phase) oder der synchrone SSH-Zugangstest die Kategorie speichert. Eine abgelehnte Anmeldung, ein DNS-Fehler oder eine verweigerte Verbindung auf dieser Strecke landen deshalb als `ansible_auth`/`ansible_dns`/`ansible_unreachable`, nie als das generische `auth`/`dns`/`unreachable`, das dieselbe Zeile wie einen ESXi-Fund aussehen ließe. Weder `ansible_auth` noch `ansible_authz` pausieren einen ESXi-Zugang: nur der exakte Code `auth` einer echten ESXi-/vCenter-Antwort tut das (`docs/operations/esxi-inventory.md`).
 
-Seit Etappe 8 nimmt diese Qualifizierung keinen fremden Fall mehr mit: Ein Datenbankfehler, den der DB-Kanal nicht mehr auffangen kann, wird vor jeder Phasenauswertung als `worker` erkannt, weil seine Phase nichts über seine Herkunft aussagt. Ebenso bleibt eine lokale Transport-Fehlkonfiguration phasenunabhängig `config`. Der technische Text im Jobprotokoll unterscheidet die Fälle weiterhin, und das Containerlog trägt die Zustandszeile des Kanals.
+Diese Qualifizierung nimmt keinen fremden Fall mit: Ein Datenbankfehler, den der DB-Kanal nicht mehr auffangen kann, wird vor jeder Phasenauswertung als `worker` erkannt, weil seine Phase nichts über seine Herkunft aussagt. Ebenso bleibt eine lokale Transport-Fehlkonfiguration phasenunabhängig `config`. Der technische Text im Jobprotokoll unterscheidet die Fälle, und das Containerlog trägt die Zustandszeile des Kanals.
 
 Das SFTP-Gesamtbudget beginnt nach erfolgreicher Anmeldung und läuft auf einer monotonen Uhr. Jede entfernte Operation erhält höchstens ihr Einzelbudget, kurz vor dem Gesamtende aber nur die verbleibende Zeit. Geprüft wird unmittelbar vor und nach `is_dir`, `mkdir`, Upload, Probe-Schreiben und Probe-Löschen sowie vor dem erfolgreichen Rücksprung. `false` und Exceptions werden zuerst gegen den unveränderten phpseclib-Timeoutzustand geprüft; erst danach findet der äußere `finally`-Disconnect statt. Eine Datenbank- oder Logger-Exception läuft außerhalb dieses Guards weiter zum Worker und wird nicht als SFTP ausgegeben.
 
 ## Playbook-Schritte, Abbruchgrenze und gespeicherte Ausgabe
 
-Seit Etappe 8 ist jeder Playbook-Schritt eines Modus ein eigener entfernter Befehl. Vorher lief die Reihe als eine `a && b`-Kette, sodass es zwischen den Playbooks keine Grenze gab, an der ein Abbruch hätte greifen können: Für eine „Full pipeline" mit fünf Playbooks bedeutete die Zusage der Oberfläche nichts. Vor jedem Schritt und nach jedem beendeten Schritt entscheidet derselbe Ownership-Helper in einer kurzen Transaktion anhand von `id`, `locked_by` und `status`, ob ein weiterer Schritt startet. Für den Operator gilt dadurch genau: Der gerade laufende Schritt kann seine Änderungen auf ESXi vollständig ausführen, danach startet kein weiterer.
+Jeder Playbook-Schritt eines Modus ist ein eigener entfernter Befehl. So gibt es zwischen den Playbooks eine Grenze, an der ein Abbruch greift; eine einzige `a && b`-Kette hätte keine. Vor jedem Schritt und nach jedem beendeten Schritt entscheidet derselbe Ownership-Helper in einer kurzen Transaktion anhand von `id`, `locked_by` und `status`, ob ein weiterer Schritt startet. Für den Operator gilt dadurch genau: Der gerade laufende Schritt kann seine Änderungen auf ESXi vollständig ausführen, danach startet kein weiterer.
 
 Der Abschluss selbst ist ein Compare-and-swap aus `running` mit eigenem Besitz. Gewinnt eine Abbruchanforderung das Rennen mit dem letzten Schritt, trifft dieser Swap null Zeilen; der Worker lädt die Zeile neu, bestätigt `cancelled` und hält im begrenzten Abschlussdetail fest, dass die Arbeit des laufenden Schritts ausgeführt wurde. Die bereits angenommene Anforderung bleibt die einzige Abbruchzeile im technischen Protokoll. Gewinnt der Abschluss, kann ein späterer Abbruch-POST den fertigen Auftrag nicht mehr verändern.
 
-Aufräumen auf dem Ansible-Host: Jeder Modusschritt aus `ansible_remote_steps()` trägt einen Trap auf HUP/INT/TERM (die Create-Steueraufrufe bewusst nicht: ihr Verzeichnis ist der einzige Beleg zu einer VM mit offenem Ausgang), der das Arbeitsverzeichnis samt `accounts.yml` entfernt, wenn seine entfernte Shell beendet wird (Verbindungsabbruch, Kill). Ein `EXIT`-Trap ist nicht mehr möglich, weil er nach dem ersten Schritt zuschlagen würde. Nach einer beendeten Reihe löscht der Worker das Verzeichnis zusätzlich selbst; hat ein Schritt nicht zurückgemeldet (Abbruch mitten im Playbook, gestörter Transport), lässt er das Verzeichnis bewusst stehen und schreibt das ins Protokoll, statt unter einem laufenden Playbook zu löschen. Die Zugangsdatei `accounts.yml` entfernt der Worker dagegen bei jedem Jobende, auch in diesem Fall. Das ist zulässig, obwohl Ansible `vars_files` nicht einmal beim Start liest, sondern vor jedem Task neu: Fehlt die Datei, sind ihre Werte ab dem nächsten Task undefiniert, auch im `always`. Ein Playbook, dessen lesender SSH-Kanal weg ist, endet aber an seiner nächsten Ausgabe, der Worker löscht erst nach dem Ende seines eigenen Kanals, und nach ADR-0042 läuft nur ein Worker. Beides misst das Gate `ansible-vars-files-lifetime` im gepinnten QA-Image. Als gelöscht gilt die Datei nur bei Exit 0 und der Rückmeldung des Löschbefehls, die „entfernt“ oder „war nicht mehr vorhanden“ sagt. Scheitert das Entfernen (Host nicht erreichbar, Worker beendet, Datenbank nicht verfügbar), bleibt ein Merkeintrag mit dem Ziel der Datei (Host, Port, gepinnter Hostschlüssel): Der nächste Job mit demselben Ansible-Zugang entfernt die Datei nach dessen Host-Vorprüfung, aber nur, solange der Zugang noch auf dieses Ziel zeigt, und schreibt dazu eine Auditzeile „Zugangsdatei nachträglich bereinigt“ mit Host und Ergebnis. Zeigt der Zugang inzwischen auf einen anderen Host, bleibt der Eintrag ohne Auditzeile stehen und jeder Kontakt nennt ihn im Fehlerprotokoll des Workers. Seit K21-F (ADR-0046) verhindert das Portal diese Umstellung: Ein Zugang mit offenen Einträgen lässt sich weder löschen noch auf ein anderes Ziel, einen anderen Port oder einen anderen Host-Schlüssel umstellen. Ein bestandener Zugangstest räumt Einträge seines Ziels ebenfalls auf. Offene Einträge meldet der Systemstatus, nach 24 Stunden und bei einem gelöschten oder umgestellten Zugang sofort. Ein Administrator kann ihre Entfernung mit Begründung bestätigen. Der Aufräum-Timer auf dem Host entfernt zusätzlich `accounts.yml`-Dateien, die älter als 24 Stunden sind und in Auftragsordnern des Ansible-Kontos liegen; er schließt aber selbst keinen Eintrag. Eine Statusabfrage einer Create-Einheit außerhalb des laufenden Jobs lädt die Datei erneut hoch, hält ihren Eintrag mit einer Frist vor dem Nachholen anderer Jobs geschützt und entfernt die Datei danach wieder; einen Aufrufer dafür gibt es in dieser Version noch nicht.
+Aufräumen auf dem Ansible-Host: Jeder Modusschritt aus `ansible_remote_steps()` trägt einen Trap auf HUP/INT/TERM (die Create-Steueraufrufe bewusst nicht: ihr Verzeichnis ist der einzige Beleg zu einer VM mit offenem Ausgang), der das Arbeitsverzeichnis samt `accounts.yml` entfernt, wenn seine entfernte Shell beendet wird (Verbindungsabbruch, Kill). Ein `EXIT`-Trap ist ausgeschlossen, weil er nach dem ersten Schritt zuschlagen würde. Nach einer beendeten Reihe löscht der Worker das Verzeichnis zusätzlich selbst; hat ein Schritt nicht zurückgemeldet (Abbruch mitten im Playbook, gestörter Transport), lässt er das Verzeichnis bewusst stehen und schreibt das ins Protokoll, statt unter einem laufenden Playbook zu löschen. Die Zugangsdatei `accounts.yml` entfernt der Worker dagegen bei jedem Jobende, auch in diesem Fall. Das ist zulässig, obwohl Ansible `vars_files` nicht einmal beim Start liest, sondern vor jedem Task neu: Fehlt die Datei, sind ihre Werte ab dem nächsten Task undefiniert, auch im `always`. Ein Playbook, dessen lesender SSH-Kanal weg ist, endet aber an seiner nächsten Ausgabe, der Worker löscht erst nach dem Ende seines eigenen Kanals, und nach ADR-0042 läuft nur ein Worker. Beides misst das Gate `ansible-vars-files-lifetime` im gepinnten QA-Image. Als gelöscht gilt die Datei nur bei Exit 0 und der Rückmeldung des Löschbefehls, die „entfernt“ oder „war nicht mehr vorhanden“ sagt. Scheitert das Entfernen (Host nicht erreichbar, Worker beendet, Datenbank nicht verfügbar), bleibt ein Merkeintrag mit dem Ziel der Datei (Host, Port, gepinnter Hostschlüssel): Der nächste Job mit demselben Ansible-Zugang entfernt die Datei nach dessen Host-Vorprüfung, aber nur, solange der Zugang noch auf dieses Ziel zeigt, und schreibt dazu eine Auditzeile „Zugangsdatei nachträglich bereinigt“ mit Host und Ergebnis. Zeigt der Zugang inzwischen auf einen anderen Host, bleibt der Eintrag ohne Auditzeile stehen und jeder Kontakt nennt ihn im Fehlerprotokoll des Workers. Das Portal verhindert diese Umstellung (ADR-0046): Ein Zugang mit offenen Einträgen lässt sich weder löschen noch auf ein anderes Ziel, einen anderen Port oder einen anderen Host-Schlüssel umstellen. Ein bestandener Zugangstest räumt Einträge seines Ziels ebenfalls auf. Offene Einträge meldet der Systemstatus, nach 24 Stunden und bei einem gelöschten oder umgestellten Zugang sofort. Ein Administrator kann ihre Entfernung mit Begründung bestätigen. Der Aufräum-Timer auf dem Host entfernt zusätzlich `accounts.yml`-Dateien, die älter als 24 Stunden sind und in Auftragsordnern des Ansible-Kontos liegen; er schließt aber selbst keinen Eintrag. Eine Statusabfrage einer Create-Einheit außerhalb des laufenden Jobs lädt die Datei erneut hoch, hält ihren Eintrag mit einer Frist vor dem Nachholen anderer Jobs geschützt und entfernt die Datei danach wieder; einen Aufrufer dafür gibt es in dieser Version noch nicht.
 
 Gespeicherte Ausgabe: Jede Zeile läuft vor der Persistenz durch genau eine Stelle. Sie erzwingt gültiges UTF-8, entfernt ANSI- und andere Steuersequenzen (Tabulator bleibt), redigiert die Zugangsdaten des Auftrags in Klartext- und URL-Form und begrenzt Zeilenlänge sowie Gesamtvolumen je Auftrag; jede Kappungsart wird genau einmal je Auftrag als eigene Zeile benannt. Eine erreichte Grenze beendet weder Playbook noch Herzschlag. Die gespeicherte Quelle heißt für neue Zeilen `ansible` (die vereinigte Remote-Ausgabe, denn der entfernte Befehl leitet mit `2>&1` um) oder `worker_error` (Befund des Workers); `system` bleibt die Schrittmeldung des Workers. Die alten Werte `stdout`/`stderr` bleiben lesbar und werden im Portal als dieselbe Ansible-Ausgabe dargestellt: Sie waren nie zwei Kanäle.
 
@@ -257,20 +256,18 @@ Systemstatus-Karte unter „Prozessvertrag" (ADR-0042). Standard ist die einfach
 Form: der Arbeitsprozess ist der Hauptprozess seines Containers. In der
 beaufsichtigten Form hält eine Aufsicht genau einen Arbeitsprozess als Kind.
 
-**Ein Stoppsignal wird jetzt beantwortet.** Bis Etappe 14C war das nicht so, und
-der Grund ist eine Kombination aus zwei einzeln harmlosen Tatsachen. Erstens
+**Ein Stoppsignal wird beantwortet.** Ohne eigenen Handler wäre das nicht so,
+und der Grund ist eine Kombination aus zwei einzeln harmlosen Tatsachen. Erstens
 ignoriert ein Prozess, der PID 1 ist, jedes Signal, für das er keinen eigenen
 Handler installiert hat; der Kernel wendet dort keine Standardaktionen an.
 Zweitens erbt dieser Container vom PHP-FPM-Basisimage `STOPSIGNAL SIGQUIT`, weil
-php-fpm damit sauber herunterfährt. Es kam also SIGQUIT an, niemand hörte zu, und
-`docker stop` endete nach der vollen Frist im SIGKILL: gemessen 30,4 Sekunden und
-Exitcode 137 im untersuchten Deploy-Worker-Fall. Genau
-dann konnte der Worker weder eine letzte Zeile schreiben noch seinen Besitz
-abgeben, und ein laufendes Playbook lief auf dem Ansible-Host weiter. Im
-historischen Auditvergleich reagierte der isolierte untätige Hilfsprozess in
-326 Millisekunden und mit Exitcode 0. Das ist ein historischer
-Messwert dieses Falles, keine neue Laufzeitmessung dieser Änderungen und keine
-allgemeine Zusage für alle drei Prozesse. Insbesondere kann ein bereits laufender
+php-fpm damit sauber herunterfährt. Ohne Handler käme SIGQUIT an, niemand hörte zu, und
+`docker stop` endete nach der vollen Frist im SIGKILL mit Exitcode 137. Dann
+könnte der Worker weder eine letzte Zeile schreiben noch seinen Besitz
+abgeben, und ein laufendes Playbook liefe auf dem Ansible-Host weiter. Alle
+drei Schleifenprozesse installieren deshalb den gemeinsamen Handler aus
+`lib/worker_stop_signal.php`. Eine Laufzeitzusage für alle drei Prozesse ist
+das nicht. Insbesondere kann ein bereits laufender
 mysqli-Aufruf die Reaktion begrenzen, bis der Aufruf zurückkehrt. Die getrennt
 beobachteten Exit-137-Fälle eines PHP-Containers belegen für sich keine Ursache
 im Bereitstellungsdienst.
@@ -281,7 +278,7 @@ Versuchen sind dafür unterbrechbar. Ein bereits laufender Systemaufruf kann den
 Beobachtungszeitpunkt begrenzen. Ein Prozess **mitten in einem Auftrag** merkt
 sich die Anforderung und arbeitet weiter, denn das Playbook verändert ESXi auf
 einem anderen Host und kein Signal an diesen Prozess hält das auf. Er schreibt
-dafür eine Zeile ins Containerlog, was vorher niemand hatte.
+dafür eine Zeile ins Containerlog.
 
 **Die Aufsicht startet nie einen zweiten Arbeitsprozess**, bevor das Ende des
 alten bestätigt ist, und bestätigt heißt hier `waitpid`, nicht „wir haben ein
@@ -292,7 +289,7 @@ ausdrücklich aufgeben: ein Prozess, der ein hartes Beenden überlebt, ist ein
 Kernelzustand, und Ersatz für ihn wäre ein zweiter Ausführer derselben Arbeit.
 
 **Ein Datenbankausfall löst keinen Neustart aus.** Ein Arbeitsprozess, der einen
-Ausfall aussitzt, ist gesund; das ist seit Etappe 2 ausdrücklich so entschieden
+Ausfall aussitzt, ist gesund; das ist ausdrücklich so entschieden
 und der Grund, warum der Worker überhaupt einen Datenbankkanal hat. Die Aufsicht
 entscheidet deshalb ausschließlich anhand der Lebenszeichendatei des Prozesses
 und nie anhand der Datenbank. Sie veröffentlicht ihren Zustand best effort in die
@@ -373,17 +370,17 @@ Der VM-Name ist nur die Suche, nicht der Identitätsbeweis. Portal und Playbooks
 
 ## Ergebnis je VM eines Create-Auftrags
 
-Ein Auftrag, dessen Modus das Create-Playbook ausführt (`create` und `full`), löst seine VM-Auswahl schon beim Einreihen auf und legt in derselben Transaktion je VM eine dauerhafte Zeile in `deploy_create_vm_results` an. Eine leere Auswahl bedeutet damit nicht mehr „alle, später entschieden": eine nach dem Einreihen angelegte VM kann einen wartenden Auftrag nicht mehr still erweitern, und bei einem geplanten Start liegen zwischen beiden Zeitpunkten Stunden.
+Ein Auftrag, dessen Modus das Create-Playbook ausführt (`create` und `full`), löst seine VM-Auswahl schon beim Einreihen auf und legt in derselben Transaktion je VM eine dauerhafte Zeile in `deploy_create_vm_results` an. Eine leere Auswahl bedeutet damit nie „alle, später entschieden": eine nach dem Einreihen angelegte VM kann einen wartenden Auftrag nicht still erweitern, und bei einem geplanten Start liegen zwischen beiden Zeitpunkten Stunden.
 
 Position und Gesamtzahl folgen ausschließlich `vm_name, id`. Position 7 bezeichnet dadurch in Portal, Protokoll und Wiederholung dieselbe VM. Jede Zeile trägt ihren eigenen Zustand (`pending`, `prepared`, `running`, `succeeded`, `failed`, `uncertain`, `skipped`); `uncertain` ist ausdrücklich kein weicheres `failed`, sondern der Zustand, in dem VirtuSphere den Ausgang nicht kennt, und er hält den Auftrag an, statt mit der nächsten VM weiterzumachen.
 
 Was diese Zeile bewusst NICHT besitzt: das Async-Verzeichnis, die Cleanup-Zähler und den Cleanup-Backoff. Die gehören dem generischen Remote-Handle, an das die Zeile über `remote_execution_id` gebunden ist; eine zweite Kopie hätte die Frage „darf dieses Verzeichnis schon entfernt werden" zwei Eigentümern gegeben.
 
-Aufträge, die vor dieser Etappe eingereiht wurden, besitzen keine solchen Zeilen und bleiben unverändert lesbar. Ein Auftrag ohne materialisierte Zeilen wird mit einer Anweisung abgelehnt, statt still über einen zweiten Pfad zu laufen: Das frühere Sammel-Playbook `createVMs-ESXi_playbook.yml` ist gelöscht, weil ein zweiter Create-Pfad ein zweiter Beweis wäre.
+Ältere Aufträge ohne solche Zeilen bleiben unverändert lesbar. Ein Auftrag ohne materialisierte Zeilen wird mit einer Anweisung abgelehnt, statt still über einen zweiten Pfad zu laufen: Ein Sammel-Playbook gibt es nicht, weil ein zweiter Create-Pfad ein zweiter Beweis wäre (ADR-0041).
 
 ## Der Einzel-VM-Vertrag des Create
 
-Jeder Modusschritt und jeder Create-Steueraufruf startet `ansible-playbook` mit `PYTHONUNBUFFERED=1` (`lib/ansible_command_modes.php`, `lib/ansible_command_create.php`); der Inventarabruf setzt die Variable nicht. Python puffert seinen stdout blockweise, sobald er kein Terminal ist, und der Worker liest über eine SSH-Pipe: ohne das stehen die Ergebniszeilen einer langen Schleife bis zum Prozessende im Puffer. Genau das war der Vorfall vom 13.08.2026, „keine Ausgabe seit 1800 Sekunden" über einer Arbeit, die auf ESXi weiterlief.
+Jeder Modusschritt und jeder Create-Steueraufruf startet `ansible-playbook` mit `PYTHONUNBUFFERED=1` (`lib/ansible_command_modes.php`, `lib/ansible_command_create.php`); der Inventarabruf setzt die Variable nicht. Python puffert seinen stdout blockweise, sobald er kein Terminal ist, und der Worker liest über eine SSH-Pipe: ohne das stehen die Ergebniszeilen einer langen Schleife bis zum Prozessende im Puffer. Dann meldete das Protokoll „keine Ausgabe seit …“ über einer Arbeit, die auf ESXi weiterläuft.
 
 Für den per-VM-Create liegen vier Steuerplaybooks bereit. `createVMPrepare` prüft eine einzelne VM read-only, `createVMLaunch` wiederholt diese Prüfung, vergleicht sie mit dem gespeicherten Ergebnis und startet dann genau einen `vmware_guest`-Aufruf mit `async` und `poll: 0`, `createVMStatus` fragt genau eine Job-ID einmal ab, `createVMCleanup` entfernt gezielt deren Statusdatei. Die Auswahl erfolgt über `portal_vm_id` aus der Serverlist; der Name bleibt Anzeige und ESXi-Suchadresse. Die gemeinsame Identitätsprüfung liegt genau einmal in `create_identity_check_tasks.yml`.
 
@@ -395,7 +392,7 @@ Der einzige maschinenlesbare Rückkanal ist eine Zeile je Steueraufruf:
 
 `emit_create_result.py` erzeugt sie aus einer lokalen Resultatdatei, `lib/ansible_create_protocol.php` liest sie. Beide Seiten kennen dieselben sechs Ereignisse mit exakt denselben Feldern; ein fehlender, doppelter, zu großer oder widersprüchlicher Marker ist ein Protokollfehler und wird nie aus gewöhnlichen Ansible-Zeilen rekonstruiert.
 
-Zwei gemessene Eigenschaften stehen hinter dem Entwurf. Erstens antwortet `async_status` auf eine verschwundene Job-ID mit `finished: true` und, wenn der Aufruf sein Scheitern unterdrückt, mit `failed: false`; ein verlorener Job sähe damit aus wie ein fertiger. Das Status-Playbook entscheidet deshalb an der Anwesenheit der Statusdatei und nicht an der Meldung des Moduls. Zweitens verlangt die gepinnte `community.vmware` einen Mindest-`ansible-core`; der Preflight vergleicht ab jetzt die installierte Collection mit dem Pin und den installierten Kern mit dem, was diese Collection selbst fordert. Ein Host mit der aus dem Vorfall gemeldeten Kernversion fällt dort mit genau diesem Satz auf, statt bei jedem ESXi-Modul unerklärt zu scheitern.
+Zwei gemessene Eigenschaften stehen hinter dem Entwurf. Erstens antwortet `async_status` auf eine verschwundene Job-ID mit `finished: true` und, wenn der Aufruf sein Scheitern unterdrückt, mit `failed: false`; ein verlorener Job sähe damit aus wie ein fertiger. Das Status-Playbook entscheidet deshalb an der Anwesenheit der Statusdatei und nicht an der Meldung des Moduls. Zweitens verlangt die gepinnte `community.vmware` einen Mindest-`ansible-core`; der Preflight vergleicht die installierte Collection mit dem Pin und den installierten Kern mit dem, was diese Collection selbst fordert. Ein Host mit der aus dem Vorfall gemeldeten Kernversion fällt dort mit genau diesem Satz auf, statt bei jedem ESXi-Modul unerklärt zu scheitern.
 
 ## Wie der Worker eine Create-VM treibt
 
@@ -405,7 +402,7 @@ Die nächste VM startet ausschließlich dann, wenn keine Zeile mehr `prepared`, 
 
 Das Async-Verzeichnis wird nicht zusätzlich gespeichert, sondern aus dem ohnehin deterministischen Arbeitsverzeichnis des Auftrags abgeleitet: `<Arbeitsverzeichnis>/create.vm.<Position>/async`. Dadurch findet ein neu gestarteter Worker dieselbe Job-ID ohne zweite Kopie in der Datenbank. Das Gesamtbudget der Create-Strecke ist kein eigener Wert, sondern das SSH-Gesamtbudget; es läuft ab `deploy_jobs.create_started_at` und wird per `COALESCE` genau einmal gesetzt, also nicht durch einen Wiederaufnahmelauf zurückgedreht.
 
-Die feste Wartezeit nach dem Erstellen (früher `CreateSettleSeconds`, 60 Sekunden blind) ist ersatzlos entfallen. Jede Einheit wird bis zum Ende gepollt und ihre Live-Identität zurückgelesen; das ist der Beweis, den die Wartezeit nur zu ersetzen versuchte.
+Eine feste Wartezeit nach dem Erstellen gibt es nicht. Jede Einheit wird bis zum Ende gepollt und ihre Live-Identität zurückgelesen; das ist der Beweis, den eine blinde Wartezeit nur ersetzen könnte.
 
 Nach jedem Erfolg bindet **eine** Transaktion die Identität: Auftrag, Ergebniszeile und VM gesperrt, eine leere UUID wird gebunden, eine gleiche UUID frischt nur die MOID auf. Eine abweichende UUID ist nur dann zulässig, wenn die Vorbereitung genau diese gespeicherte UUID live als fehlend nachgewiesen hat (`replaced_instance_uuid`) und das Modul eine neue VM angelegt hat (IDR-P02): Dann übernimmt das Portal die neue Instanz, rotiert die Berichtsgeneration und verwirft die importierten MACs; MECM bleibt ein Schritt für die Bedienperson (altes Gerät löschen, neue MAC importieren lassen, „MECM-ID zurücksetzen“). Jeder gebundene Schreibweg (Create-Erfolg und MAC-Export mit nachgewiesener UUID) hält dabei fest, über welchen ESXi-Zugang und gegen welches Zugangsziel die Identität belegt wurde (`vm_bound_credential_id`, `vm_bound_esxi_host`, Migration 0061); daraus kommt die Host-Warnung vor einem Create auf einem anderen Host (K17, FM-E1). Jede andere abweichende UUID schreibt nichts. Existiert die gebundene VM unter anderem Namen weiter, lehnt die Vorbereitung mit `identity_bound_vm_renamed` ab. Create löscht nie eine VM. Eine Beweiskombination außerhalb dieser Regeln ist `identity_result_invalid` und damit ein Fehler, keine Auslegung.
 
