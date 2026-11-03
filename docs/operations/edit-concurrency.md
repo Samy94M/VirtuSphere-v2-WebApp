@@ -3,15 +3,15 @@
 VM and mission editors round-trip `edit_version`, a decimal counter independent
 of `updated_at`. Missing, malformed and stale versions are rejected under the
 existing mission/VM locks before the editor changes the row, child rows or
-hostname claims. Reload the page and re-enter the change after a conflict.
-Forms opened before this contract was installed must also be reloaded.
+hostname claims.
 
 After a refused save both editors render the version the save was submitted
-with (`form_old()`), not the row's current one, so every further save fails
-until the operator reloads on purpose (QL-01, decision A). The conflict message
-says that a reload discards the input.
+with (`form_old()`), not the row's current one, so every further ordinary save
+fails until the operator either chooses "Continue with my input" or reloads on
+purpose. The conflict message names both ways and says that a reload discards
+the input.
 
-Above the form both editors then show a comparison (QL-01/QL-03 B): per field
+Above the form both editors then show a comparison: per field
 the operator's input and the value saved now, only for fields that differ after
 the save path's normalization. Network cards, disks and packages appear as
 counts only. The field lists are the save path's own

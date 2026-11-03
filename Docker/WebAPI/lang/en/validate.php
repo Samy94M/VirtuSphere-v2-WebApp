@@ -66,7 +66,7 @@ return [
 
     // Mission and template states beyond per-field checks.
     'mission_not_found' => 'Mission not found.',
-    'mission_stale' => 'The mission was changed by someone else in the meantime. Saving again fails until you reload the page. Reloading discards your input, so open the page in a new tab first to see the change made in the meantime.',
+    'mission_stale' => 'The mission was changed by someone else in the meantime. Saving again fails until you choose "Continue with my input" or reload the page. Reloading discards your input; the comparison above the form shows what differs.',
     'template_name_required' => 'Enter a template name.',
     'target_mission_name_required' => 'Enter a target mission name.',
     'target_mission_no_prefix' => 'Target mission names must not start with the template prefix.',

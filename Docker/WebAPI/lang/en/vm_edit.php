@@ -141,7 +141,7 @@ return [
     // default one silently, overwriting the imported MAC address while reporting
     // success.
     'err_interfaces_required' => 'A VM needs at least one network interface. The stored interfaces stay unchanged until one is entered.',
-    'err_conflict' => 'This VM was changed by someone else in the meantime. Saving again fails until you reload the page. Reloading discards your input, so open the page in a new tab first to see the change made in the meantime.',
+    'err_conflict' => 'This VM was changed by someone else in the meantime. Saving again fails until you choose "Continue with my input" or reload the page. Reloading discards your input; the comparison above the form shows what differs.',
     'label_ip' => 'Configured IP address',
     'label_subnet' => 'Subnet',
     'subnet_mask' => 'Subnet mask',

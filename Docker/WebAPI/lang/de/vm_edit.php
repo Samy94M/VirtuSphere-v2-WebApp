@@ -142,7 +142,7 @@ return [
     // leere Standardkarte ein und überschrieb damit die importierte MAC-Adresse,
     // während es Erfolg meldete.
     'err_interfaces_required' => 'Eine VM braucht mindestens eine Netzwerkkarte. Die gespeicherten Netzwerkkarten bleiben unverändert, bis eine eingetragen ist.',
-    'err_conflict' => 'Diese VM wurde inzwischen von jemand anderem geändert. Ein erneutes Speichern schlägt fehl, bis Sie die Seite neu laden. Das Neuladen verwirft Ihre Eingaben; öffnen Sie die Seite deshalb vorher in einem neuen Tab, um die zwischenzeitliche Änderung zu sehen.',
+    'err_conflict' => 'Diese VM wurde inzwischen von jemand anderem geändert. Ein erneutes Speichern schlägt fehl, bis Sie „Mit meinen Eingaben weiterarbeiten“ wählen oder die Seite neu laden. Das Neuladen verwirft Ihre Eingaben; der Vergleich über dem Formular zeigt, was sich unterscheidet.',
     'label_ip' => 'Konfigurierte IP-Adresse',
     'label_subnet' => 'Subnetz',
     'subnet_mask' => 'Subnetzmaske',
