@@ -21,10 +21,12 @@ Read the sections relevant to the current change. Paths below are relative to Do
 ## A64 mecm_updateid.php: accepts deviceResourceID and deviceid.
 
 - `mecm_updateid.php`: accepts `deviceResourceID` and `deviceid`.
+- Every success answer carries the field `success`. The devices sync deletes its membership journal entries and counts a ResourceID report as delivered only on that field (`Assert-VsPortalSuccess`, `Powershell-MECM/mecm/VirtuSphere-Common.ps1`); a 2xx without it, such as a proxy page, is no acknowledgement.
 
 ## A65 mecm_packages.php: package/task sequence sync.
 
 - `mecm_packages.php`: package/task sequence sync.
+- Its success answer carries the field `success`; the packages sync remembers a sent catalog only on that field, so a 2xx without it leaves the catalog to be sent again.
 
 ## A66 db_importMAC.php: Ansible MAC import; payload { "mission_id": 123, "job_id": 45, "results": [..
 
