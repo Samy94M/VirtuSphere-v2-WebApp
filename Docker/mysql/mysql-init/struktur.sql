@@ -885,6 +885,20 @@ CREATE TABLE IF NOT EXISTS deploy_client_events (
     CONSTRAINT fk_deploy_client_events_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- MX1 (migration 0072): the one cause per VM the MECM device sync last reported
+-- (reportDeviceCauses). Display data; lib/repo/vm_sync_causes.php is the only
+-- writer, reader and purge (7 days after the last observation).
+CREATE TABLE IF NOT EXISTS deploy_vm_sync_causes (
+    vm_id INT NOT NULL,
+    code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    rollout_revision BIGINT UNSIGNED NOT NULL,
+    run_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (vm_id),
+    INDEX deploy_vm_sync_causes_observed (observed_at),
+    CONSTRAINT fk_deploy_vm_sync_causes_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Package-wrapper report foundation (ADR-0044). The singleton generation is
 -- rotated after a supported disaster restore and before report acceptance.
 CREATE TABLE IF NOT EXISTS deploy_package_report_state (

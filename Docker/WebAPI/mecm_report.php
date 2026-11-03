@@ -20,6 +20,8 @@ require_once __DIR__ . '/lib/repo/heartbeats.php';
 require_once __DIR__ . '/lib/repo/package_runs.php';
 require_once __DIR__ . '/lib/run_report.php';
 require_once __DIR__ . '/lib/package_run_report.php';
+require_once __DIR__ . '/lib/device_sync_causes.php';
+require_once __DIR__ . '/lib/repo/vm_sync_causes.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -39,11 +41,12 @@ if (virtusphere_correlation_id_is_valid($headerCorrelation)) {
 
 try {
     // The report token, when configured, authenticates the server sync channel:
-    // legacy heartbeats and the reportRun result channel. Client phase reports
-    // (reportPhase) authenticate by their already-known MAC (see below) and
-    // deliberately do not require the token, so it never has to be provisioned
-    // onto the ephemeral deploy VMs (ADR-0018).
-    $tokenGatedAction = $action === 'heartbeat' || $action === 'reportRun';
+    // legacy heartbeats, the reportRun result channel and the device sync's
+    // per-VM causes (reportDeviceCauses). Client phase reports (reportPhase)
+    // authenticate by their already-known MAC (see below) and deliberately do
+    // not require the token, so it never has to be provisioned onto the
+    // ephemeral deploy VMs (ADR-0018).
+    $tokenGatedAction = $action === 'heartbeat' || $action === 'reportRun' || $action === 'reportDeviceCauses';
     if ($tokenGatedAction
         && !machine_api_report_token_ok($connection, $_SERVER['HTTP_X_VIRTUSPHERE_TOKEN'] ?? null)) {
         machine_api_audit_warning(
@@ -58,8 +61,11 @@ try {
         machine_api_json(['error' => 'Invalid token'], 401);
     }
 
-    $bodyLimit = $action === 'reportPackageRun'
-        ? VIRTUSPHERE_PACKAGE_REPORT_MAX_BODY_BYTES : VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES;
+    $bodyLimit = match ($action) {
+        'reportPackageRun' => VIRTUSPHERE_PACKAGE_REPORT_MAX_BODY_BYTES,
+        'reportDeviceCauses' => VIRTUSPHERE_DEVICE_SYNC_CAUSE_MAX_BODY_BYTES,
+        default => VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES,
+    };
     $raw = (string) file_get_contents('php://input', false, null, 0, $bodyLimit + 1);
     if (strlen($raw) > $bodyLimit) {
         machine_api_json(['error' => 'Payload too large'], 413);
@@ -103,6 +109,34 @@ try {
             'event_seq' => $report['event_seq'],
             'accepted' => (bool) ($result['accepted'] ?? false),
             'deduplicated' => (bool) ($result['deduplicated'] ?? false),
+        ]);
+    }
+
+    // MX1 (FM-05): the device sync's one cause per VM. Display data like
+    // reportRun; it never writes deploy_vms and emits no audit row per report.
+    // The revision fence decides per entry (ADR-0043 amendment): a stale entry
+    // is counted, not answered with 409 for the whole report.
+    if ($action === 'reportDeviceCauses') {
+        if (!$ipAllowed) {
+            machine_api_forbidden($clientIp, $connection);
+        }
+
+        $validated = device_sync_causes_validate($data);
+        if (isset($validated['error'])) {
+            machine_api_json(['error' => $validated['error']], $validated['status']);
+        }
+        $report = $validated['report'];
+        $result = repo_vm_sync_causes_record($connection, $report);
+
+        machine_api_json([
+            'success' => true,
+            'schema_version' => VIRTUSPHERE_DEVICE_SYNC_CAUSE_SCHEMA_VERSION,
+            'run_id' => $report['run_id'],
+            'complete' => $report['complete'],
+            'accepted' => $result['accepted'],
+            'stale' => $result['stale'],
+            'unknown_vm' => $result['unknown_vm'],
+            'deduplicated' => $result['deduplicated'],
         ]);
     }
 

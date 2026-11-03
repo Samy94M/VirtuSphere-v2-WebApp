@@ -162,8 +162,10 @@ const FILE_SIZE_ALLOWANCES = [
     // lives in lib/migrations/0070_mecm_sync_deploy_failed.php.
     // U-01 (01.11.2026) adds the two registry lines for migration 0071; its CHECK
     // lives in lib/migrations/0071_deploy_ansible_connection_lost.php.
+    // MX1-C1 (03.11.2026) adds the two registry lines for migration 0072; its table
+    // lives in lib/migrations/0072_device_sync_causes.php.
     'Docker/WebAPI/lib/migrate.php' => [
-        'lines' => 1264,
+        'lines' => 1266,
         'why' => 'ordered migration registry; distributing it across files breaks the one property it has, that the order is readable in one place',
         'stage' => 'kein Abbau geplant',
     ],

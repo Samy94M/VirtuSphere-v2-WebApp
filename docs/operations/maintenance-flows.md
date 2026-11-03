@@ -62,6 +62,7 @@ Jeder Löschlauf ist ein eigener Job namens `retention:<Name>`; ein gescheiterte
 | `retention:finished_system_jobs` | `repo_purge_finished_system_jobs()` | `VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS` nach dem Ende des Systemauftrags |
 | `retention:status_events` | `repo_purge_vm_status_events()` | `VIRTUSPHERE_STATUS_EVENT_RETENTION_DAYS` |
 | `retention:package_report_runs` | `repo_purge_expired_package_runs()` | Ablauf des Markers, beim ersten Bericht auf `VIRTUSPHERE_PACKAGE_REPORT_RETENTION_DAYS` gesetzt (ADR-0044) |
+| `retention:device_sync_causes` | `repo_purge_device_sync_causes()` | `VIRTUSPHERE_DEVICE_SYNC_CAUSE_RETENTION_DAYS` nach der letzten Beobachtung der Ursache (MX1) |
 | `retention:audit` | `audit_event()` | eine Auditzeile je Lauf mit Löschungen |
 
 ## Hängengebliebene VMs
