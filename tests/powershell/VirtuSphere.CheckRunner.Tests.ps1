@@ -125,6 +125,67 @@ Describe 'dot-sourced runner modules' {
         @($files).Count | Should -Be 1
         @($files)[0] | Should -Be (Join-Path $sourceDir 'new-untracked.ps1')
     }
+
+    It 'Get-CheckFiles ueberspringt verschachtelte Arbeitsbaeume, nicht aber die eigene Wurzel (RH1)' {
+        # Release-Lane 2026.11.2: .claude/worktrees/* brachte 692 statt 35 YAML-Dateien.
+        $runtime = Join-Path $script:ModuleDir 'runtime.ps1'
+        $fixture = Join-Path $TestDrive 'nested-root'
+        $own = Join-Path $fixture 'Ansible'
+        $worktree = Join-Path $fixture '.claude\worktrees\paket-a'
+        $clone = Join-Path $fixture 'tools\eingebetteter-klon'
+        foreach ($dir in @((Join-Path $fixture '.git'), $own, $worktree, (Join-Path $clone '.git'), (Join-Path $fixture '.claude\settings'))) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        # git worktree legt eine .git-DATEI an, ein Klon einen .git-ORDNER.
+        Set-Content -LiteralPath (Join-Path $worktree '.git') -Value 'gitdir: C:/repo/.git/worktrees/paket-a'
+        Set-Content -LiteralPath (Join-Path $own 'site.yml') -Value 'a: 1'
+        Set-Content -LiteralPath (Join-Path $fixture '.claude\settings\eigen.yml') -Value 'b: 1'
+        Set-Content -LiteralPath (Join-Path $worktree 'fremd.yml') -Value 'c: 1'
+        Set-Content -LiteralPath (Join-Path $clone 'fremd.yml') -Value 'd: 1'
+
+        $files = & {
+            param($module, $root)
+            . $module
+            $repoRoot = $root
+            Get-CheckFiles @('*.yml')
+        } $runtime $fixture
+
+        @($files | ForEach-Object { $_.Substring($fixture.Length + 1) -replace '\\', '/' } | Sort-Object) |
+            Should -Be @(@('.claude/settings/eigen.yml', 'Ansible/site.yml') | Sort-Object)
+    }
+}
+
+Describe 'Werkzeugstart gegen Werkzeugurteil (RH1)' {
+    BeforeDiscovery {
+        $script:OnWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+    }
+    BeforeAll {
+        . (Join-Path $script:ModuleDir 'runtime.ps1')
+    }
+
+    It 'meldet ein nicht startbares Werkzeug als infrastructure_error, nicht als Befund' {
+        $r = Invoke-Tool 'virtusphere-rh1-kein-solches-werkzeug' @('--version')
+        $r.StartFailed | Should -BeTrue
+        $r.ExitCode | Should -Be 127
+        $outcome = Format-ToolResult $r 'sauber' 'yamllint meldet Befunde'
+        $outcome.class | Should -Be 'infrastructure_error'
+        $outcome.detail | Should -Match 'Werkzeug nicht gestartet'
+        $outcome.detail | Should -Not -Match 'meldet Befunde'
+    }
+
+    It 'laesst einen echten Exit 127 des gestarteten Werkzeugs ein fail bleiben' {
+        $r = Invoke-Tool (Get-Process -Id $PID).Path @('-NoProfile', '-Command', 'exit 127')
+        $r.StartFailed | Should -BeFalse
+        $r.ExitCode | Should -Be 127
+        (Format-ToolResult $r 'sauber' 'yamllint meldet Befunde').class | Should -Be 'fail'
+    }
+
+    It 'meldet eine Kommandozeile ueber der Windows-Grenze als infrastructure_error' -Skip:(-not $script:OnWindows) {
+        # CreateProcess nimmt hoechstens 32767 Zeichen; dahinter laeuft das Werkzeug nie.
+        $r = Invoke-Tool (Get-Process -Id $PID).Path @('-NoProfile', '-Command', 'exit 0', ('x' * 33000))
+        $r.StartFailed | Should -BeTrue
+        (Format-ToolResult $r 'sauber' 'shellcheck meldet Befunde').class | Should -Be 'infrastructure_error'
+    }
 }
 
 Describe 'run artifact directory' {

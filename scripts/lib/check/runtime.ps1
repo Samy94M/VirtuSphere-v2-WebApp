@@ -76,6 +76,66 @@ function Get-QaActiveJobCount {
     return $value
 }
 
+# Der Dienststatus, den deploy.php rendert, kommt aus deploy_service_health_snapshot()
+# und haengt an Heartbeat-Zeilen, die nur die Worker schreiben. Waehrend der
+# Pause altern sie; nach der Produktgrenze kippt die Seite von "bereit" auf
+# "nicht erreichbar", und jede spaetere Aufnahme zeigt einen Zustand, den kein
+# Sollbild beschreibt (RH1, 03.11.2026: unter worker_v1 nach rund 150 s, das
+# waren die 3639/427468/318982 px der dritten Versuche). Die Grenze wird hier
+# nicht nachgebaut: Der Snapshot nimmt die Uhrzeit als Parameter, also fragt
+# die Pruefung das Produkt fuer jede Sekunde des Fensters, ob es denselben
+# Status rendern wuerde wie am Fensteranfang. Uhr ist die des PHP-Containers,
+# das Fenster eine Dauer der Host-Stoppuhr; so stoert ein abweichender
+# Docker-VM-Takt nicht. Nur Lesen, keine Sitzung, kein Bootstrap.
+function Get-QaDeployServiceDrift {
+    param([int]$Seconds)
+    $window = [Math]::Max(0, $Seconds)
+    $php = @(
+        "require_once '/var/www/html/lib/constants.php';"
+        "require_once '/var/www/html/lib/db.php';"
+        "require_once '/var/www/html/lib/repo/deploy_runtime_identity.php';"
+        "require_once '/var/www/html/lib/deploy_service_health.php';"
+        '$db = db();'
+        '$to = time();'
+        ('$from = $to - {0};' -f $window)
+        '$state = static function (int $t) use ($db): string {'
+        '  $s = deploy_service_health_snapshot($db, $t);'
+        "  return implode('/', [`$s['availability'], `$s['claim_state'], `$s['recovery_attention'], `$s['badge']]);"
+        '};'
+        '$before = $state($from); $after = $before; $flip = null;'
+        'for ($t = $from + 1; $t <= $to; $t++) {'
+        '  $now = $state($t);'
+        '  if ($now !== $before) { $flip = $t - $from; $after = $now; break; }'
+        '}'
+        "echo 'RH1DRIFT' . json_encode(['before' => `$before, 'after' => `$after, 'flip' => `$flip]) . 'RH1DRIFT';"
+    ) -join ' '
+    $probe = Invoke-Tool 'docker' @('exec', $qaPhpContainer, 'php', '-r', $php)
+    $text = (@($probe.Output) -join "`n")
+    if (($probe.ExitCode -ne 0) -or ($text -notmatch 'RH1DRIFT(.*)RH1DRIFT')) {
+        return @{ Ok = $false; Output = $probe.Output }
+    }
+    try { $parsed = $Matches[1] | ConvertFrom-Json } catch { return @{ Ok = $false; Output = $probe.Output } }
+    return @{ Ok = $true; Before = [string]$parsed.before; After = [string]$parsed.after; FlipAfterSeconds = $parsed.flip; Seconds = $window; Output = $probe.Output }
+}
+
+# Ein pass oder fail des Bodys gilt nur, wenn die Pause den gerenderten
+# Dienststatus nicht veraendert hat. Sonst ist das Urteil nicht zuzuordnen:
+# rot statt still falsch, als infrastructure_error, mit dem Body-Urteil im Text.
+function Confirm-QaPauseKeptServiceState {
+    param($Outcome, [int]$Seconds)
+    if (($null -eq $Outcome) -or ($Outcome.class -eq 'infrastructure_error')) { return $Outcome }
+    $verdict = ('{0}: {1}' -f $Outcome.class, $Outcome.detail)
+    $drift = Get-QaDeployServiceDrift -Seconds $Seconds
+    if (-not $drift.Ok) {
+        return New-InfraResult ('Deploy-Dienststatus im Pausenfenster nicht pruefbar; Body-Urteil nicht verwertbar ({0})' -f $verdict) (@($Outcome.output) + @($drift.Output))
+    }
+    if ($null -ne $drift.FlipAfterSeconds) {
+        $detail = ('Deploy-Dienststatus kippte nach {0} s der {1} s langen Worker-Pause von {2} auf {3}; Aufnahmen danach zeigen nicht den Zustand der Sollbilder. Body-Urteil nicht verwertbar ({4})' -f $drift.FlipAfterSeconds, $drift.Seconds, $drift.Before, $drift.After, $verdict)
+        return New-InfraResult $detail $Outcome.output
+    }
+    return $Outcome
+}
+
 function Invoke-WithPausedQaWorkers {
     param([scriptblock]$Body)
     $before = Get-QaWorkerSnapshot
@@ -87,6 +147,9 @@ function Invoke-WithPausedQaWorkers {
     $running = @($before.States | Where-Object { $_.Running } | ForEach-Object { $_.Service })
     $outcome = $null
     $restoreFailure = $null
+    # Das Fenster beginnt vor dem stop: Bezug ist der Status, den die laufenden
+    # Worker hinterlassen, nicht der nach einem langsamen stop.
+    $pauseClock = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         if ($running.Count -gt 0) {
             $stopped = Invoke-QaCompose (@('stop', '--timeout', '30') + $running)
@@ -100,6 +163,9 @@ function Invoke-WithPausedQaWorkers {
                 $outcome = New-InfraResult 'isolierte QA-Worker nach stop nicht vollstaendig pausiert' $paused.Output
             } else {
                 try { $outcome = & $Body } catch { $outcome = New-InfraResult ('Visual-Harness warf eine Exception: ' + $_.Exception.Message) }
+                # Vor dem Neustart pruefen: ein frisch gestarteter Worker schreibt
+                # seine Zeile neu und wuerde das Kippen verdecken.
+                $outcome = Confirm-QaPauseKeptServiceState -Outcome $outcome -Seconds ([int][Math]::Ceiling($pauseClock.Elapsed.TotalSeconds))
             }
         }
     } finally {
@@ -145,6 +211,12 @@ function Invoke-Tool {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $lines = @()
+    # StartFailed trennt "Werkzeug lief und meldete etwas" von "Werkzeug lief nie":
+    # ein fehlendes Programm oder eine Kommandozeile ueber der Windows-Grenze
+    # (32767 Zeichen, "Der Dateiname oder die Erweiterung ist zu lang") wirft hier,
+    # und Exit 127 allein ist von einem echten Exit 127 des Werkzeugs nicht zu
+    # unterscheiden (RH1, 03.11.2026: yaml-lint/shellcheck als "meldet Befunde").
+    $startFailed = $false
     try {
         $lines = @(& $Exe @Arguments 2>&1 | ForEach-Object {
             $line = "$_"
@@ -155,10 +227,16 @@ function Invoke-Tool {
     } catch {
         $lines = @("$($_.Exception.Message)")
         $code = 127
+        $startFailed = $true
     } finally {
         $ErrorActionPreference = $prev
     }
-    return @{ ExitCode = $code; Output = $lines }
+    return @{ ExitCode = $code; Output = $lines; StartFailed = $startFailed }
+}
+
+function Get-ToolStartFailureDetail {
+    param($Result)
+    return ('Werkzeug nicht gestartet, das Gate hat nichts geprueft: ' + ((@($Result.Output) -join ' ').Trim()))
 }
 
 function Test-Command { param([string]$Name) return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
@@ -282,7 +360,17 @@ function Invoke-AppComposer {
 
 # Dateien unter dem Pruef-Root sammeln. Ausgabebaeume werden schon bei der
 # Traversierung abgeschnitten, damit kopierte Quellen darin weder geparst noch
-# als eigener Produktumfang gezaehlt werden.
+# als eigener Produktumfang gezaehlt werden. Ein Unterverzeichnis mit eigenem
+# `.git` (Datei bei `git worktree`, Ordner bei einem eingebetteten Klon) ist ein
+# anderer Arbeitsbaum: sein Inhalt ist fremder Stand, nicht dieser. Abgeleitet
+# statt als Pfadliste, damit ein neuer Ablageort (etwa .claude/worktrees,
+# .codex) nicht still wieder mitgezaehlt wird (RH1, 03.11.2026: 692 statt 35
+# YAML-Dateien, docker-Kommandozeile ueber der Windows-Grenze).
+function Test-NestedWorkingTree {
+    param([System.IO.DirectoryInfo]$Directory)
+    return (Test-Path -LiteralPath (Join-Path $Directory.FullName '.git'))
+}
+
 function Get-CheckFiles {
     param([string[]]$Patterns)
     $excludedDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -303,7 +391,9 @@ function Get-CheckFiles {
             }
         }
         foreach ($child in @(Get-ChildItem -LiteralPath $directory.FullName -Directory -Force -ErrorAction SilentlyContinue)) {
-            if (-not $excludedDirectories.Contains($child.Name)) { $pending.Push($child) }
+            if ($excludedDirectories.Contains($child.Name)) { continue }
+            if (Test-NestedWorkingTree $child) { continue }
+            $pending.Push($child)
         }
     }
     return @($found | Sort-Object -Unique)
@@ -316,6 +406,7 @@ function ConvertTo-RepoRelative {
 
 function Format-ToolResult {
     param($Result, [string]$OkDetail, [string]$FailDetail)
+    if ($Result.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $Result) $Result.Output }
     if ($Result.ExitCode -eq 0) { return New-PassResult $OkDetail $Result.Output }
     return New-FailResult ("{0} (exit {1})" -f $FailDetail, $Result.ExitCode) $Result.Output
 }

@@ -119,6 +119,7 @@ function Invoke-VisualBaselines {
     try {
         return Invoke-WithPausedQaWorkers {
             $run = Invoke-Tool 'node' @($harness)
+            if ($run.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $run) $run.Output }
             if ($run.ExitCode -eq 0) { return New-PassResult ('reviewte Sollbaselines beider Themes bei Nulltoleranz getroffen; Artefakte: ' + $visualArtifactDir) $run.Output }
             if ($run.ExitCode -eq 2) { return New-InfraResult 'Visual-Harness meldet infrastructure_error' $run.Output }
             return New-FailResult 'Visual-Harness meldet Abweichung von den reviewten Sollbaselines oder einen fachlichen Browserfehler' $run.Output

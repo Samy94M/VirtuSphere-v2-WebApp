@@ -45,8 +45,13 @@ Describe 'QA worker isolation for phpunit-full' {
 Describe 'Visual QA worker restore contract' {
     BeforeEach {
         $script:snapshotCall = 0
+        $script:events = New-Object System.Collections.Generic.List[string]
         Mock Get-QaActiveJobCount { 0 }
-        Mock Invoke-QaCompose { @{ ExitCode = 0; Output = @() } }
+        Mock Invoke-QaCompose { $script:events.Add($Arguments[0]); @{ ExitCode = 0; Output = @() } }
+        Mock Get-QaDeployServiceDrift {
+            $script:events.Add('drift')
+            @{ Ok = $true; Before = 'ready/accepting/none/success'; After = 'ready/accepting/none/success'; FlipAfterSeconds = $null; Seconds = $Seconds; Output = @() }
+        }
         Mock Get-QaWorkerSnapshot {
             $script:snapshotCall++
             if ($script:snapshotCall -eq 1) {
@@ -98,6 +103,91 @@ Describe 'Visual QA worker restore contract' {
         $result.class | Should -Be 'infrastructure_error'
         $result.detail | Should -Match 'shared'
         Should -Invoke Invoke-QaCompose -Times 0
+    }
+
+    # RH1, 03.11.2026: Die Pause liess die Worker-Zeile altern; ab rund 150 s
+    # zeigte deploy.php "nicht erreichbar", und die dritten Versuche trugen
+    # 3639/427468/318982 px Inhaltsdiff gegen das Sollbild "bereit".
+    It 'checks the rendered service state after the body and before any worker restart' {
+        $result = Invoke-WithPausedQaWorkers { New-PassResult 'visual body passed' }
+        $result.class | Should -Be 'pass'
+        @($script:events) | Should -Be @('stop', 'drift', 'up')
+    }
+
+    It 'turns a pass into infrastructure_error when the pause flipped the service state' {
+        Mock Get-QaDeployServiceDrift {
+            @{ Ok = $true; Before = 'ready/accepting/none/success'; After = 'offline/accepting/none/danger'; FlipAfterSeconds = 151; Seconds = 190; Output = @() }
+        }
+        $result = Invoke-WithPausedQaWorkers { New-PassResult 'visual body passed' @('harness line') }
+        $result.class | Should -Be 'infrastructure_error'
+        $result.detail | Should -Match 'kippte nach 151 s der 190 s langen Worker-Pause von ready/accepting/none/success auf offline/accepting/none/danger'
+        $result.detail | Should -Match 'Body-Urteil nicht verwertbar \(pass: visual body passed\)'
+        @($result.output) | Should -Contain 'harness line'
+        Should -Invoke Invoke-QaCompose -Times 1 -ParameterFilter { $Arguments[0] -eq 'up' }
+    }
+
+    It 'does not let a fail after a flip read as a baseline regression' {
+        Mock Get-QaDeployServiceDrift {
+            @{ Ok = $true; Before = 'ready/a/n/s'; After = 'offline/a/n/d'; FlipAfterSeconds = 140; Seconds = 200; Output = @() }
+        }
+        $result = Invoke-WithPausedQaWorkers { New-FailResult 'Visual-Harness meldet Abweichung' }
+        $result.class | Should -Be 'infrastructure_error'
+        $result.detail | Should -Match 'Body-Urteil nicht verwertbar \(fail: Visual-Harness meldet Abweichung\)'
+    }
+
+    It 'fails closed when the service state cannot be read' {
+        Mock Get-QaDeployServiceDrift { @{ Ok = $false; Output = @('php error') } }
+        $result = Invoke-WithPausedQaWorkers { New-PassResult 'visual body passed' }
+        $result.class | Should -Be 'infrastructure_error'
+        $result.detail | Should -Match 'nicht pruefbar'
+        @($result.output) | Should -Contain 'php error'
+    }
+
+    It 'keeps a body infrastructure_error as is without probing' {
+        $result = Invoke-WithPausedQaWorkers { New-InfraResult 'QA-Stack laeuft nicht' }
+        $result.detail | Should -Be 'QA-Stack laeuft nicht'
+        Should -Invoke Get-QaDeployServiceDrift -Times 0
+    }
+
+    It 'measures the window from before the stop through the body' {
+        $result = Invoke-WithPausedQaWorkers { Start-Sleep -Milliseconds 1100; New-PassResult }
+        $result.class | Should -Be 'pass'
+        Should -Invoke Get-QaDeployServiceDrift -Times 1 -ParameterFilter { $Seconds -ge 2 }
+    }
+}
+
+Describe 'Deploy service drift probe' {
+    BeforeEach {
+        $script:qaPhpContainer = 'virtusphere-qa-php-1'
+    }
+
+    It 'asks the product snapshot for every second of the window without the portal bootstrap' {
+        Mock Invoke-Tool { @{ ExitCode = 0; Output = @('RH1DRIFT{"before":"ready/accepting/none/success","after":"ready/accepting/none/success","flip":null}RH1DRIFT') } }
+        $drift = Get-QaDeployServiceDrift -Seconds 187
+        $drift.Ok | Should -BeTrue
+        $drift.FlipAfterSeconds | Should -BeNullOrEmpty
+        Should -Invoke Invoke-Tool -Times 1 -ParameterFilter {
+            $Exe -eq 'docker' -and $Arguments[0] -eq 'exec' -and $Arguments[1] -eq 'virtusphere-qa-php-1' -and
+            $Arguments[-1] -match 'deploy_service_health_snapshot\(\$db, \$t\)' -and
+            $Arguments[-1] -match '\$from = \$to - 187;' -and
+            $Arguments[-1] -notmatch 'bootstrap\.php' -and
+            $Arguments[-1] -notmatch '"'
+        }
+    }
+
+    It 'reports the second at which the rendered state first differs' {
+        Mock Invoke-Tool { @{ ExitCode = 0; Output = @('noise', 'RH1DRIFT{"before":"ready/accepting/none/success","after":"offline/accepting/none/danger","flip":151}RH1DRIFT') } }
+        $drift = Get-QaDeployServiceDrift -Seconds 190
+        $drift.Ok | Should -BeTrue
+        $drift.FlipAfterSeconds | Should -Be 151
+        $drift.After | Should -Be 'offline/accepting/none/danger'
+    }
+
+    It 'is not ok when the probe fails or prints no result' {
+        Mock Invoke-Tool { @{ ExitCode = 255; Output = @('PHP Fatal error') } }
+        (Get-QaDeployServiceDrift -Seconds 10).Ok | Should -BeFalse
+        Mock Invoke-Tool { @{ ExitCode = 0; Output = @('kein Ergebnis') } }
+        (Get-QaDeployServiceDrift -Seconds 10).Ok | Should -BeFalse
     }
 }
 
