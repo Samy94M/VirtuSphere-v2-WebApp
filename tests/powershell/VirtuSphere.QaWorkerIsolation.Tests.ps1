@@ -46,6 +46,9 @@ Describe 'Visual QA worker restore contract' {
     BeforeEach {
         $script:snapshotCall = 0
         $script:events = New-Object System.Collections.Generic.List[string]
+        # The qa-repo check (OV1) has its own suite, VirtuSphere.QaSourceVolume.Tests.ps1;
+        # here the stack is synthetic and its copy counts as current.
+        Mock Confirm-QaSourceCurrent { $script:events.Add('source'); $null }
         Mock Get-QaActiveJobCount { 0 }
         Mock Invoke-QaCompose { $script:events.Add($Arguments[0]); @{ ExitCode = 0; Output = @() } }
         Mock Get-QaDeployServiceDrift {
@@ -111,7 +114,20 @@ Describe 'Visual QA worker restore contract' {
     It 'checks the rendered service state after the body and before any worker restart' {
         $result = Invoke-WithPausedQaWorkers { New-PassResult 'visual body passed' }
         $result.class | Should -Be 'pass'
-        @($script:events) | Should -Be @('stop', 'drift', 'up')
+        @($script:events) | Should -Be @('source', 'stop', 'drift', 'up')
+    }
+
+    # OV1, 03.11.2026: Ein stehender Stack aus einem frueheren qa-stack darf
+    # weder gepruefte Bilder noch Sollbilder von altem Code liefern.
+    It 'refuses a stale qa-repo copy before any worker stop or body' {
+        Mock Confirm-QaSourceCurrent { New-InfraResult 'Arbeitsbaum weicht vom Stand des stehenden QA-Stacks ab (1 Dateien seit qa-stack)' }
+        $script:bodyCalled = $false
+        $result = Invoke-WithPausedQaWorkers { $script:bodyCalled = $true; New-PassResult }
+        $result.class | Should -Be 'infrastructure_error'
+        $result.detail | Should -Match 'stehenden QA-Stacks'
+        $script:bodyCalled | Should -BeFalse
+        Should -Invoke Invoke-QaCompose -Times 0
+        Should -Invoke Get-QaWorkerSnapshot -Times 0
     }
 
     It 'turns a pass into infrastructure_error when the pause flipped the service state' {
