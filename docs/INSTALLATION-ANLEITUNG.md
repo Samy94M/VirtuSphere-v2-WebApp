@@ -197,14 +197,14 @@ Jeder Dienst des Kernstacks hat einen Healthcheck (das optionale phpMyAdmin nich
 
 ### phpMyAdmin (optional)
 
-phpMyAdmin ist reines Admin-Werkzeug und startet nicht mehr automatisch mit dem Stack. Bei Bedarf:
+phpMyAdmin ist reines Admin-Werkzeug und startet nicht mit dem Stack. Bei Bedarf:
 
 ```bash
 docker compose --profile tools up -d phpmyadmin   # starten (nur 127.0.0.1:PMA_PORT)
 docker compose --profile tools rm -sf phpmyadmin  # wieder entfernen
 ```
 
-Hinweis für Updates von älteren Ständen: Ein früher dauerhaft laufender phpMyAdmin-Container bleibt nach dem Update zurück, weil `docker compose down` Profil-Dienste nicht anfasst. Einmalig mit `docker compose --profile tools rm -sf phpmyadmin` entfernen; danach gilt der On-Demand-Weg oben.
+Läuft noch ein dauerhaft gestarteter phpMyAdmin-Container, bleibt er bei `docker compose down` stehen, weil der Befehl Profil-Dienste nicht anfasst. Einmalig mit `docker compose --profile tools rm -sf phpmyadmin` entfernen; danach gilt der On-Demand-Weg oben.
 
 Migrationen erneut prüfen:
 
@@ -238,7 +238,7 @@ Ein neueres Release kommt nach dem [Update-Runbook](operations/update.md) auf ei
 
 ## Backup und Restore
 
-Kanonisch sind die Skripte unter `scripts/` (die früheren `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt und brechen absichtlich mit einem Hinweis ab):
+Kanonisch sind die Skripte unter `scripts/` (`Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt und brechen absichtlich mit einem Hinweis ab):
 
 ```bash
 sudo sh scripts/install-backup-schedule.sh  # täglicher Zeitplan (läuft als root)
