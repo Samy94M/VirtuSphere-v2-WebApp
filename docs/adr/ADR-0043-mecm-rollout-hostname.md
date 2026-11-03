@@ -19,6 +19,26 @@ never adopts an unbound record. The fix ships with the server-only update
 (`install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly`), not with the client
 cutover.
 
+## Amendment 2 (03.11.2026): display reports decide the fence per entry
+
+MX1 (FM-05) adds `mecm_report.php?action=reportDeviceCauses`: the device sync
+reports, per VM it read from `getDeviceList`, the one cause that keeps it
+waiting, together with the `rollout_revision` it read. This is display data, not
+a mutating callback: it writes only `deploy_vm_sync_causes`, never `deploy_vms`.
+
+The fence still decides with the same pure function,
+`mecm_rollout_fence_revision_current()`, and a newer revision is refused as
+firmly as an older one. But it decides PER ENTRY, and the answer is not 409 for
+the whole report. A refused entry is counted as `stale` (or `unknown_vm` when
+the VM is gone) in a 200 response and written nowhere; there is no audit row
+per entry. A reset during a scan is planned, so one freshly reset VM would
+otherwise discard the causes of every other VM in the same report. The rule
+"everything else is 409 with no domain write" keeps applying to every callback
+that writes MECM or client state in `deploy_vms`; it does not apply to display
+reports. The reader shows a stored cause only while its revision is the VM's
+current one, so a row from before a reset disappears without a writer touching
+it.
+
 ## Context
 
 MECM imported `vm_name`. That is the ESXi/portal VM name, typically something

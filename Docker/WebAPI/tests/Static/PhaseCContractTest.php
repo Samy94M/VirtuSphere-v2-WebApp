@@ -63,11 +63,12 @@ final class PhaseCContractTest extends TestCase
         self::assertStringNotContainsString('repo_set_vm_state', $report);
         self::assertStringContainsString('machine_api_report_token_ok', $report);
 
-        // The report token gate covers the server sync channels (heartbeat and
-        // the reportRun result channel) but never the client phase reports
-        // (reportPhase), which authenticate by known MAC only, so the token never
-        // has to be provisioned onto ephemeral deploy VMs (ADR-0018).
-        self::assertStringContainsString("\$action === 'heartbeat' || \$action === 'reportRun'", $report);
+        // The report token gate covers the server sync channels (heartbeat, the
+        // reportRun result channel and the device sync's reportDeviceCauses) but
+        // never the client phase reports (reportPhase), which authenticate by
+        // known MAC only, so the token never has to be provisioned onto
+        // ephemeral deploy VMs (ADR-0018).
+        self::assertStringContainsString("\$action === 'heartbeat' || \$action === 'reportRun' || \$action === 'reportDeviceCauses'", $report);
         self::assertStringContainsString('!machine_api_report_token_ok(', $report);
         // reportRun is display-only telemetry too: it records run reports, never
         // VM lifecycle state.

@@ -15,6 +15,7 @@ require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/repo/catalog.php';
 require_once __DIR__ . '/repo/deploy_jobs.php';
 require_once __DIR__ . '/repo/package_run_maintenance.php';
+require_once __DIR__ . '/repo/vm_sync_causes.php';
 
 /**
  * The maintenance worker's interval jobs. Lives outside lib/maintenance_worker.php
@@ -174,6 +175,7 @@ function maintenance_worker_retention(mysqli $db, array &$failures): void
         'finished_system_jobs' => static fn (): int => (int) repo_purge_finished_system_jobs($db),
         'status_events' => static fn (): int => (int) repo_purge_vm_status_events($db),
         'package_report_runs' => static fn (): int => (int) repo_purge_expired_package_runs($db),
+        'device_sync_causes' => static fn (): int => (int) repo_purge_device_sync_causes($db),
     ];
     foreach ($purges as $name => $purge) {
         maintenance_worker_job('retention:' . $name, $failures, static function () use ($name, $purge, &$purged): void {
