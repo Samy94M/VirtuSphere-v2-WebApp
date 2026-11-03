@@ -24,6 +24,7 @@ require_once __DIR__ . '/deploy_create_constants.php';
 require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/vm_progress.php';
 require_once __DIR__ . '/vm_inventory_observation.php';
+require_once __DIR__ . '/vm_sync_cause.php';
 
 // --- Phases (rank = index in VIRTUSPHERE_VM_PHASES plus one) -----------------
 const VIRTUSPHERE_VM_PHASE_CREATED = 'created';
@@ -242,14 +243,13 @@ function virtusphere_vm_phase_sql(string $vm = 'v'): string
  * `kind`, `severity`, `params` (raw values: tokens and server timestamps, the
  * label owner formats them) and `link` (a closed target plus its ids).
  *
- * $evidence, as repo_vm_evidence_for_vm() shapes it: `is_template`,
- * `last_job` (the deploy_jobs row of the newest journal row of this VM, with
- * `id`, `status`, `mode`, `started_at`, `created_at`, `updated_at`, or null),
- * `create_uncertain` (list of `job_id`/`position`), `create_failed` (or null), `client_phases`,
- * `last_package_run` (`run_id`, `project_name`, `package_version`,
- * `completed_received_at`, `wrapper_result`, `reported_failures`, or null) and
- * `inventory` of the bound access (`fresh`, `answered`, `fresh_at`, `vms` as
- * instance UUID => `power_state`), or null when there is none.
+ * $evidence, as repo_vm_evidence_for_vm() shapes it: `is_template`, `last_job` (the deploy_jobs
+ * row of the newest journal row of this VM, with `id`, `status`, `mode`, `started_at`, `created_at`,
+ * `updated_at`, or null), `create_uncertain` (list of `job_id`/`position`), `create_failed` (or null),
+ * `client_phases`, `last_package_run` (`run_id`, `project_name`, `package_version`, `completed_received_at`,
+ * `wrapper_result`, `reported_failures`, or null), `inventory` of the bound access (`fresh`, `answered`,
+ * `fresh_at`, `vms` as instance UUID => `power_state`, or null when there is none) and `sync_cause`
+ * (the device sync's current cause, lib/vm_sync_cause.php, or null).
  *
  * Time findings need a valid, non-future server timestamp; without one the
  * state finding stays and the time is simply not claimed (ADR-0038).
@@ -325,14 +325,14 @@ function virtusphere_vm_findings(array $vm, array $evidence = [], ?int $now = nu
         $add(VIRTUSPHERE_VM_FINDING_OLD_MECM_DEVICE, ['id' => (string) $vm['mecm_previous_id']], ['target' => VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_MECM]);
     }
 
-    // 6 and 7: the MECM wait, overdue by the existing clock rule.
+    // 6 and 7: the MECM wait, overdue by the existing clock rule; the sync's cause shows at once (F13, MX1).
     $attention = virtusphere_vm_progress_attention($vm, $current);
     if ($mecm === VIRTUSPHERE_MECM_SYNC_PENDING) {
-        $since = virtusphere_vm_finding_time((string) ($vm['mecm_pending_since'] ?? ''), $current);
+        [$since, $cause] = [virtusphere_vm_finding_time((string) ($vm['mecm_pending_since'] ?? ''), $current), virtusphere_vm_sync_cause_params($evidence['sync_cause'] ?? null, $current)];
         if ($attention !== null && $attention['kind'] === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING) {
-            $add(VIRTUSPHERE_VM_FINDING_MECM_PENDING_OVERDUE, ['since' => $since, 'hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)], ['target' => VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_MECM]);
+            $add(VIRTUSPHERE_VM_FINDING_MECM_PENDING_OVERDUE, ['since' => $since, 'hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600)] + $cause, ['target' => VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_MECM]);
         } else {
-            $add(VIRTUSPHERE_VM_FINDING_MECM_PENDING, ['since' => $since], ['target' => VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_MECM]);
+            $add(VIRTUSPHERE_VM_FINDING_MECM_PENDING, ['since' => $since] + $cause, ['target' => VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_MECM]);
         }
     }
 

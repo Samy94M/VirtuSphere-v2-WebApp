@@ -153,12 +153,12 @@ function portal_vm_finding_text(array $finding): string
         VIRTUSPHERE_VM_FINDING_OLD_MECM_DEVICE => __t('status.finding_old_mecm_device', ['id' => $text('id')]),
         // An overdue wait without its since-time cannot occur (the overdue rule
         // reads the same timestamp); it falls back to the plain wait, not a gap.
-        VIRTUSPHERE_VM_FINDING_MECM_PENDING_OVERDUE => $text('since') !== ''
+        VIRTUSPHERE_VM_FINDING_MECM_PENDING_OVERDUE => portal_vm_sync_cause_text($text('since') !== ''
             ? __t('status.finding_mecm_pending_overdue', ['since' => $time('since'), 'hours' => (int) ($params['hours'] ?? 0)])
-            : __t('status.finding_mecm_pending'),
-        VIRTUSPHERE_VM_FINDING_MECM_PENDING => $text('since') !== ''
+            : __t('status.finding_mecm_pending'), $params),
+        VIRTUSPHERE_VM_FINDING_MECM_PENDING => portal_vm_sync_cause_text($text('since') !== ''
             ? __t('status.finding_mecm_pending_since', ['since' => $time('since')])
-            : __t('status.finding_mecm_pending'),
+            : __t('status.finding_mecm_pending'), $params),
         VIRTUSPHERE_VM_FINDING_POWERED_OFF => __t('status.finding_powered_off', ['time' => $time('time')]),
         VIRTUSPHERE_VM_FINDING_OS_INSTALL_OVERDUE => __t('status.finding_os_install_overdue', ['hours' => (int) ($params['hours'] ?? 0)]),
         VIRTUSPHERE_VM_FINDING_PXE_UNWATCHED => __t('status.finding_pxe_unwatched'),
@@ -172,4 +172,28 @@ function portal_vm_finding_text(array $finding): string
         VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED => __t('status.mecm_deploy_failed'),
         default => __t('status.finding_unknown'),
     };
+}
+
+/**
+ * The MECM wait sentence with the device sync's cause behind it (MX1, Q1): the
+ * full sentence of the editor and of the table cell's title names the cause, the
+ * short form of the cell does not (F7). A cause older than
+ * VIRTUSPHERE_VM_SYNC_CAUSE_AS_OF_AFTER_SECONDS names its observation time (Q2).
+ * Without a cause, or with a code outside the closed list, the sentence stays
+ * as it was; the code itself is never printed here.
+ *
+ * @param array<string,mixed> $params the finding's params (lib/vm_sync_cause.php)
+ */
+function portal_vm_sync_cause_text(string $sentence, array $params): string
+{
+    $code = (string) ($params['cause'] ?? '');
+    if (!in_array($code, VIRTUSPHERE_DEVICE_SYNC_CAUSES, true)) {
+        return $sentence;
+    }
+    $cause = __t('status.sync_cause_' . $code);
+    $observedAt = trim((string) ($params['cause_observed_at'] ?? ''));
+
+    return !empty($params['cause_as_of']) && $observedAt !== ''
+        ? __t('status.finding_mecm_cause_as_of', ['finding' => $sentence, 'cause' => $cause, 'time' => portal_format_datetime($observedAt)])
+        : __t('status.finding_mecm_cause', ['finding' => $sentence, 'cause' => $cause]);
 }

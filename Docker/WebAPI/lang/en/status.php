@@ -125,4 +125,34 @@ return [
     'finding_short_client_phase_unconfirmed' => 'Client phase unconfirmed',
     'finding_short_package_run_failed' => 'Package report failed',
     'finding_short_mecm_sync_deploy_failed' => 'MECM sync open',
+    // The device sync's cause at the finding "Waiting for MECM" (MX1). It is part of
+    // the full sentence (VM editor and table cell tooltip), never of the short
+    // form; past a certain age with "as of" and the observation time.
+    'finding_mecm_cause' => ':finding; cause: :cause',
+    'finding_mecm_cause_as_of' => ':finding; cause (as of :time): :cause',
+    // One phrase per device code (VIRTUSPHERE_DEVICE_SYNC_CAUSES) saying what holds
+    // the VM up. The system status help names the action.
+    'sync_cause_mission_missing' => 'VM without a mission',
+    'sync_cause_mac_missing' => 'no MAC on the WDS port group',
+    'sync_cause_pxe_nic_ambiguous' => 'several network adapters on the WDS port group',
+    'sync_cause_mac_conflict' => 'name and MAC point to different MECM devices',
+    'sync_cause_device_name_invalid' => 'Windows hostname is not a valid device name',
+    'sync_cause_device_identity_ambiguous' => 'several MECM records match the VM',
+    'sync_cause_previous_resource_present' => 'old MECM device still exists',
+    'sync_cause_resource_id_missing' => 'bound MECM device was deleted',
+    'sync_cause_resource_mac_conflict' => 'bound MECM device carries a different MAC',
+    'sync_cause_device_import_failed' => 'import into MECM failed',
+    'sync_cause_resource_id_pending' => 'MECM has not assigned a ResourceID yet',
+    'sync_cause_stale_rollout_revision' => 'scan used an outdated state, the next one starts over',
+    'sync_cause_collection_missing' => 'a collection of the VM is missing in MECM',
+    'sync_cause_collection_folder_failed' => 'folder of a collection not created or not moved',
+    'sync_cause_collection_assign_failed' => 'assignment to a collection failed',
+    'sync_cause_collection_remove_failed' => 'own collection assignment not removed',
+    'sync_cause_membership_provenance_invalid' => 'origin of a collection assignment incomplete',
+    'sync_cause_membership_identity_ambiguous' => 'collection not unique',
+    'sync_cause_membership_query_failed' => 'collection memberships not reliably readable',
+    'sync_cause_membership_operation_uncertain' => 'collection assignment unconfirmed after an abort',
+    'sync_cause_membership_report_pending' => 'collection assignment confirmed, report follows',
+    'sync_cause_membership_report_failed' => 'reporting the collection assignment to the portal failed',
+    'sync_cause_resource_update_failed' => 'reporting the ResourceID to the portal failed',
 ];

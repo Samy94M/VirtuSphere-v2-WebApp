@@ -446,6 +446,93 @@ final class VmFindingsTest extends TestCase
         self::assertSame([], $clean);
     }
 
+    /**
+     * MX1 (F13, Q2): a reported cause rides on the young wait at once, the
+     * severity stays `info`; the as-of mark starts exactly at its threshold.
+     *
+     * @return iterable<string, array{0:int,1:bool}>
+     */
+    public static function syncCauseAges(): iterable
+    {
+        yield 'fresh' => [-60, false];
+        yield 'one second before the as-of threshold' => [-VIRTUSPHERE_VM_SYNC_CAUSE_AS_OF_AFTER_SECONDS + 1, false];
+        yield 'exactly at the as-of threshold' => [-VIRTUSPHERE_VM_SYNC_CAUSE_AS_OF_AFTER_SECONDS, true];
+        yield 'a day old, still shown' => [-86400, true];
+    }
+
+    #[PHPUnit\Framework\Attributes\DataProvider('syncCauseAges')]
+    public function testAReportedSyncCauseRidesOnTheYoungWaitAndIsMarkedAsOfByAge(int $observedOffset, bool $asOf): void
+    {
+        $since = $this->at(-600);
+        $findings = virtusphere_vm_findings($this->pendingVm($since), $this->evidence([
+            'sync_cause' => $this->syncCause(['observed_at' => $this->at($observedOffset)]),
+        ]), self::NOW);
+
+        self::assertSame([VIRTUSPHERE_VM_FINDING_MECM_PENDING], $this->kinds($findings));
+        self::assertSame('info', $findings[0]['severity'], 'the cause does not raise the severity (F13)');
+        self::assertSame([
+            'since' => $since,
+            'cause' => 'mac_missing',
+            'cause_revision' => 3,
+            'cause_observed_at' => $this->at($observedOffset),
+            'cause_as_of' => $asOf,
+        ], $findings[0]['params']);
+        self::assertSame(['target' => VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_MECM], $findings[0]['link']);
+    }
+
+    public function testAReportedSyncCauseRidesOnTheOverdueWaitAfterItsHours(): void
+    {
+        $since = $this->at(-VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS - 1);
+        $findings = virtusphere_vm_findings($this->pendingVm($since), $this->evidence(['sync_cause' => $this->syncCause()]), self::NOW);
+
+        self::assertSame([VIRTUSPHERE_VM_FINDING_MECM_PENDING_OVERDUE], $this->kinds($findings));
+        self::assertSame([
+            'since' => $since,
+            'hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
+            'cause' => 'mac_missing',
+            'cause_revision' => 3,
+            'cause_observed_at' => $this->at(-60),
+            'cause_as_of' => false,
+        ], $findings[0]['params']);
+    }
+
+    /** Q7: stored for every delivered VM, shown only at the pending wait. */
+    public function testASyncCauseIsNeverShownOutsideThePendingWait(): void
+    {
+        $evidence = $this->evidence(['sync_cause' => $this->syncCause()]);
+        $deployFailed = virtusphere_vm_findings($this->vm(['mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED]), $evidence, self::NOW);
+        $registered = virtusphere_vm_findings($this->installingVm(['os_install_watch_started_at' => $this->at(-60)]), $evidence, self::NOW);
+
+        self::assertSame([VIRTUSPHERE_VM_FINDING_MECM_SYNC_DEPLOY_FAILED], $this->kinds($deployFailed));
+        foreach (array_merge($deployFailed, $registered) as $finding) {
+            self::assertArrayNotHasKey('cause', $finding['params'], $finding['kind']);
+        }
+    }
+
+    public function testASyncCauseWithAnUnusableTimeStillShowsWithoutClaimingOne(): void
+    {
+        foreach (['', 'not-a-timestamp', $this->at(3600)] as $observedAt) {
+            $findings = virtusphere_vm_findings($this->pendingVm($this->at(-60)), $this->evidence([
+                'sync_cause' => $this->syncCause(['observed_at' => $observedAt]),
+            ]), self::NOW);
+
+            self::assertSame('mac_missing', $findings[0]['params']['cause'], $observedAt);
+            self::assertSame('', $findings[0]['params']['cause_observed_at'], $observedAt);
+            self::assertFalse($findings[0]['params']['cause_as_of'], $observedAt);
+        }
+    }
+
+    public function testACodeOutsideTheClosedListIsNoCause(): void
+    {
+        foreach (['collection_update_failed', 'package_config_invalid', 'MAC_MISSING', ''] as $code) {
+            $findings = virtusphere_vm_findings($this->pendingVm($this->at(-60)), $this->evidence([
+                'sync_cause' => $this->syncCause(['code' => $code]),
+            ]), self::NOW);
+
+            self::assertSame(['since' => $this->at(-60)], $findings[0]['params'], $code);
+        }
+    }
+
     public function testSeveralFindingsFollowTheSeverityOrderOfTheList(): void
     {
         $vm = $this->vm([
@@ -572,6 +659,17 @@ final class VmFindingsTest extends TestCase
             'answered' => true,
             'fresh_at' => $this->at(-60),
             'vms' => [],
+        ];
+    }
+
+    /** @return array<string,mixed> a row as repo_vm_sync_causes_current() returns it */
+    private function syncCause(array $overrides = []): array
+    {
+        return $overrides + [
+            'code' => 'mac_missing',
+            'rollout_revision' => 3,
+            'run_id' => str_repeat('a', 32),
+            'observed_at' => $this->at(-60),
         ];
     }
 
