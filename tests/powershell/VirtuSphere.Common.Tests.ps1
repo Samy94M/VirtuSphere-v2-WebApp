@@ -1181,7 +1181,7 @@ Describe 'Client-Packaging (Get-VsClientAppSpecs / Copy-VsClientContent)' {
             $issues | Should -Contain 'return-code-type:1641'
 
             # SDK-Form ExitCode (Code/Class) wird gelesen; ohne jedes Typfeld ist der
-            # Befund "nicht lesbar" statt einer behaupteten Abweichung (Standort CGN).
+            # Befund "nicht lesbar" statt einer behaupteten Abweichung (an einem Standort).
             $sdkCodes = @(
                 [pscustomobject]@{ Code = 0; Class = 'Success' }
                 [pscustomobject]@{ Code = 1641; Class = 'HardReboot' }

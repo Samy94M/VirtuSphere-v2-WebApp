@@ -452,7 +452,7 @@ function Get-VsClientDeploymentTypeContractIssues {
             continue
         }
         # Get-CMDeploymentTypeReturnCode liefert ExitCode[]; der Typ ist ein
-        # ExitCodeClass-Wert (Microsoft-Doku). Am Standort CGN (02.11.2026) trug kein
+        # ExitCodeClass-Wert (Microsoft-Doku). An einem Standort (02.11.2026) trug kein
         # Objekt 'CodeType' oder 'Type', die Codes selbst wurden gefunden. 'Class' ist
         # der vermutete SDK-Name, die Site-Bestaetigung steht aus. Ein nicht lesbares
         # Typfeld ist ein eigener Befund, keine Abweichung vom Vertrag.

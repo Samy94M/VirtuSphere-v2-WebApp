@@ -360,7 +360,7 @@ Describe 'MC02 read-only client preflight inventory' {
 
     It 'runs content staging and the UNC manifest check from the file system, then returns before the CM writes' {
         # Initialize-VsCmSite leaves the session in the CM drive, where Test-Path and
-        # Get-ChildItem cannot resolve UNC paths (seen at site CGN, 02.11.2026).
+        # Get-ChildItem cannot resolve UNC paths (seen at a site, 02.11.2026).
         $siteAt = $script:InstallerSource.IndexOf('$siteCode = Initialize-VsCmSite')
         $pushAt = $script:InstallerSource.IndexOf('Push-Location -LiteralPath (Get-VsFileSystemRoot)')
         $copyAt = $script:InstallerSource.IndexOf('$dest = Copy-VsClientContent')

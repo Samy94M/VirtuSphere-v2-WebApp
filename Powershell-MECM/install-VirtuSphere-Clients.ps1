@@ -119,7 +119,7 @@ if ($clientLoggingVersion -ne $serverLoggingVersion) {
 
 # --- Content bereitstellen (kein CM noetig, hier scharf pruefbar) -----------
 # Initialize-VsCmSite hat ins CM-Laufwerk gewechselt. Von dort loesen Test-Path
-# und Get-ChildItem keine UNC-Pfade auf (am Standort CGN am 02.11.2026 im
+# und Get-ChildItem keine UNC-Pfade auf (an einem Standort am 02.11.2026 im
 # Notfalllauf umgangen). Der Datei- und Share-Teil laeuft deshalb wie im
 # Preflight an der Systemlaufwerkswurzel; danach zurueck ins CM-Laufwerk.
 Push-Location -LiteralPath (Get-VsFileSystemRoot)

@@ -292,16 +292,16 @@ Describe 'Get-VsDistributionCopySnapshot transport' {
                 param($Namespace, $ClassName, $Filter, $ComputerName, $ErrorAction)
                 if ($PSBoundParameters.ContainsKey('ComputerName')) { throw 'WinRM unavailable' }
                 [pscustomobject]@{
-                    PackageID = 'CGN0000E'; SecureObjectID = 'ScopeId_test/Application_test'
-                    ServerNALPath = 'local-dp'; SiteCode = 'CGN'; State = 0
+                    PackageID = 'ABC0000E'; SecureObjectID = 'ScopeId_test/Application_test'
+                    ServerNALPath = 'local-dp'; SiteCode = 'ABC'; State = 0
                     LastCopied = [datetime]'2026-09-11T09:00:00Z'
                 }
             }
             $previousComputerName = $env:COMPUTERNAME
             try {
                 $env:COMPUTERNAME = 'VS-LOCAL'
-                Get-VsDistributionCopySnapshot -PackageId 'CGN0000E' -ApplicationModelName 'ScopeId_test/Application_test' `
-                    -SiteCode 'CGN' -ProviderMachine ' vs-local '
+                Get-VsDistributionCopySnapshot -PackageId 'ABC0000E' -ApplicationModelName 'ScopeId_test/Application_test' `
+                    -SiteCode 'ABC' -ProviderMachine ' vs-local '
             } finally { $env:COMPUTERNAME = $previousComputerName }
         }
         $result.State | Should -Be 'known'
@@ -315,8 +315,8 @@ Describe 'Get-VsDistributionCopySnapshot transport' {
                 param($Namespace, $ClassName, $Filter, $ComputerName, $ErrorAction)
                 if ($ComputerName -ne 'remote-provider.invalid') { throw 'Wrong provider' }
             }
-            Get-VsDistributionCopySnapshot -PackageId 'CGN0000E' -ApplicationModelName 'ScopeId_test/Application_test' `
-                -SiteCode 'CGN' -ProviderMachine 'remote-provider.invalid'
+            Get-VsDistributionCopySnapshot -PackageId 'ABC0000E' -ApplicationModelName 'ScopeId_test/Application_test' `
+                -SiteCode 'ABC' -ProviderMachine 'remote-provider.invalid'
         }
         $result.State | Should -Be 'known'
         $result.Targets.Count | Should -Be 0
