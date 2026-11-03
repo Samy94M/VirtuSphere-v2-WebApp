@@ -2900,17 +2900,29 @@ Paket der Runde vor dem Rollout, Session mit Opus 5.5, Effort high, Worktree `fx
 - **Gates (`scripts/check.ps1` aus Windows PowerShell, Logs in `qa-artifacts/welle-fx1-2026-11-02/`):** `fast-1.log` js-syntax, file-size, doc-hygiene, doc-semantics 4/4 grün; `fast-2.log` phpunit-unit grün ohne Skips (Static-Tests lesen Spec-Quelltexte). Messläufe unter `heavy-run.ps1 -Label fx1`: `measure-2.log` (isoliert), `measure-3-wrapper.log` (volle WebKit-Suite), `measure-5.log` (Prüflauf mit Fix); `measure-1` und `measure-4` waren Werkzeugfehler (D0, D5). Release-Gates nach dem Commit: `FX1.done`.
 - **Offen:** Push offen (Nutzer 31.10.: alles lokal). Die Hostlast während der Release-Lane (ganze WebKit-Suite 1,6- bis 1,9-mal langsamer als allein) hat keine geklärte Quelle; die Sperre schließt nur andere schwere Läufe aus.
 
-#### Welle BK2 (02./03.11.2026): Rasterrauschen auf deploy-desktop und deploy-mobile gemessen, Entscheidung offen
+#### Welle BK2 (02./03.11.2026): Rasterrauschen auf deploy-desktop und deploy-mobile gemessen, `--disable-partial-raster` übernommen
 
-Paket der Nachtrunde, Session mit Opus 5.5, Effort high, Worktree `bk2-rasterrauschen-01bbdf`, Branch `claude/bk2-rasterrauschen-01bbdf` auf `bc325bc3`. Brief `qa-artifacts/session-handoff/waves/BK2-startbrief.md`. Kein Produkt-, Test-, Vertrags- oder Sollbildwechsel; Ende `BK2.blocked` mit Nutzerfrage. Nachweise, Messwerkzeug und Entscheidungen D1 bis D8 in `qa-artifacts/welle-bk2-2026-11-02/`.
+Paket der Nachtrunde, Session mit Opus 5.5, Effort high, Worktree `bk2-rasterrauschen-01bbdf`, Branch `claude/bk2-rasterrauschen-01bbdf` auf `bc325bc3`. Brief `qa-artifacts/session-handoff/waves/BK2-startbrief.md`. Zuerst `BK2.blocked` mit Nutzerfrage (06:40), nach der Nutzerentscheidung umgesetzt; kein Produktcode, keine Migration. Nachweise, Messwerkzeug und Entscheidungen D1 bis D9 in `qa-artifacts/welle-bk2-2026-11-02/`.
 
 - **Messung im QA-Stack** (Nachbau des aktuellen Bild-Specs mit allen neun Bildern je Theme, frischer Kontext je Aufnahme, Worker je Messprozess pausiert, sieben Blöcke unter `heavy-run.ps1 -Label bk2`): Varianten nur an zwei Stellen, eine Kanalstufe: untere Ecken des Knopfs „Session verlängern“ auf `deploy-desktop` (hell 14 px, dunkel 12 px), obere Ecken der Karte „Bereitstellungsauftrag einreihen“ auf `deploy-mobile` (hell 13 px, dunkel 16 px). Unverändert hell 8 von 78, dunkel 6 von 70 Desktop-Varianten, Mobile 0 von 148. W (Dokument am Stück per `route.fetch`) hell 15 und dunkel 11 von 30; K (Caret ab dem Parsen transparent) 2 von 30; NC (ohne Caret-Eingriff) 4 von 15; H und HALL (Seite bis `load` unsichtbar, nur Spec) Desktop 0 von 120, Mobile hell 2 von 60; D (`--disable-partial-raster`) je Theme 30 von 30 mit genau einer Fassung je Bild, 16 Bilder gleich dem Sollbild, beide `deploy-mobile` in ihrer bekannten Kantenvariante.
 - **Ursache (gemessen):** wie BK1 ein Zwischenzustand, der gerastert und danach teilweise neu gerastert wird. Die Deploy-Seite wird gezeichnet, bevor ihre `defer`-Skripte Formular und Session-Uhr setzen; je nach Weg (teilweise oder ganz neu gerastert) fallen die runden Ecken um eine Stufe anders aus. Nicht der Session-Tick, nicht das Eintreffen des Dokuments in Stücken (W vermehrt die Variante), nicht Playwrights Caret-Eingriff.
 - **Befund nebenbei:** Pausierte Worker schalten `deploy.php` nach etwa 2,5 min auf „Der Bereitstellungsdienst ist nicht erreichbar“ (Supervisor-Heartbeat älter als 90 s). Der Harness pausiert die Worker über alle Versuche beider Themes; das erklärt die großen Inhaltsdiffs früherer Läufe an den dunklen Deploy-Bildern (318982 und 427468 px im zweiten Versuch).
-- **Entscheidung offen:** Null erreicht nur D, eine Vertragsänderung außerhalb des Paketbesitzes (`runner-contract.json`, Listenfall im Vertragstest, Runner-Block des Manifests, zwei neue Sollbilder). Fertiger Entwurf `d-patch/d-disable-partial-raster.patch` (Vertragstest damit 23/24, rot nur der Manifestfall bis zum Writer-Lauf). Frage an den Nutzer in `BK2.blocked`.
+- **Nutzerentscheidung 03.11.2026:** „D übernehmen“, über die Koordination bestätigt („D: Startschalter“; der Bildvertrag liegt damit im BK2-Paket). Null erreicht nur D. **Umgesetzt:**
+  - `--disable-partial-raster` in den `launchArgs` von `tests/e2e/visual/runner-contract.json`.
+  - Listenfall mit Begründung in `tests/e2e/tests/visual-contract.test.js`. Gegen den alten Vertrag ist er rot (`contract-red-oldcontract.log`, 23/24).
+  - Absatz zur Deploy-Varianz und Ausnahmesatz in `docs/QA.md` „Reviewed target baselines“.
+- **Sollbilder:** nur über `scripts/update-visual-baselines.ps1`, getrieben von `tool/writer.ps1`. Der Treiber stellt den Sollbildsatz vor jedem Lauf aus HEAD wieder her. Er nimmt einen Lauf nur an, wenn light/dark `deploy-mobile` genau die unter D gemessenen SHA-256 tragen und die 16 übrigen Bilder byte-gleich sind.
+  - Der erste Lauf wurde angenommen (`writer.log`: „0 added, 2 replaced, 16 unchanged; deviation from target: none“).
+  - Prüfung je Bild im Review-Ordner `qa-artifacts/visual-baseline-review-20261103-080410-24316-3ee8130c/`: hell 13 px, dunkel 16 px. Alle Abweichungen liegen in den vier runden oberen Ecken der Karte „Bereitstellungsauftrag einreihen“ (Box x 14, y 248, 362 × 8), je eine Kanalstufe; kein Inhalt ist geändert.
+  - Das Manifest ändert nur Grund, Zeitstempel, `launchArgs` im Runner-Block und die zwei Hashes.
+  - Vertragstest danach 24/24 (`contract-green.log`).
 - **Quellen (Regel 7):** [WHATWG HTML „The end“](https://html.spec.whatwg.org/multipage/parsing.html#the-end) (`defer`-Skripte vor `DOMContentLoaded`, `load` danach), [CSS Display 3 `visibility`](https://www.w3.org/TR/css-display-3/#visibility), [CDP `Page.captureScreenshot`](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Page.pdl) (`captureBeyondViewport`), [rrweb PR 286](https://github.com/getsentry/rrweb/pull/286) (`replaceSync` unter CSP), die Partial-Raster-Quellen aus BK1. Die Ursache stützt sich auf die Messung.
-- **Gates:** nur Fast-Doku (`fast-docs-1.log`), weil nur dieser Abschnitt geändert ist. Kein Integration-Gate.
-- **Offen:** Push offen (Nutzer 31.10.: alles lokal). Nutzerentscheidung zu D, H oder nichts; Worker-Pause des Harness gegen die 90-s-Heartbeat-Grenze (eigenes Paket, Harness nicht im BK2-Besitz).
+- **Gates:**
+  - Fast `file-size`, `doc-hygiene`, `doc-semantics`, `js-syntax`: `fast-2.log`.
+  - Integration `qa-stack`, `e2e-portal` (mit echtem Bildvergleich) und `visual-contract` zweimal hintereinander: `integ-1.log` und `integ-2.log`. Ergebnis im Nachtrag unten.
+- **Offen:**
+  - Push offen (Nutzer 31.10.: alles lokal).
+  - Worker-Pause des Harness gegen die 90-s-Heartbeat-Grenze: eigenes Paket nach dem Rollout (Nutzerentscheidung 03.11.), nicht angefasst.
 
 ### Notfall 02.11.2026: Core-Applications am Standort CGN neu angelegt
 
