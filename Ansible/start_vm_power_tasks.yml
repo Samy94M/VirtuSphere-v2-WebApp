@@ -1,0 +1,92 @@
+---
+# Einschalten einer VM im Start-Schritt, mit Wiederholung (K4a, W1).
+#
+# Eingebunden je VM aus startVMs-ESXi_playbook.yml, nach Identitaetspruefung
+# und Wartezeit. `powered-on` ohne force ueber die Instance-UUID ist
+# idempotent: eine VM, die ein frueherer Versuch schon eingeschaltet hat,
+# meldet nur `changed: false`. Deshalb darf ein Fehlschlag (etwa HTTP 503) bis
+# zu dreimal wiederholt werden, mit den Pausen aus esxi_retry_wait_tasks.yml.
+#
+# Die Fortschrittszeilen (`RUN Start`, danach `pass|fail Start`) stehen nur auf
+# der aeussersten Ebene; die Wiederholungen binden dieselbe Datei mit
+# start_power_is_retry ein. Ein endgueltiger Fehlschlag bricht NICHT ab: die
+# uebrigen VMs werden trotzdem gestartet, und das Playbook endet danach mit
+# der Liste der nicht gestarteten VMs (start_power_failures).
+- name: Beginn des Einschaltens melden
+  ansible.builtin.debug:
+    msg: "[{{ start_index + 1 }}/{{ start_identity_results.results | length }}] RUN Start {{ start_vm['item']['vm_name'] }}"
+  when: not (start_power_is_retry | default(false) | bool)
+
+- name: Ersten Einschaltversuch zaehlen
+  ansible.builtin.set_fact:
+    start_power_attempt: 1
+  when: not (start_power_is_retry | default(false) | bool)
+
+- name: Vorhandene VM starten
+  community.vmware.vmware_guest_powerstate:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+    uuid: "{{ (start_vm['instance'] | default({}))['instance_uuid'] }}"
+    use_instance_uuid: true
+    folder: "/"
+    datacenter: "{{ (start_vm['item'] | default({}))['datacenter_name'] }}"
+    state: powered-on
+    force: false
+  delegate_to: localhost
+  register: start_power_result
+  # Toleriert bis zum letzten Versuch; danach wird der Fehlschlag gesammelt.
+  ignore_errors: true
+
+- name: Naechsten Einschaltversuch entscheiden
+  ansible.builtin.set_fact:
+    start_power_again: >-
+      {{
+        (start_power_result['failed'] | default(false) | bool)
+        and (start_power_attempt | int) <= ((EsxiRetryPauseSeconds | default([5, 15, 45])) | length)
+      }}
+
+- name: Vor dem naechsten Einschaltversuch warten
+  ansible.builtin.include_tasks: ./esxi_retry_wait_tasks.yml
+  vars:
+    vs_retry_position: "[{{ start_index + 1 }}/{{ start_identity_results.results | length }}]"
+    vs_retry_unit: "Start {{ start_vm['item']['vm_name'] }}"
+    vs_retry_attempt: "{{ start_power_attempt }}"
+    vs_retry_cause: "{{ start_power_result['msg'] | default('') }}"
+  when: start_power_again | bool
+
+- name: Einschaltversuch hochzaehlen
+  ansible.builtin.set_fact:
+    start_power_attempt: "{{ start_power_attempt | int + 1 }}"
+  when: start_power_again | bool
+
+- name: VM erneut starten
+  ansible.builtin.include_tasks: ./start_vm_power_tasks.yml
+  vars:
+    start_power_is_retry: true
+  when: start_power_again | bool
+
+- name: Endgueltig nicht gestartete VM sammeln
+  ansible.builtin.set_fact:
+    start_power_failures: >-
+      {{
+        start_power_failures
+        + [start_vm['item']['vm_name'] ~ ' after ' ~ start_power_attempt ~ ' attempt(s): '
+           ~ (start_power_result['msg'] | default('no module message') | string | replace('\n', ' ') | truncate(300))]
+      }}
+  when:
+    - not (start_power_is_retry | default(false) | bool)
+    - start_power_result['failed'] | default(false) | bool
+
+- name: Ergebnis des Einschaltens melden
+  ansible.builtin.debug:
+    msg: >-
+      [{{ start_index + 1 }}/{{ start_identity_results.results | length }}]
+      {{ 'fail' if start_power_result['failed'] | default(false) | bool else 'pass' }}
+      Start {{ start_vm['item']['vm_name'] }}{{
+        (': ' ~ (start_power_result['msg'] | default('no module message') | string | replace('\n', ' ') | truncate(300)))
+        if (start_power_result['failed'] | default(false) | bool) else ''
+      }}
+  when: not (start_power_is_retry | default(false) | bool)

@@ -1,0 +1,314 @@
+# Repository contract for visible progress in long-running checks. This test
+# deliberately reads the agent instructions as well as both canonical runners:
+# the convention must survive new sessions and future model changes, not only
+# today's implementation.
+
+BeforeAll {
+    $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $script:AgentGuide = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'AGENTS.md') -Raw
+    $script:ClaudeGuide = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'CLAUDE.md') -Raw
+    $script:QaGuide = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'docs') 'QA.md') -Raw
+    $script:CheckRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1') -Raw
+    $script:CheckRuntime = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'runtime.ps1') -Raw
+    $script:FastGates = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'gates-fast.ps1') -Raw
+    $script:CreateAsyncContract = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'qa-ansible') 'create-async-contract.py') -Raw
+    $script:PowercycleInfoTasks = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Ansible') 'powercycle_vm_info.yml') -Raw
+    $script:ExportInfoTasks = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Ansible') 'export_vm_info.yml') -Raw
+    $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
+    $script:DocHygiene = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check-doc-hygiene.sh') -Raw
+    $script:PowerShellRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'run-pester.ps1') -Raw
+    $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
+    $script:CollectionLock = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'verify-collection-lock.py') -Raw
+    $script:CollectionLockContract = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'collection-lock-contract.py') -Raw
+    $script:NetworkPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI/lib') 'deploy_worker_network_preflight.php') -Raw
+    $script:MecmCommon = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-Common.ps1') -Raw
+    $script:ClientPreflight = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientPreflight.ps1') -Raw
+    $script:LegacyRetirement = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-LegacyRetirement.ps1') -Raw
+    $script:SiteSurvey = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-SiteSurvey.ps1') -Raw
+    $script:ClientBundles = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'mecm') 'VirtuSphere-ClientBundles.ps1') -Raw
+    $script:PackageWrapper = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage/install.ps1') -Raw
+    $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
+    $script:BackupRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
+}
+
+
+Describe 'Visible progress reporting contract' {
+    It 'reports each client preflight phase and each content manifest read' {
+        $script:ClientPreflight | Should -Match '\[0/\$total\] RUN client-preflight'
+        $script:ClientPreflight | Should -Match '\$total = 8\b'
+        foreach ($index in 1..8) {
+            $script:ClientPreflight | Should -Match ("\[$index/\`$total\] RUN ")
+            $script:ClientPreflight | Should -Match ("\[$index/\`$total\] DONE ")
+        }
+        $script:ClientPreflight | Should -Match '\[\$specIndex/\$specCount\] RUN content-manifest'
+        $script:ClientPreflight | Should -Match '\[\$specIndex/\$specCount\] DONE content-manifest'
+        $script:ClientPreflight | Should -Match '\[0/4\] RUN shared-references'
+        foreach ($unit in @('1/4\] (RUN|DONE) application-groups', '2/4\] (RUN|DONE) task-sequence-references', '3/4\] (RUN|DONE) dependence-relations', '4/4\] (RUN|DONE) ci-relations')) {
+            ([regex]::Matches($script:ClientPreflight, ('\[' + $unit))).Count | Should -Be 2 -Because $unit
+        }
+        $script:ClientPreflight | Should -Match '\[0/\$\(\$policyCollections.Count\)\] RUN deployment-collections'
+        $script:ClientPreflight | Should -Match '\[\$collectionIndex/\$\(\$policyCollections.Count\)\] RUN deployment-collection \$id'
+        $script:ClientPreflight | Should -Match '\[\$collectionIndex/\$\(\$policyCollections.Count\)\] DONE deployment-collection \$id'
+        $script:ClientPreflight | Should -Match '\[0/\$\(\$points.Count\)\] RUN distribution-points'
+        $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] RUN distribution-point'
+        $script:ClientPreflight | Should -Match '\[\$pointIndex/\$\(\$points.Count\)\] DONE distribution-point'
+    }
+
+    It 'reports each client bundle folder build with a total derived from the specs' {
+        $script:ClientBundles | Should -Match "'\[0/\{0\}\] RUN client-bundle-content' -f \`$specs.Count"
+        foreach ($result in @('RUN', 'DONE', 'FAIL')) {
+            $script:ClientBundles | Should -Match ("'\[\{0\}/\{1\}\] $result client-bundle \{2\}' -f \`$ordinal, \`$specs.Count")
+        }
+        $script:ClientBundles | Should -Not -Match '\[\{0\}/4\]|\[0/4\]'
+    }
+
+    It 'reports each legacy retirement read and each guarded write' {
+        $script:LegacyRetirement | Should -Match '\[0/\$total\] RUN legacy-retirement-inventory'
+        $script:LegacyRetirement | Should -Match '\[\$position/\$total\] RUN legacy-application'
+        $script:LegacyRetirement | Should -Match '\[\$position/\$total\] DONE legacy-application'
+        foreach ($unit in @('similar-names', 'application-groups', 'core-chain')) {
+            $script:LegacyRetirement | Should -Match ("\[\`$position/\`$total\] RUN $unit")
+            $script:LegacyRetirement | Should -Match ("\[\`$position/\`$total\] DONE $unit")
+        }
+        $script:LegacyRetirement | Should -Match '\[0/\$total\] RUN legacy-retirement \$Stage'
+        $script:LegacyRetirement | Should -Match '\[\$index/\$total\] RUN \$label'
+        $script:LegacyRetirement | Should -Match '\[\$index/\$total\] pass \$label'
+        $script:LegacyRetirement | Should -Match '\[\$index/\$total\] fail \$label'
+        $script:LegacyRetirement | Should -Match '\[\{0\}/\{1\}\] skip \{2\}'
+    }
+
+    It 'reports the site survey start and each section before and after it runs' {
+        $script:SiteSurvey | Should -Match "Format-VsSurveyProgress -Position 0 -Total \`$total -Phase 'RUN' -Unit 'site-survey'"
+        $script:SiteSurvey | Should -Match "Format-VsSurveyProgress -Position \`$Position -Total \`$Total -Phase 'RUN' -Unit \`$Name"
+        $script:SiteSurvey | Should -Match "Format-VsSurveyProgress -Position \`$Position -Total \`$Total -Phase \`$status -Unit \`$Name"
+    }
+
+    It 'reports each package step around the existing hash and child decision' {
+        $script:PackageWrapper | Should -Match '\[0/\$knownStepTotal\]'
+        $script:PackageWrapper | Should -Match '\[\$stepIndex/\$knownStepTotal\] RUN \$scriptName'
+        $script:PackageWrapper | Should -Match '\[\$Index/\$displayTotal\] \$Outcome \$ScriptName'
+        $script:PackageWrapper | Should -Match "'SKIP'|Outcome SKIP"
+    }
+
+    It 'streams the powercycle production-flow cases with bounded progress' {
+        $source = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/powercycle-sequence-contract.py') -Raw
+        $source | Should -Match 'enumerate\(CASES, 1\)'
+        $source | Should -Match '\] RUN '
+        $source | Should -Match '\] pass '
+        $source | Should -Match '\] fail '
+        $script:FastGates | Should -Match "powercycle-sequence-contract\.py'\) -Live"
+    }
+
+    It 'reports each per-VM touch and info boundary before the ESXi read' {
+        $script:PowercycleInfoTasks | Should -Match '\[\{\{ powercycle_info_index \+ 1 \}\}/\{\{ powercycle_targets \| length \}\}\] RUN Powercycle info'
+        $script:PowercycleInfoTasks | Should -Match '\[\{\{ powercycle_info_index \+ 1 \}\}/\{\{ powercycle_targets \| length \}\}\] (pass|fail) Powercycle info'
+        $script:ExportInfoTasks | Should -Match '\[\{\{ export_info_index \+ 1 \}\}/\{\{ vm_configurations \| length \}\}\] RUN Export info'
+        $script:ExportInfoTasks | Should -Match '\[\{\{ export_info_index \+ 1 \}\}/\{\{ vm_configurations \| length \}\}\] (pass|fail) Export info'
+
+        foreach ($source in @($script:PowercycleInfoTasks, $script:ExportInfoTasks)) {
+            $touchPosition = $source.IndexOf('./report_vm_touch.py')
+            # K4a: the ESXi read is the shared, repeated include.
+            $infoPosition = $source.IndexOf('include_tasks: ./esxi_vm_read_tasks.yml')
+            $touchPosition | Should -BeGreaterOrEqual 0
+            $infoPosition | Should -BeGreaterThan $touchPosition
+        }
+    }
+
+    It 'reports every start and autostart VM before and after its ESXi call (K4a)' {
+        $ansible = Join-Path $script:RepoRoot 'Ansible'
+        $identity = Get-Content -LiteralPath (Join-Path $ansible 'vm_identity_read_tasks.yml') -Raw
+        $start = Get-Content -LiteralPath (Join-Path $ansible 'start_vm_power_tasks.yml') -Raw
+        $autostart = Get-Content -LiteralPath (Join-Path $ansible 'autostart_write_tasks.yml') -Raw
+        $identity | Should -Match '\[\{\{ vs_identity_index \+ 1 \}\}/\{\{ vs_identity_total \}\}\] RUN \{\{ vs_identity_step \}\} info'
+        $identity | Should -Match "'fail' if vs_vm_read\['failed'\]"
+        $start | Should -Match '\[\{\{ start_index \+ 1 \}\}/\{\{ start_identity_results\.results \| length \}\}\] RUN Start'
+        $start | Should -Match "'fail' if start_power_result\['failed'\]"
+        $autostart | Should -Match '\{\{ autostart_position \}\} RUN \{\{ autostart_unit \}\}'
+        $autostart | Should -Match "'fail' if autostart_write_result\['failed'\]"
+        $identity.IndexOf('] RUN ') | Should -BeLessThan $identity.IndexOf('include_tasks: ./esxi_vm_read_tasks.yml')
+        foreach ($pair in @(@($start, '] RUN Start'), @($autostart, ' RUN {{ autostart_unit }}'))) {
+            $call = $pair[0].IndexOf('community.vmware.')
+            $run = $pair[0].IndexOf($pair[1])
+            $run | Should -BeGreaterOrEqual 0
+            $call | Should -BeGreaterThan $run
+        }
+    }
+
+    It 'streams the export, start and autostart retry cases with bounded progress' {
+        $source = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/esxi-step-retry-contract.py') -Raw
+        $source | Should -Match 'enumerate\(CASES, 1\)'
+        $source | Should -Match '\] RUN '
+        $source | Should -Match '\] pass '
+        $source | Should -Match '\] fail '
+        $script:FastGates | Should -Match "esxi-step-retry-contract\.py'\) -Live"
+    }
+
+    It 'binds future agents and multi-unit runners to the n/total convention' {
+        $script:AgentGuide | Should -Match 'Progress reporting is a repository contract'
+        $script:AgentGuide | Should -Match '\[n/total\] RUN'
+        $script:AgentGuide | Should -Match 'buffered'
+        $script:AgentGuide | Should -Match '\[0/total\]'
+        $script:AgentGuide | Should -Match 'elapsed-time-only'
+        $script:ClaudeGuide | Should -Match 'actual latest `\[n/total\]`'
+        $script:QaGuide | Should -Match 'latest real `\[n/total\]`'
+        $script:QaGuide | Should -Match '`\[0/total\]`'
+    }
+
+    It 'reports every selected check gate before and after execution' {
+        $script:CheckRunner | Should -Match '\$gateTotal\s*=\s*\$selected\.Count'
+        $script:CheckRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"
+        $script:CheckRunner | Should -Match "'\[\{0\}/\{1\}\] \{2\} \{3\}"
+    }
+
+    It 'streams the long PowerShell child while preserving its captured artifact' {
+        $script:CheckRuntime | Should -Match 'param\(\[string\]\$Exe, \[string\[\]\]\$Arguments = @\(\), \[switch\]\$Live\)'
+        $script:CheckRuntime | Should -Match 'if \(\$Live\) \{ Write-Host \$line \}'
+        $script:FastGates | Should -Match "run-pester\.ps1'\)\) -Live"
+    }
+
+    It 'reports the selected analyzer, Pester suite and historical register units before and after execution' {
+        $script:PowerShellRunner | Should -Match '\$unitTotal\s*=\s*0'
+        $script:PowerShellRunner | Should -Match 'if \(-not \$SkipAnalyzer\) \{ \$unitTotal \+= 2 \}'
+        $script:PowerShellRunner | Should -Match 'if \(-not \$SkipTests\) \{\s+\$unitTotal\+\+'
+        $script:PowerShellRunner | Should -Match 'if \(\$registerPresent\) \{ \$unitTotal\+\+ \}'
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"
+        ([regex]::Matches($script:PowerShellRunner, "Write-Host \('\[\{0\}/\{1\}\] RUN\s+\{2\}'")).Count | Should -Be 4
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''PSScriptAnalyzer \(Powershell-MECM\)'''
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''PSScriptAnalyzer \(scripts, tests\\powershell\)'''
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''Pester \(tests\\powershell\)'''
+        $script:PowerShellRunner | Should -Match '\$unitName\s*=\s*''Haertungsregister 2026-08 \(nicht Teil des Gates\)'''
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] pass \{2\}:"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] fail \{2\}:"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] open \{2\}:"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] infrastructure_error \{2\}:"
+    }
+
+    It 'classifies the blocking Pester run from its run object with the canonical result lines' {
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] infrastructure_error \{2\}: Invoke-Pester lieferte kein Ergebnisobjekt'
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] infrastructure_error \{2\}: 0 Tests entdeckt'
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] pass \{2\}: \{3\} Test\(s\) gruen'
+        $script:PowerShellRunner | Should -Match '\[\{0\}/\{1\}\] fail \{2\}: \{3\} Test\(s\) rot, \{4\} Container gescheitert, \{5\} Setup/Teardown-Bloecke gescheitert'
+        $script:PowerShellRunner | Should -Match 'Container gescheitert: \{0\}: \{1\}'
+        $script:PowerShellRunner | Should -Match 'Coverage-Ergebnis fehlt'
+    }
+
+    It 'shows named historical results and distinguishes discovery failure from an empty register without blocking the gate' {
+        $script:PowerShellRunner | Should -Match '\$regConfig\.Output\.Verbosity\s*=\s*''Detailed'''
+        $script:PowerShellRunner | Should -Match '\$registerFailedContainers\s*=\s*@\(\$reg\.FailedContainers'
+        $script:PowerShellRunner | Should -Match '\$reg\.FailedContainersCount -gt 0 -or \$reg\.FailedBlocksCount -gt 0'
+        $script:PowerShellRunner | Should -Match 'Discovery/Containerfehler:'
+        $script:PowerShellRunner | Should -Match '\$reg\.TotalCount\s*-eq\s*0'
+        $script:PowerShellRunner | Should -Match '0 Tests entdeckt \(nicht blockierend\)'
+        $registerSection = $script:PowerShellRunner.Substring($script:PowerShellRunner.IndexOf('# --- Haertungsregister'))
+        $registerSection | Should -Not -Match '\$failed\s*=\s*\$true'
+    }
+
+    It 'reports every host cleanup case before and after it and streams the gate live' {
+        $probe = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'tests/host-cleanup/host-cleanup-probe.sh') -Raw
+        $probe | Should -Match '\[0/\$TOTAL\] START'
+        $probe | Should -Match 'echo "\[\$DONE/\$TOTAL\] RUN '
+        $probe | Should -Match 'echo "\[\$DONE/\$TOTAL\] PASS '
+        $probe | Should -Match 'echo "\[\$DONE/\$TOTAL\] FAIL '
+        $script:FastGates | Should -Match "host-cleanup-probe\.sh', '/repo/Ansible/host-cleanup'\) -Live"
+    }
+
+    It 'reports and streams every create async production sample' {
+        $script:CreateAsyncContract | Should -Match 'for index, \(label, case\) in enumerate\(cases, start=1\)'
+        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] RUN \{label\}"'
+        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] PASS \{label\}"'
+        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] FAIL \{label\}:'
+        $script:FastGates | Should -Match "create-async-contract\.py'.+-Live"
+    }
+
+    It 'keeps launch and status read-failure samples inside the counted create loop' {
+        foreach ($label in @('prepare-bound-powered-on', 'launch-powered-on', 'launch-power-unknown', 'launch-suspended', 'launch-powered-off', 'status-power-read-failure', 'status-identity-read-failure')) {
+            $script:CreateAsyncContract | Should -Match ([regex]::Escape($label))
+        }
+        $loop = $script:CreateAsyncContract.Substring($script:CreateAsyncContract.IndexOf('for index, (label, case)'))
+        $loop | Should -Match 'run_launch_case\(repo, label, case\[1\]\)'
+        $loop | Should -Match 'read_failure=case\[1\]'
+        $loop.IndexOf('] RUN') | Should -BeLessThan $loop.IndexOf('run_launch_case(')
+        $loop.IndexOf('run_launch_case(') | Should -BeLessThan $loop.IndexOf('] PASS')
+    }
+
+    It 'reports every selected guard case before and after execution' {
+        $script:GuardRunner | Should -Match '\$caseTotal\s*=\s*\$selected\.Count'
+        $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] RUN\s+\{2\}'"
+        $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] proven\s+\{2\}'"
+    }
+
+    It 'reports each document boundary while preserving quiet hook operation' {
+        $script:DocHygiene | Should -Match 'for file in AGENTS\.md GROK\.md CLAUDE\.md README\.md'
+        $script:DocHygiene | Should -Match '\[\$file_index/4\] RUN doc-hygiene \$file'
+        $script:DocHygiene | Should -Match '\[\$file_index/4\] \$result doc-hygiene \$file'
+        $script:DocHygiene | Should -Match '\[\$file_index/4\] fail doc-hygiene \$file'
+        $script:DocHygiene | Should -Match '\[ "\$quiet" -eq 1 \] \|\| echo'
+        $script:DocHygiene | Should -Match 'if \[ "\$quiet" -eq 0 \]; then'
+    }
+
+    It 'counts the complete unmutated module fixture as an observable guard case' {
+        $script:GuardRunner | Should -Match "Name = 'runner.ansible-module-contract.control'"
+        $script:GuardRunner | Should -Match 'New-Fixture \$moduleContractFixtureFiles'
+        $script:GuardRunner | Should -Match 'Docker/qa-ansible/verify-collection-lock.py'
+        $script:GuardRunner | Should -Match 'Docker/qa-ansible/collection-lock-contract.py'
+    }
+
+    It 'reports every visual theme before and after, and every capture inside it' {
+        # Die Fortschrittseinheit ist seit Etappe 17 das Theme, nicht der
+        # einzelne Playwright-Lauf: wie viele Aufnahmen ein Theme braucht, haengt
+        # am Ergebnis (zwei Versuche immer, ein dritter nur fuer noch offene
+        # Bilder), und ein Gesamtwert, der nie erreicht wird, liest sich wie ein
+        # abgebrochener Lauf. Jede Aufnahme meldet sich weiterhin, als Unterzeile
+        # unter ihrem Theme.
+        $script:VisualRunner | Should -Match 'const total = contract\.themes\.length'
+        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] RUN visual-'
+        $script:VisualRunner | Should -Match '`\[\$\{position\}/\$\{total\}\] \$\{state\} visual-'
+        $script:VisualRunner | Should -Match "const state = themes\[theme\]\.unmatched\.length === 0 \? 'pass' : 'fail'"
+        $script:VisualRunner | Should -Match '`  capture \$\{label\}'
+    }
+
+    It 'reports every effective VM around the worker network preflight' {
+        $script:NetworkPreflight | Should -Match '\$progressRows\s*=\s*\$preflight\[''vms''\]'
+        $script:NetworkPreflight | Should -Match 'foreach\s*\(\$missingVmIds\s+as\s+\$missingVmId\)'
+        $script:NetworkPreflight | Should -Match '\$total\s*=\s*count\(\$progressRows\)'
+        $script:NetworkPreflight | Should -Match '\$position.+\$total.+RUN network/WDS preflight'
+        $script:NetworkPreflight | Should -Match '\$position.+\$total.+OK network/WDS preflight'
+        $script:NetworkPreflight | Should -Match '\$position.+\$total.+FAIL network/WDS preflight'
+    }
+
+    It 'reports every pinned Ansible collection before and after lock verification' {
+        $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] RUN collection-lock-'
+        $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] PASS collection-lock-'
+        $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] FAIL collection-lock-'
+        $script:CollectionLockContract | Should -Match '\[\{position\}/\{total\}\] RUN collection-lock-contract-'
+        $script:CollectionLockContract | Should -Match '\[\{position\}/\{total\}\] PASS collection-lock-contract-'
+        $script:CollectionLockContract | Should -Match '\[\{position\}/\{total\}\] FAIL collection-lock-contract-'
+    }
+
+    It 'keeps the portal closure probes inside the counted guard harness' {
+        $script:GuardRunner | Should -Match "Name = 'portal-require-closure.probes'"
+        $script:GuardRunner | Should -Match '--fail-on-empty-test-suite'
+        $script:GuardRunner | Should -Match 'Zero entrypoints are a contract error'
+        (Get-Content -Raw (Join-Path $script:RepoRoot 'scripts/lib/check/gates-integration.ps1')) | Should -Match "test-guards\.ps1'\)\) -Live"
+    }
+
+    It 'reports every restore and backup phase before and after execution' {
+        $script:RestoreDrill | Should -Match 'PROGRESS_TOTAL=10'
+        $script:RestoreDrill | Should -Match 'echo "\[\$progress_position/\$PROGRESS_TOTAL\] RUN \$progress_unit"'
+        ([regex]::Matches($script:RestoreDrill, 'progress_run (10|[1-9]) ')).Count | Should -Be 10
+        $script:RestoreDrill | Should -Match 'progress_result (pass|fail|infrastructure_error)'
+        $script:RestoreDrill | Should -Match 'progress_run 10 cleanup'
+        $script:BackupRunner | Should -Match 'BACKUP_PROGRESS_TOTAL=6'
+        $script:BackupRunner | Should -Match 'echo "\[\$backup_progress_position/\$BACKUP_PROGRESS_TOTAL\] RUN \$backup_progress_unit"'
+        ([regex]::Matches($script:BackupRunner, 'backup_progress_run [1-6] ')).Count | Should -Be 6
+        $script:BackupRunner | Should -Match 'backup_progress_result (pass|fail)'
+    }
+
+    It 'reports every automatically requested and revalidated MECM cleanup unit without polluting its result stream' {
+        $script:MecmCommon | Should -Match '\$total\s*=\s*@\(\$CurrentPlan\.Items\)\.Count'
+        $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] RUN cleanup'
+        $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] pass cleanup'
+        $script:MecmCommon | Should -Match '\[\{0\}/\{1\}\] fail cleanup'
+        $script:MecmCommon | Should -Not -Match 'Write-Output\s+\("\[\{0\}/\{1\}\].*cleanup'
+    }
+}

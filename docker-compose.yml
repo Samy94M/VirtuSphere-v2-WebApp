@@ -1,0 +1,304 @@
+x-app-db-environment: &app-db-environment
+  APP_ENV: ${APP_ENV}
+  APP_KEY: ${APP_KEY}
+  DB_HOST: ${DB_HOST}
+  DB_NAME: ${DB_NAME}
+  DB_PASS: ${DB_PASS}
+  DB_PORT: ${DB_PORT}
+  DB_USER: ${DB_USER}
+  VIRTUSPHERE_DEBUG: ${VIRTUSPHERE_DEBUG:-0}
+
+# One bounded container-log policy for every long-lived runtime service. nginx
+# writes access/error output to stdout/stderr as well, so it is covered by the
+# same 50 MiB upper bound instead of growing an unrotated host bind mount.
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# One versioned runtime image for FPM and both workers. Compose builds this
+# target once and all three services resolve the same tag/Image-ID; QA and
+# release tooling deliberately use the separate `tooling` target.
+x-php-runtime: &php-runtime
+  image: virtusphere-php:8.4-runtime
+
+services:
+  webserver:
+    build:
+      context: ./Docker/nginx
+      dockerfile: Dockerfile
+    ports:
+      - "${APP_BIND_IP}:${WEB_HTTP_PORT}:8080"
+      # HTTPS (WP7): unprivileged container port, served by the admin-generated
+      # server block in virtusphere-conf.d; inert until a cert is uploaded.
+      - "${APP_BIND_IP}:${WEB_HTTPS_PORT}:8443"
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+      - ./Docker/nginx/ssl:/etc/nginx/ssl
+      - ./Docker/nginx/conf.d:/etc/nginx/virtusphere-conf.d
+    logging: *container-logging
+    # Bewusst KEIN env_file und keine environment-Sektion. Der Container las mit
+    # `env_file: .env` APP_KEY, DB_PASS und MYSQL_ROOT_PASSWORD, obwohl das Image
+    # keinen dieser Werte anfasst: init.sh liest keine Umgebung, default.conf ist
+    # statisch, und der envsubst-Entrypoint des Basisimages laeuft nicht. Die
+    # veroeffentlichten Ports kommen aus der Host-seitigen Interpolation, nicht aus
+    # der Container-Umgebung. Ein LAN-zugewandter Prozess mit dem
+    # Datenbank-Rootpasswort im `env` ist Reichweite ohne Gegenwert.
+    # SSL_SUBJECT stand hier und wurde von nichts gelesen; es ist auch aus
+    # .env.example und dem Runbook entfernt.
+    # Gepinnt durch scripts/check-compose-hardening.ps1 ([compose.env-scope]).
+    depends_on:
+      php:
+        # Real PHP readiness (AP8): nginx only starts once FPM answers its
+        # FastCGI ping, so a cold `up --wait` cannot go green with a dead
+        # upstream behind it.
+        condition: service_healthy
+    healthcheck:
+      # nginx-only probe (no PHP, no DB): a database outage must not flag the
+      # webserver unhealthy. Busybox wget ships with the alpine base.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      # nginx master starts as root, chowns its temp/cache dirs to the
+      # worker uid (101) and drops privileges to that worker. Port 8080
+      # is unprivileged, so NET_BIND_SERVICE is intentionally not granted.
+      - CHOWN
+      - SETGID
+      - SETUID
+      # Read-only DAC bypass so the root master can load the TLS key that PHP
+      # writes as www-data with mode 0600 (WP7). Narrower than DAC_OVERRIDE:
+      # no write bypass.
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+
+  php:
+    <<: *php-runtime
+    # Sole build owner. Workers reference the resulting versioned image only,
+    # so `compose build` evaluates this target once instead of once per service.
+    build:
+      context: ./Docker/php
+      dockerfile: Dockerfile
+      target: runtime
+    expose:
+      - 9000
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+      # HTTPS admin flow (ADR-0012): PHP writes cert/key and the generated
+      # server block here; the watcher inside the nginx container picks them
+      # up. PHP never talks to Docker or nginx directly.
+      - ./Docker/nginx/ssl:/etc/nginx/ssl
+      - ./Docker/nginx/conf.d:/etc/nginx/virtusphere-conf.d
+      # Read-only: only the backup STATUS channel (JSONL), never the dumps or the
+      # config tar (which contains .env with the DB root password). ADR-0021.
+      - ./Docker/backups/status:/var/backups/virtusphere-status:ro
+      # The playbooks, read-only and OUTSIDE the webroot (nginx serves only
+      # /var/www/html). PHP-FPM never runs them. This exists so the contract
+      # tests that read the playbook source actually run here instead of
+      # skipping, which is how a skipped test silently stops guarding anything.
+      - ./Ansible:/var/www/ansible-src:ro
+    environment:
+      <<: *app-db-environment
+      ANSIBLE_SOURCE_DIR: /var/www/ansible-src
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_USER: ${SEED_ADMIN_USER:-}
+      WEB_HTTPS_PORT: ${WEB_HTTPS_PORT}
+    logging: *container-logging
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      # Real FPM readiness over the FastCGI path (ping.path from
+      # Docker/php/fpm.d/zz-virtusphere.conf), not just "a process exists".
+      test: ["CMD-SHELL", "REQUEST_METHOD=GET SCRIPT_NAME=/fpm-ping SCRIPT_FILENAME=/fpm-ping cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      # php-fpm master starts as root and drops each worker to www-data
+      # (uid/gid 33); the setuid/setgid syscalls need these caps.
+      # KILL lets that root master signal its uid-33 children on shutdown.
+      # Without it SIGQUIT waits out Docker's grace and ends with exit 137.
+      - KILL
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+
+  deploy-worker:
+    <<: *php-runtime
+    command: ["php", "/var/www/html/lib/deploy_worker.php", "--loop", "--sleep=5"]
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+      - ./Ansible:/var/www/ansible-src:ro
+    environment:
+      <<: *app-db-environment
+      ANSIBLE_SOURCE_DIR: /var/www/ansible-src
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-}
+      VIRTUSPHERE_DEPLOY_WORKDIR: /tmp/virtusphere-deploy
+    logging: *container-logging
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      # Liveness file the loop keeps fresh - also during long playbook runs,
+      # via the transport's silence tick. Path and window are PHP constants
+      # (lib/worker_heartbeat.php), so nothing is hardcoded here.
+      test: ["CMD", "php", "/var/www/html/lib/worker_healthcheck.php"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    # A stop never ends a running job: an idle worker exits at once, a busy one
+    # keeps its job and records the request (lib/worker_stop_signal.php). 600 s
+    # gives that job time to finish before SIGKILL. It equals
+    # VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, the silence after which the system
+    # already treats a job as dead, so a longer grace would only delay that.
+    # The runbook stops workers only after the claim check (update.md 3.1, 3.5).
+    stop_grace_period: 600s
+
+  maintenance-worker:
+    <<: *php-runtime
+    command: ["php", "/var/www/html/lib/maintenance_worker.php", "--loop", "--sleep=15"]
+    volumes:
+      - ./Docker/WebAPI:/var/www/html
+    environment:
+      <<: *app-db-environment
+    logging: *container-logging
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "/var/www/html/lib/worker_healthcheck.php"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+
+  mysql:
+    # The runtime tag is local and survives docker save/load. Its upstream bytes
+    # are pinned in Docker/mysql/Dockerfile; the child image removes the unused
+    # mysql-shell RPM and its independently vulnerable Python runtime.
+    image: mysql:8.4-virtusphere
+    build:
+      context: ./Docker/mysql
+    # ADR-0017 defines scheduled logical backups, not replication or PITR.
+    # Keep binary logging disabled instead of retaining an unused second
+    # recovery stream. Existing binlog files are never deleted by this setting.
+    command: ["mysqld", "--skip-log-bin"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+    logging: *container-logging
+    volumes:
+      - ./Docker/mysql/mysql-data:/var/lib/mysql
+      - ./Docker/mysql/mysql-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1g
+
+  phpmyadmin:
+    # Admin tooling, not part of the runtime stack (AP8): only started on
+    # demand via `docker compose --profile tools up -d phpmyadmin`. Stays
+    # loopback-only (GROK.md). Previously this ran tagless (implicit :latest)
+    # and always-on. Library image, not phpmyadmin/phpmyadmin: the vendor repo
+    # stopped rebuilding (hundreds of fixable base CVEs frozen in its 5.2.3).
+    # The opt-in tool gets the same local-tag/offline contract as MySQL. Its
+    # Dockerfile pins upstream and consumes the available Debian security fix.
+    image: phpmyadmin:5.2.3-virtusphere
+    build:
+      context: ./Docker/phpmyadmin
+    profiles:
+      - tools
+    ports:
+      # PMA_PORT ist hier der HOST-Veroeffentlichungsport. Im Container heisst
+      # dieselbe Variable etwas anderes: das phpMyAdmin-Image liest PMA_PORT als
+      # Port des MySQL-SERVERS. Mit `env_file: .env` bekam der Container also
+      # PMA_PORT=8023 und versuchte mysql:8023 - dort lauscht nichts, und die
+      # Verbindung war schlicht kaputt, waehrend die Oberflaeche erreichbar war.
+      - "127.0.0.1:${PMA_PORT}:80"
+    # Kein env_file: das Image liest weder APP_KEY noch DB_PASS noch
+    # MYSQL_ROOT_PASSWORD (die Anmeldung passiert im Browser), und ein Werkzeug,
+    # das nur mit dem tools-Profil startet, braucht die Geheimnisse des ganzen
+    # Projekts nicht in seiner Umgebung.
+    environment:
+      PMA_HOST: mysql
+      # Der Server-Port, explizit, damit die Namenskollision oben nicht
+      # wiederkommt. Nicht weglassen: mit gesetztem PMA_HOST und fehlendem
+      # PMA_PORT protokolliert das Image je Anfrage "Undefined array key
+      # PMA_PORT", bevor es auf 3306 zurueckfaellt.
+      PMA_PORT: ${DB_PORT}
+    logging: *container-logging
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m

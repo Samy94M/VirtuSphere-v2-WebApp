@@ -1,0 +1,33 @@
+---
+# Die Pause vor dem naechsten Versuch eines ESXi-Aufrufs (K4a, Entscheidung W1).
+#
+# Ein kurzer Aussetzer des Hosts (etwa HTTP 503) soll einen Schritt nicht
+# beenden. Die Dateien, die einen ESXi-Aufruf wiederholen, binden diese Datei
+# nach einem Fehlschlag ein: Sie meldet die Wiederholung samt Ursache in einer
+# eigenen Protokollzeile und wartet. Den naechsten Versuch startet die
+# aufrufende Datei selbst.
+#
+# Erwartet:
+#   vs_retry_position  "[n/total]" der Einheit oder leer
+#   vs_retry_unit      Einheit, etwa "Export info vm02"
+#   vs_retry_attempt   Nummer des Versuchs, der gerade fehlgeschlagen ist
+#   vs_retry_cause     Meldung des Moduls
+#
+# Die Pausen stehen als EsxiRetryPauseSeconds in serverlist.yml und kommen aus
+# VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS, derselben Liste wie beim Anlegen:
+# vor Versuch n+1 liegen EsxiRetryPauseSeconds[n-1] Sekunden. Der Rueckfall
+# unten ist die Kopie fuer ein Artefakt ohne den Schluessel;
+# AnsiblePauseBudgetContractTest haelt beide gleich und unter dem Idle-Budget
+# der SSH-Schicht.
+- name: Wiederholung des ESXi-Aufrufs melden
+  ansible.builtin.debug:
+    msg: >-
+      {{ (vs_retry_position ~ ' ') if (vs_retry_position | default('') | length > 0) else '' }}RETRY
+      {{ vs_retry_unit }}:
+      {{ (vs_retry_cause | default('', true) or 'no module message') | string | replace('\n', ' ') | truncate(300) }};
+      attempt {{ vs_retry_attempt | int + 1 }} of {{ (EsxiRetryPauseSeconds | default([5, 15, 45])) | length + 1 }}
+      in {{ (EsxiRetryPauseSeconds | default([5, 15, 45]))[vs_retry_attempt | int - 1] }} s
+
+- name: Vor dem naechsten Versuch warten
+  ansible.builtin.pause:
+    seconds: "{{ (EsxiRetryPauseSeconds | default([5, 15, 45]))[vs_retry_attempt | int - 1] | int }}"

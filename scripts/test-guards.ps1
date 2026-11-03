@@ -1,0 +1,1413 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Guard-the-guards-Harness (AP3, ADR-0031): beweist jeden Drift-/Pattern-
+    Guard positiv (echtes Repo gruen), negativ (gezielte Mutation in einer
+    temporaeren Fixturekopie wird mit der richtigen Diagnose-ID rot) und im
+    Zero-Match-Fall (fehlende Suchtreffer werden nie leer gruen).
+
+.DESCRIPTION
+    Kein Guard gilt als vertrauenswuerdig, bevor sein Positiv-, Negativ- und
+    Zero-Match-Fall automatisiert bewiesen ist. Fixtures entstehen unter
+    %TEMP% und werden ueber VIRTUSPHERE_CHECK_ROOT an die Checks gereicht;
+    das echte Repo wird nie mutiert.
+
+    Ergebnisklassen je Fall: proven, unproven, infra (Werkzeug fehlt).
+    Exitcodes: 0 alle Faelle proven | 1 mindestens ein Fall unproven |
+    2 nur Infrastrukturluecken | 3 ungueltiger Aufruf.
+
+    Muss unter Windows PowerShell 5.1 und pwsh laufen; nur ASCII in dieser
+    Datei (PS 5.1 liest UTF-8 ohne BOM als ANSI).
+
+.PARAMETER Filter
+    Nur Faelle ausfuehren, deren Name mit einem der Praefixe beginnt
+    (z. B. -Filter enum-sync,csp).
+
+.PARAMETER List
+    Faelle auflisten, nichts ausfuehren.
+
+.EXAMPLE
+    powershell -NoProfile -File scripts\test-guards.ps1
+#>
+[CmdletBinding()]
+param(
+    [string[]]$Filter,
+    [switch]$List
+)
+
+Set-StrictMode -Version 1.0
+$ErrorActionPreference = 'Stop'
+
+if ($Filter) { $Filter = @($Filter | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }) }
+
+$scriptDir = $PSScriptRoot
+$repoRoot = (Split-Path $scriptDir -Parent) -replace '\\', '/'
+# Ein Laufverzeichnis nach der einen Namensregel des Moduls (eigener Name je Lauf,
+# nie wiederverwendet). $workRoot wird erst nach -List und -Filter angelegt, damit
+# diese Aufrufe keine Verzeichnisse hinterlassen.
+. (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'artifact-dir.ps1')
+$workRoot = $null
+$hostShell = 'powershell'
+if ($PSVersionTable.PSEdition -eq 'Core') { $hostShell = 'pwsh' }
+
+# --- Werkzeuge: Invoke-Tool, Test-Command und Find-Sh kommen aus runtime.ps1 ----
+# (eine Quelle; das Modul definiert nur Funktionen und fuehrt beim Import nichts aus)
+. (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'runtime.ps1')
+$shExe = Find-Sh
+# PHP-Tooling-Image aus der Lockdatei (dockerImages.php.ref), derselben Quelle
+# wie der php-lint-Hook; ohne lesbaren Eintrag gilt das Image als nicht verfuegbar.
+$phpImage = $null
+try {
+    $phpImage = (Get-Content -Raw -LiteralPath (Join-Path $scriptDir 'tool-lock.json') | ConvertFrom-Json).dockerImages.php.ref
+} catch {
+    $phpImage = $null
+}
+$dockerAvailable = Test-Command 'docker'
+$phpImageAvailable = $false
+if ($dockerAvailable -and $phpImage) {
+    $probe = Invoke-Tool 'docker' @('image', 'inspect', '--format', 'ok', $phpImage)
+    $phpImageAvailable = ($probe.ExitCode -eq 0)
+}
+
+# Shellskript mit optionalem Fixture-Root ausfuehren (Host-sh, PATH-Fix wie
+# check.ps1: sh.exe direkt gestartet kennt grep/sed/wc sonst nicht).
+function Invoke-GuardShell {
+    param([string]$ScriptPath, [string[]]$Arguments = @(), [string]$FixtureRoot = '')
+    if (-not $shExe) { return $null }
+    $prevPath = $env:PATH
+    $prevRoot = $env:VIRTUSPHERE_CHECK_ROOT
+    $env:PATH = (Split-Path $shExe -Parent) + [System.IO.Path]::PathSeparator + $env:PATH
+    if ($FixtureRoot) { $env:VIRTUSPHERE_CHECK_ROOT = ($FixtureRoot -replace '\\', '/') }
+    try {
+        return Invoke-Tool $shExe (@(($ScriptPath -replace '\\', '/')) + $Arguments)
+    } finally {
+        $env:PATH = $prevPath
+        $env:VIRTUSPHERE_CHECK_ROOT = $prevRoot
+    }
+}
+
+# PHP-Checkskript ausfuehren: Host-php, sonst Projekt-Image mit Fixture-Mount.
+function Invoke-GuardPhp {
+    param([string]$ScriptName, [string[]]$Arguments = @(), [string]$FixtureRoot = '')
+    if (Test-Command 'php') {
+        $prevRoot = $env:VIRTUSPHERE_CHECK_ROOT
+        if ($FixtureRoot) { $env:VIRTUSPHERE_CHECK_ROOT = ($FixtureRoot -replace '\\', '/') }
+        try {
+            return Invoke-Tool 'php' (@((Join-Path $scriptDir $ScriptName)) + $Arguments)
+        } finally {
+            $env:VIRTUSPHERE_CHECK_ROOT = $prevRoot
+        }
+    }
+    if ($dockerAvailable -and $phpImageAvailable) {
+        $mountRoot = $repoRoot
+        if ($FixtureRoot) { $mountRoot = ($FixtureRoot -replace '\\', '/') }
+        $dockerArgs = @('run', '--rm',
+            '-v', ($scriptDir + ':/checker:ro'),
+            '-v', ($mountRoot + ':/checkroot:ro'),
+            '-e', 'VIRTUSPHERE_CHECK_ROOT=/checkroot',
+            $phpImage, 'php', ('/checker/' + $ScriptName)) + $Arguments
+        return Invoke-Tool 'docker' $dockerArgs
+    }
+    return $null
+}
+
+# Runner-Gate gegen ein Fixture-Root ausfuehren (beweist die check.ps1-Gates).
+function Invoke-RunnerGate {
+    param([string]$FixtureRoot, [string]$GateNames)
+    $prevRoot = $env:VIRTUSPHERE_CHECK_ROOT
+    $env:VIRTUSPHERE_CHECK_ROOT = ($FixtureRoot -replace '\\', '/')
+    try {
+        return Invoke-Tool $hostShell @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', (Join-Path $scriptDir 'check.ps1'), '-Gate', $GateNames)
+    } finally {
+        $env:VIRTUSPHERE_CHECK_ROOT = $prevRoot
+    }
+}
+
+# --- Fixtures ------------------------------------------------------------------
+$fixtureCounter = 0
+function New-Fixture {
+    param([string[]]$Paths = @())
+    $script:fixtureCounter = $script:fixtureCounter + 1
+    $root = Join-Path $workRoot ('fx-' + $script:fixtureCounter)
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    foreach ($rel in $Paths) {
+        $source = Join-Path $repoRoot $rel
+        $target = Join-Path $root $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+        if (Test-Path $source -PathType Container) {
+            Copy-Item -Recurse -Force -Path $source -Destination $target
+        } else {
+            Copy-Item -Force -Path $source -Destination $target
+        }
+    }
+    return $root
+}
+
+# Mutation mit Anker: schlaegt der Anker fehl, wirft Edit-Fixture. Der Lauf faengt
+# jede Ausnahme eines Falls (catch um $case.Body) und klassifiziert sie als infra,
+# nicht als unproven (Exit 2, sofern kein Fall unproven ist): die Quelle hat sich
+# bewegt, der Fall ist also weder bewiesen noch widerlegt, und ein No-op-Gruenlauf
+# ist ausgeschlossen.
+function Edit-Fixture {
+    param([string]$FixtureRoot, [string]$RelativePath, [string]$Find, [string]$Replace)
+    $file = Join-Path $FixtureRoot $RelativePath
+    $content = [System.IO.File]::ReadAllText($file)
+    if ($content.IndexOf($Find) -lt 0) {
+        throw ('Mutationsanker nicht gefunden in ' + $RelativePath + ': ' + $Find)
+    }
+    $content = $content.Replace($Find, $Replace)
+    [System.IO.File]::WriteAllText($file, $content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Add-FixtureFile {
+    param([string]$FixtureRoot, [string]$RelativePath, [string]$Content)
+    $file = Join-Path $FixtureRoot $RelativePath
+    New-Item -ItemType Directory -Force -Path (Split-Path $file -Parent) | Out-Null
+    [System.IO.File]::WriteAllText($file, $Content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# --- Bewertung ------------------------------------------------------------------
+function Assert-Guard {
+    param($Result, [int[]]$ExpectExit, [string]$ExpectPattern = '', [switch]$InfraOnExit2)
+    if ($null -eq $Result) { return @{ Status = 'infra'; Detail = 'Werkzeug fehlt (sh/php/docker)' } }
+    $joined = @($Result.Output) -join "`n"
+    if ($InfraOnExit2 -and $Result.ExitCode -eq 2 -and ($ExpectExit -notcontains 2)) {
+        $head = $joined
+        if ($head.Length -gt 200) { $head = $head.Substring(0, 200) }
+        return @{ Status = 'infra'; Detail = ('Umgebung unvollstaendig: ' + $head) }
+    }
+    if ($ExpectExit -notcontains $Result.ExitCode) {
+        $head = $joined
+        if ($head.Length -gt 400) { $head = $head.Substring(0, 400) }
+        return @{ Status = 'unproven'; Detail = ('exit ' + $Result.ExitCode + ', erwartet ' + ($ExpectExit -join '/') + '; ' + $head) }
+    }
+    if ($ExpectPattern -ne '' -and $joined -notmatch $ExpectPattern) {
+        return @{ Status = 'unproven'; Detail = ('erwartete Diagnose fehlt im Output: ' + $ExpectPattern) }
+    }
+    return @{ Status = 'proven'; Detail = '' }
+}
+
+# --- Fall-Katalog ----------------------------------------------------------------
+# Jede Datei, aus der check-enum-sync.sh eine Seite eines Spiegels liest. Fehlt
+# eine, meldet der Waechter fuer dieses Paar [enum-sync.no-consts] und der
+# Fixture-Lauf wird rot, BEVOR die eigentliche Mutation greift: der Fall besteht
+# dann aus dem falschen Grund und wuerde auch ohne Mutation bestehen.
+# directory_constants.php fehlte hier genau so.
+$enumFixtureFiles = @(
+    'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/permissions.php',
+    'Docker/WebAPI/lib/deploy_constants.php', 'Docker/WebAPI/lib/credentials.php',
+    'Docker/WebAPI/lib/directory_constants.php', 'Docker/WebAPI/lib/deploy_create_constants.php',
+    'Docker/WebAPI/lib/auth_rate_limit.php',
+    'Docker/mysql/mysql-init/struktur.sql', 'Docker/WebAPI/lib/migrate.php',
+    'Docker/WebAPI/lib/migrations'
+)
+$fileSizeFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/portal')
+$moduleContractFixtureFiles = @(
+    'Ansible', 'Docker/qa-ansible/module-probe.yml',
+    'Docker/qa-ansible/module-deprecations.txt', 'Docker/qa-ansible/module-contract.sh',
+    'Docker/qa-ansible/verify-collection-lock.py', 'Docker/qa-ansible/collection-lock-contract.py'
+)
+$phpVerFixtureFiles = @(
+    'Docker/php/Dockerfile', 'Docker/WebAPI/composer.json',
+    'Docker/WebAPI/lib/constants.php', 'CLAUDE.md', 'AGENTS.md'
+)
+$docFixtureFiles = @('AGENTS.md', 'GROK.md', 'CLAUDE.md', 'README.md')
+# doc-semantics liest den vollen Doku-Scope plus seine SSoT-Quellen; eine
+# unvollstaendige Fixture wuerde ueber missing-file rot und die Mutation
+# waere nicht mehr der bewiesene Grund.
+$docSemFixtureFiles = @(
+    'README.md', 'AGENTS.md', 'GROK.md', 'CLAUDE.md', 'PRE-SHIP-CHECKLIST.md',
+    'docs/QA.md', 'docs/QUALITY-GATES.md', 'docs/TESTPLAN.md',
+    'docs/DEPLOYMENT.md', 'docs/INSTALLATION-ANLEITUNG.md',
+    'docs/operations', 'docs/security',
+    'Docker/WebAPI/phpstan.neon.dist', 'docker-compose.yml', '.github/workflows/ci.yml',
+    # SSoT der const-mirror-Regel: ohne sie meldet jede "aktuell N"-Nennung im
+    # Doku-Scope "nicht auffindbar", und jeder andere Fall waere aus dem
+    # falschen Grund rot statt aus seiner eigenen Mutation.
+    'Docker/WebAPI/lib/constants.php', 'Docker/WebAPI/lib/deploy_constants.php',
+    # SSoT der env-key-Regel: ohne .env.example meldet sie no-ssot, und jeder
+    # andere Fall waere aus dem falschen Grund rot.
+    '.env.example',
+    # SSoT der Hardware-Version: dasselbe Argument. Ohne das Playbook meldet
+    # Regel 15 no-ssot und faerbt jeden anderen Fall mit.
+    # Der Name folgt dem, was check-doc-semantics.sh in $create_playbook
+    # liest. Teiletappe D hat das alte createVMs-Playbook in vier zerlegt und
+    # die Pruefung mitgezogen, diese Fixture aber nicht: sechzehn
+    # doc-semantics-Waechter liefen danach als infra und bewiesen nichts
+    # mehr, ohne dass irgendetwas rot wurde.
+    'Ansible/createVMLaunch-ESXi_playbook.yml',
+    # Seit ADR-0023 Nachtrag 7 die eigentliche SSoT der Regel 15: die Tabelle
+    # der vmx-Versionen je ESXi-Version. Ohne sie meldet Regel 15 no-ssot.
+    'Docker/WebAPI/lib/esxi_create_compatibility.php'
+)
+# struktur.sql gehoert seit Etappe 10C dazu: bounds-sync prueft dort den
+# gespiegelten Audit-Kontext-Bytewert gegen die PHP-Konstante und bricht ohne
+# die Datei mit audit-context-zero-match ab. Jeder andere Fall waere dann rot
+# aus einem anderen Grund als seiner eigenen Mutation, also unproven.
+$boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang', 'Docker/mysql/mysql-init/struktur.sql')
+# check-audit-contract scannt jede first-party PHP-Datei unter Docker/WebAPI und
+# liest die Registry als SSoT. Die Wurzeldateien gehoeren dazu, weil die
+# Machine-API-Endpunkte eigene Producer sind; ohne sie waere jeder Negativfall
+# aus einem anderen Grund rot als aus seiner Mutation.
+# Abgeleitet, nicht aufgezaehlt: Jede PHP-Datei im WebAPI-Wurzelverzeichnis kann
+# ein Audit-Ereignis erzeugen. Die frueher handgeschriebene Liste kannte
+# deploy_vm_touch.php nicht; sein Ereignis galt im Fixture deshalb als ungenutzt.
+$auditFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/portal') + @(
+    Get-ChildItem -LiteralPath (Join-Path $repoRoot 'Docker/WebAPI') -Filter '*.php' -File |
+        Sort-Object Name |
+        ForEach-Object { 'Docker/WebAPI/' + $_.Name }
+)
+# Muss dem AKTUELLEN Spiegel folgen (ADR-0016): 'cancelling' kam mit
+# Migration 0031, und ein Anker auf einem Literal, das es nicht mehr gibt,
+# faerbt beide Mutationsfaelle infra statt proven.
+$enumList = "'queued','running','cancelling','succeeded','failed','cancelled','partial'"
+
+$cases = @(
+    @{ Name = 'enum-sync.green'; Body = {
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci')) @(0)
+    } }
+    @{ Name = 'enum-sync.missing-value'; Body = {
+        $fx = New-Fixture $enumFixtureFiles
+        Edit-Fixture $fx 'Docker/mysql/mysql-init/struktur.sql' $enumList "'queued','running','cancelling','succeeded','failed','cancelled'"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
+    } }
+    @{ Name = 'enum-sync.reordered'; Body = {
+        $fx = New-Fixture $enumFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/migrate.php' $enumList "'running','queued','cancelling','succeeded','failed','cancelled','partial'"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
+    } }
+    # Tabellenweite Paare (Etappe 14B). `status` ist als Spaltenname mehrdeutig,
+    # deshalb prueft der Waechter hier CREATE-TABLE-Block-scoped, und der neue
+    # Spiegel liegt in lib/migrations/ statt in migrate.php. Beide Seiten
+    # bekommen ihre eigene Mutation, sonst bewiese der Fall nur eine davon.
+    @{ Name = 'enum-sync.table-scoped-schema'; Body = {
+        $fx = New-Fixture $enumFixtureFiles
+        Edit-Fixture $fx 'Docker/mysql/mysql-init/struktur.sql' "'pending','prepared','running','succeeded','failed','uncertain','skipped'" "'pending','prepared','running','succeeded','uncertain','failed','skipped'"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
+    } }
+    @{ Name = 'enum-sync.table-scoped-migration'; Body = {
+        $fx = New-Fixture $enumFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/migrations/0047_deploy_create_results.php' "'create','verify_skip'" "'verify_skip','create'"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.drift\]'
+    } }
+    @{ Name = 'enum-sync.zero-match'; Body = {
+        $fx = New-Fixture $enumFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/deploy_constants.php' 'VIRTUSPHERE_DEPLOY_STATUS_' 'VIRTUSPHERE_DEPLOY_XSTATUS_'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-enum-sync.sh') @('--ci') $fx) @(1) '\[enum-sync\.no-consts\]'
+    } }
+
+    @{ Name = 'php-version-sync.green'; Body = {
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-php-version-sync.sh') @('--ci')) @(0)
+    } }
+    @{ Name = 'php-version-sync.drift'; Body = {
+        $fx = New-Fixture $phpVerFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/composer.json' '"php": "8.4.0"' '"php": "8.3.0"'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-php-version-sync.sh') @('--ci') $fx) @(1) '\[php-version-sync\.drift\]'
+    } }
+    @{ Name = 'php-version-sync.zero-match'; Body = {
+        $fx = New-Fixture $phpVerFixtureFiles
+        Edit-Fixture $fx 'Docker/php/Dockerfile' 'FROM php:' 'FROM notphp:'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-php-version-sync.sh') @('--ci') $fx) @(1) '\[php-version-sync\.no-ssot\]'
+    } }
+
+    # Release-Nummer: die Werte stehen explizit in den Fixtures (keine Mutation
+    # einer echten Nummer), damit der Fall bei jedem Release gleich bleibt.
+    @{ Name = 'version-sync.green'; Body = {
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci')) @(0)
+    } }
+    @{ Name = 'version-sync.drift'; Body = {
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/VERSION' "2026.10.1`n"
+        Add-FixtureFile $fx 'Powershell-MECM/VERSION' "2026.10.2`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci') $fx) @(1) '\[version-sync\.drift\]'
+    } }
+    @{ Name = 'version-sync.format'; Body = {
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/VERSION' "2026.1.1`n"
+        Add-FixtureFile $fx 'Powershell-MECM/VERSION' "2026.1.1`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci') $fx) @(1) '\[version-sync\.format\]'
+    } }
+    @{ Name = 'version-sync.zero-match'; Body = {
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Powershell-MECM/VERSION' "2026.10.1`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-version-sync.sh') @('--ci') $fx) @(1) '\[version-sync\.no-ssot\]'
+    } }
+
+    @{ Name = 'doc-hygiene.green'; Body = {
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci')) @(0)
+    } }
+    @{ Name = 'doc-hygiene.changelog-marker'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        $grok = [System.IO.File]::ReadAllText((Join-Path $fx 'GROK.md'))
+        [System.IO.File]::WriteAllText((Join-Path $fx 'GROK.md'), ("## Stand 2026-07-16`n" + $grok), (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.changelog-marker\]'
+    } }
+    @{ Name = 'doc-hygiene.line-budget'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        $pad = ("Zeile fuer das Budget`n" * 80)
+        [System.IO.File]::AppendAllText((Join-Path $fx 'CLAUDE.md'), $pad)
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.line-budget\]'
+    } }
+    @{ Name = 'doc-hygiene.byte-budget'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        # One long line stays below the line budget but must not bypass context limits.
+        [System.IO.File]::WriteAllText((Join-Path $fx 'AGENTS.md'), ('x' * 40000), (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.byte-budget\]'
+    } }
+    @{ Name = 'doc-hygiene.utf8-byte-budget'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        # Below the character count budget, above the UTF-8 byte budget.
+        [System.IO.File]::WriteAllText((Join-Path $fx 'CLAUDE.md'), ([string][char]0x00E4 * 1500), (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.byte-budget\]'
+    } }
+    @{ Name = 'doc-hygiene.zero-match'; Body = {
+        $fx = New-Fixture $docFixtureFiles
+        [System.IO.File]::WriteAllText((Join-Path $fx 'AGENTS.md'), '', (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-hygiene.sh') @('--ci') $fx) @(1) '\[doc-hygiene\.empty-file\]'
+    } }
+
+    @{ Name = 'doc-semantics.green'; Body = {
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci')) @(0)
+    } }
+    @{ Name = 'doc-semantics.pre-ship-checked'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'PRE-SHIP-CHECKLIST.md' '- [ ] Fast-Lane' '- [x] Fast-Lane'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.pre-ship-checked\]'
+    } }
+    @{ Name = 'doc-semantics.stale-number'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/QA.md' 'PHPStan (level 5' 'PHPStan (level 4'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phpstan-level\]'
+    } }
+    @{ Name = 'doc-semantics.const-mirror'; Body = {
+        # Zweite Nennung derselben Zeile: sie faellt nur auf, wenn die Regel jede
+        # Nennung einzeln an ihre Zahl bindet statt einmal pro Zeile zu ersetzen.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/esxi-inventory.md' 'aktuell 2x' 'aktuell 5x'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.const-mirror\]'
+    } }
+    @{ Name = 'doc-semantics.sccm-terminology'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/mecm-integration.md' 'MECM-Server' 'SCCM-Server'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.sccm-terminology\]'
+    } }
+    @{ Name = 'doc-semantics.zero-match'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/phpstan.neon.dist' 'level: 5' 'tier: 5'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.no-ssot\]'
+    } }
+    @{ Name = 'doc-semantics.phantom-path'; Body = {
+        # Der Originalbefund: das Runbook schickte den Admin zu einer
+        # Erstpasswort-Datei, die nichts im Repository je schreibt. Der
+        # Erzeuger-Scan laeuft gegen den echten Baum (nicht die Fixture), sonst
+        # waere in einer Doku-Fixture jeder Pfad scheinbar verwaist.
+        #
+        # Der Dateiname wird zusammengesetzt und steht nirgends als Literal: aus
+        # demselben Grund. Ein Literal in dieser Datei liegt ausserhalb von docs/
+        # und waere fuer den Scan selbst ein Erzeuger, womit die Fixture die
+        # Regel aushebeln wuerde, die sie beweisen soll.
+        $phantom = 'initial-admin' + '-password' + '.txt'
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Erstpasswort liegt in ``Docker/WebAPI/logs/$phantom``.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phantom-path\]'
+    } }
+    @{ Name = 'doc-semantics.phantom-path-ignored-decoy'; Body = {
+        # Befund G1 (Release 2026.10.1): Im Hauptbaum nannten gitignorierte
+        # Audit-Notizen unter qa-artifacts/ den Phantomnamen, und der Scan las
+        # sie als Erzeuger. Ein ignorierter Koeder im echten Baum darf den Fund
+        # nicht verdecken. Der Koeder liegt nur fuer diesen Fall dort.
+        $phantom = 'initial-admin' + '-password' + '.txt'
+        $decoyDir = Join-Path $repoRoot ('qa-artifacts/guard-decoy-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force $decoyDir | Out-Null
+        try {
+            Set-Content -Encoding utf8 -Path (Join-Path $decoyDir 'note.md') -Value ("Audit-Notiz nennt $phantom")
+            $fx = New-Fixture $docSemFixtureFiles
+            Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Erstpasswort liegt in ``Docker/WebAPI/logs/$phantom``.`n`n## Schritt 3: Backup")
+            Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phantom-path\]'
+        } finally {
+            Remove-Item -Recurse -Force $decoyDir -Confirm:$false
+        }
+    } }
+    @{ Name = 'doc-semantics.phantom-path-removal-note'; Body = {
+        # Gegenrichtung: eine Loeschungsnotiz ("entfernt X") darf NICHT rot
+        # werden, sonst waere jede historische Aussage in aktiver Doku ein Befund
+        # und die Regel wuerde abgeschaltet.
+        $gone = 'keiner-liest' + '-das' + '.txt'
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Phase X entfernt ``portal/$gone``.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(0)
+    } }
+    @{ Name = 'doc-semantics.env-key-unnamed'; Body = {
+        # APP_BIND_IP fehlte im .env-Schritt, und sein Vorlagenwert macht das
+        # Portal im LAN unerreichbar, waehrend der Stack gesund ist.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' 'APP_BIND_IP' 'APP_IRGENDWAS'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.env-key-unnamed\]'
+    } }
+    @{ Name = 'doc-semantics.migration-range'; Body = {
+        # Die Bereichsform, die die Zaehlregel nicht fing: beide Enden sind
+        # konkrete Namen, also sah die Spanne wie eine fachliche Referenz aus und
+        # veraltete trotzdem mit der naechsten Migration.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Erwartet: Migrationen 0001-0028 angewandt.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.migration-range\]'
+    } }
+    @{ Name = 'doc-semantics.doc-ascii-umlaut'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Backup laeuft taeglich und ist fuer den Betrieb noetig.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.doc-ascii-umlaut\]'
+    } }
+    @{ Name = 'doc-semantics.installation-ascii-umlaut'; Body = {
+        # Pinnt den weggefallenen Sonderweg: Die Installationsanleitung gehoert
+        # zum gleichen deutschen Prosa-Scope wie jedes andere aktive Runbook.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/INSTALLATION-ANLEITUNG.md' '# Installationsanleitung' ("# Installationsanleitung`n`nDiese Ausnahme waere fuer Administratoren stoerend.")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.doc-ascii-umlaut\]'
+    } }
+    @{ Name = 'doc-semantics.doc-ascii-umlaut-in-code'; Body = {
+        # Gegenrichtung: derselbe Text in Backticks ist ein zitierter Wert. Ein
+        # PowerShell-Skript vergleicht wirklich gegen 'Uebersprungen'; dort einen
+        # Umlaut zu erzwingen wuerde die Doku falsch machen, und eine Regel, die
+        # das verlangt, wird abgeschaltet statt befolgt.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/operations/go-live.md' '## Schritt 3: Backup' ("Das Skript meldet ``Uebersprungen``.`n`n## Schritt 3: Backup")
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(0)
+    } }
+    @{ Name = 'doc-semantics.hw-version-matrix'; Body = {
+        # Das Paar, nicht die Zahl: die Tabelle in lib/esxi_create_compatibility.php
+        # ist die SSoT, und jedes ihrer Paare muss in den Matrixzeilen zur
+        # Erstellung stehen. Eine geaenderte vmx-Zuordnung ohne Doku verspricht
+        # etwas anderes, als der Worker tut.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/esxi_create_compatibility.php' "['esxi' => '7.0.2', 'vmx' => 19]" "['esxi' => '7.0.2', 'vmx' => 18]"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-matrix\]'
+    } }
+    @{ Name = 'doc-semantics.hw-version-hardwired'; Body = {
+        # Der Vorfall vom 15.10.2026: eine verdrahtete Zahl im Playbook ignoriert
+        # die gemeldete Hostversion. Sie darf nicht zurueckkommen.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Ansible/createVMLaunch-ESXi_playbook.yml' 'version: >-' 'version: 21'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.hw-version-hardwired\]'
+    } }
+    @{ Name = 'doc-semantics.hw-version-ssot-unreadable'; Body = {
+        # Eine Tabelle, aus der die Regel nichts liest, ist kein gruener Lauf:
+        # sonst haette ein Umbau der Zeilenform die Regel still stillgelegt.
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/esxi_create_compatibility.php' "['esxi' => " "['release' => "
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.no-ssot\]'
+    } }
+    @{ Name = 'doc-semantics.vcenter-deploy-boundary'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/DEPLOYMENT.md' '| vCenter (`api_type = VirtualCenter`) | deploy **no**, partial read-only inventory |' '| vCenter (`api_type = VirtualCenter`) | deploy yes |'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.vcenter-deploy-boundary\]'
+    } }
+    @{ Name = 'doc-semantics.vcenter-deploy-zero-match'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx 'docs/DEPLOYMENT.md' '| vCenter (`api_type = VirtualCenter`) | deploy **no**, partial read-only inventory |' '| Management endpoint | deploy **no**, partial read-only inventory |'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.vcenter-deploy-boundary\]'
+    } }
+
+    @{ Name = 'lang-audit.green'; Body = {
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci')) @(0)
+    } }
+    @{ Name = 'lang-audit.missing-key'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_probe' => 'Probe',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.parity-gap\].*zz_guard_probe'
+    } }
+    @{ Name = 'lang-audit.placeholder-drift'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_ph' => 'Wert :min',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_ph' => 'value :minimum',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.placeholder-drift\].*zz_guard_ph'
+    } }
+    # i18n R11 (Welle A2): the German pair only. The fixture value is a PHP
+    # double-quoted string with \u{...} escapes, so this file stays ASCII and the
+    # fixture bytes do not depend on the encoding Edit-Fixture writes.
+    @{ Name = 'lang-audit.quote-mix'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_quote' => `"Reiter \u{201E}Probe\`" offen`",`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_quote' => 'Tab Probe open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_quote'
+    } }
+    @{ Name = 'lang-audit.quote-unclosed'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_open' => `"Reiter \u{201E}Probe offen`",`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_open' => 'Tab Probe open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_open.*never closed'
+    } }
+    # i18n R12: English quotes with the straight pair. Same ASCII-only fixture
+    # technique as above for the typographic marks.
+    @{ Name = 'lang-audit.quote-en-typographic'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_en_quote' => 'Reiter Probe offen',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_en_quote' => `"Tab \u{201C}Probe\u{201D} open`",`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_en_quote en: typographic quote mark U\+201C'
+    } }
+    @{ Name = 'lang-audit.quote-en-unclosed'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_en_open' => 'Reiter Probe offen',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_en_open' => 'Tab `"Probe open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_en_open en: straight quote " is never closed'
+    } }
+
+    @{ Name = 'bounds-sync.green'; Body = {
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci')) @(0)
+    } }
+    @{ Name = 'bounds-sync.spelled-out'; Body = {
+        $fx = New-Fixture $boundsFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_probe.php' "<?php`nconst VIRTUSPHERE_GUARD_PROBE_SECONDS = 424242;`n"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_bounds' => 'Wartet 424242 Sekunden auf den Worker.',`n];"
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) '\[bounds-sync\.spelled-out\].*zz_guard_bounds'
+    } }
+    @{ Name = 'bounds-sync.array-element'; Body = {
+        # An array element carries the unit in its key, not in a constant name.
+        # Before the allowlist, "50 GB" in the storage help was invisible for two
+        # independent reasons: the value lives in VIRTUSPHERE_VM_DEFAULTS and "GB"
+        # was not a unit word.
+        $fx = New-Fixture $boundsFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_array' => 'Standard sind 50 GB je Festplatte.',`n];"
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) "\[bounds-sync\.spelled-out\].*zz_guard_array.*VM_DEFAULTS"
+    } }
+    @{ Name = 'bounds-sync.product-constant'; Body = {
+        # A constant written as a product, read in the unit the prose uses. Both
+        # halves have to work: evaluating 2 * 1024 * 1024 and deriving MB from it.
+        $fx = New-Fixture $boundsFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_bytes' => 'Die Datei darf hoechstens 2 MB gross sein.',`n];"
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) "\[bounds-sync\.spelled-out\].*zz_guard_bytes.*MISSION_IMPORT_MAX_BYTES"
+    } }
+    @{ Name = 'bounds-sync.unreadable-array'; Body = {
+        # An allowlisted array the script can no longer parse must fail loudly.
+        # Silently skipping it leaves the elements unchecked while the guard keeps
+        # reporting green, which is worse than never having had the check.
+        $fx = New-Fixture $boundsFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/defaults.php' 'const VIRTUSPHERE_VM_DEFAULTS' 'const VIRTUSPHERE_VM_DEFAULTS_RENAMED'
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) '\[bounds-sync\.unreadable-array\].*VIRTUSPHERE_VM_DEFAULTS'
+    } }
+    @{ Name = 'bounds-sync.stale-exempt'; Body = {
+        $fx = New-Fixture $boundsFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/validate.php' "'netbios_hostname'" "'zz_renamed_netbios'"
+        Assert-Guard (Invoke-GuardPhp 'check-bounds-sync.php' @('--ci') $fx) @(1) '\[bounds-sync\.stale-exempt\].*netbios_hostname'
+    } }
+
+    # --- Etappe 10C: Audit-SSoT ---------------------------------------------
+    # Der Guard beweist, dass persistierte Ereignisse genau einen Owner haben.
+    # Jeder Negativfall mutiert genau eine Regel; der Zero-Match-Fall ist der
+    # wichtigste, weil jede andere Regel eine Suche nach etwas Schlechtem ist
+    # und eine Suche ohne Treffer wie ein sauberes Repository aussieht.
+    @{ Name = 'audit-contract.green'; Body = {
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci')) @(0)
+    } }
+    @{ Name = 'audit-contract.free-producer'; Body = {
+        # Die alte Freitextform: Kategorie plus Satz statt Ereigniscode.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_producer.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_producer(mysqli $db): void
+{
+    audit($db, VIRTUSPHERE_LOG_CATEGORY_SYSTEM, 'something happened', null, 'cli');
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.free-producer\].*zz_guard_producer'
+    } }
+    @{ Name = 'audit-contract.unknown-event'; Body = {
+        # Eine Konstante, die aussieht wie ein Ereignis, aber keines ist.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_unknown.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_unknown(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_ZZ_NOT_REGISTERED, 'user', 1, 'success', []);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unknown-event\].*ZZ_NOT_REGISTERED'
+    } }
+    @{ Name = 'audit-contract.registry-bypass'; Body = {
+        # Ein zweiter Schreibpfad in die Audittabelle erzeugt Zeilen, die keine
+        # Registry validiert hat, und jeder Leser zaehlt sie trotzdem mit.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/migrate.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_bypass(mysqli $db): void
+{
+    $db->query("INSERT INTO deploy_logs (ip, category, log_message) VALUES ('1.2.3.4', 'system', 'direct')");
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.registry-bypass\].*migrate\.php'
+    } }
+    @{ Name = 'audit-contract.forbidden-field'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_field.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_field(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED, 'user', 1, 'success', ['role' => 'admin', 'password' => 'hunter2']);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.forbidden-field\].*password'
+    } }
+    @{ Name = 'audit-contract.dead-sink'; Body = {
+        # addLog() war nie aufgerufen und einen Aufruf davon entfernt, einen
+        # Auth-Token in eine Tabelle mit 365-Tage-Fenster zu schreiben.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_sink.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_sink(mysqli $db): void
+{
+    addLog($db, 'system', 'back again');
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.dead-sink\].*addLog'
+    } }
+    @{ Name = 'audit-contract.token-sink'; Body = {
+        # Die Signatur ist die Grenze, nicht die Aufrufstellen: solange der
+        # Parameter existiert, ist "kein Aufrufer uebergibt einen Token" eine
+        # Aussage ueber heute.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_token.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_audit_line(mysqli $db, string $token, string $message): void
+{
+    error_log($message);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.token-sink\].*zz_guard_audit_line'
+    } }
+    @{ Name = 'audit-contract.unredacted-sink'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_unredacted.php' "<?php`ndeclare(strict_types=1);`nfunction zz_guard_unredacted(Throwable `$exception): void`n{`n    error_log('provider failed: ' . `$exception->getMessage());`n}`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unredacted-sink\].*zz_guard_unredacted'
+    } }
+    @{ Name = 'audit-contract.sentinel'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_sentinel.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_sentinel(): void
+{
+    error_log('probe Authorization: Bearer eyJhbGciOiJIUzI1NiJ9zzGuardSentinel');
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.sentinel\].*zz_guard_sentinel'
+    } }
+    @{ Name = 'audit-contract.unused-event'; Body = {
+        # Ein Code, den kein Producer schreibt, ist ein Wert, den ein Filter
+        # anbietet und den keine Zeile je traegt.
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';" `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`nconst VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_ORPHAN = 'zz.guard_orphan';"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unused-event\].*ZZ_GUARD_ORPHAN'
+    } }
+    # Historische Ereignisse (VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL) bleiben lesbar,
+    # duerfen aber nie wieder geschrieben werden. Die Liste ist die einzige
+    # Ausnahme von unused-event. Der Ereignisname ist synthetisch, damit der Fall
+    # nicht davon abhaengt, welche echten Ereignisse historisch sind.
+    @{ Name = 'audit-contract.historical-produced'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';" `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`nconst VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED = 'zz.guard_retired';"
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [' `
+            "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED,"
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_historical.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_historical(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED, 'user', 1, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, []);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.historical-produced\].*ZZ_GUARD_RETIRED'
+    } }
+    @{ Name = 'audit-contract.historical-exempt'; Body = {
+        # Dieselbe synthetische Registrierung wie historical-produced, aber ohne
+        # Producer: der Listeneintrag allein befreit das Ereignis von unused-event.
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';" `
+            "const VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`nconst VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED = 'zz.guard_retired';"
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [' `
+            "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED,"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(0)
+    } }
+    @{ Name = 'audit-contract.zero-match-registry'; Body = {
+        # Eine leere Registry darf nie als "alle Producer sind sauber" gelten.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/audit_event_definitions.php' "<?php`ndeclare(strict_types=1);`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.zero-match\]'
+    } }
+    @{ Name = 'audit-contract.zero-match-producers'; Body = {
+        # Registry vorhanden, aber kein einziger Producer: die Aufrufform wurde
+        # umgeschrieben und der Scan sieht nichts mehr.
+        $fx = New-Fixture @()
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/audit_event_definitions.php' "<?php`ndeclare(strict_types=1);`nconst VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT = 'auth.logout';`n"
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_empty.php' "<?php`ndeclare(strict_types=1);`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.zero-match\]'
+    } }
+    @{ Name = 'audit-contract.zero-match-files'; Body = {
+        # Leerer Scope: kein Producer gefunden heisst nicht, dass keiner falsch ist.
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'README.md' "placeholder`n"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.zero-match\]'
+    } }
+    @{ Name = 'audit-contract.new-module-allowed'; Body = {
+        # Positivrichtung: ein neues Modul mit einem korrekten Producer bleibt
+        # still. Ein Guard, der nur je feuert, ist einer, neben den niemand
+        # eine Datei legen kann.
+        $fx = New-Fixture $auditFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_ok.php' @'
+<?php
+declare(strict_types=1);
+function zz_guard_ok(mysqli $db): void
+{
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED, 'user', 1, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['role' => 'admin']);
+}
+'@
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(0)
+    } }
+
+    @{ Name = 'file-size.green'; Body = {
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci')) @(0)
+    } }
+    @{ Name = 'file-size.small-file-allowed'; Body = {
+        # The positive direction: a new module inside the budget is silent. A
+        # guard that only ever fires is one nobody can add a file next to.
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_small.php' ("<?php`n" + ("// small`n" * 20))
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(0)
+    } }
+    @{ Name = 'file-size.oversize'; Body = {
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/zz_guard_big.php' ("<?php`n" + ("// filler`n" * 420))
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.oversize\].*zz_guard_big'
+    } }
+    @{ Name = 'file-size.grown'; Body = {
+        # A recorded exception is a ceiling: the file may shrink, never grow.
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/migrate.php' 'declare(strict_types=1);' "declare(strict_types=1);`n// guard probe`n// guard probe"
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.grown\].*migrate\.php'
+    } }
+    @{ Name = 'file-size.stale-allowance'; Body = {
+        # An exception that outlives its split silently re-opens the budget.
+        $fx = New-Fixture $fileSizeFixtureFiles
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/constants.php' "<?php`ndeclare(strict_types=1);`n"
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.stale\].*constants\.php'
+    } }
+    @{ Name = 'file-size.zero-match'; Body = {
+        # An empty scope must never read as "no file is too large".
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'README.md' "placeholder`n"
+        Assert-Guard (Invoke-GuardPhp 'check-file-size.php' @('--ci') $fx) @(1) '\[file-size\.zero-match\]'
+    } }
+
+    @{ Name = 'csp.file-clean'; Body = {
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'clean.php' "<?php`n`$x = 1;`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'lint-csp-patterns.sh') @('--file', 'clean.php') $fx) @(0)
+    } }
+    @{ Name = 'csp.hard-pattern'; Body = {
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'bad.php' "<?php`n`$db->query(`"SELECT * FROM t WHERE id = `$id`");`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'lint-csp-patterns.sh') @('--file', 'bad.php') $fx) @(2) '\[csp\.interpolated-sql\]'
+    } }
+    @{ Name = 'csp.worktree-staged-unstaged-untracked'; Body = {
+        if (-not (Test-Command 'git')) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        $fx = New-Fixture
+        $git = { param([string[]]$GitArguments) Invoke-Tool 'git' (@('-C', $fx) + $GitArguments) }
+        [void](& $git @('init', '-q', '.'))
+        [void](& $git @('config', 'user.email', 'guard@test'))
+        [void](& $git @('config', 'user.name', 'guard'))
+        Add-FixtureFile $fx 'tracked.php' "<?php`n`$x = 1;`n"
+        [void](& $git @('add', 'tracked.php'))
+        [void](& $git @('commit', '-qm', 'init'))
+        Add-FixtureFile $fx 'staged.php' "<?php`n`$db->query(`"SELECT a FROM t WHERE b = `$b`");`n"
+        [void](& $git @('add', 'staged.php'))
+        Add-FixtureFile $fx 'tracked.php' "<?php`nmysqli_query(`$c, `"DELETE FROM t WHERE x = `$x`");`n"
+        Add-FixtureFile $fx 'untracked.php' "<?php`n`$db->query(`"SELECT `$col FROM t`");`n"
+        $r = Invoke-GuardShell (Join-Path $scriptDir 'lint-csp-patterns.sh') @('--worktree') $fx
+        $verdict = Assert-Guard $r @(2) '\[csp\.interpolated-sql\]'
+        if ($verdict.Status -ne 'proven') { return $verdict }
+        $joined = @($r.Output) -join "`n"
+        foreach ($expected in @('staged.php', 'tracked.php', 'untracked.php')) {
+            if ($joined -notmatch [regex]::Escape($expected)) {
+                return @{ Status = 'unproven'; Detail = ('--worktree hat ' + $expected + ' nicht gefunden') }
+            }
+        }
+        return @{ Status = 'proven'; Detail = '' }
+    } }
+    @{ Name = 'csp.worktree-no-git'; Body = {
+        $fx = New-Fixture
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'lint-csp-patterns.sh') @('--worktree') $fx) @(2) '\[csp\.no-git\]'
+    } }
+
+    @{ Name = 'sh-posix.parse-all'; Body = {
+        if (-not $shExe) { return @{ Status = 'infra'; Detail = 'sh fehlt' } }
+        $shFiles = @(Get-ChildItem -Path (Join-Path $repoRoot 'scripts') -Filter '*.sh' -File)
+        $shFiles += @(Get-ChildItem -Path (Join-Path (Join-Path $repoRoot '.claude') 'hooks') -Filter '*.sh' -File)
+        if ($shFiles.Count -eq 0) { return @{ Status = 'unproven'; Detail = 'Zero-Match: keine Shellskripte gefunden' } }
+        foreach ($f in $shFiles) {
+            $r = Invoke-GuardShell '-n' @(($f.FullName -replace '\\', '/'))
+            if ($r.ExitCode -ne 0) {
+                return @{ Status = 'unproven'; Detail = ($f.Name + ' ist nicht POSIX-parsebar: ' + (@($r.Output) -join ' ')) }
+            }
+        }
+        return @{ Status = 'proven'; Detail = ('' + $shFiles.Count + ' Skripte POSIX-parsebar') }
+    } }
+
+    @{ Name = 'runner.powershell-syntax.red'; Body = {
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'broken.ps1' "function Broken {`n"
+        Assert-Guard (Invoke-RunnerGate $fx 'powershell-syntax') @(1)
+    } }
+    @{ Name = 'runner.powershell-syntax.zero-match'; Body = {
+        $fx = New-Fixture
+        Assert-Guard (Invoke-RunnerGate $fx 'powershell-syntax') @(2)
+    } }
+    @{ Name = 'runner.js-syntax.red'; Body = {
+        if (-not (Test-Command 'node')) { return @{ Status = 'infra'; Detail = 'node fehlt' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'Docker/WebAPI/portal/assets/bad.js' "function {`n"
+        Assert-Guard (Invoke-RunnerGate $fx 'js-syntax') @(1)
+    } }
+    @{ Name = 'runner.js-syntax.zero-match'; Body = {
+        if (-not (Test-Command 'node')) { return @{ Status = 'infra'; Detail = 'node fehlt' } }
+        $fx = New-Fixture
+        Assert-Guard (Invoke-RunnerGate $fx 'js-syntax') @(2)
+    } }
+    @{ Name = 'runner.fail-dominates-infra'; Body = {
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'broken.ps1' "function Broken {`n"
+        # ansible-lint ist ohne QA-Image infrastructure_error; der Parserfehler
+        # muss trotzdem Exit 1 dominieren (ADR-0031 Exitcode-Praezedenz).
+        Assert-Guard (Invoke-RunnerGate $fx 'powershell-syntax,ansible-lint') @(1)
+    } }
+    @{ Name = 'runner.ansible-module-contract.control'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(0) -InfraOnExit2
+    } }
+    @{ Name = 'runner.ansible-module-contract.missing-library'; Body = {
+        # Der Originalbefund war: ohne `requests` scheitert JEDES benutzte
+        # community.vmware-Modul beim Import, vor der Argumentpruefung, waehrend
+        # ansible-lint --strict gruen bleibt. Bewiesen wird hier die Erkennung -
+        # dass diese Meldung den Build bricht - nicht der Zustand des Images: den
+        # beweist der gruene Gate-Lauf gegen das echte Repo. Die Bibliothek im
+        # Image zu entfernen ginge nur ueber einen Image-Build je Fall.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        $probe = [System.IO.File]::ReadAllText((Join-Path $fx 'Docker/qa-ansible/module-probe.yml'))
+        Add-FixtureFile $fx 'Docker/qa-ansible/module-probe.yml' ($probe + @'
+
+    - name: die Meldung, die das Gate faengt
+      ansible.builtin.fail:
+        msg: Failed to import the required Python library (requests) on probe Python /usr/bin/python3
+      ignore_errors: true
+'@)
+        $gate = Invoke-RunnerGate $fx 'ansible-module-contract'
+        $verdict = Assert-Guard $gate @(1) '\[ansible-module-contract\.missing-library\]' -InfraOnExit2
+        # In Lanes war dieser Fall mehrfach unbewiesen, ohne dass zu sehen war,
+        # woran der Gate stattdessen scheiterte. Die Erwartung bleibt; ein
+        # unbewiesener Lauf nennt jetzt das Ende der Gate-Ausgabe.
+        if ($verdict.Status -eq 'unproven') {
+            $verdict.Detail = $verdict.Detail + ' | Gate-Ausgabe: ' + ((@($gate.Output) | Select-Object -Last 12) -join ' / ')
+        }
+        return $verdict
+    } }
+    @{ Name = 'runner.ansible-module-contract.argument-spec'; Body = {
+        # Gegen die ECHTE Collection: ein Argumentname, den die gepinnte Version
+        # nicht kennt, muss auffallen. Genau diese Klasse hat einmal 13
+        # Portgruppen als 0 gemeldet, weil die Aufgabe unter ignore_errors lief.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Edit-Fixture $fx 'Docker/qa-ansible/module-probe.yml' 'esxi_hostname: virtusphere-probe-host' 'esxi_hostnaem: virtusphere-probe-host'
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.argument-spec\]' -InfraOnExit2
+    } }
+    @{ Name = 'runner.ansible-module-contract.deprecation-unrecorded'; Body = {
+        # Ein upstream neu als deprecated markiertes Modul darf nicht still
+        # durchlaufen: die Frist muss im Repo stehen, sonst faellt sie beim Kunden auf.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Add-FixtureFile $fx 'Docker/qa-ansible/module-deprecations.txt' "# leer`n"
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.deprecation-unrecorded\]' -InfraOnExit2
+    } }
+    @{ Name = 'runner.ansible-module-contract.probe-incomplete'; Body = {
+        # Der realistische Weg, wie der Vertrag stillschweigend schrumpft: jemand
+        # benutzt ein neues Modul in einem Playbook. Ohne diese Richtung meldet die
+        # Probe weiter gruen fuer die zehn, die sie kennt.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Add-FixtureFile $fx 'Ansible/zzprobe_playbook.yml' @'
+---
+- name: Fixture
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: ein Modul, das die Probe nicht kennt
+      community.vmware.vmware_cluster_info:
+        hostname: 127.0.0.1
+'@
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.probe-incomplete\]' -InfraOnExit2
+    } }
+    @{ Name = 'runner.ansible-module-contract.probe-stale'; Body = {
+        # Gegenrichtung: eine Probe-Zeile fuer ein Modul, das kein Playbook mehr
+        # benutzt, bindet den Vertrag an etwas, das uns nicht mehr betrifft.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Edit-Fixture $fx 'Docker/qa-ansible/module-probe.yml' 'community.vmware.vmware_about_info' 'community.vmware.vmware_cluster_info'
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.probe-stale\]' -InfraOnExit2
+    } }
+    @{ Name = 'runner.ansible-module-contract.zero-match'; Body = {
+        # Eine Ableitung, die nichts findet, macht jede Pruefung darunter
+        # dauerhaft und still gruen. Sie muss ein Fehler sein.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture $moduleContractFixtureFiles
+        Get-ChildItem -LiteralPath (Join-Path $fx 'Ansible') -Filter '*.yml' | Where-Object { $_.Name -ne 'requirements.yml' } | ForEach-Object {
+            Add-FixtureFile $fx ('Ansible/' + $_.Name) "---
+[]
+"
+        }
+        Assert-Guard (Invoke-RunnerGate $fx 'ansible-module-contract') @(1) '\[ansible-module-contract\.zero-match\]' -InfraOnExit2
+    } }
+    @{ Name = 'runner.yaml-lint.red'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'bad.yml' "key: value:`n  - broken: [unclosed`n"
+        Assert-Guard (Invoke-RunnerGate $fx 'yaml-lint') @(1) -InfraOnExit2
+    } }
+    @{ Name = 'runner.actionlint.red'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx '.github/workflows/bad.yml' "on: [push]`njobs:`n  probe:`n    runs-on: ubuntu-latest`n"
+        Assert-Guard (Invoke-RunnerGate $fx 'actionlint') @(1) -InfraOnExit2
+    } }
+    @{ Name = 'runner.hadolint.red'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'Docker/probe/Dockerfile' "FROM debian`n"
+        Assert-Guard (Invoke-RunnerGate $fx 'hadolint') @(1) -InfraOnExit2
+    } }
+    @{ Name = 'runner.shellcheck.red'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture
+        # Unabgeschlossenes Quote: Parserfehler (SC1078, error-Level), sicher
+        # oberhalb der -S-warning-Schwelle des Gates.
+        Add-FixtureFile $fx 'probe.sh' "#!/bin/sh`necho `"unclosed`n"
+        Assert-Guard (Invoke-RunnerGate $fx 'shellcheck') @(1) -InfraOnExit2
+    } }
+    @{ Name = 'runner.yaml-roundtrip.drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        # Expected-Vertrag der Golden-Mission mutieren: der PyYAML-Verifier
+        # muss die semantische Abweichung rot melden, nicht leer gruen laufen.
+        $fx = New-Fixture @('Docker/WebAPI/lib', 'Docker/WebAPI/tests/fixtures', 'Docker/WebAPI/tests/tools', 'Ansible/tests')
+        Edit-Fixture $fx 'Docker/WebAPI/tests/fixtures/golden-mission.json' '"memory": 8192' '"memory": 9999'
+        Assert-Guard (Invoke-RunnerGate $fx 'yaml-roundtrip') @(1) -InfraOnExit2
+    } }
+    @{ Name = 'runner.yaml-roundtrip.zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-Fixture
+        Assert-Guard (Invoke-RunnerGate $fx 'yaml-roundtrip') @(2)
+    } }
+)
+
+# Hook-Payload-Faelle brauchen stdin; eigener Baustein statt Invoke-Tool.
+function Invoke-HookWithPayload {
+    param([string]$HookRelPath, [string]$Payload)
+    if (-not $shExe) { return $null }
+    $prevPath = $env:PATH
+    $env:PATH = (Split-Path $shExe -Parent) + [System.IO.Path]::PathSeparator + $env:PATH
+    $payloadFile = Join-Path $workRoot ('payload-' + [System.IO.Path]::GetRandomFileName() + '.json')
+    [System.IO.File]::WriteAllText($payloadFile, $Payload, (New-Object System.Text.UTF8Encoding($false)))
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $hookPosix = ((Join-Path $repoRoot $HookRelPath) -replace '\\', '/')
+        $payloadPosix = ($payloadFile -replace '\\', '/')
+        $lines = @(& $shExe '-c' ("cd '" + $repoRoot + "' && sh '" + $hookPosix + "' < '" + $payloadPosix + "'") 2>&1 | ForEach-Object { "$_" })
+        return @{ ExitCode = $LASTEXITCODE; Output = $lines }
+    } finally {
+        $ErrorActionPreference = $prev
+        $env:PATH = $prevPath
+    }
+}
+
+# php-lint-Hook mit einer Payload wie unter Windows (JSON-escapte Backslashes).
+function Invoke-PhpLintHook {
+    param([string]$File)
+    $jsonPath = ($File -replace '/', '\') -replace '\\', '\\'
+    return Invoke-HookWithPayload '.claude/hooks/php-lint.sh' ('{"tool_input":{"file_path":"' + $jsonPath + '"}}')
+}
+# Der Hook lintet mit Host-PHP oder im Tooling-Image; ohne beides kann kein
+# Blockfall bewiesen werden (infra, nie ein stiller Gruenfall).
+$phpLintToolAvailable = (Test-Command 'php') -or $phpImageAvailable
+
+# Hook-Payload-Faelle: ungueltige Payloads duerfen weder crashen noch blocken
+# (Exit 0); eine Payload auf eine kaputte PHP-Datei muss blocken (Exit 2).
+# Der Hook lintet genau die editierte Datei (Host-PHP oder Tooling-Image aus
+# tool-lock.json), nie die gleichnamige Datei im laufenden App-Container.
+$cases += @(
+    @{ Name = 'hooks.php-lint.invalid-payload'; Body = {
+        Assert-Guard (Invoke-HookWithPayload '.claude/hooks/php-lint.sh' 'kein json {{{') @(0)
+    } }
+    @{ Name = 'hooks.lang-parity.invalid-payload'; Body = {
+        Assert-Guard (Invoke-HookWithPayload '.claude/hooks/lang-parity.sh' 'kein json {{{') @(0)
+    } }
+    @{ Name = 'hooks.csp.invalid-payload'; Body = {
+        Assert-Guard (Invoke-HookWithPayload '.claude/hooks/lint-csp-patterns.sh' 'kein json {{{') @(0)
+    } }
+    @{ Name = 'hooks.php-lint.blocks-syntax-error'; Body = {
+        if (-not $phpLintToolAvailable) { return @{ Status = 'infra'; Detail = 'weder Host-PHP noch PHP-Tooling-Image' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'broken.php' "<?php`nif (true {`n"
+        $payload = '{"tool_input":{"file_path":"' + (($fx -replace '\\', '/') + '/broken.php') + '"}}'
+        Assert-Guard (Invoke-HookWithPayload '.claude/hooks/php-lint.sh' $payload) @(2) 'BLOCK'
+    } }
+    @{ Name = 'hooks.php-lint.lints-edited-copy'; Body = {
+        # Kaputte Kopie einer Datei, die es im App-Container intakt gibt (wie
+        # eine Aenderung im Worktree): geblockt wird die bearbeitete Kopie.
+        if (-not $phpLintToolAvailable) { return @{ Status = 'infra'; Detail = 'weder Host-PHP noch PHP-Tooling-Image' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'Docker/WebAPI/lib/ansible.php' "<?php`nif (true {`n"
+        Assert-Guard (Invoke-PhpLintHook (Join-Path $fx 'Docker/WebAPI/lib/ansible.php')) @(2) 'BLOCK'
+    } }
+    @{ Name = 'hooks.php-lint.passes-new-valid-file'; Body = {
+        # Neue gueltige Datei, die der App-Container nicht kennt (neue Datei im
+        # Worktree): kein Block.
+        if (-not $phpLintToolAvailable) { return @{ Status = 'infra'; Detail = 'weder Host-PHP noch PHP-Tooling-Image' } }
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'Docker/WebAPI/guard-new-file-probe.php' "<?php`necho 1;`n"
+        Assert-Guard (Invoke-PhpLintHook (Join-Path $fx 'Docker/WebAPI/guard-new-file-probe.php')) @(0)
+    } }
+)
+
+# Tool-Lockdatei (AP4): check.ps1 verweigert den Lauf ohne gueltige Pins
+# (Exit 2, Pruefumgebung), niemals ein stiller Lauf gegen ungepinnte Tools.
+# Die Faelle kopieren check.ps1 samt Lock in ein Fixture und mutieren dort.
+function Invoke-FixtureRunner {
+    param([string]$FixtureRoot)
+    return Invoke-Tool $hostShell @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', (Join-Path (Join-Path $FixtureRoot 'scripts') 'check.ps1'), '-List')
+}
+$cases += @(
+    @{ Name = 'tool-lock.green'; Body = {
+        Assert-Guard (Invoke-Tool $hostShell @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', (Join-Path $scriptDir 'check.ps1'), '-List')) @(0)
+    } }
+    @{ Name = 'tool-lock.missing-file'; Body = {
+        $fx = New-Fixture @('scripts/check.ps1')
+        Assert-Guard (Invoke-FixtureRunner $fx) @(2) 'Tool-Lockdatei fehlt'
+    } }
+    @{ Name = 'tool-lock.broken-json'; Body = {
+        $fx = New-Fixture @('scripts/check.ps1', 'scripts/tool-lock.json')
+        Edit-Fixture $fx 'scripts/tool-lock.json' '"version": 1,' '"version": 1,,'
+        Assert-Guard (Invoke-FixtureRunner $fx) @(2) 'Tool-Lockdatei unlesbar'
+    } }
+    @{ Name = 'tool-lock.missing-image-entry'; Body = {
+        $fx = New-Fixture @('scripts/check.ps1', 'scripts/tool-lock.json')
+        Edit-Fixture $fx 'scripts/tool-lock.json' '"yamllint": {' '"yamllint-renamed": {'
+        Assert-Guard (Invoke-FixtureRunner $fx) @(2) 'ohne dockerImages\.yamllint'
+    } }
+)
+
+# Compose-/Dockerfile-Haertungs-Contract (AP8): check-compose-hardening.ps1
+# liest VIRTUSPHERE_CHECK_ROOT selbst; die Fixtures brauchen eine .env (aus
+# .env.example kopiert, enthaelt keine Geheimnisse), weil compose config die
+# expliziten Interpolationen aufloest.
+function Invoke-ComposeHardeningGuard {
+    param([string]$FixtureRoot = '')
+    $prevRoot = $env:VIRTUSPHERE_CHECK_ROOT
+    if ($FixtureRoot) { $env:VIRTUSPHERE_CHECK_ROOT = ($FixtureRoot -replace '\\', '/') }
+    try {
+        return Invoke-Tool $hostShell @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', (Join-Path $scriptDir 'check-compose-hardening.ps1'))
+    } finally {
+        $env:VIRTUSPHERE_CHECK_ROOT = $prevRoot
+    }
+}
+function New-ComposeFixture {
+    $fx = New-Fixture @('docker-compose.yml', '.env.example',
+        'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
+        'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
+        'Docker/qa-ansible/Dockerfile')
+    Copy-Item -Force -Path (Join-Path $fx '.env.example') -Destination (Join-Path $fx '.env')
+    return $fx
+}
+$cases += @(
+    @{ Name = 'compose-hardening.green'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        Assert-Guard (Invoke-ComposeHardeningGuard) @(0) -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.env-leak-drift'; Body = {
+        # Der Originalbefund: env_file gab dem LAN-zugewandten nginx-Container
+        # APP_KEY, DB_PASS und MYSQL_ROOT_PASSWORD, obwohl das Image keinen dieser
+        # Werte liest. Wiederhergestellt heisst das: die Regel muss es sehen.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    logging: *container-logging' "    logging: *container-logging`n    env_file:`n      - .env"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.php-root-secret-drift'; Body = {
+        # App-Runtime und Worker duerfen das nur fuer MySQL/Hostwerkzeuge
+        # bestimmte Rootsecret auch dann nicht erhalten, wenn es in .env steht.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      WEB_HTTPS_PORT: ${WEB_HTTPS_PORT}' "      WEB_HTTPS_PORT: `${WEB_HTTPS_PORT}`n      MYSQL_ROOT_PASSWORD: `${MYSQL_ROOT_PASSWORD}"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.pma-port-collision-drift'; Body = {
+        # Gegenrichtung derselben Regel: der Container BRAUCHT PMA_PORT, weil das
+        # Image es als MySQL-Serverport liest. Faellt es weg, protokolliert
+        # phpMyAdmin je Anfrage "Undefined array key PMA_PORT" und faellt still auf
+        # 3306 zurueck - genau die Sorte stiller Vorgabe, die spaeter jemand
+        # umkonfiguriert und nicht mehr findet.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      PMA_PORT: ${DB_PORT}' '      # PMA_PORT entfernt'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.env-scope\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.logging-bound-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    max-file: "5"' '    max-file: "50"'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.logging\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.mysql-binlog-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    command: ["mysqld", "--skip-log-bin"]' '    command: ["mysqld"]'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.mysql-binlog\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.read-only-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' 'read_only: true' 'read_only: false'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.read-only\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.cap-add-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      - DAC_READ_SEARCH' ("      - DAC_READ_SEARCH`n      - SYS_ADMIN")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.cap-add\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.php-kill-missing'; Body = {
+        # The root FPM master must signal its uid-33 children during shutdown.
+        # Removing KILL reproduces the measured SIGQUIT timeout / exit 137.
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      - KILL' '      # required FPM signal capability removed'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.cap-add\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.depends-started-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' 'condition: service_healthy' 'condition: service_started'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.depends-healthy\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.pma-profile-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        # Der reale Drift: Profil entfernt (x-Key ist valide, compose ignoriert
+        # ihn) und phpMyAdmin startet wieder always-on.
+        Edit-Fixture $fx 'docker-compose.yml' '    profiles:' '    x-disabled-profiles:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.pma-profile\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.pma-wrong-profile-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        # In ein fremdes Profil verschoben: dank --profile "*" bleibt der
+        # Service sichtbar und wird als falsch platziert gemeldet.
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      - tools' '      - werkzeuge'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.pma-profile\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.built-image-tag-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' 'image: mysql:8.4-virtusphere' 'image: mysql:8.4-untrusted'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-tag\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.built-image-context-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' 'context: ./Docker/mysql' 'context: ./Docker/php'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-context\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.built-image-context-zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '      context: ./Docker/mysql' '      x-context-disabled: ./Docker/mysql'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-context\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.php-runtime-target-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    target: runtime' '    target: tooling'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.built-image-target\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.php-worker-build-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '  deploy-worker:' ("  deploy-worker:`n    build:`n      context: ./Docker/php`n      target: runtime")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.php-worker-build\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.dockerfile-digest-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        # Gleiche Digest-Unabhaengigkeit: der Check parst die FROM-Referenz nur
+        # bis zum ersten Leerzeichen und baut nie, der Rest darf Muell sein.
+        Edit-Fixture $fx 'Docker/php/Dockerfile' 'FROM php:8.4-fpm@sha256:' 'FROM php:8.4-fpm sha256:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '  phpmyadmin:' '  phpmyadmin-renamed:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.services\]' -InfraOnExit2
+    } }
+)
+
+# Offline-Bundle-Vorbedingungen: --release lehnt einen dirty Worktree hart ab,
+# ein nichtleeres Ziel wird nie ueberbaut. Beide Checks stehen VOR jedem
+# Docker-Schritt, deshalb kommen die Faelle ohne Images aus; die Fixtures sind
+# eigene Mini-Git-Repos, das echte Repo wird nie beruehrt.
+function Invoke-BundleScript {
+    param([string]$FixtureRoot, [string[]]$ScriptArgs)
+    if (-not $shExe) { return $null }
+    $prevPath = $env:PATH
+    $env:PATH = (Split-Path $shExe -Parent) + [System.IO.Path]::PathSeparator + $env:PATH
+    try {
+        $scriptPosix = ((Join-Path $FixtureRoot 'scripts/build-offline-bundle.sh') -replace '\\', '/')
+        $argLine = @($ScriptArgs | ForEach-Object { "'" + ($_ -replace '\\', '/') + "'" }) -join ' '
+        return Invoke-Tool $shExe @('-c', ("sh '" + $scriptPosix + "' " + $argLine))
+    } finally {
+        $env:PATH = $prevPath
+    }
+}
+function New-BundleFixture {
+    param([string[]]$ExtraPaths = @())
+    $fx = New-Fixture (@('scripts/build-offline-bundle.sh') + $ExtraPaths)
+    foreach ($gitStep in @(
+            @('init', '-q'),
+            @('config', 'user.email', 'guard@fixture.invalid'),
+            @('config', 'user.name', 'guard'),
+            @('add', '.'),
+            @('commit', '-q', '-m', 'fixture'))) {
+        $r = Invoke-Tool 'git' (@('-C', $fx) + $gitStep)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitStep -join ' ') + ' im Bundle-Fixture fehlgeschlagen: ' + (@($r.Output) -join ' ')) }
+    }
+    return $fx
+}
+$cases += @(
+    @{ Name = 'offline-bundle.release-dirty-abort'; Body = {
+        $fx = New-BundleFixture
+        Add-FixtureFile $fx 'dirty.txt' 'uncommitted'
+        Assert-Guard (Invoke-BundleScript $fx @('--release', (Join-Path $fx 'dist/out'))) @(1) '\[bundle\.dirty\]'
+    } }
+    @{ Name = 'offline-bundle.dirty-warns-without-release'; Body = {
+        # Negativrichtung: ohne --release ist dirty nur eine Warnung und der Lauf
+        # geht ueber den Check hinaus. Die Fixture laesst tool-lock.json bewusst
+        # weg, damit der Lauf deterministisch am naechsten Umgebungs-Halt endet
+        # (exit 2), bevor irgendein Docker-Schritt laufen koennte; exit 2 statt 1
+        # beweist zugleich, dass es NICHT der [bundle.dirty]-Abbruch war.
+        $fx = New-BundleFixture
+        Add-FixtureFile $fx 'dirty.txt' 'uncommitted'
+        Assert-Guard (Invoke-BundleScript $fx @((Join-Path $fx 'dist/out'))) @(2) 'WARNUNG: Worktree ist nicht sauber'
+    } }
+    @{ Name = 'offline-bundle.dest-not-empty-abort'; Body = {
+        $fx = New-BundleFixture
+        Add-FixtureFile $fx 'dist/out/altdatei.txt' 'aus einem frueheren Lauf'
+        Assert-Guard (Invoke-BundleScript $fx @((Join-Path $fx 'dist/out'))) @(2) '\[bundle\.dest-not-empty\]'
+    } }
+)
+
+$cases += @(
+    @{ Name = 'portal-require-closure.probes'; Body = {
+        if (-not $phpImageAvailable) { throw 'INFRA: PHP test image unavailable' }
+        $result = Invoke-Tool 'docker' @('run', '--rm', '--network', 'none',
+            '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+            $phpImage, 'php', 'vendor/bin/phpunit', '--testsuite', 'unit', '--filter',
+            'PortalClosureAnalysisTest|PortalRequireClosureContractTest',
+            '--fail-on-empty-test-suite', '--fail-on-skipped', '--testdox')
+        $proof = Assert-Guard $result @(0) 'Dashboard regression mutation removes its real module edge'
+        if ($proof.Status -ne 'proven') { return $proof }
+        Assert-Guard $result @(0) 'Zero entrypoints are a contract error'
+    } }
+)
+
+# --- Ausfuehrung -----------------------------------------------------------------
+$selected = $cases
+if ($Filter) {
+    $selected = @($cases | Where-Object {
+        $name = $_.Name
+        @($Filter | Where-Object { $name.StartsWith($_) }).Count -gt 0
+    })
+    if ($selected.Count -eq 0) {
+        Write-Host 'test-guards.ps1: kein Fall passt zum Filter (siehe -List)' -ForegroundColor Red
+        exit 3
+    }
+}
+
+if ($List) {
+    Write-Host ('{0} Guard-Faelle:' -f $selected.Count)
+    foreach ($c in $selected) { Write-Host ('  ' + $c.Name) }
+    exit 0
+}
+
+# Ein Anlegefehler ist Infrastruktur (Exit 2 laut Kopf), kein Fallergebnis.
+try {
+    $workRoot = New-CheckArtifactDirectory -Root ([System.IO.Path]::GetTempPath()) -Stamp (Get-Date -Format 'yyyyMMdd-HHmmss') -Prefix 'virtusphere-guards-'
+} catch {
+    Write-Host ('test-guards.ps1: Arbeitsverzeichnis nicht anlegbar: ' + $_.Exception.Message) -ForegroundColor Yellow
+    exit 2
+}
+$proven = 0
+$unproven = 0
+$infra = 0
+$caseNumber = 0
+$caseTotal = $selected.Count
+
+try {
+    Write-Host ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle' -f $selected.Count) -ForegroundColor Cyan
+    foreach ($case in $selected) {
+        $caseNumber = $caseNumber + 1
+        Write-Host ('[{0}/{1}] RUN  {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Cyan
+        $verdict = $null
+        try {
+            $verdict = & $case.Body
+        } catch {
+            $verdict = @{ Status = 'infra'; Detail = ('Exception: ' + $_.Exception.Message) }
+        }
+        switch ($verdict.Status) {
+            'proven' {
+                $proven = $proven + 1
+                Write-Host ('[{0}/{1}] proven   {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Green
+            }
+            'infra' {
+                $infra = $infra + 1
+                Write-Host ('[{0}/{1}] infra    {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Yellow
+            }
+            default {
+                $unproven = $unproven + 1
+                Write-Host ('[{0}/{1}] unproven {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Red
+            }
+        }
+    }
+} finally {
+    Remove-Item -Recurse -Force -Path $workRoot -ErrorAction SilentlyContinue
+}
+
+$exitCode = 0
+if ($infra -gt 0) { $exitCode = 2 }
+if ($unproven -gt 0) { $exitCode = 1 }
+Write-Host ''
+Write-Host ('Guards: {0} proven, {1} unproven, {2} infra => Exit {3}' -f $proven, $unproven, $infra, $exitCode) `
+    -ForegroundColor $(if ($exitCode -eq 0) { 'Green' } elseif ($exitCode -eq 1) { 'Red' } else { 'Yellow' })
+exit $exitCode

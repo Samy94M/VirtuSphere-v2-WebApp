@@ -1,0 +1,388 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../credentials.php';
+require_once __DIR__ . '/../crypto.php';
+require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/../validate.php';
+require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/deploy_remote_mode_activation.php';
+require_once __DIR__ . '/deploy_create_fence.php';
+require_once __DIR__ . '/deploy_remote_secret_fence.php';
+
+function credential_normalize_type(string $type): string
+{
+    $type = strtolower(trim($type));
+    if (!in_array($type, VIRTUSPHERE_CREDENTIAL_TYPES, true)) {
+        throw new InvalidArgumentException('Credential type must be esxi or ansible.');
+    }
+
+    return $type;
+}
+
+function credential_validate_host_literal(Validator $validator, string $field, string $host, string $label): void
+{
+    if (preg_match('/[\x00-\x20\x7F]/', $host) === 1) {
+        $validator->add($field, validator_text('validate.host_no_whitespace', ':field must not contain whitespace or control characters.', ['field' => $label]));
+        return;
+    }
+
+    if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+        return;
+    }
+
+    $hostnamePattern = '/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/';
+    if (preg_match($hostnamePattern, $host) !== 1) {
+        $validator->add($field, validator_text('validate.host_invalid', ':field must be a valid hostname or IP address.', ['field' => $label]));
+    }
+}
+
+function credential_validate_host(Validator $validator, string $type, mixed $value): string
+{
+    $hostLabel = validator_label('host', 'Host');
+    $host = $validator->requireString('host', $value, $hostLabel, 255);
+    if ($host === '') {
+        return $host;
+    }
+
+    $hasScheme = preg_match('#^[A-Za-z][A-Za-z0-9+.-]*://#', $host) === 1;
+    if (!$hasScheme) {
+        credential_validate_host_literal($validator, 'host', $host, $hostLabel);
+        return $host;
+    }
+
+    if ($type !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        $validator->add('host', validator_text('validate.ansible_host_no_url', 'Ansible SSH host must be a hostname or IP address, not a URL.'));
+        return $host;
+    }
+
+    $parts = parse_url($host);
+    if (!is_array($parts) || empty($parts['host'])) {
+        $validator->add('host', validator_text('validate.esxi_url_host_missing', 'ESXi host URL must include a host.'));
+        return $host;
+    }
+
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    if (!in_array($scheme, VIRTUSPHERE_ESXI_SCHEMES, true)) {
+        $validator->add('host', validator_text('validate.esxi_url_scheme', 'ESXi host URL must use http or https.'));
+    }
+    if (!empty($parts['user']) || !empty($parts['pass']) || !empty($parts['query']) || !empty($parts['fragment'])) {
+        $validator->add('host', validator_text('validate.esxi_url_no_userinfo', 'ESXi host URL must not include credentials, query or fragment parts.'));
+    }
+    if (isset($parts['path']) && !in_array((string) $parts['path'], ['', '/'], true)) {
+        $validator->add('host', validator_text('validate.esxi_url_no_path', 'ESXi host URL must not include a path.'));
+    }
+    if (isset($parts['port']) && ((int) $parts['port'] < 1 || (int) $parts['port'] > 65535)) {
+        $validator->add('host', validator_text('validate.esxi_url_port_range', 'ESXi host URL port must be between 1 and 65535.'));
+    }
+
+    credential_validate_host_literal($validator, 'host', (string) $parts['host'], validator_label('esxi_host_url_host', 'ESXi host URL host'));
+
+    return $host;
+}
+
+function credential_name_exists(mysqli $db, string $type, string $name, int $excludeId = 0): bool
+{
+    if ($excludeId > 0) {
+        $row = repo_fetch_one($db, 'SELECT id FROM deploy_credentials WHERE type = ? AND name = ? AND id <> ? LIMIT 1', 'ssi', [$type, $name, $excludeId]);
+    } else {
+        $row = repo_fetch_one($db, 'SELECT id FROM deploy_credentials WHERE type = ? AND name = ? LIMIT 1', 'ss', [$type, $name]);
+    }
+
+    return $row !== null;
+}
+
+/** A PEM text as the stored value compares it: line endings unified, outer whitespace removed. */
+function credential_pem_comparable(string $pem): string
+{
+    return trim(str_replace("\r\n", "\n", $pem));
+}
+
+/**
+ * @param string|null $storedCertificatePem the PEM the row stores now (updates only). A "none" choice that posts
+ *        this very certificate back, as the editor's textarea does, removes it as decided instead of refusing it.
+ */
+function credential_validate_payload(mysqli $db, array $data, ?string $secret, bool $secretRequired, int $excludeId = 0, ?string $storedCertificatePem = null): array
+{
+    $validator = new Validator();
+    $type = $validator->enum('type', $data['type'] ?? '', validator_label('credential_type', 'Credential type'), VIRTUSPHERE_CREDENTIAL_TYPES);
+    $name = $validator->requireString('name', $data['name'] ?? '', validator_label('name', 'Name'), 191);
+    $host = credential_validate_host($validator, $type, $data['host'] ?? '');
+    $port = $validator->optionalIntRange('port', $data['port'] ?? null, validator_label('port', 'Port'), 1, 65535);
+    $username = $validator->requireString('username', $data['username'] ?? '', validator_label('username', 'Username'), 191);
+    $esxiCertChoice = null;
+    $esxiCertKind = null;
+    $esxiCertificatePem = null;
+    if ($type === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        // The certificate type is the one control of the trust mode: a certificate
+        // type verifies the peer and needs its PEM, 'none' verifies nothing and
+        // stores no PEM at all.
+        $esxiCertChoice = $validator->enum(
+            'esxi_cert_kind',
+            $data['esxi_cert_kind'] ?? '',
+            validator_label('esxi_cert_kind', 'ESXi certificate type'),
+            VIRTUSPHERE_ESXI_CERT_CHOICES
+        );
+        $rawCertificate = trim((string) ($data['esxi_certificate_pem'] ?? ''));
+        if ($esxiCertChoice === VIRTUSPHERE_ESXI_CERT_NONE) {
+            // Browsers submit textarea line breaks as CRLF, the stored PEM has LF: compare after normalizing both.
+            $postedSame = $storedCertificatePem !== null
+                && credential_pem_comparable($rawCertificate) === credential_pem_comparable($storedCertificatePem);
+            if ($rawCertificate !== '' && !$postedSame) {
+                $validator->add('esxi_certificate_pem', validator_text('validate.esxi_certificate_unexpected', 'With "No certificate verification", no certificate is stored. Clear the field or choose a certificate type.'));
+            }
+        } elseif (in_array($esxiCertChoice, VIRTUSPHERE_ESXI_CERT_KINDS, true)) {
+            $esxiCertKind = $esxiCertChoice;
+            if ($rawCertificate === '') {
+                $validator->add('esxi_certificate_pem', validator_text('validate.esxi_certificate_missing', 'Paste a certificate for this certificate type, or choose "No certificate verification".'));
+            } else {
+                try {
+                    $esxiCertificatePem = credential_esxi_certificate_normalize($esxiCertKind, $rawCertificate);
+                } catch (InvalidArgumentException $exception) {
+                    $validator->add('esxi_certificate_pem', validator_text('validate.esxi_certificate_invalid', 'The ESXi certificate is not a valid PEM certificate or bundle.'));
+                }
+            }
+        }
+    }
+
+    if ($secretRequired && trim((string) ($secret ?? '')) === '') {
+        $validator->add('secret', validator_text('validate.secret_required', 'Secret is required.'));
+    }
+
+    $validator->throwIfInvalid();
+
+    if (credential_name_exists($db, $type, $name, $excludeId)) {
+        $message = validator_text('validate.credential_name_taken_for_type', 'A credential with this name already exists for this type.');
+        throw new ValidationException(['name' => $message], $message);
+    }
+
+    return [
+        'type' => $type,
+        'name' => $name,
+        'host' => $host,
+        'port' => $port,
+        'username' => $username,
+        'esxi_cert_kind' => $esxiCertKind,
+        'esxi_certificate_pem' => $esxiCertificatePem,
+        // The chosen form value, 'none' included; null for a row that is not ESXi.
+        'esxi_cert_choice' => $esxiCertChoice,
+    ];
+}
+
+function repo_credentials(mysqli $db): array
+{
+    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.config_revision, c.ansible_test_generation, c.ansible_host_fingerprint, c.ansible_host_key_type, c.ansible_host_first_seen_at, c.ansible_host_confirmed_at, c.ansible_host_confirmed_by, c.ansible_host_accept_new, c.ansible_host_observed_fingerprint, c.ansible_host_observed_type, c.ansible_host_observed_at, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
+    $stmt->execute();
+
+    return repo_fetch_all($stmt->get_result());
+}
+
+function repo_credentials_by_type(mysqli $db, string $type): array
+{
+    $type = credential_normalize_type($type);
+    $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, ansible_host_fingerprint, ansible_host_key_type, ansible_host_first_seen_at, ansible_host_confirmed_at, ansible_host_confirmed_by, ansible_host_accept_new, ansible_host_observed_fingerprint, ansible_host_observed_type, ansible_host_observed_at, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
+    $stmt->bind_param('s', $type);
+    $stmt->execute();
+
+    return repo_fetch_all($stmt->get_result());
+}
+
+function repo_credential(mysqli $db, int $id, bool $includeSecret = false): ?array
+{
+    if ($includeSecret) {
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, ansible_host_fingerprint, ansible_host_key_type, ansible_host_first_seen_at, ansible_host_confirmed_at, ansible_host_confirmed_by, ansible_host_accept_new, ansible_host_observed_fingerprint, ansible_host_observed_type, ansible_host_observed_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+    } else {
+        $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, ansible_host_fingerprint, ansible_host_key_type, ansible_host_first_seen_at, ansible_host_confirmed_at, ansible_host_confirmed_by, ansible_host_accept_new, ansible_host_observed_fingerprint, ansible_host_observed_type, ansible_host_observed_at, created_by, created_at, updated_at FROM deploy_credentials WHERE id = ? LIMIT 1');
+    }
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+
+    return $row ?: null;
+}
+
+function repo_credential_secret(mysqli $db, int $id): string
+{
+    $row = repo_credential($db, $id, true);
+    if ($row === null) {
+        throw new RuntimeException('Credential not found.');
+    }
+
+    return crypto_decrypt_secret((string) $row['secret_ciphertext']);
+}
+
+function repo_create_credential(mysqli $db, array $data, string $secret, int $createdBy): int
+{
+    $values = credential_validate_payload($db, $data, $secret, true);
+    // A non-ESXi row keeps the stored value it has always had.
+    $trustMode = credential_esxi_trust_mode_after_save($values, null) ?? VIRTUSPHERE_ESXI_TRUST_STRICT;
+    credential_assert_strict_esxi_https($values, $trustMode);
+    $ciphertext = crypto_encrypt_secret($secret);
+
+    return repo_transaction($db, static function () use ($db, $values, $ciphertext, $trustMode, $createdBy): int {
+        $stmt = $db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, created_by, ansible_host_accept_new) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
+        $stmt->bind_param('sssisssssi', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $trustMode, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $createdBy);
+        $stmt->execute();
+        $credentialId = (int) $db->insert_id;
+        repo_sync_disabled_remote_activations($db, $credentialId, $values['type']);
+        return $credentialId;
+    });
+}
+
+/**
+ * @param array{before: string|null, after: string|null} $trustChange out: the ESXi trust mode
+ *        before and after this save (null for a row that is not ESXi), for the audit and the flash
+ */
+function repo_update_credential(mysqli $db, int $id, array $data, ?string $secret = null, bool &$preflightCleared = false, array &$trustChange = ['before' => null, 'after' => null]): bool
+{
+    $preflightCleared = false;
+    $trustChange = ['before' => null, 'after' => null];
+    if ($id <= 0) {
+        throw new InvalidArgumentException('Credential id is required.');
+    }
+
+    $current = repo_credential($db, $id, true);
+    if ($current === null) {
+        throw new RuntimeException('Credential not found.');
+    }
+    $storedPem = isset($current['esxi_certificate_pem']) ? (string) $current['esxi_certificate_pem'] : null;
+    $values = credential_validate_payload($db, $data, $secret, false, $id, $storedPem);
+    $beforeTrustMode = (string) ($current['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI
+        ? credential_esxi_trust_mode($current)
+        : null;
+    $trustMode = credential_esxi_trust_mode_after_save($values, $beforeTrustMode);
+    $trustChange = ['before' => $beforeTrustMode, 'after' => $trustMode];
+    credential_assert_strict_esxi_https($values, $trustMode ?? VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE);
+    // Only a real change of the mode is written. An unchanged mode is left to the
+    // row as it is now, so a save with a stale read cannot undo a concurrent activation.
+    $trustWriteInt = $trustMode !== null && $trustMode !== $beforeTrustMode ? 1 : 0;
+    $trustValue = $trustMode ?? VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
+    $secretChanges = $secret !== null && trim($secret) !== '';
+    $resetStrictTest = $secretChanges
+        || (string) ($current['type'] ?? '') !== $values['type']
+        || trim((string) ($current['host'] ?? '')) !== trim((string) $values['host'])
+        || (string) ($current['port'] ?? '') !== (string) ($values['port'] ?? '')
+        || trim((string) ($current['username'] ?? '')) !== trim((string) $values['username'])
+        || (string) ($current['esxi_cert_kind'] ?? '') !== (string) ($values['esxi_cert_kind'] ?? '')
+        || trim((string) ($current['esxi_certificate_pem'] ?? '')) !== trim((string) ($values['esxi_certificate_pem'] ?? ''))
+        // Choosing "none" leaves no strict proof behind, even when the stored certificate was already empty.
+        || ($values['esxi_cert_choice'] ?? null) === VIRTUSPHERE_ESXI_CERT_NONE;
+    $resetStrictTestInt = $resetStrictTest ? 1 : 0;
+
+    // A blank or whitespace-only secret means "keep the stored secret". Real
+    // secrets are encrypted verbatim (no trim), so surrounding spaces survive.
+    if ($secretChanges) {
+        $ciphertext = crypto_encrypt_secret($secret);
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?, esxi_trust_mode = IF(? = 1, ?, esxi_trust_mode), esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sssississsii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $ciphertext, $trustWriteInt, $trustValue, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
+    } else {
+        $stmt = $db->prepare('UPDATE deploy_credentials SET type = ?, name = ?, host = ?, port = ?, username = ?, esxi_trust_mode = IF(? = 1, ?, esxi_trust_mode), esxi_cert_kind = ?, esxi_certificate_pem = ?, esxi_strict_tested_at = IF(? = 1, NULL, esxi_strict_tested_at), config_revision = config_revision + 1, ansible_test_started_at = NULL, updated_at = NOW() WHERE id = ?');
+        $stmt->bind_param('sssisisssii', $values['type'], $values['name'], $values['host'], $values['port'], $values['username'], $trustWriteInt, $trustValue, $values['esxi_cert_kind'], $values['esxi_certificate_pem'], $resetStrictTestInt, $id);
+    }
+
+    return repo_transaction($db, static function () use ($db, $stmt, $id, $values, &$preflightCleared): bool {
+        repo_deploy_create_fence_credential_change($db, $id, $values);
+        repo_remote_secret_fence_credential_change($db, $id, $values);
+        $locked = repo_fetch_one($db, 'SELECT type, host, port FROM deploy_credentials WHERE id = ? FOR UPDATE', 'i', [$id]);
+        $stmt->execute();
+        if ($stmt->affected_rows === 0 && repo_credential($db, $id) === null) {
+            throw new RuntimeException('Credential not found.');
+        }
+        if ($locked !== null && ((string) $locked['type'] !== $values['type']
+            || (string) $locked['host'] !== $values['host']
+            || credential_ssh_port($locked['port']) !== credential_ssh_port($values['port']))) {
+            $resetIdentity = $db->prepare('UPDATE deploy_credentials SET ansible_host_fingerprint = NULL, ansible_host_key_type = NULL, ansible_host_first_seen_at = NULL, ansible_host_confirmed_at = NULL, ansible_host_confirmed_by = NULL, ansible_host_accept_new = 0, ansible_host_observed_fingerprint = NULL, ansible_host_observed_type = NULL, ansible_host_observed_at = NULL WHERE id = ?');
+            $resetIdentity->bind_param('i', $id);
+            $resetIdentity->execute();
+        }
+        // The old evidence and the new revision become visible atomically. A
+        // test starting for the new revision after commit can therefore never
+        // be deleted by the update request that created that revision.
+        $clear = $db->prepare('DELETE FROM deploy_ansible_preflight_state WHERE credential_id = ?');
+        $clear->bind_param('i', $id);
+        $clear->execute();
+        $preflightCleared = $clear->affected_rows > 0;
+        repo_sync_disabled_remote_activations($db, $id, $values['type']);
+        return true;
+    });
+}
+
+function credential_assert_strict_esxi_https(array $values, string $trustMode): void
+{
+    if (($values['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI || $trustMode !== VIRTUSPHERE_ESXI_TRUST_STRICT) {
+        return;
+    }
+    $endpoint = credential_esxi_normalize((string) ($values['host'] ?? ''), $values['port'] ?? null);
+    if ($endpoint !== null && $endpoint['scheme'] === 'https') {
+        return;
+    }
+
+    $message = validator_text('validate.esxi_strict_https', 'Strict ESXi certificate verification requires an HTTPS host URL.');
+    throw new ValidationException(['host' => $message], $message);
+}
+
+function repo_record_esxi_strict_test_success(mysqli $db, int $id): bool
+{
+    $stmt = $db->prepare("UPDATE deploy_credentials SET esxi_strict_tested_at = NOW() WHERE id = ? AND type = 'esxi'");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+
+    return $stmt->affected_rows === 1;
+}
+
+function repo_activate_esxi_strict_trust(mysqli $db, int $id): bool
+{
+    $credential = repo_credential($db, $id);
+    if ($credential === null || (string) ($credential['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        throw new RuntimeException('ESXi credential not found.');
+    }
+    $endpoint = credential_esxi_normalize((string) ($credential['host'] ?? ''), $credential['port'] ?? null);
+    if ($endpoint === null || $endpoint['scheme'] !== 'https') {
+        throw new RuntimeException('Strict ESXi certificate verification requires HTTPS.');
+    }
+    credential_esxi_certificate_normalize(
+        (string) ($credential['esxi_cert_kind'] ?? ''),
+        (string) ($credential['esxi_certificate_pem'] ?? '')
+    );
+    if (empty($credential['esxi_strict_tested_at'])) {
+        throw new RuntimeException('Strict ESXi certificate verification must pass a connection test before activation.');
+    }
+
+    $stmt = $db->prepare("UPDATE deploy_credentials SET esxi_trust_mode = 'strict', updated_at = NOW() WHERE id = ? AND type = 'esxi'");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+
+    return $stmt->affected_rows === 1 || credential_esxi_trust_mode(repo_credential($db, $id) ?? []) === VIRTUSPHERE_ESXI_TRUST_STRICT;
+}
+
+function repo_activate_esxi_legacy_trust(mysqli $db, int $id): bool
+{
+    $stmt = $db->prepare("UPDATE deploy_credentials SET esxi_trust_mode = 'legacy_insecure', esxi_strict_tested_at = NULL, updated_at = NOW() WHERE id = ? AND type = 'esxi'");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    if ($stmt->affected_rows === 0) {
+        $credential = repo_credential($db, $id);
+        if ($credential === null || (string) ($credential['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+            throw new RuntimeException('ESXi credential not found.');
+        }
+    }
+
+    return true;
+}
+
+function repo_delete_credential(mysqli $db, int $id): bool
+{
+    if ($id <= 0) {
+        throw new InvalidArgumentException('Credential id is required.');
+    }
+
+    return repo_transaction($db, static function () use ($db, $id): bool {
+        repo_deploy_create_fence_credential_change($db, $id, null);
+        repo_remote_secret_fence_credential_change($db, $id, null);
+        $stmt = $db->prepare('DELETE FROM deploy_credentials WHERE id = ?');
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        return $stmt->affected_rows === 1;
+    });
+}

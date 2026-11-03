@@ -1,0 +1,400 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/defaults.php';
+require_once __DIR__ . '/inventory_error_constants.php';
+require_once __DIR__ . '/network_mac_constants.php';
+
+// Declaration order is the ENUM mirror order (ADR-0016, check-enum-sync):
+// cancelling sits between running and the terminal states, exactly where the
+// machine passes through it. A running job whose cancel was requested keeps
+// lock, heartbeat and every protective effect until the worker confirms at a
+// step boundary or the reaper converges a dead worker (ADR-0033, decision 4).
+const VIRTUSPHERE_DEPLOY_STATUS_QUEUED = 'queued';
+const VIRTUSPHERE_DEPLOY_STATUS_RUNNING = 'running';
+const VIRTUSPHERE_DEPLOY_STATUS_CANCELLING = 'cancelling';
+const VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED = 'succeeded';
+const VIRTUSPHERE_DEPLOY_STATUS_FAILED = 'failed';
+const VIRTUSPHERE_DEPLOY_STATUS_CANCELLED = 'cancelled';
+const VIRTUSPHERE_DEPLOY_STATUS_PARTIAL = 'partial';
+const VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN = 'outcome_unknown';
+
+// Active = the job still owns its mission (delete/enqueue blocks, the
+// one-job-per-mission and one-pull-per-credential guards). Cancelling belongs
+// here: the playbook may still be executing its current step.
+const VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES = [
+    VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
+    VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+    VIRTUSPHERE_DEPLOY_STATUS_CANCELLING,
+];
+
+// What the cancel button (and a cancel POST) may act on; NOT the active set: a
+// cancelling job already has its wish recorded, a second cancel is pointless.
+const VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES = [
+    VIRTUSPHERE_DEPLOY_STATUS_QUEUED,
+    VIRTUSPHERE_DEPLOY_STATUS_RUNNING,
+];
+
+// `partial` (durable per-VM result_json) and `outcome_unknown` (only the reaper
+// writes it, after a silent heartbeat: WK-04/WK-07 A, migration 0065) are
+// terminal. Membership also opts them into the retention purges, intended: they
+// age like any finished job (repo_purge_deploy_job_logs, ..._finished_system_jobs).
+const VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES = [
+    VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED,
+    VIRTUSPHERE_DEPLOY_STATUS_FAILED,
+    VIRTUSPHERE_DEPLOY_STATUS_CANCELLED,
+    VIRTUSPHERE_DEPLOY_STATUS_PARTIAL,
+    VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN,
+];
+
+require_once __DIR__ . '/deploy_terminal_constants.php';
+
+// Where a stored job-log line came from.
+//
+// `stdout`/`stderr` are legacy values and stay readable (Etappe 8). They were
+// never a real channel split: the remote command redirects with `2>&1`, so
+// Ansible's two streams are already merged before the worker sees a single
+// byte, and every line the worker stored as `stdout` could just as well have
+// been stderr. A UI that offered to filter them apart offered something the
+// transport cannot deliver. New lines therefore say what is true: `ansible` is
+// the merged remote output, `worker_error` is the worker's own finding about
+// the job, and `system` stays what it always was - this worker narrating its
+// own steps. A real channel split would be a change to ssh_execute_command(),
+// not a label.
+const VIRTUSPHERE_DEPLOY_LOG_STDOUT = 'stdout';
+const VIRTUSPHERE_DEPLOY_LOG_STDERR = 'stderr';
+const VIRTUSPHERE_DEPLOY_LOG_SYSTEM = 'system';
+const VIRTUSPHERE_DEPLOY_LOG_ANSIBLE = 'ansible';
+const VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR = 'worker_error';
+
+require_once __DIR__ . '/deploy_log_constants.php';
+
+const VIRTUSPHERE_DEPLOY_LOG_STREAMS = [
+    VIRTUSPHERE_DEPLOY_LOG_STDOUT,
+    VIRTUSPHERE_DEPLOY_LOG_STDERR,
+    VIRTUSPHERE_DEPLOY_LOG_SYSTEM,
+    VIRTUSPHERE_DEPLOY_LOG_ANSIBLE,
+    VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR,
+];
+
+// The legacy pair, kept as a set rather than as two literals so the display
+// helper and any later backfill read the same list.
+const VIRTUSPHERE_DEPLOY_LOG_LEGACY_STREAMS = [
+    VIRTUSPHERE_DEPLOY_LOG_STDOUT,
+    VIRTUSPHERE_DEPLOY_LOG_STDERR,
+];
+
+// The stored-output limits and their truncation kinds live with the gate that
+// enforces them, in lib/deploy_job_output.php.
+
+const VIRTUSPHERE_DEPLOY_MODE_FULL = 'full';
+const VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS = 30;
+const VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS = 600;
+
+// A failure detector must not count silence it was not awake to observe. While
+// the database was unreachable NOTHING could write a heartbeat, so at the moment
+// it returns every running job looks abandoned and the reaper cannot tell a dead
+// worker from its own blindness - it fails a healthy job whose playbook then
+// keeps running against ESXi under a terminal job row. Kubernetes' node
+// controller solves the same problem the same way, stopping evictions once too
+// large a share of nodes looks unhealthy at once.
+//
+// So a process that has just (re)connected waits this long before it reaps. The
+// value must outlast what a LIVE worker needs to restore its job heartbeat after
+// the database returns: its reconnect backoff (capped at 30 s) plus one
+// VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS, doubled for margin. It costs
+// nothing in the case that matters: an observer that has been connected all
+// along was never blind and reaps a genuinely dead worker without any delay.
+const VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS = 120;
+
+// The database channel a running job writes through (lib/deploy_worker_db_channel.php).
+// A job log line and a job heartbeat are a SIDE channel: losing the database
+// while a playbook is executing on the Ansible host must not end the SSH stream,
+// because the remote work continues either way and its exit code is the only
+// thing that can still be learned about it.
+//
+// SPOOL_MAX_LINES bounds what the outage may cost in memory. Ansible with -vvv
+// can emit thousands of lines a minute, so an unbounded spool turns a database
+// restart into an OOM kill of the very process that is holding the job. The
+// oldest lines are dropped, not the newest: the tail is what explains how the
+// run ended, and the count of what fell out is reported as its own SYSTEM line,
+// so a gap is never silent.
+//
+// The backoff is per channel, doubling between BACKOFF_MIN and BACKOFF_MAX. It
+// exists so a callback attempts at most ONE reconnect per tick: a retry loop
+// inside a stream callback would stop reading the SSH channel, which is how a
+// database outage turns into a lost playbook.
+// Once the remote command has ENDED, the exit code exists only in this process,
+// so waiting for the database is worth more than failing fast, but only in the loop
+// worker. Its LOOP budget must outlast VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS: no job
+// heartbeat reaches a dead database, so only a worker still waiting when it returns keeps
+// the outcome. --once stays bounded (ONCE) and says so instead of pretending to conclude.
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_SPOOL_MAX_LINES = 2000;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MIN_SECONDS = 2;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_BACKOFF_MAX_SECONDS = 30;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_ONCE = 3;
+const VIRTUSPHERE_DEPLOY_DB_CHANNEL_RECOVER_ATTEMPTS_LOOP = 23;
+
+// SSH transport hardening (AP6). A remote command used to run with an
+// unbounded timeout, and a timed-out exec came back as exit 0. These four
+// constants are the SSoT for the bounded transport in lib/ssh.php:
+//  - KEEPALIVE: SSH_MSG_IGNORE interval, keeps NAT/firewall state alive.
+//  - SILENCE_TICK: read-slice length; every slice without remote output calls
+//    the onSilence hook, which is what makes the worker heartbeat time-based
+//    instead of output-based. Must stay below HEARTBEAT_INTERVAL and far below
+//    STALE_AFTER, otherwise a silent-but-alive playbook gets reaped mid-run.
+//  - IDLE: no remote output at all for this long fails the command. Generous,
+//    because vmware_guest clones a template for many minutes without printing.
+//  - TOTAL: wall-clock cap per remote command, however chatty. A full pipeline
+//    over many VMs is slow, but nothing legitimate runs for four hours.
+const VIRTUSPHERE_SSH_KEEPALIVE_INTERVAL_SECONDS = 15;
+const VIRTUSPHERE_SSH_SILENCE_TICK_SECONDS = 15;
+const VIRTUSPHERE_SSH_IDLE_TIMEOUT_SECONDS = 1800;
+const VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS = 14400;
+
+// SFTP upload of the generated deploy artifacts (serverlist.yml, accounts.yml,
+// the patched upload script - all a few KB). Two bounds, mirroring the exec
+// path: a per-operation read timeout so one stalled transfer cannot hang the
+// worker forever, and a wall-clock cap across the whole directory. Both are
+// tight because these files are small; a legitimate upload finishes in seconds.
+const VIRTUSPHERE_SFTP_OP_TIMEOUT_SECONDS = 120;
+const VIRTUSPHERE_SFTP_TOTAL_TIMEOUT_SECONDS = 300;
+
+// Removing the remote work directory after the sequence ended. One `rm -rf` on
+// a directory of a few small files; if that does not answer in this time the
+// host has a problem the cleanup cannot solve, and waiting longer only delays
+// a job whose outcome is already decided.
+const VIRTUSPHERE_DEPLOY_REMOTE_CLEANUP_TIMEOUT_SECONDS = 30;
+
+// Per-VM create contract (Etappe 14B). Loaded here rather than at the top of
+// this facade because deploy_create_total_budget_seconds() derives the create
+// budget from VIRTUSPHERE_SSH_TOTAL_TIMEOUT_SECONDS above; a require before
+// that line would leave a caller of the module alone with an undefined
+// constant instead of the one number both budgets share.
+require_once __DIR__ . '/deploy_create_constants.php';
+
+// Second reaper (AP6): the deploy worker reaps only at its own loop start, so
+// a worker stuck inside a blocking transport call would never be reaped until
+// it returns. The maintenance worker runs the same reap on this interval.
+const VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS = 120;
+
+// Convergence sweep interval (L4): the maintenance worker periodically fails
+// VMs stuck in `deploying` whose mission has no queued/running job left. That
+// covers the fault the deploy worker cannot: it died (or was cancelled and then
+// died) before its own catch could mark the VMs, and the heartbeat reaper only
+// touches jobs that are still `running`.
+const VIRTUSPHERE_DEPLOY_VM_SWEEP_INTERVAL_SECONDS = 300;
+
+// Scheduling (ADR-0022). scheduled_at is stored in UTC and compared against
+// UTC_TIMESTAMP(); staggering only makes sense for the power-on modes.
+const VIRTUSPHERE_DEPLOY_SCHEDULE_HORIZON_DAYS = 30;
+const VIRTUSPHERE_DEPLOY_SCHEDULE_PAST_GRACE_SECONDS = 300;
+const VIRTUSPHERE_DEPLOY_STAGGER_MIN = 1;
+const VIRTUSPHERE_DEPLOY_STAGGER_MAX = 120;
+const VIRTUSPHERE_DEPLOY_STAGGER_MODES = ['full', 'powercycle', 'start'];
+
+// Deploy modes that create VMs and thus change ESXi resource usage (datastore
+// allocation, portgroups in use). A successful job in one of these triggers an
+// inventory refresh for its ESXi credential (ADR-0023, E3.4b). Power-cycle,
+// start and export do not create resources and are excluded.
+const VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES = ['create', VIRTUSPHERE_DEPLOY_MODE_FULL];
+
+// ESXi inventory (ADR-0023): a system deploy mode that is never shown in the UI
+// (deliberately absent from virtusphere_deploy_mode_labels()). Its playbook is
+// read-only and runs without a mission.
+const VIRTUSPHERE_DEPLOY_MODE_INVENTORY = 'inventory';
+const VIRTUSPHERE_SYSTEM_PLAYBOOKS = [
+    VIRTUSPHERE_DEPLOY_MODE_INVENTORY => 'inventoryESXi_playbook.yml',
+];
+
+// ESXi autostart policy (ADR-0025). The deploy mode writes the host's autostart
+// configuration; it creates no resources and moves no power, so it is in neither
+// VIRTUSPHERE_DEPLOY_STAGGER_MODES nor VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES.
+const VIRTUSPHERE_DEPLOY_MODE_AUTOSTART = 'autostart';
+
+// SSoT for the deploy_missions.autostart_stop_action ENUM (mirrored order-exact
+// in struktur.sql + migrate.php, checked by scripts/check-enum-sync.sh).
+// These are community.vmware.vmware_host_auto_start's system_defaults.stop_action
+// values verbatim; do not translate or re-case them, the module compares strings.
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_GUEST_SHUTDOWN = 'guestShutdown';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_POWER_OFF = 'powerOff';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_SUSPEND = 'suspend';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTION_NONE = 'none';
+const VIRTUSPHERE_AUTOSTART_STOP_ACTIONS = [
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_GUEST_SHUTDOWN,
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_POWER_OFF,
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_SUSPEND,
+    VIRTUSPHERE_AUTOSTART_STOP_ACTION_NONE,
+];
+
+// Delay bounds in seconds. The mission default must be a real wait (>= 0); a VM
+// may additionally store VIRTUSPHERE_AUTOSTART_DELAY_INHERIT, which the module
+// reads as "use the host default". 0 and -1 are NOT interchangeable: 0 means
+// "no wait", -1 means "inherit". Keep them apart in every layer.
+const VIRTUSPHERE_AUTOSTART_DELAY_INHERIT = -1;
+const VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT = 120;
+const VIRTUSPHERE_AUTOSTART_DELAY_MIN = 0;
+const VIRTUSPHERE_AUTOSTART_DELAY_MAX = 3600;
+
+// The autostart entry that means "this VM does not participate". Writing it is
+// how the deactivation path removes a VM from the host's autostart list.
+const VIRTUSPHERE_AUTOSTART_START_ACTION_ON = 'powerOn';
+const VIRTUSPHERE_AUTOSTART_START_ACTION_OFF = 'none';
+
+// SSoT for the deploy_esxi_inventory.kind ENUM (mirrored order-exact in
+// struktur.sql + migrate.php, checked by scripts/check-enum-sync.sh, ADR-0016).
+const VIRTUSPHERE_INVENTORY_KIND_DATACENTER = 'datacenter';
+const VIRTUSPHERE_INVENTORY_KIND_DATASTORE = 'datastore';
+const VIRTUSPHERE_INVENTORY_KIND_NETWORK = 'network';
+const VIRTUSPHERE_INVENTORY_KIND_HOST = 'host';
+const VIRTUSPHERE_INVENTORY_KIND_VM = 'vm';
+const VIRTUSPHERE_INVENTORY_KINDS = [
+    VIRTUSPHERE_INVENTORY_KIND_DATACENTER,
+    VIRTUSPHERE_INVENTORY_KIND_DATASTORE,
+    VIRTUSPHERE_INVENTORY_KIND_NETWORK,
+    VIRTUSPHERE_INVENTORY_KIND_HOST,
+    VIRTUSPHERE_INVENTORY_KIND_VM,
+];
+
+// Outcome of a single query inside one inventory pull. A pull is several
+// separate queries and only the first one (datacenters) is the connection
+// canary, so a pull can succeed while one query answered nothing. These three
+// words are what separates "the host has none" from "my call never got there",
+// which an empty list alone cannot say. Job-log vocabulary, not a portal
+// vocabulary: nothing here colours a badge or blocks anything.
+const VIRTUSPHERE_INVENTORY_QUERY_ANSWERED = 'answered';
+const VIRTUSPHERE_INVENTORY_QUERY_REJECTED = 'rejected';
+const VIRTUSPHERE_INVENTORY_QUERY_SKIPPED = 'skipped';
+// The module's own message is kept for the log, but only its beginning: the
+// full playbook output is already in the same job log, and one runaway message
+// must not push the summary line out of a reader's view.
+const VIRTUSPHERE_INVENTORY_QUERY_MESSAGE_MAX_LENGTH = 200;
+
+// Why the interval automation would skip an ESXi credential. The scheduler
+// decides with these and the Credentials page names them, so a fourth blocker
+// cannot reach one of the two without the other. Order is the order an operator
+// has to fix them in, not the order of the checks: a global switch outranks a
+// per-credential pause, because un-pausing cannot start a cycle that the
+// interval or the missing Ansible host has already stopped.
+const VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF = 'interval_off';
+const VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST = 'no_ansible_host';
+// A dead deploy worker stops the cycle as thoroughly as a switched-off interval:
+// the pull is a deploy JOB, so the maintenance worker enqueues it and the deploy
+// worker executes it. With no deploy worker the job is queued and nothing runs
+// it, while the cadence line promised a cycle. Ranked ahead of the per-credential
+// pause and behind the two global settings, in fix order: un-pausing one
+// credential cannot start a cycle that has no executor.
+const VIRTUSPHERE_ESXI_AUTOMATION_NO_WORKER = 'no_deploy_worker';
+const VIRTUSPHERE_ESXI_AUTOMATION_PAUSED = 'paused';
+const VIRTUSPHERE_ESXI_AUTOMATION_BLOCKERS = [
+    VIRTUSPHERE_ESXI_AUTOMATION_INTERVAL_OFF,
+    VIRTUSPHERE_ESXI_AUTOMATION_NO_ANSIBLE_HOST,
+    VIRTUSPHERE_ESXI_AUTOMATION_NO_WORKER,
+    VIRTUSPHERE_ESXI_AUTOMATION_PAUSED,
+];
+
+// Inventory settings + defaults.
+const VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS = 'esxi_inventory_interval_hours';
+const VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL = 'esxi_inventory_ansible_credential';
+const VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT = 6;
+// Bounds of the interval an admin may set. 0 is not "no interval" but "off": the
+// automatic pull stops and only the manual refresh remains. The upper bound is a
+// week, past which a cached inventory says more about the past than the present.
+// Named because the number lived in three places at once (the POST validation,
+// the input's max attribute and the error text), and a change to any one of them
+// left the other two lying.
+const VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MIN = 0;
+const VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX = 168;
+// How often the maintenance worker re-evaluates which credentials are due.
+const VIRTUSPHERE_ESXI_INVENTORY_SCHEDULE_CHECK_SECONDS = 300;
+// ESXi host clock skew above this (seconds) is flagged as a warning (E9).
+const VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS = 120;
+
+// Fetch failures drive danger; success expires after STALE_FACTOR intervals
+// or the fixed lifetime with automation off. Legend and help use these values.
+const VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER = 3;
+const VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR = 2;
+const VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS = 7;
+
+// Capability facts of a SUCCESSFUL pull (ADR-0023 amendment 3), stored on
+// deploy_esxi_inventory_state. Deliberately separate from the error categories
+// above: those describe a fetch that failed, these describe what the host is.
+// A NULL value means "not known", never "false".
+const VIRTUSPHERE_ESXI_CAPABILITY_FIELDS = [
+    'api_type',
+    'product_version',
+    'license_product',
+    'license_free',
+    'in_ha_cluster',
+    'in_maintenance',
+];
+
+// Substrings that identify a free (non-write-capable) ESXi license in the
+// about-info's licenseProductName. Broadcom reinstated the free hypervisor with
+// ESXi 8.0 U3e; its API is read-only, so deploy and autostart cannot work there.
+const VIRTUSPHERE_ESXI_FREE_LICENSE_MARKERS = ['hypervisor', 'free'];
+
+/**
+ * Every mode a stored payload may legally carry, system modes included. Read
+ * side: the worker reads back a queued job's payload with this.
+ */
+function virtusphere_deploy_modes(): array
+{
+    return array_merge(
+        array_keys(VIRTUSPHERE_PLAYBOOKS),
+        [VIRTUSPHERE_DEPLOY_MODE_FULL],
+        array_keys(VIRTUSPHERE_SYSTEM_PLAYBOOKS)
+    );
+}
+
+/**
+ * The modes an operator may ask for, which is exactly the set the deploy form
+ * offers. Write side: a mission job is created only with one of these.
+ *
+ * The label map is the source of truth for it, so a mode without a label cannot
+ * be posted and a postable mode cannot be unlabelled. System modes (inventory)
+ * are deliberately absent from the labels, and were previously accepted by the
+ * job validator anyway: a crafted POST could queue a mission job the worker then
+ * routed into the mission-less inventory branch.
+ */
+function virtusphere_user_deploy_modes(): array
+{
+    return array_keys(virtusphere_deploy_mode_labels());
+}
+
+/**
+ * Whether a mode needs the mission's datacenter and datastore. Autostart writes
+ * the host's boot configuration and touches neither, so refusing it because a
+ * mission has no datastore would be a gate answering the wrong question.
+ * Everything else creates, powers or exports VMs and needs a location.
+ *
+ * It reads the mode the way the validators write it, because three gates ask
+ * this question (the page, the repository, the Ansible layer) and a bare
+ * inequality answered "needs a location" for every spelling it did not
+ * recognise. A mode differing only in case therefore made the page refuse what
+ * the enqueue path would accept. An unknown mode throws rather than inheriting
+ * that answer: a location-free mode added later must be given one here, and
+ * DeployModeGateTest walks the mode list so the omission fails the build.
+ */
+function virtusphere_deploy_mode_needs_location(string $mode): bool
+{
+    $mode = strtolower(trim($mode));
+    if (!in_array($mode, virtusphere_deploy_modes(), true)) {
+        throw new LogicException('Unknown deploy mode: ' . $mode . '.');
+    }
+
+    return $mode !== VIRTUSPHERE_DEPLOY_MODE_AUTOSTART;
+}
+
+function virtusphere_deploy_mode_labels(): array
+{
+    return [
+        VIRTUSPHERE_DEPLOY_MODE_FULL => 'Full pipeline',
+        'create' => 'Create VMs',
+        'powercycle' => 'Power-Cycle + Export MACs',
+        'export' => 'Export MACs',
+        'start' => 'Start VMs',
+        VIRTUSPHERE_DEPLOY_MODE_AUTOSTART => 'Apply ESXi autostart policy',
+    ];
+}

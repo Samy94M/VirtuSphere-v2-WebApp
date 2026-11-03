@@ -1,0 +1,67 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+require_once dirname(__DIR__, 2) . '/lib/deploy_urls.php';
+
+final class DeployUrlsTest extends TestCase
+{
+    public function testJobLogUrlOwnsTheRouteAndRejectsInvalidIds(): void
+    {
+        self::assertSame('deploy_log.php?id=42', deploy_job_log_url(42));
+
+        $this->expectException(InvalidArgumentException::class);
+        deploy_job_log_url(0);
+    }
+
+    public function testMissionJobReturnsToItsFilteredDeployList(): void
+    {
+        self::assertSame(
+            'deploy.php?mission_id=17',
+            deploy_job_origin_url(['mission_id' => 17, 'credential_esxi_id' => 9])
+        );
+    }
+
+    public function testMissionRoutesHaveOneValidatedBuilderEach(): void
+    {
+        self::assertSame('deploy.php?mission_id=17', deploy_mission_url(17));
+        self::assertSame('mission_details.php?id=17', mission_details_url(17));
+
+        foreach (['deploy_mission_url', 'mission_details_url'] as $builder) {
+            try {
+                $builder(0);
+                self::fail($builder . ' accepted a non-positive mission id');
+            } catch (InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testInventoryJobReturnsToItsExactSystemStatusCard(): void
+    {
+        self::assertSame(
+            'system_status.php?inventory=9#credential-9',
+            deploy_job_origin_url(['mission_id' => null, 'credential_esxi_id' => 9])
+        );
+    }
+
+    public function testInventoryJobWithDeletedCredentialReturnsToTheEsxiSection(): void
+    {
+        self::assertSame(
+            'system_status.php#esxi',
+            deploy_job_origin_url(['mission_id' => null, 'credential_esxi_id' => null])
+        );
+    }
+
+    public function testCancelOriginTokenReturnsToTheSameLogWithoutAcceptingUrls(): void
+    {
+        $job = ['id' => 42, 'mission_id' => 17];
+        self::assertSame('deploy_log.php?id=42', deploy_job_cancel_redirect_url($job, VIRTUSPHERE_DEPLOY_JOB_ORIGIN_LOG));
+        self::assertSame('deploy.php?mission_id=17', deploy_job_cancel_redirect_url($job, ''));
+
+        $this->expectException(InvalidArgumentException::class);
+        deploy_job_cancel_redirect_url($job, 'https://example.invalid/redirect');
+    }
+}

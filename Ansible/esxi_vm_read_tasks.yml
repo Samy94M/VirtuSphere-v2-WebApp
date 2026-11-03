@@ -1,0 +1,70 @@
+---
+# Liest eine VM ueber ihre gebundene Instance-UUID, mit Wiederholung (K4a, W1).
+#
+# Die eine lesende Abfrage vor Powercycle, Export, Start und Autostart und die
+# Zustandsabfrage nach einem unklaren Einschalten (W2). Lesen aendert nichts,
+# deshalb darf ein Fehlschlag bis zu dreimal wiederholt werden, mit den Pausen
+# aus esxi_retry_wait_tasks.yml. Jede Wiederholung steht als RETRY-Zeile mit der
+# Meldung des Moduls im Protokoll.
+#
+# Erwartet:
+#   vs_read_uuid        gebundene Instance-UUID der VM
+#   vs_read_datacenter  Datacenter oder leer (dann ohne)
+#   vs_read_position    "[n/total]" der Einheit oder leer
+#   vs_read_unit        Einheit fuer die RETRY-Zeile
+# Setzt:
+#   vs_vm_read          Ergebnis des letzten Versuchs
+#   vs_read_attempt     Zahl der Versuche
+#
+# Die Datei bricht nie ab. Was ein endgueltiger Fehlschlag bedeutet, entscheidet
+# der Aufrufer: der Export meldet ihn je VM ans Portal, die anderen Schritte
+# halten an.
+- name: Ersten Leseversuch zaehlen
+  ansible.builtin.set_fact:
+    vs_read_attempt: 1
+  when: not (vs_read_is_retry | default(false) | bool)
+
+# AN-01: addressed by the bound instance UUID, never by the name. The caller's
+# identity check still compares both.
+- name: VM per Instance-UUID lesen
+  community.vmware.vmware_guest_info:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+    datacenter: "{{ vs_read_datacenter | default(omit, true) }}"
+    uuid: "{{ vs_read_uuid }}"
+    use_instance_uuid: true
+  delegate_to: localhost
+  register: vs_vm_read
+  # Toleriert, damit der naechste Versuch und danach der Aufrufer entscheiden.
+  ignore_errors: true
+
+- name: Naechsten Leseversuch entscheiden
+  ansible.builtin.set_fact:
+    vs_read_again: >-
+      {{
+        (vs_vm_read['failed'] | default(false) | bool)
+        and (vs_read_attempt | int) <= ((EsxiRetryPauseSeconds | default([5, 15, 45])) | length)
+      }}
+
+- name: Vor dem naechsten Leseversuch warten
+  ansible.builtin.include_tasks: ./esxi_retry_wait_tasks.yml
+  vars:
+    vs_retry_position: "{{ vs_read_position | default('') }}"
+    vs_retry_unit: "{{ vs_read_unit }}"
+    vs_retry_attempt: "{{ vs_read_attempt }}"
+    vs_retry_cause: "{{ vs_vm_read['msg'] | default('') }}"
+  when: vs_read_again | bool
+
+- name: Leseversuch hochzaehlen
+  ansible.builtin.set_fact:
+    vs_read_attempt: "{{ vs_read_attempt | int + 1 }}"
+  when: vs_read_again | bool
+
+- name: VM erneut lesen
+  ansible.builtin.include_tasks: ./esxi_vm_read_tasks.yml
+  vars:
+    vs_read_is_retry: true
+  when: vs_read_again | bool

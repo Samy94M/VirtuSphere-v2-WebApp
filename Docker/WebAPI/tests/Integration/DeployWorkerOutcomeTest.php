@@ -1,0 +1,502 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_worker_outcome.php';
+$vmJournalRepo = dirname(__DIR__, 2) . '/lib/repo/deploy_job_vm_states.php';
+if (is_file($vmJournalRepo)) {
+    require_once $vmJournalRepo;
+}
+
+/**
+ * Drives the worker's job-outcome state machine (lib/deploy_worker_outcome.php)
+ * against a real database: what deploy_worker.php runs after a playbook
+ * sequence ends, minus the SSH transport. Together with MacImportCallbackTest
+ * (the HTTP half that writes result_json) this proves the deploy matrix
+ * scenarios 1, 2, 3, 11, 14 and 17 end to end.
+ */
+final class DeployWorkerOutcomeTest extends TestCase
+{
+    private const WORKER = 'phpunit:outcome-worker';
+
+    private mysqli $db;
+    private string $prefix;
+    /** @var list<int> */
+    private array $missionIds = [];
+
+    protected function setUp(): void
+    {
+        try {
+            $this->db = db(true);
+        } catch (Throwable $exception) {
+            self::markTestSkipped('Database is not reachable: ' . $exception->getMessage());
+        }
+
+        $this->prefix = 'phpunit_outcome_' . bin2hex(random_bytes(4));
+    }
+
+    protected function tearDown(): void
+    {
+        if (!isset($this->db)) {
+            return;
+        }
+        foreach (array_reverse($this->missionIds) as $missionId) {
+            $stmt = $this->db->prepare('DELETE FROM deploy_missions WHERE id = ?');
+            $stmt->bind_param('i', $missionId);
+            $stmt->execute();
+        }
+    }
+
+    /** Matrix 1: every VM imported, job finishes `succeeded`, states stay deployed/pending. */
+    public function testSuccessfulExportSequenceFinishesSucceededAndTouchesNoVm(): void
+    {
+        $missionId = $this->insertMission('m1');
+        $vmA = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $vmB = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $jobId = $this->insertJob($missionId, 'export', [$vmA, $vmB], $this->resultJson('success', [$vmA, $vmB], []));
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$vmA, $vmB]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($vmA));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($vmB));
+    }
+
+    /** Matrix 2/2b: a partial import finishes the job `partial` and converges only the failed VMs. */
+    public function testPartialImportFinishesPartialAndConvergesOnlyFailedVms(): void
+    {
+        $missionId = $this->insertMission('m2');
+        $ok = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $bad = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$ok, $bad], $this->resultJson('partial', [$ok], [$bad]));
+        $this->markAndTouch($jobId, [$ok, $bad], [$bad]);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$ok, $bad]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_PARTIAL, $this->jobStatus($jobId));
+        self::assertNull($this->job($jobId)['last_error']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_TERMINAL_REASON_PARTIAL_RESULT, (string) $this->job($jobId)['terminal_reason_code']);
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($ok));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($bad));
+    }
+
+    /** Matrix 3: a wholly failed import throws, and the failure path converges job and VMs. */
+    public function testWhollyFailedImportFailsJobAndAllVms(): void
+    {
+        $missionId = $this->insertMission('m3');
+        $vmA = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $vmB = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$vmA, $vmB], $this->resultJson('failed', [], [$vmA, $vmB]));
+        $this->markAndTouch($jobId, [$vmA, $vmB], [$vmA, $vmB]);
+        $job = $this->job($jobId);
+
+        $message = '';
+        try {
+            deploy_worker_conclude_sequence($this->db, $job, self::WORKER, [$vmA, $vmB]);
+            self::fail('a wholly failed import must throw');
+        } catch (RuntimeException $exception) {
+            $message = $exception->getMessage();
+        }
+        self::assertStringContainsString('MAC import failed for every VM', $message);
+
+        deploy_worker_handle_failure($this->db, $job, self::WORKER, [$vmA, $vmB], $message);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vmA));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vmB));
+    }
+
+    /** L3: an export sequence without any recorded result fails job and VMs, never leaves `deploying`. */
+    public function testMissingResultForExportSequenceFailsJobAndVms(): void
+    {
+        $missionId = $this->insertMission('m17a');
+        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$vmId], null);
+        $this->markAndTouch($jobId, [$vmId], [$vmId]);
+        $job = $this->job($jobId);
+
+        $message = '';
+        try {
+            deploy_worker_conclude_sequence($this->db, $job, self::WORKER, [$vmId]);
+            self::fail('a missing result must throw for an export sequence');
+        } catch (RuntimeException $exception) {
+            $message = $exception->getMessage();
+        }
+        self::assertStringContainsString('no usable MAC import result', $message);
+
+        deploy_worker_handle_failure($this->db, $job, self::WORKER, [$vmId], $message);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vmId));
+    }
+
+    /**
+     * Matrix 17: modes without an export step demand no result and succeed.
+     * Their claim-time `deploying` is restored to the prior lifecycle, so the
+     * convergence sweep never "converges" the VMs of a green job.
+     */
+    public function testCreateSequenceSucceedsWithoutResultAndRestoresPriorLifecycles(): void
+    {
+        $missionId = $this->insertMission('m17b');
+        $fresh = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $deployed = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $jobId = $this->insertJob($missionId, 'create', [$fresh, $deployed], null);
+
+        $prior = deploy_worker_mark_vms_deploying($this->db, $this->job($jobId), 'deploy job ' . $jobId . ' started', [$fresh, $deployed]);
+        self::assertSame([$fresh => VIRTUSPHERE_LIFECYCLE_READY, $deployed => VIRTUSPHERE_LIFECYCLE_DEPLOYED], $prior);
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($fresh));
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$fresh, $deployed], $prior);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($fresh));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($deployed));
+
+        // The sweep must find nothing left to converge for this mission.
+        $swept = repo_sweep_orphaned_deploying_vms($this->db);
+        self::assertNotContains($fresh, array_column($swept, 'vm_id'));
+        self::assertNotContains($deployed, array_column($swept, 'vm_id'));
+    }
+
+    /** A VM without a known prior state is never guessed at; the sweep stays the authority. */
+    public function testRestoreNeverGuessesAnUnknownPriorState(): void
+    {
+        $missionId = $this->insertMission('m17c');
+        $vmId = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+
+        $jobId = $this->insertJob($missionId, 'create', [$vmId], null);
+        $restored = deploy_worker_restore_deploying_vms($this->db, $this->job($jobId), 'restore probe', [$vmId], []);
+
+        self::assertSame(0, $restored);
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vmId));
+    }
+
+    /**
+     * Matrix 14 (E1): a follow-up failure after a committed import fails the
+     * JOB, but VMs from successful_vm_ids keep deployed/pending; only the
+     * rest converges to failed/deploy_failed.
+     *
+     * Runs as `export`: since K15 a create-capable mode admits a touch only
+     * after its create units completed, which the create tests own. The E1
+     * keep rule under test is the same for every MAC-exporting mode.
+     */
+    public function testLateFollowUpFailureKeepsSuccessfullyImportedVms(): void
+    {
+        $missionId = $this->insertMission('m14');
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $unfinished = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$imported, $unfinished], $this->resultJson('partial', [$imported], [$unfinished]));
+        $this->markAndTouch($jobId, [$imported, $unfinished], [$unfinished]);
+
+        deploy_worker_handle_failure($this->db, $this->job($jobId), self::WORKER, [$imported, $unfinished], 'Ansible command failed with exit code 2.');
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_FAILED, $this->jobStatus($jobId));
+        self::assertSame('Ansible command failed with exit code 2.', (string) $this->job($jobId)['last_error']);
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported), 'a committed import outlives the failing job (E1)');
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($unfinished));
+    }
+
+    /**
+     * Matrix 11 (worker half): the cancel handler converges only VMs still in
+     * `deploying`; imported VMs and their stored MACs survive, the job status
+     * stays `cancelled`.
+     */
+    public function testCancelHandlerConvergesOnlyStillDeployingVmsAndKeepsMacs(): void
+    {
+        $missionId = $this->insertMission('m11');
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $mac = '02:AB:CD:EF:00:11';
+        $this->insertInterface($imported, 'WDS', $mac);
+        $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], $this->resultJson('partial', [$imported], [$stuck]));
+        $this->markAndTouch($jobId, [$imported, $stuck], [$stuck]);
+        $this->setJobStatus($jobId, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING);
+
+        deploy_worker_handle_cancelled($this->db, $this->job($jobId), [$imported, $stuck]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId), 'a cancel must never be repainted');
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
+        self::assertSame($mac, $this->interfaceMac($imported), 'stored MACs survive the cancel convergence');
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($stuck));
+    }
+
+    /**
+     * L4 companion: reaping a crashed job keeps the VMs whose import already
+     * committed and converges only the rest.
+     */
+    public function testReapingAStaleJobKeepsCommittedImportsAndConvergesTheRest(): void
+    {
+        $missionId = $this->insertMission('reap');
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $stuck = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$imported, $stuck], $this->resultJson('partial', [$imported], [$stuck]), VIRTUSPHERE_DEPLOY_STATUS_RUNNING, true);
+        $this->markAndTouch($jobId, [$imported, $stuck], [$stuck]);
+
+        // The reaper only trusts an observer that has been connected longer than
+        // its grace; an unset one counts as blind, which is the production
+        // default on a fresh connection. Declare this observer as long-established.
+        deploy_reap_observer_since(time() - VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS - 1);
+
+        deploy_worker_reap_stale_jobs($this->db);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($stuck));
+    }
+
+    /**
+     * WK-02 (ADR-0033): a cancel confirmed after the last step ended with exit
+     * code 0 converges like the success path. A create-only run restores its
+     * bracket, where the stop path would have failed the VM its ESXi work touched.
+     * The terminal detail records that every step ended with exit code 0.
+     */
+    public function testCancelAfterACompleteCreateSequenceRestoresLikeSuccess(): void
+    {
+        $missionId = $this->insertMission('wk02a');
+        $vm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'create', [$vm], null);
+        $prior = deploy_worker_mark_vms_deploying($this->db, $this->job($jobId), 'deploy job ' . $jobId . ' started', [$vm]);
+        $this->touchEsxi($jobId, $vm);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$vm], $prior);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY], $this->vmState($vm), 'restored as the success path restores it');
+        self::assertStringContainsString('every playbook step ended with exit code 0', (string) $this->job($jobId)['terminal_reason_detail']);
+        self::assertSame(1, $this->outcomeRows($jobId));
+    }
+
+    /**
+     * The control for WK-02: the same touched VM, but the cancel is confirmed at
+     * a step boundary, so not every step completed. The conservative journal
+     * decision stands and the VM fails, with no finding in the detail.
+     */
+    public function testCancelWithoutACompletedSequenceKeepsTheJournalDecision(): void
+    {
+        $missionId = $this->insertMission('wk02b');
+        $vm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'create', [$vm], null);
+        deploy_worker_mark_vms_deploying($this->db, $this->job($jobId), 'deploy job ' . $jobId . ' started', [$vm]);
+        $this->touchEsxi($jobId, $vm);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        self::assertTrue(deploy_worker_confirm_owned_cancel($this->db, $this->job($jobId)));
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vm));
+        self::assertStringNotContainsString('every playbook step', (string) $this->job($jobId)['terminal_reason_detail']);
+    }
+
+    /**
+     * WK-02 for a MAC-exporting sequence: the success path's MAC verdict stands.
+     * A complete import keeps its VM deployed/pending, and the finding is recorded.
+     */
+    public function testCancelAfterACompleteExportSequenceKeepsTheImportedVm(): void
+    {
+        $missionId = $this->insertMission('wk02c');
+        $imported = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $jobId = $this->insertJob($missionId, 'export', [$imported], $this->resultJson('success', [$imported], []));
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$imported]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($imported));
+        self::assertStringContainsString('every playbook step ended with exit code 0', (string) $this->job($jobId)['terminal_reason_detail']);
+        self::assertSame(1, $this->outcomeRows($jobId));
+    }
+
+    /**
+     * WK-02 for a partial import: as on success, only the VM the import did not
+     * cover fails; the imported one keeps its state.
+     */
+    public function testCancelAfterACompletePartialExportFailsOnlyTheMissedVm(): void
+    {
+        $missionId = $this->insertMission('wk02d');
+        $ok = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING);
+        $bad = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$ok, $bad], $this->resultJson('partial', [$ok], [$bad]));
+        $this->markAndTouch($jobId, [$ok, $bad], [$bad]);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$ok, $bad]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING], $this->vmState($ok));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($bad));
+        self::assertStringContainsString('every playbook step ended with exit code 0', (string) $this->job($jobId)['terminal_reason_detail']);
+    }
+
+    /**
+     * WK-02 without a usable MAC result: the run is no verified success, so the
+     * stop path's journal decision applies and the touched VM fails.
+     */
+    public function testCancelAfterACompleteExportWithoutItsResultKeepsTheJournalDecision(): void
+    {
+        $missionId = $this->insertMission('wk02e');
+        $vm = $this->insertVm($missionId, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_NOT_READY);
+        $jobId = $this->insertJob($missionId, 'export', [$vm], null);
+        $this->markAndTouch($jobId, [$vm], [$vm]);
+        repo_cancel_deploy_job($this->db, $jobId, 42);
+
+        deploy_worker_conclude_sequence($this->db, $this->job($jobId), self::WORKER, [$vm]);
+
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_CANCELLED, $this->jobStatus($jobId));
+        self::assertSame([VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED], $this->vmState($vm));
+        self::assertStringNotContainsString('every playbook step', (string) $this->job($jobId)['terminal_reason_detail']);
+    }
+
+    private function touchEsxi(int $jobId, int $vmId): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_job_vm_states SET esxi_touched = 1 WHERE job_id = ? AND vm_id = ?');
+        $stmt->bind_param('ii', $jobId, $vmId);
+        $stmt->execute();
+        self::assertSame(1, $stmt->affected_rows, 'fixture must mark the VM as touched by ESXi');
+    }
+
+    private function outcomeRows(int $jobId): int
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM deploy_logs WHERE event_code = ? AND object_type = ? AND object_id = ?');
+        $event = VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME;
+        $type = 'deploy_job';
+        $id = (string) $jobId;
+        $stmt->bind_param('sss', $event, $type, $id);
+        $stmt->execute();
+
+        return (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
+    }
+
+    private function insertMission(string $suffix): int
+    {
+        $name = $this->prefix . '_' . $suffix;
+        $status = 'active';
+        $stmt = $this->db->prepare('INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, ?)');
+        $stmt->bind_param('ss', $name, $status);
+        $stmt->execute();
+        $id = (int) $this->db->insert_id;
+        $this->missionIds[] = $id;
+
+        return $id;
+    }
+
+    private function insertVm(int $missionId, string $lifecycleState, string $mecmSyncState): int
+    {
+        $name = strtoupper($this->prefix . '_VM' . bin2hex(random_bytes(2)));
+        $stmt = $this->db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state) VALUES (?, ?, ?, ?, ?)');
+        $stmt->bind_param('issss', $missionId, $name, $name, $lifecycleState, $mecmSyncState);
+        $stmt->execute();
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function insertInterface(int $vmId, string $vlan, string $mac): void
+    {
+        $empty = '';
+        $stmt = $this->db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssss', $vmId, $empty, $empty, $empty, $vlan, $mac);
+        $stmt->execute();
+    }
+
+    /** @param list<int> $vmIds */
+    private function insertJob(int $missionId, string $mode, array $vmIds, ?string $resultJson, string $status = VIRTUSPHERE_DEPLOY_STATUS_RUNNING, bool $staleHeartbeat = false): int
+    {
+        $payload = json_encode(['mode' => $mode, 'vm_ids' => $vmIds], JSON_THROW_ON_ERROR);
+        $worker = self::WORKER;
+        $heartbeat = $staleHeartbeat ? 'DATE_SUB(NOW(), INTERVAL 1 DAY)' : 'NOW()';
+        $contract = VIRTUSPHERE_EXECUTION_CONTRACT_LEGACY;
+        $stmt = $this->db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json, result_json, locked_at, locked_by, lock_token, worker_epoch, heartbeat_at, attempts, execution_contract, execution_generation_id) '
+            . 'SELECT ?, ?, ?, ?, NOW(), ?, REPEAT(CHAR(97), 32), 1, ' . $heartbeat . ', 1, ?, current_generation_id FROM deploy_runtime_identity WHERE id = 1');
+        $stmt->bind_param('isssss', $missionId, $status, $payload, $resultJson, $worker, $contract);
+        $stmt->execute();
+
+        return (int) $this->db->insert_id;
+    }
+
+    /** @param list<int> $successful @param list<int> $failed */
+    private function resultJson(string $outcome, array $successful, array $failed): string
+    {
+        return json_encode([
+            // Worker-outcome convergence must continue to accept durable
+            // historical results. V2 is covered by the callback contract
+            // tests and requires the per-VM evidence/fingerprint bundle.
+            'version' => VIRTUSPHERE_MAC_IMPORT_LEGACY_RESULT_VERSION,
+            'kind' => VIRTUSPHERE_MAC_IMPORT_RESULT_KIND,
+            'outcome' => $outcome,
+            'successful_vm_ids' => $successful,
+            'failed_vm_ids' => $failed,
+            'errors' => [],
+            'counts' => [
+                'expected_vms' => count($successful) + count($failed),
+                'successful_vms' => count($successful),
+                'failed_vms' => count($failed),
+                'updated_interfaces' => count($successful),
+            ],
+            'retry' => ['mode' => 'export', 'vm_ids' => $failed],
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    /** @return array<string,mixed> */
+    private function job(int $jobId): array
+    {
+        $job = repo_deploy_job($this->db, $jobId);
+        self::assertNotNull($job);
+
+        return $job;
+    }
+
+    private function jobStatus(int $jobId): string
+    {
+        return (string) $this->job($jobId)['status'];
+    }
+
+    /** @param list<int> $vmIds @param list<int> $touchedVmIds */
+    private function markAndTouch(int $jobId, array $vmIds, array $touchedVmIds): void
+    {
+        if (!function_exists('repo_deploy_job_vm_admit_touch')) {
+            self::markTestSkipped('K15 journal admission is not installed on this baseline.');
+        }
+        $job = $this->job($jobId);
+        deploy_worker_mark_vms_deploying($this->db, $job, 'K15 journal setup', $vmIds);
+        foreach ($touchedVmIds as $vmId) {
+            self::assertTrue(repo_deploy_job_vm_admit_touch(
+                $this->db,
+                $jobId,
+                $vmId,
+                (int) $job['attempts'],
+                (string) $job['execution_generation_id'],
+                'export'
+            ), 'fixture must persist a touch admitted for the exact active VM');
+        }
+    }
+
+    private function setJobStatus(int $jobId, string $status): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_jobs SET status = ? WHERE id = ?');
+        $stmt->bind_param('si', $status, $jobId);
+        $stmt->execute();
+    }
+
+    /** @return array{0:string,1:string} */
+    private function vmState(int $vmId): array
+    {
+        $stmt = $this->db->prepare('SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ?');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+
+        return [(string) $row['lifecycle_state'], (string) $row['mecm_sync_state']];
+    }
+
+    private function interfaceMac(int $vmId): string
+    {
+        $stmt = $this->db->prepare('SELECT mac FROM deploy_interfaces WHERE vm_id = ? LIMIT 1');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+
+        return (string) ($stmt->get_result()->fetch_assoc()['mac'] ?? '');
+    }
+}

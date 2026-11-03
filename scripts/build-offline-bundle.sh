@@ -1,0 +1,466 @@
+#!/bin/sh
+# Offline-Release-Bundle (AP8, Plan v2): baut aus dem lokalen Stand ein
+# vollstaendig offline verifizier- und installierbares Artefakt:
+#
+#   images/         docker save der Kern-Runtime-Images (per Image-ID dedupliziert)
+#   images.txt      Ref -> Tag -> Image-ID -> RepoDigest je gespeichertem Image
+#   tools/          optionales, separat verifizierbares phpMyAdmin-Teilbundle
+#   deps/           vendor.tar.gz (composer install --no-dev, im PHP-Image)
+#   collections/    ansible-galaxy collection download (Air-Gap-Ansible-Host)
+#   runner/         geschlossener 8R-O-Runner samt eigenem Pruefmanifest
+#   sbom/           SPDX-SBOM je Image (trivy, Digest-Pin aus tool-lock.json)
+#   reports/        CVE-Bericht je Image; offene Critical/High brechen den
+#                   Build (.trivyignore.yaml ist der befristete Ausnahme-Vertrag)
+#   source.tar.gz   git archive HEAD
+#   provenance.json Commit, Release-Nummer, Dirty-Flag, Zeit, Toolversionen (keine Secrets)
+#   INSTALL.md      Offline-Installationsschritte
+#   verify.sh       prueft SHA256SUMS vollstaendig offline
+#   SHA256SUMS      Manifest ueber jede Datei des Bundles
+#
+# Der Build-Host braucht Netz (composer, Galaxy, trivy-DB, PyPI) und Docker;
+# das Zielsystem braucht fuer die Verifikation nur sha256sum.
+#
+# Aufruf: sh scripts/build-offline-bundle.sh [--release] [zielverzeichnis]
+#   ohne Argument: <repo>/dist/virtusphere-offline-<commit12>
+#   --release: ein dirty Worktree ist ein Abbruch statt einer Warnung
+#              (Images/vendor entstehen aus dem lokalen Stand, waehrend
+#              source.tar.gz HEAD archiviert; ein Release-Artefakt darf diese
+#              Luecke nicht tragen)
+#
+# Gebaut wird in einem frischen Staging neben dem Ziel und erst nach der
+# Selbstverifikation atomar umbenannt; ein nichtleeres Ziel ist ein Abbruch,
+# weil Altdateien sonst mit ins SHA256SUMS-Manifest gehasht wuerden.
+#
+# Exitcodes: 0 Bundle gebaut und verifiziert | 1 Qualitaet (CVE, dirty bei
+#            --release, Roundtrip-Bruch) | 2 Umgebung unvollstaendig.
+set -eu
+
+# Git-Bash/MSYS wandelt absolute POSIX-Argumente (-w /tmp/app, --ignorefile
+# /repo/...) in Windows-Pfade um; Container-Pfade muessen unangetastet bleiben.
+# Nur je docker-run-Aufruf setzen (dkr), nie global: native Programme wie
+# git.exe brauchen die automatische Konvertierung weiterhin. Auf Linux sind
+# beide Variablen wirkungslos.
+dkr() {
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker "$@"
+}
+
+# Host-Seite eines -v-Mounts in Windows-Form bringen. cygpath -m loest dabei
+# auch die MSYS-Mount-Aliase auf: Git-Bash-pwd meldet fuer das User-Temp
+# z. B. /tmp/..., und dieser Pfad ginge unkonvertiert an Docker Desktop, das
+# ihn still im Linux-VM-Dateisystem anlegt - der Container schreibt dann ins
+# Leere und kein Werkzeug meldet einen Fehler. Auf Linux gibt es kein cygpath
+# und der Pfad bleibt unveraendert.
+docker_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+
+command -v docker >/dev/null 2>&1 || { echo "offline-bundle: docker fehlt"; exit 2; }
+command -v git >/dev/null 2>&1 || { echo "offline-bundle: git fehlt"; exit 2; }
+command -v sha256sum >/dev/null 2>&1 || { echo "offline-bundle: sha256sum fehlt"; exit 2; }
+
+RELEASE=false
+if [ "${1:-}" = "--release" ]; then
+    RELEASE=true
+    shift
+fi
+
+COMMIT=$(git -C "$ROOT" rev-parse HEAD)
+COMMIT_SHORT=$(git -C "$ROOT" rev-parse --short=12 HEAD)
+DIRTY=false
+if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
+    DIRTY=true
+    if [ "$RELEASE" = true ]; then
+        echo "offline-bundle: [bundle.dirty] ABBRUCH: --release verlangt einen sauberen Worktree. Images und vendor entstehen aus dem lokalen Stand, waehrend source.tar.gz HEAD archiviert; ein Release-Artefakt darf diese Luecke nicht tragen." >&2
+        exit 1
+    fi
+    echo "offline-bundle: WARNUNG: Worktree ist nicht sauber; Provenance traegt dirty=true (Release verlangt Clean Checkout; --release macht daraus einen Abbruch)."
+fi
+
+# Release-Nummer aus der SSoT (Docker/WebAPI/lib/VERSION): genau eine nichtleere
+# Zeile ohne CR (Windows-Checkout), Form JJJJ.MM.N. Mit --release ein Abbruch wie
+# bei dirty, ohne --release eine Warnung und ein leerer Wert in provenance.json.
+VERSION_FILE="$ROOT/Docker/WebAPI/lib/VERSION"
+RELEASE_RE='^[0-9]{4}\.(0[1-9]|1[0-2])\.[1-9][0-9]?$'
+VERSION_VALUE=''
+if [ -f "$VERSION_FILE" ] && [ "$(tr -d '\r' < "$VERSION_FILE" | grep -c . || true)" -eq 1 ]; then
+    VERSION_VALUE=$(tr -d '\r' < "$VERSION_FILE" | grep . | head -n 1)
+fi
+if ! printf '%s\n' "$VERSION_VALUE" | grep -Eq "$RELEASE_RE"; then
+    if [ "$RELEASE" = true ]; then
+        echo "offline-bundle: [bundle.version] ABBRUCH: Release-Nummer in Docker/WebAPI/lib/VERSION fehlt oder ist nicht JJJJ.MM.N (Monat 01-12, N 1-99)." >&2
+        exit 1
+    fi
+    echo "offline-bundle: WARNUNG: Release-Nummer in Docker/WebAPI/lib/VERSION fehlt oder ist nicht JJJJ.MM.N; Provenance traegt version leer."
+    VERSION_VALUE=''
+fi
+
+OUT=${1:-"$ROOT/dist/virtusphere-offline-$COMMIT_SHORT"}
+mkdir -p "$(dirname "$OUT")"
+OUT_PARENT=$(CDPATH='' cd -- "$(dirname "$OUT")" && pwd)
+OUT="$OUT_PARENT/$(basename "$OUT")"
+if [ -e "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then
+    echo "offline-bundle: [bundle.dest-not-empty] ABBRUCH: Zielverzeichnis $OUT ist nicht leer. Altdateien wuerden mit ins SHA256SUMS-Manifest gehasht und als Bundle-Inhalt ausgeliefert; Verzeichnis leeren oder anderes Ziel waehlen." >&2
+    exit 2
+fi
+# Frisches Staging neben dem Ziel (gleiches Dateisystem, das mv am Ende ist
+# atomar): ein abgebrochener Build hinterlaesst nie ein halbes Bundle unter dem
+# Zielnamen, und kein Altbestand kann ins Manifest wandern.
+STAGE="$OUT_PARENT/.$(basename "$OUT").stage-$$"
+rm -rf "$STAGE"
+mkdir -p "$STAGE/images" "$STAGE/tools/images" "$STAGE/deps" "$STAGE/collections" "$STAGE/runner" "$STAGE/sbom" "$STAGE/reports"
+cleanup_stage() { rm -rf "$STAGE"; }
+trap cleanup_stage EXIT INT TERM
+ROOT_M=$(docker_path "$ROOT")
+OUT_M=$(docker_path "$STAGE")
+
+# Digest-gepinnte Tool-Images aus der Lockdatei (AP4-SSoT); ohne Pin kein Lauf.
+TRIVY_REF=$(sed -n 's/.*"ref": "\(aquasec\/trivy@sha256:[0-9a-f]*\)".*/\1/p' "$ROOT/scripts/tool-lock.json")
+[ -n "$TRIVY_REF" ] || { echo "offline-bundle: kein trivy-Pin in scripts/tool-lock.json"; exit 2; }
+ANSIBLE_IMAGE=virtusphere-qa-ansible:latest
+PHP_IMAGE=virtusphere-php:8.4-tooling
+docker image inspect "$ANSIBLE_IMAGE" >/dev/null 2>&1 || { echo "offline-bundle: $ANSIBLE_IMAGE fehlt (docker build -f Docker/qa-ansible/Dockerfile -t $ANSIBLE_IMAGE .)"; exit 2; }
+docker image inspect "$PHP_IMAGE" >/dev/null 2>&1 || { echo "offline-bundle: $PHP_IMAGE fehlt (docker build --target tooling -t $PHP_IMAGE Docker/php)"; exit 2; }
+
+# --- 1) Images: ein Resolver, getrennte Kern-/Werkzeug-Manifeste --------------
+echo "==> Kern- und optionale Werkzeug-Images speichern"
+docker compose --project-directory "$ROOT" config --images | LC_ALL=C sort -u > "$STAGE/.core-refs"
+docker compose --project-directory "$ROOT" --profile "*" config --images | LC_ALL=C sort -u > "$STAGE/.all-refs"
+comm -13 "$STAGE/.core-refs" "$STAGE/.all-refs" > "$STAGE/.tool-refs"
+: > "$STAGE/images.txt"
+: > "$STAGE/tools/images.txt"
+
+save_image_set() {
+    refs_file=$1
+    manifest=$2
+    archive_dir=$3
+    manifest_prefix=$4
+    SEEN_IDS=""
+    while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    id=$(docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null) || { echo "offline-bundle: Image fehlt lokal: $ref (erst docker compose build/pull)"; exit 2; }
+    case " $SEEN_IDS " in *" $id "*) echo "    skip (buildgleich): $ref"; continue;; esac
+    SEEN_IDS="$SEEN_IDS $id"
+    digest=$(docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$ref")
+    safe=$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')
+    echo "    $ref"
+
+    # `docker save name:tag@sha256:...` schreibt "RepoTags": null ins Manifest,
+    # weil eine Referenz mit Digest keinen Tag traegt. Nach `docker load` ist das
+    # Image dann namenlos (<none>:<none>) - der gemeldete "dangling image". Und
+    # schlimmer: `docker load` stellt NIE einen RepoDigest wieder her, ein
+    # save-Archiv enthaelt gar keinen. Ein digest-gepinntes `image:` ist auf dem
+    # Zielhost damit ueberhaupt nicht aufloesbar ("No such image"), also versucht
+    # compose zu ziehen - auf einem luftspaltgetrennten Host das Ende.
+    #
+    # Gespeichert wird deshalb der TAG. Die Integritaet der Kette haengt nicht
+    # mehr am Registry-Digest (den der Zielhost nie pruefen koennte), sondern an
+    # der Pruefsumme des Bundles - plus dieser Zusicherung hier: das lokale Image
+    # muss den gepinnten Digest wirklich tragen, sonst waere der ausgelieferte Tag
+    # nicht beweisbar derselbe Inhalt.
+    tag="${ref%@*}"
+    want="${ref#*@}"
+    # Eine Referenz ohne Tag (die lokal gebauten Images heissen bei
+    # `compose config --images` nur einen lokalen Namen) normalisiert
+    # Docker auf :latest, und genau das steht dann in RepoTags. Ohne diese
+    # Normalisierung sucht die Zusicherung unten einen Tag, den es so nie gibt.
+    case "$tag" in
+        */*:*|*:*) : ;;
+        *) tag="$tag:latest" ;;
+    esac
+    if [ "$want" != "$ref" ]; then
+        if ! docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" \
+            | grep -qx "${tag%%:*}@$want"; then
+            echo "offline-bundle: [bundle.digest-mismatch] $ref traegt den gepinnten Digest lokal nicht; erst 'docker compose pull' laufen lassen." >&2
+            exit 2
+        fi
+    fi
+    docker save "$tag" | gzip > "$archive_dir/$safe.tar.gz"
+
+    # Das Archiv muss sich selbst beweisen: verify.sh hasht nur Dateien, und ein
+    # leeres RepoTags faellt erst auf dem Zielhost auf, wo niemand mehr etwas
+    # reparieren kann.
+    if ! gunzip -c "$archive_dir/$safe.tar.gz" | tar -xOf - manifest.json 2>/dev/null | grep -q "\"$tag\""; then
+        echo "offline-bundle: [bundle.image-tag] $manifest_prefix/$safe.tar.gz traegt den Tag $tag nicht; ein docker load daraus ergaebe ein namenloses Image." >&2
+        exit 1
+    fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$tag" "$id" "${digest:-lokal-gebaut}" "$manifest_prefix/$safe.tar.gz" >> "$manifest"
+    done < "$refs_file"
+}
+
+save_image_set "$STAGE/.core-refs" "$STAGE/images.txt" "$STAGE/images" "images"
+save_image_set "$STAGE/.tool-refs" "$STAGE/tools/images.txt" "$STAGE/tools/images" "images"
+
+# --- 1b) Roundtrip: loesen die Offline-Referenzen wirklich auf? -----------------
+#
+# Die docker-load-Haelfte laesst sich auf dem Build-Host nicht ehrlicher beweisen
+# als durch den manifest.json-Tag-Check oben (die Images sind hier ohnehin
+# vorhanden; nur ein Wegwerf-Docker-Daemon koennte mehr zeigen). Die lokal
+# gehaerteten Runtime-Images haben feste Tags, und jede von Compose aufgeloeste
+# Referenz muss unter genau diesem Tag im Bundle liegen. Ein Digest waere nach
+# docker load nicht aufloesbar und bleibt deshalb ein harter Befund.
+echo "==> Compose-Roundtrip mit Bundle-Tags"
+verify_image_set() {
+    refs_file=$1
+    manifest=$2
+    class=$3
+    if grep -q '@sha256:' "$refs_file"; then
+        echo "offline-bundle: [bundle.roundtrip-digest] Compose loest im $class-Satz eine Digest-Referenz auf; docker load koennte sie nicht finden." >&2
+        exit 1
+    fi
+    while IFS= read -r res; do
+        [ -n "$res" ] || continue
+        restag="$res"
+        case "$restag" in */*:*|*:*) : ;; *) restag="$restag:latest" ;; esac
+        if ! grep -q "$(printf '\t%s\t' "$restag")" "$manifest"; then
+            echo "offline-bundle: [bundle.roundtrip-missing] $class referenziert $res, aber sein Manifest traegt keinen Tag $restag." >&2
+            exit 1
+        fi
+    done < "$refs_file"
+}
+
+verify_image_set "$STAGE/.core-refs" "$STAGE/images.txt" "Kern"
+verify_image_set "$STAGE/.tool-refs" "$STAGE/tools/images.txt" "Werkzeug"
+cat "$STAGE/images.txt" "$STAGE/tools/images.txt" > "$STAGE/.all-images"
+
+# --- 2) PHP-Abhaengigkeiten: vendor.tar.gz ohne Dev-Pakete --------------------
+echo "==> composer vendor (--no-dev) bauen"
+dkr run --rm \
+    -v "$ROOT_M/Docker/WebAPI/composer.json:/tmp/app/composer.json:ro" \
+    -v "$ROOT_M/Docker/WebAPI/composer.lock:/tmp/app/composer.lock:ro" \
+    -v "$OUT_M/deps:/bundle-out" \
+    -e COMPOSER_CACHE_DIR=/tmp/composer-cache -e COMPOSER_ALLOW_SUPERUSER=1 \
+    -w /tmp/app "$PHP_IMAGE" \
+    sh -c 'composer install --no-dev --no-interaction --no-progress --no-scripts --quiet && tar czf /bundle-out/vendor.tar.gz vendor'
+
+# --- 3) Ansible-Collections fuer den Air-Gap-Control-Node ---------------------
+echo "==> Ansible-Collections herunterladen"
+dkr run --rm \
+    -v "$ROOT_M/Ansible/requirements.yml:/tmp/requirements.yml:ro" \
+    -v "$OUT_M/collections:/bundle-out" \
+    "$ANSIBLE_IMAGE" \
+    ansible-galaxy collection download -r /tmp/requirements.yml -p /bundle-out
+
+# --- 3a) Durable Runner: offline und mit eigenem geschlossenem Manifest -------
+#
+# Das globale Bundle-Manifest beweist den Transport. Das Runner-Manifest wird
+# zusaetzlich vor dem Kopieren geprueft und vom Offline-Installer erneut
+# geprueft; dadurch kann der kleine privilegienarme Installationssatz unabhaengig
+# vom restlichen Bundle verifiziert werden. Keine Standortwerte und keine
+# Aktivierung werden hier erzeugt.
+echo "==> Durable-Runner-Payload pruefen und aufnehmen"
+(
+    cd "$ROOT/Ansible/runner"
+    sha256sum -c SHA256SUMS
+)
+cp "$ROOT/Ansible/runner/"* "$STAGE/runner/"
+
+# --- 3b) Python-Wheels fuer den Air-Gap-Ansible-Host ---------------------------
+#
+# requirements.yml verlangt ansible-core/pyvmomi/requests "BEFORE the network is
+# air-gapped"; ohne Wheels im Bundle hiess das fuer einen frisch aufzusetzenden
+# Air-Gap-Host "vorher im Netz installieren" - ein Widerspruch in sich. Die
+# Versionen kommen aus der QA-Lockdatei (SSoT Docker/qa-ansible/requirements.txt,
+# pip-compile mit Hashes); die Integritaet der Dateien haengt am
+# SHA256SUMS-Manifest des Bundles.
+#
+# Die Zielplattform ist EXPLIZIT gesetzt, nicht geerbt: das QA-Image ist Alpine
+# (musl), und ein nacktes pip download lud dort musllinux-Wheels, die auf dem
+# glibc-Ubuntu-Ansible-Host nicht installierbar sind (beim ersten Probelauf
+# passiert). manylinux + Python 3.12 deckt Ubuntu 24.04; ansible-core 2.19
+# verlangt ohnehin Python >= 3.11. --only-binary haelt sdists heraus, die im
+# Air-Gap nicht baubar waeren; setuptools/wheel kommen trotzdem mit, damit
+# pip-Werkzeug auf dem Host vollstaendig ist.
+echo "==> Python-Wheels fuer den Ansible-Host (manylinux/cp312)"
+: > "$STAGE/deps/requirements-ansible-host.txt"
+HOST_PKGS=""
+for pkg in ansible-core pyvmomi requests; do
+    pin=$(sed -n "s/^\($pkg==[0-9][^ \\\\]*\).*$/\1/p" "$ROOT/Docker/qa-ansible/requirements.txt" | head -n 1)
+    [ -n "$pin" ] || { echo "offline-bundle: [bundle.wheel-pin] $pkg fehlt in Docker/qa-ansible/requirements.txt; der Wheelhouse-Pin waere ungedeckt." >&2; exit 2; }
+    HOST_PKGS="$HOST_PKGS $pin"
+    printf '%s\n' "$pin" >> "$STAGE/deps/requirements-ansible-host.txt"
+done
+# shellcheck disable=SC2086
+dkr run --rm \
+    -v "$OUT_M/deps:/bundle-out" \
+    "$ANSIBLE_IMAGE" \
+    pip download --no-cache-dir --dest /bundle-out/wheels \
+    --only-binary=:all: --python-version 312 \
+    --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
+    $HOST_PKGS setuptools wheel
+ls "$STAGE/deps/wheels"/ansible_core-*.whl >/dev/null 2>&1 \
+    || { echo "offline-bundle: [bundle.wheelhouse] kein ansible-core-Wheel im Wheelhouse gelandet." >&2; exit 1; }
+if ls "$STAGE/deps/wheels"/*musllinux*.whl >/dev/null 2>&1; then
+    echo "offline-bundle: [bundle.wheel-platform] musllinux-Wheels im Wheelhouse; der glibc-Ansible-Host koennte sie nicht installieren." >&2
+    exit 1
+fi
+
+# --- 4) SBOM + CVE-Bericht je gespeichertem Image ------------------------------
+echo "==> SBOM und CVE-Scan (trivy)"
+CVE_FAILED=0
+while IFS="$(printf '\t')" read -r ref _tag _id _digest _file; do
+    safe=$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')
+    dkr run --rm \
+        -v //var/run/docker.sock:/var/run/docker.sock \
+        -v virtusphere-trivy-cache://root/.cache \
+        "$TRIVY_REF" image --quiet --format spdx-json "$ref" > "$STAGE/sbom/$safe.spdx.json"
+    # Voller Bericht (inkl. unfixed) als Bundle-Artefakt; blockiert wird nur,
+    # was fixbar ist (--ignore-unfixed) - dieselbe Politik wie das
+    # image-cve-Gate, dokumentiert in .trivyignore.yaml.
+    dkr run --rm \
+        -v //var/run/docker.sock:/var/run/docker.sock \
+        -v virtusphere-trivy-cache://root/.cache \
+        -v "$ROOT_M/.trivyignore.yaml:/repo/.trivyignore.yaml:ro" \
+        "$TRIVY_REF" image --quiet --scanners vuln --severity CRITICAL,HIGH \
+        --ignorefile /repo/.trivyignore.yaml "$ref" > "$STAGE/reports/cve-$safe.txt"
+    if ! dkr run --rm \
+        -v //var/run/docker.sock:/var/run/docker.sock \
+        -v virtusphere-trivy-cache://root/.cache \
+        -v "$ROOT_M/.trivyignore.yaml:/repo/.trivyignore.yaml:ro" \
+        "$TRIVY_REF" image --quiet --scanners vuln --severity CRITICAL,HIGH \
+        --ignore-unfixed --ignorefile /repo/.trivyignore.yaml --exit-code 1 "$ref" >/dev/null; then
+        echo "offline-bundle: fixbare Critical/High-CVEs in $ref (reports/cve-$safe.txt)"
+        CVE_FAILED=1
+    fi
+done < "$STAGE/.all-images"
+if [ "$CVE_FAILED" -ne 0 ]; then
+    echo "offline-bundle: ABBRUCH: ein Release-Artefakt mit fixbaren Critical/High-CVEs entsteht nicht (Ausnahmen nur befristet via .trivyignore.yaml)."
+    exit 1
+fi
+
+# --- 5) Quellcode-Snapshot ------------------------------------------------------
+echo "==> git archive HEAD"
+git -C "$ROOT" archive --format=tar.gz -o "$STAGE/source.tar.gz" HEAD
+
+# --- 6) Provenance (keine Secrets, keine .env-Inhalte) -------------------------
+DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unbekannt)
+cat > "$STAGE/provenance.json" <<EOF
+{
+    "schema": 1,
+    "bundle": "virtusphere-offline",
+    "commit": "$COMMIT",
+    "version": "$VERSION_VALUE",
+    "dirty": $DIRTY,
+    "release": $RELEASE,
+    "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "builder": "$(uname -s)/$(uname -m)",
+    "dockerServer": "$DOCKER_VERSION",
+    "trivy": "$TRIVY_REF",
+    "imageManifest": "images.txt",
+    "optionalToolsManifest": "tools/images.txt"
+}
+EOF
+
+# --- 7) INSTALL.md + verify.sh --------------------------------------------------
+cat > "$STAGE/INSTALL.md" <<'EOF'
+# VirtuSphere Offline-Bundle
+
+Alle Schritte laufen ohne Internetzugang.
+
+1. Verifikation: `sh verify.sh` (prueft jede Datei gegen SHA256SUMS).
+2. Images laden: `for f in images/*.tar.gz; do gunzip -c "$f" | docker load; done`
+   Danach muss `docker images` jedes Image MIT Namen und Tag zeigen. Kein
+   `docker image prune`: es wuerde die eben geladenen Images entfernen.
+3. Quellcode entpacken: `mkdir virtusphere && tar xzf source.tar.gz -C virtusphere`
+4. PHP-Abhaengigkeiten: `tar xzf deps/vendor.tar.gz -C virtusphere/Docker/WebAPI`
+5. Python-Pakete auf dem Ansible-Host (vor den Collections; ansible-core,
+   pyvmomi und requests sind die dokumentierten Host-Voraussetzungen):
+   `python3 -m pip install --no-index --find-links deps/wheels -r deps/requirements-ansible-host.txt`
+   Danach die Ansible-Collections:
+   `ansible-galaxy collection install collections/*.tar.gz` (offline).
+6. Den noch deaktivierten Durable Runner offline installieren:
+   `python3 runner/virtusphere_remote_install.py runner`. Der Installer prueft
+   `runner/SHA256SUMS`, aendert kein Linger und aktiviert keinen Produktpfad.
+   Der anschliessende lesende Preflight braucht den am Standort freigegebenen
+   Mindestwert: `python3 ~/.local/libexec/virtusphere/virtusphere_remote_preflight.py --required-free-bytes <standortfreigabe>`.
+   Sein JSON ist Evidenz fuer 8R-S, keine Freigabe aus sich selbst.
+6a. Den Aufraeum-Timer fuer verwaiste Zugangsdateien einmalig installieren
+   (als root, auf dem Ansible-Host; `<ansible-konto>` ist das Linux-Konto des
+   Ansible-Zugangs, unter dem die Auftraege laufen):
+   `sudo sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-konto>`
+   Der Timer loescht nur `accounts.yml` unter `/tmp/virtusphere-job-*`, die
+   aelter als 24 h ist, dem Ansible-Konto gehoert und in einem Auftragsordner
+   dieses Kontos liegt. Den Schutz laufender Auftraege leistet das Alter von
+   24 h. Die Sperre des Auftragsordners schliesst nur einen zweiten Lauf des
+   Skripts aus, solange die Auftragsbefehle ihre Ordner nicht selbst sperren.
+   Der Timer ist die Sicherung fuer Dateien, die kein Auftrag mehr erreicht; die
+   Bereinigung durch die Auftraege bleibt unveraendert. Die Installation braucht
+   kein Netz, installiert kein Paket und ist wiederholbar. Status:
+   `systemctl status virtusphere-secret-cleanup.timer`.
+7. Weiter mit `virtusphere/docs/operations/offline-install.md` (.env anlegen,
+   Log-Rechte, `docker compose up -d --wait`, Migrationen), danach ab Schritt 3
+   mit `virtusphere/docs/operations/go-live.md`. Der Kernlauf lädt und startet
+   phpMyAdmin nicht. Das separat verifizierte Teilbundle wird bei Bedarf aus dem
+   entpackten Bundle-Verzeichnis (dort liegt `tools/install.sh`, nicht in der
+   Projektwurzel) mit `sh tools/install.sh` installiert.
+
+NICHT `Docker/scripts/setup.sh` benutzen: es ruft `docker compose build` auf, und
+die Basis-Images sind digest-gepinnt und liegen nicht im Bundle. Auf einem Host
+ohne Netz kann dieser Aufruf nicht durchlaufen. Schritt 2 laedt fertige Images,
+gebaut wird hier nichts.
+
+`sbom/` und `reports/` dokumentieren den Auslieferungszustand (SPDX-SBOM und
+CVE-Bericht je Image); `provenance.json` traegt Commit und Buildkontext.
+EOF
+
+cat > "$STAGE/verify.sh" <<'EOF'
+#!/bin/sh
+# Offline-Verifikation des VirtuSphere-Bundles: prueft jede Datei gegen
+# SHA256SUMS. Braucht nur sha256sum, kein Netz, kein Docker.
+set -eu
+cd "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+command -v sha256sum >/dev/null 2>&1 || { echo "verify: sha256sum fehlt"; exit 2; }
+sha256sum -c SHA256SUMS
+echo "OK: Bundle vollstaendig offline verifiziert."
+EOF
+chmod +x "$STAGE/verify.sh"
+
+# Das optionale Werkzeugteilbundle hat ein eigenes Manifest und einen einzigen
+# Installationsowner. Es lädt ausschließlich seine Archive und startet nur das
+# explizite tools-Profil; der Kerninstaller bleibt davon unabhängig.
+cat > "$STAGE/tools/install.sh" <<'EOF'
+#!/bin/sh
+set -eu
+TOOLS_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+cd "$TOOLS_DIR"
+sha256sum -c SHA256SUMS
+for archive in images/*.tar.gz; do
+    [ -f "$archive" ] || { echo "tools-install: kein Werkzeug-Image im Teilbundle" >&2; exit 2; }
+    gunzip -c "$archive" | docker load
+done
+PROJECT_DIR=${1:-"$TOOLS_DIR/../virtusphere"}
+cd "$PROJECT_DIR"
+docker compose --profile tools up -d phpmyadmin
+EOF
+chmod +x "$STAGE/tools/install.sh"
+(
+    cd "$STAGE/tools"
+    find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | xargs -d '\n' sha256sum > SHA256SUMS
+)
+
+rm -f "$STAGE/.core-refs" "$STAGE/.all-refs" "$STAGE/.tool-refs" "$STAGE/.all-images"
+
+# --- 8) Manifest zuletzt: jede Datei ausser dem Manifest selbst ----------------
+echo "==> SHA256SUMS schreiben"
+(
+    cd "$STAGE"
+    find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort | xargs -d '\n' sha256sum > SHA256SUMS
+)
+
+# --- 9) Selbstverifikation, dann atomar veroeffentlichen ------------------------
+echo "==> Offline-Selbstverifikation"
+sh "$STAGE/verify.sh"
+
+# Erst ein vollstaendig verifiziertes Staging bekommt den Zielnamen; der Trap
+# entfaellt danach, denn ab hier gibt es nichts Halbes mehr aufzuraeumen.
+mv "$STAGE" "$OUT"
+trap - EXIT INT TERM
+
+echo "offline-bundle: fertig unter $OUT"
+du -sh "$OUT" 2>/dev/null || true

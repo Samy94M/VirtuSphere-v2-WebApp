@@ -1,0 +1,199 @@
+<?php
+
+declare(strict_types=1);
+
+// JSON on the wire even for an uncaught error. Must come before mysql.php, which
+// connects while it loads: a dead database throws there, i.e. before anything
+// below runs (see virtusphere_error_response_mode).
+require_once __DIR__ . '/lib/errors.php';
+virtusphere_error_response_mode('json');
+
+require_once __DIR__ . '/mysql.php';
+require_once __DIR__ . '/lib/machine_api.php';
+require_once __DIR__ . '/lib/defaults.php'; // mission_name_is_template(), the one template predicate (MA-13)
+require_once __DIR__ . '/lib/status.php';
+require_once __DIR__ . '/lib/repo/mecm_provenance.php';
+
+header('Content-Type: application/json; charset=utf-8');
+
+function machine_vm_packages(mysqli $db, int $vmId): array
+{
+    $stmt = $db->prepare('SELECT dp.* FROM deploy_packages dp JOIN deploy_vm_packages dvp ON dp.id = dvp.package_id WHERE dvp.vm_id = ? ORDER BY dp.package_name');
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+
+    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+function machine_vm_interfaces(mysqli $db, int $vmId, bool $onlyWithMac): array
+{
+    $sql = $onlyWithMac
+        ? "SELECT * FROM deploy_interfaces WHERE mac != '' AND mac IS NOT NULL AND vm_id = ? ORDER BY id"
+        : 'SELECT * FROM deploy_interfaces WHERE vm_id = ? ORDER BY id';
+    $stmt = $db->prepare($sql);
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+
+    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+/**
+ * The PXE client contract, not a database-row export (ADR-0019/E3).
+ * Keep this projection in the order the client consumes it and never replace
+ * it with SELECT *: ids, notes and lifecycle/provenance fields do not belong on
+ * every deployed Windows machine.
+ */
+function machine_client_interfaces(mysqli $db, int $vmId): array
+{
+    $stmt = $db->prepare(
+        'SELECT vlan, mac, mode, ip, subnet, gateway, dns1, dns2, type
+         FROM deploy_interfaces
+         WHERE vm_id = ?
+         ORDER BY id'
+    );
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+
+    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+function machine_vm_mission(mysqli $db, int $missionId): ?array
+{
+    $stmt = $db->prepare('SELECT * FROM deploy_missions WHERE id = ? LIMIT 1');
+    $stmt->bind_param('i', $missionId);
+    $stmt->execute();
+    $mission = $stmt->get_result()->fetch_assoc();
+
+    return $mission ?: null;
+}
+
+$clientIp = machine_api_client_ip();
+// request_string, not a raw cast: `?action[]=x` would otherwise throw "Array to
+// string conversion", and this cast sits ahead of the IP gate, so any host could
+// turn a stray bracket into a 500 plus a system audit row - unauthenticated,
+// one per request. See lib/request.php.
+$action = request_string($_GET, 'action');
+$mac = request_string($_GET, 'mac');
+// K20: the client reads its own configuration; the device list is the
+// MECM server's. One gate per action, decided before either branch runs.
+$ipAllowed = machine_api_ip_allowed($connection, $clientIp, $action === 'getDeviceInfos' ? 'device_infos' : 'device_list');
+
+// ADR-0032: adopt the PowerShell client's per-run correlation id for this
+// request's audit lines. Diagnostic only; an invalid header is ignored.
+$headerCorrelation = (string) ($_SERVER['HTTP_X_VIRTUSPHERE_CORRELATION'] ?? '');
+if (virtusphere_correlation_id_is_valid($headerCorrelation)) {
+    virtusphere_correlation_adopt($headerCorrelation);
+}
+
+try {
+    if ($action === 'getDeviceInfos') {
+        if ($mac === '' || !filter_var($mac, FILTER_VALIDATE_MAC)) {
+            machine_api_json(['error' => 'Invalid MAC address'], 400);
+        }
+        // Canonical lookup (E2): separator/case variants match the stored form.
+        $mac = virtusphere_normalize_mac($mac) ?? $mac;
+        if (!$ipAllowed && !machine_api_mac_allowed($connection, $mac)) {
+            machine_api_forbidden($clientIp, $connection);
+        }
+
+        $stmt = $connection->prepare('SELECT vm_id FROM deploy_interfaces WHERE mac = ? LIMIT 1');
+        $stmt->bind_param('s', $mac);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if (!$row) {
+            machine_api_json([]);
+        }
+
+        $vmId = (int) $row['vm_id'];
+        // Read only (ADR-0019/E3): downloading configuration proves neither
+        // that the registry write finished nor that the client can acknowledge
+        // it. The explicit POST to mecm_client_ack.php owns the 5/5 transition.
+        // Still the exact minimal contract: the same five base fields plus the
+        // interfaces, with `vm_hostname` aliased onto the frozen rollout
+        // snapshot (Etappe 14D), the rollout fence and the two ADR-0044 report
+        // generations. The client
+        // renames Windows to what it reads here, so it has to read the name this
+        // rollout was handed, not a desired value that may have moved since.
+        $stmt = $connection->prepare('SELECT v.vm_name, v.mecm_rollout_hostname AS vm_hostname, v.vm_domain, v.vm_os, v.mission_id,
+            v.mecm_rollout_revision AS rollout_revision,
+            LOWER(BIN_TO_UUID(v.package_report_generation)) AS device_generation,
+            LOWER(BIN_TO_UUID(s.acceptance_generation)) AS acceptance_generation
+            FROM deploy_vms v CROSS JOIN deploy_package_report_state s WHERE v.id = ? AND s.id = 1 LIMIT 1');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+        $data = $stmt->get_result()->fetch_assoc() ?: [];
+        if ($data !== []) {
+            $data['interfaces'] = machine_client_interfaces($connection, $vmId);
+        }
+
+        machine_api_json($data);
+    }
+
+    if (!$ipAllowed) {
+        machine_api_forbidden($clientIp, $connection);
+    }
+
+    if ($action === 'getDeviceList') {
+        // Explicit projection, never `SELECT *` (Etappe 14D, ADR-0043). The old
+        // star handed every column of deploy_vms to the MECM server, so each
+        // internal column a later stage added became wire by accident - and this
+        // stage adds three of them. VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS is the
+        // pinned list; MachineApiWireTest walks it in both directions.
+        //
+        // Two deliberate aliases and nothing else changes:
+        //  - `vm_hostname` on the wire is the FROZEN rollout snapshot, not the
+        //    current portal desired value. MECM must receive the name this
+        //    rollout was handed, or a correction typed after the hand-off would
+        //    silently reinterpret a device MECM already accepted. The desired
+        //    value is deliberately NOT exported.
+        //  - `previous_resource_id` is the delete tombstone under a wire name;
+        //    the internal column name never leaves the database.
+        //  - `transfer_generation` (AV-P0) is the queueing counter the sync
+        //    reports back through updateDevice, so only the transfer it applied
+        //    leaves the queue.
+        // `vm_name` keeps meaning the ESXi identity, exactly as before.
+        $result = machine_api_prepared_result(
+            $connection,
+            'SELECT ' . implode(', ', VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS) . ',
+                    mecm_rollout_hostname AS vm_hostname,
+                    mecm_rollout_revision AS rollout_revision,
+                    mecm_previous_id AS previous_resource_id,
+                    mecm_transfer_generation AS transfer_generation
+               FROM deploy_vms WHERE updated = 1 OR mecm_sync_state = ? ORDER BY id',
+            's',
+            [VIRTUSPHERE_MECM_SYNC_PENDING]
+        );
+        $data = [];
+        while ($vm = $result->fetch_assoc()) {
+            $vmId = (int) $vm['id'];
+            $vm['interfaces'] = machine_vm_interfaces($connection, $vmId, true);
+            if ($vm['interfaces'] === []) {
+                continue;
+            }
+
+            $mission = machine_vm_mission($connection, (int) $vm['mission_id']);
+            if (!$mission || mission_name_is_template((string) $mission['mission_name'])) {
+                continue;
+            }
+
+            $vm['mission'] = $mission;
+            $vm['packages'] = machine_vm_packages($connection, $vmId);
+            // Additive wire (ADR-0034): the owned membership rules ride along,
+            // so the device-sync can compute its reconciliation plan without a
+            // second endpoint. Empty for a device VirtuSphere never reported a
+            // rule for; a remove is only ever planned against entries here.
+            $vm['owned_collections'] = repo_mecm_rules_for_vm($connection, $vmId);
+            $vm['vm_status'] = virtusphere_legacy_status_from_states((string) $vm['lifecycle_state'], (string) $vm['mecm_sync_state']);
+            $vm['mecm_sync_state'] = virtusphere_mecm_sync_wire_value((string) $vm['mecm_sync_state']);
+            $vm['updated'] = 1;
+            $data[] = $vm;
+        }
+
+        machine_api_json($data);
+    }
+
+    machine_api_json(['message' => 'Invalid action specified'], 400);
+} catch (Throwable $exception) {
+    machine_api_log_warning('mecm-api', $exception::class . ': ' . $exception->getMessage());
+    machine_api_json(['error' => 'Interner Serverfehler'], 500);
+}

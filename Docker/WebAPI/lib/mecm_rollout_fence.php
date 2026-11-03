@@ -1,0 +1,170 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * The revision fence every mutating MECM callback passes (Etappe 14D, ADR-0043).
+ *
+ * The problem it solves is not theoretical. Before 14D a reset opened a fresh
+ * queue entry, and the PREVIOUS rollout's `updateDevice` could still be in
+ * flight; it arrived seconds later, wrote the OLD ResourceID, set the VM to
+ * `registered` and took it straight back out of `getDeviceList`. The new rollout
+ * then never happened, and nothing in the portal said why.
+ *
+ * So every mutating callback carries the rollout revision it believes it is
+ * answering for, and the write only lands when that belief is current. The check
+ * runs under the SAME row lock as the write, because a revision read before the
+ * lock is a revision that may already be stale when the update executes.
+ *
+ * Answers are deliberately three, not two:
+ *  - `accept`  the caller is current and may write.
+ *  - `noop`    the caller is current AND the write is already there. Idempotent
+ *              200, no second write, no second status event: a retried callback
+ *              of the same rollout is a duplicate, not a conflict.
+ *  - `stale`   missing, older, newer or contradicting. 409 without side effects.
+ *
+ * A FUTURE revision is refused as firmly as an old one. It cannot be a legal
+ * caller: only this server hands revisions out, so a higher one means the caller
+ * invented it or the row was restored from an older backup, and writing on that
+ * belief would bind a ResourceID to a rollout that does not exist here.
+ */
+
+require_once __DIR__ . '/constants.php';
+
+const VIRTUSPHERE_MECM_FENCE_ACCEPT = 'accept';
+const VIRTUSPHERE_MECM_FENCE_NOOP = 'noop';
+const VIRTUSPHERE_MECM_FENCE_STALE = 'stale';
+
+/** Closed causes of a stale refusal (MA-07); the audit row carries one as `reason`. */
+const VIRTUSPHERE_MECM_FENCE_CAUSE_REVISION = 'revision_mismatch';
+const VIRTUSPHERE_MECM_FENCE_CAUSE_BINDING = 'binding_conflict';
+
+/**
+ * The revision half of the fence: whether the caller is the current rollout.
+ *
+ * The legacy branch is the one deliberate hole and it is fail-closed: a callback
+ * with NO revision is accepted only for revision 1 with no tombstone, i.e. a VM
+ * that has never been reset and whose desired name never moved while pending.
+ * That is exactly the estate a site runs before the MECM script and client
+ * packages are cut over. The moment anything reset or a pending snapshot moved,
+ * the revision is above 1 and an un-upgraded caller gets 409 instead of writing
+ * into the wrong rollout. Removing this branch after a proven cutover is its own
+ * E3/ADR decision, not a cleanup.
+ */
+function mecm_rollout_fence_revision_current(?int $reported, ?int $stored, ?string $tombstone): bool
+{
+    $stored = $stored ?? VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL;
+    $hasTombstone = $tombstone !== null && $tombstone !== '';
+
+    if ($reported === null) {
+        return $stored === VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL && !$hasTombstone;
+    }
+
+    return $reported === $stored;
+}
+
+/**
+ * Pure decision, so it can be driven through every branch without a database.
+ *
+ * `$reported` is the revision the caller sent, or null when it sent none.
+ * `$stored` is the row's current revision, `$storedBinding` what is already
+ * written for the thing the caller wants to write (a ResourceID, an ACK marker),
+ * `$incomingBinding` what it wants to write.
+ */
+function mecm_rollout_fence_decide(?int $reported, ?int $stored, ?string $storedBinding, ?string $incomingBinding, ?string $tombstone): string
+{
+    if (!mecm_rollout_fence_revision_current($reported, $stored, $tombstone)) {
+        return VIRTUSPHERE_MECM_FENCE_STALE;
+    }
+
+    // Current caller. Now the binding itself decides between a first write, a
+    // duplicate and an attempt to overwrite an existing binding with a different
+    // value. The last one is a conflict even from a current caller: two
+    // ResourceIDs for one rollout means the sync found two devices, and picking
+    // one here would make VirtuSphere the thing that chose wrong.
+    if ($storedBinding === null || $storedBinding === '') {
+        return VIRTUSPHERE_MECM_FENCE_ACCEPT;
+    }
+    if ($incomingBinding !== null && $storedBinding === $incomingBinding) {
+        return VIRTUSPHERE_MECM_FENCE_NOOP;
+    }
+
+    return VIRTUSPHERE_MECM_FENCE_STALE;
+}
+
+/**
+ * Which check refused a callback (MA-07), for the audit row only: null when
+ * the same arguments are not a stale refusal. A stale caller whose revision is
+ * not current is `revision_mismatch`; a current caller refused by a different
+ * ResourceID over an existing binding is `binding_conflict`. The wire answer is
+ * the same 409 for both and does not depend on this function.
+ */
+function mecm_rollout_fence_refusal_cause(?int $reported, ?int $stored, ?string $storedBinding, ?string $incomingBinding, ?string $tombstone): ?string
+{
+    if (mecm_rollout_fence_decide($reported, $stored, $storedBinding, $incomingBinding, $tombstone) !== VIRTUSPHERE_MECM_FENCE_STALE) {
+        return null;
+    }
+
+    return mecm_rollout_fence_revision_current($reported, $stored, $tombstone)
+        ? VIRTUSPHERE_MECM_FENCE_CAUSE_BINDING
+        : VIRTUSPHERE_MECM_FENCE_CAUSE_REVISION;
+}
+
+/**
+ * Reads the revision a callback reported. Absent and empty mean "no revision"
+ * (the pre-cutover caller); anything present but not a positive integer is a
+ * malformed body, which the endpoint answers with 400 rather than 409, because
+ * 409 promises the caller that retrying after a resync could work.
+ *
+ * @throws InvalidArgumentException on a present but unusable value.
+ */
+function mecm_rollout_fence_reported_revision(mixed $raw): ?int
+{
+    if ($raw === null || $raw === '') {
+        return null;
+    }
+    if (is_int($raw)) {
+        $value = $raw;
+    } elseif (is_string($raw) && preg_match('/^[0-9]{1,18}$/', $raw) === 1) {
+        $value = (int) $raw;
+    } else {
+        throw new InvalidArgumentException('rollout_revision must be a positive integer.');
+    }
+    if ($value < 1) {
+        throw new InvalidArgumentException('rollout_revision must be a positive integer.');
+    }
+
+    return $value;
+}
+
+/**
+ * Reads the transfer generation an updateDevice callback reported (AV-P0).
+ * Absent and empty mean a caller from before the counter; a present value
+ * must be a non-negative integer, because the counter starts at 0.
+ *
+ * @throws InvalidArgumentException on a present but unusable value.
+ */
+function mecm_transfer_generation_reported(mixed $raw): ?int
+{
+    if ($raw === null || $raw === '') {
+        return null;
+    }
+    if (is_int($raw) && $raw >= 0) {
+        return $raw;
+    }
+    if (is_string($raw) && preg_match('/^[0-9]{1,18}$/', $raw) === 1) {
+        return (int) $raw;
+    }
+    throw new InvalidArgumentException('transfer_generation must be a non-negative integer.');
+}
+
+/**
+ * Whether a callback answers the transfer queued now. Without a reported
+ * generation it answers whatever is queued (the behaviour before AV-P0);
+ * with one, only the exact generation it read from getDeviceList. A transfer
+ * queued after that read therefore stays queued.
+ */
+function mecm_transfer_generation_applied(?int $reported, int $stored): bool
+{
+    return $reported === null || $reported === $stored;
+}

@@ -1,0 +1,26 @@
+---
+# Fixture des Leser-Beweises (QA-Werkzeug, wird nicht ausgeliefert; Gate
+# ansible-vars-files-lifetime, Treiber vars-files-lifetime-probe.py).
+#
+# Ein Playbook, dessen stdout-Leser nach der ersten Ausgabe geht, waehrend ein
+# Task ohne Ausgabe laeuft. Der dritte Task legt eine Markerdatei an; existiert
+# sie nach dem Lauf, hat das Playbook seinen naechsten Task ohne Leser
+# erreicht. Im Kontrollfall liest der Treiber bis zum Ende, und der Marker muss
+# entstehen.
+- name: Verhalten ohne lesenden Kanal messen
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Erste Ausgabe
+      ansible.builtin.debug:
+        msg: vs-first
+
+    - name: Pause, in der der Leser geht
+      ansible.builtin.command: sleep 3
+      changed_when: false
+
+    - name: Marker des naechsten Tasks
+      ansible.builtin.file:
+        path: "{{ vs_marker }}"
+        state: touch
+        mode: "0600"

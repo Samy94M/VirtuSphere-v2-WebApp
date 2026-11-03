@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose *)",
+      "Bash(php -l *)",
+      "Bash(curl -sI http://localhost:8021/*)",
+      "Bash(git status *)",
+      "Bash(git diff *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/lint-csp-patterns.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/php-lint.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/lang-parity.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

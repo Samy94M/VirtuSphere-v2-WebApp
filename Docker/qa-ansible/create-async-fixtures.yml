@@ -1,0 +1,175 @@
+---
+# Beweis der Async-Mechanik des per-VM-Create ohne ESXi (QA-Werkzeug, wird nicht
+# ausgeliefert; Gate ansible-create-async).
+#
+# Was hier bewiesen wird, ist NICHT die VM-Erstellung, sondern der Teil des
+# Vertrags, an dem der Vorfall vom 13.08.2026 hing: dass ein mit `poll: 0`
+# gestarteter Job eine dauerhafte Job-ID zurueckgibt, dass eine spaetere,
+# EIGENE Statusabfrage denselben Job im dedizierten Verzeichnis wiederfindet,
+# dass sie ihn erst als laufend und dann als fertig meldet, und dass der
+# gezielte Cleanup genau diese eine Statusdatei entfernt.
+#
+# Statt community.vmware.vmware_guest laeuft ein `sleep`. Das ist genau die
+# Ersetzung, die der Plan vorsieht: die Async-Naht gehoert ansible-core, nicht
+# der Collection, und ein ESXi-Host beantwortet an dieser Stelle keine einzige
+# zusaetzliche Frage.
+#
+# Zusaetzlich geprueft: das dedizierte Verzeichnis wird ueber die Variable
+# ansible_async_dir gewaehlt (seit core 2.12 der einzige unterstuetzte Weg) und
+# nicht ueber ANSIBLE_ASYNC_DIR im Task-Environment, und eine falsche Job-ID
+# ergibt einen geschlossenen Fehler statt eines stillen Erfolgs.
+- name: Async-Start, Poll und Cleanup gegen einen Sleep-Stub beweisen
+  hosts: localhost
+  gather_facts: false
+  vars:
+    vs_async_dir: /tmp/vs-create-async-fixture
+    vs_async_timeout: 120
+
+  tasks:
+    - name: Frisches Async-Verzeichnis anlegen
+      ansible.builtin.file:
+        path: "{{ vs_async_dir }}"
+        state: "{{ item }}"
+        mode: "0700"
+      loop:
+        - absent
+        - directory
+
+    - name: Einen Job mit poll 0 starten
+      ansible.builtin.command: sleep 4
+      changed_when: false
+      vars:
+        ansible_async_dir: "{{ vs_async_dir }}"
+      async: "{{ vs_async_timeout | int }}"
+      poll: 0
+      register: vs_launch
+
+    - name: Der Start liefert eine dauerhafte Job-ID
+      ansible.builtin.assert:
+        that:
+          - vs_launch.ansible_job_id is defined
+          - vs_launch.ansible_job_id | string | length > 0
+          - vs_launch.ansible_job_id is match('^[A-Za-z0-9._-]+$')
+        fail_msg: >-
+          Ein Start mit poll 0 ohne wiederauffindbare Job-ID macht den ganzen
+          Vertrag wertlos: der Worker koennte den Lauf nach einem Abriss nicht
+          wieder beobachten.
+
+    - name: Die Statusdatei liegt im dedizierten Verzeichnis
+      ansible.builtin.stat:
+        path: "{{ vs_async_dir }}/{{ vs_launch.ansible_job_id }}"
+      register: vs_state_file
+
+    - name: Genau dieses Verzeichnis wurde benutzt
+      ansible.builtin.assert:
+        that:
+          - vs_state_file.stat.exists
+        fail_msg: >-
+          Die Statusdatei liegt nicht unter ansible_async_dir. Damit haette der
+          Worker keinen Pfad, den er dem Handle zuordnen kann.
+
+    - name: Erste Abfrage meldet den Job als laufend
+      ansible.builtin.async_status:
+        jid: "{{ vs_launch.ansible_job_id }}"
+      vars:
+        ansible_async_dir: "{{ vs_async_dir }}"
+      register: vs_first_poll
+      failed_when: false
+      changed_when: false
+
+    - name: Ein laufender Job ist nicht fertig
+      ansible.builtin.assert:
+        that:
+          - (vs_first_poll.finished | default(0) | int) == 0
+        fail_msg: >-
+          Der Job war sofort fertig. Dann prueft diese Fixture den Pollpfad
+          nicht mehr und muss verlaengert werden, statt gruen zu bleiben.
+
+    - name: Auf den Ausgang desselben Jobs warten
+      ansible.builtin.async_status:
+        jid: "{{ vs_launch.ansible_job_id }}"
+      vars:
+        ansible_async_dir: "{{ vs_async_dir }}"
+      register: vs_final_poll
+      until: (vs_final_poll.finished | default(0) | int) == 1
+      retries: 20
+      delay: 1
+      changed_when: false
+
+    - name: Der terminale Ausgang gehoert derselben Job-ID
+      ansible.builtin.assert:
+        that:
+          - (vs_final_poll.finished | int) == 1
+          - not (vs_final_poll.failed | default(false) | bool)
+          - vs_final_poll.ansible_job_id | string == vs_launch.ansible_job_id | string
+
+    # Der Grund, warum das Status-Playbook zuerst die Statusdatei prueft. Diese
+    # Fixture haelt das gemessene Verhalten fest, statt es anzunehmen: eine
+    # unbekannte Job-ID antwortet mit finished=1 und der freien Meldung
+    # "could not find job", und unter failed_when: false steht dort zusaetzlich
+    # failed=false. Ein verlorener Job saehe damit aus wie ein fertiger.
+    - name: Eine fremde Job-ID abfragen
+      ansible.builtin.async_status:
+        jid: "0000000000.0000"
+      vars:
+        ansible_async_dir: "{{ vs_async_dir }}"
+      register: vs_foreign_poll
+      failed_when: false
+      changed_when: false
+
+    - name: Ein verlorener Job ist an failed NICHT erkennbar
+      ansible.builtin.assert:
+        that:
+          - (vs_foreign_poll.finished | default(0) | int) == 1
+          - not (vs_foreign_poll.failed | default(false) | bool)
+        fail_msg: >-
+          Die Laufzeit meldet eine unbekannte Job-ID inzwischen anders. Das ist
+          eine gute Nachricht, aber das Status-Playbook stuetzt seine
+          Unterscheidung auf die Anwesenheit der Statusdatei; diese Fixture und
+          der Kommentar dort gehoeren dann gemeinsam nachgezogen.
+
+    - name: Die Statusdatei ist die strukturelle Antwort
+      ansible.builtin.stat:
+        path: "{{ vs_async_dir }}/0000000000.0000"
+      register: vs_foreign_state
+
+    - name: Ein verlorener Job hat keine Statusdatei
+      ansible.builtin.assert:
+        that:
+          - not vs_foreign_state.stat.exists
+        fail_msg: >-
+          Dann traegt auch die Statusdatei die Unterscheidung nicht mehr und das
+          Status-Playbook braucht ein anderes strukturelles Merkmal.
+
+    - name: Gezielt genau diesen Job bereinigen
+      ansible.builtin.async_status:
+        jid: "{{ vs_launch.ansible_job_id }}"
+        mode: cleanup
+      vars:
+        ansible_async_dir: "{{ vs_async_dir }}"
+
+    - name: Nach dem Cleanup ist die Statusdatei fort
+      ansible.builtin.stat:
+        path: "{{ vs_async_dir }}/{{ vs_launch.ansible_job_id }}"
+      register: vs_state_after
+
+    - name: Das Verzeichnis ist leer, nicht geloescht
+      ansible.builtin.find:
+        paths: "{{ vs_async_dir }}"
+        hidden: true
+      register: vs_remaining
+
+    - name: Cleanup entfernt die Statusdatei und sonst nichts
+      ansible.builtin.assert:
+        that:
+          - not vs_state_after.stat.exists
+          - vs_remaining.files | length == 0
+        fail_msg: >-
+          Nach dem gezielten Cleanup blieb etwas liegen. Ein Rest im
+          Async-Verzeichnis ist entweder ein fremder Job oder ein nicht
+          bereinigter eigener; beides muss sichtbar bleiben statt zu wachsen.
+
+    - name: Fixture-Verzeichnis abraeumen
+      ansible.builtin.file:
+        path: "{{ vs_async_dir }}"
+        state: absent

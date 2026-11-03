@@ -1,0 +1,265 @@
+// Live deploy blocker list. The server remains authoritative; this read-only
+// mirror gives the same answer while the operator changes queue controls.
+(function () {
+    var root = document.querySelector('[data-deploy-blockers]');
+    var form = document.querySelector('form:has([data-deploy-mission])');
+    var button = document.querySelector('[data-deploy-queue-button]');
+    if (!root || !form || !button) {
+        return;
+    }
+
+    var list = root.querySelector('[data-deploy-blocker-list]');
+    var summary = root.querySelector('[data-deploy-blocker-summary]');
+    var warningList = root.querySelector('[data-deploy-warning-list]');
+    var warningHeading = root.querySelector('[data-deploy-warning-heading]');
+    var jump = root.querySelector('[data-deploy-blocker-jump]');
+    var status = root.querySelector('[data-deploy-preparation-status]');
+    var context = root.querySelector('[data-deploy-preparation-context]');
+    var initialLimit = parseInt(root.getAttribute('data-initial-limit') || '0', 10) || 0;
+    var timer = null;
+    var controller = null;
+    var requestSequence = 0;
+    var stopped = false;
+    var hardNetworkModes = [];
+    try {
+        hardNetworkModes = JSON.parse(root.getAttribute('data-hard-network-modes') || '[]');
+    } catch (error) {
+        hardNetworkModes = [];
+    }
+
+    function appendHidden(target, name, value) {
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = String(value);
+        target.appendChild(input);
+        return input;
+    }
+
+    function appendDraftFields(target) {
+        Array.prototype.forEach.call(target.querySelectorAll('input[name^="draft["]'), function (field) {
+            field.remove();
+        });
+        Array.prototype.forEach.call(form.elements, function (field) {
+            var name = field.name;
+            if (!name || name === '_csrf' || name === 'action') return;
+            if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) return;
+            var draftName = name === 'vm_ids[]' ? 'draft[vm_ids][]' : 'draft[' + name + ']';
+            appendHidden(target, draftName, field.value).setAttribute('data-deploy-draft-field', '');
+        });
+    }
+
+    function remedyForm(action, code) {
+        var remedy = document.createElement('form');
+        remedy.className = 'inline-form';
+        remedy.method = 'post';
+        remedy.action = 'deploy.php';
+        var csrf = form.querySelector('input[name="_csrf"]');
+        if (csrf) appendHidden(remedy, '_csrf', csrf.value);
+        appendHidden(remedy, 'action', 'open_remedy');
+        appendHidden(remedy, 'remedy_code', code);
+        appendDraftFields(remedy);
+        var button = document.createElement('button');
+        button.className = 'button-as-link';
+        button.type = 'submit';
+        button.textContent = action.label;
+        remedy.appendChild(button);
+        return remedy;
+    }
+
+    function queueParams() {
+        var params = new URLSearchParams();
+        Array.prototype.forEach.call(form.elements, function (field) {
+            var name = field.name;
+            if (!name || name === '_csrf' || name === 'action') {
+                return;
+            }
+            if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) {
+                return;
+            }
+            params.append(name === 'vm_ids[]' ? 'vm_ids[]' : name, field.value);
+        });
+        return params;
+    }
+
+    function blockerNode(blocker, index) {
+        var box = document.createElement('div');
+        box.className = 'alert alert-error';
+        box.id = blocker.target_id || ('deploy-blocker-' + String(index + 1));
+        box.setAttribute('data-deploy-blocker', '');
+        box.tabIndex = -1;
+        box.appendChild(document.createTextNode(String(blocker.message || '')));
+
+        // Same shape as the server render: follow-ups live in one .alert-actions
+        // row, the middle dot appears only between two of them, and the row is
+        // only created when something fills it.
+        var action = blocker.action;
+        var help = blocker.help;
+        if ((action && action.type === 'link') || help) {
+            var actions = document.createElement('div');
+            actions.className = 'alert-actions';
+            if (action && action.type === 'link') {
+                actions.appendChild(remedyForm(action, String(blocker.code || '')));
+            }
+            if (action && action.type === 'link' && help) {
+                var dot = document.createElement('span');
+                dot.className = 'muted';
+                dot.setAttribute('aria-hidden', 'true');
+                dot.textContent = '·';
+                actions.appendChild(dot);
+            }
+            if (help) {
+                var helpLink = document.createElement('a');
+                helpLink.href = help.url;
+                helpLink.textContent = help.label;
+                helpLink.setAttribute('data-deploy-blocker-help', '');
+                actions.appendChild(helpLink);
+            }
+            box.appendChild(actions);
+        }
+
+        return box;
+    }
+
+    // The rendered list is bounded exactly like the server render, and the
+    // sentence naming what it leaves out comes from the response, because a
+    // translated string may not be assembled here.
+    function omittedNode(label, hook) {
+        var note = document.createElement('p');
+        note.className = 'muted';
+        note.setAttribute(hook, '');
+        note.textContent = label;
+        return note;
+    }
+
+    function render(data) {
+        list.replaceChildren();
+        data.blockers.slice(0, initialLimit || data.blockers.length).forEach(function (blocker, index) {
+            list.appendChild(blockerNode(blocker, index));
+        });
+        if (String(data.labels.omitted || '') !== '') {
+            list.appendChild(omittedNode(data.labels.omitted, 'data-deploy-blocker-omitted'));
+        }
+        if (warningList) {
+            warningList.replaceChildren();
+            var warnings = data.warnings || [];
+            warnings.slice(0, initialLimit || warnings.length).forEach(function (warning) {
+                var box = blockerNode(warning, 0);
+                box.className = 'alert alert-warning';
+                box.removeAttribute('id');
+                box.removeAttribute('data-deploy-blocker');
+                box.setAttribute('data-deploy-network-warning', '');
+                warningList.appendChild(box);
+            });
+            if (warningHeading) warningHeading.hidden = warnings.length === 0;
+        }
+        button.disabled = !data.can_queue;
+        var presentation = data.presentation || {
+            state: data.count === 0 ? 'ready' : 'blocked',
+            status: data.labels.count,
+            context: context ? context.textContent : ''
+        };
+        root.setAttribute('data-preparation-state', String(presentation.state || 'blocked'));
+        status.textContent = String(presentation.status || data.labels.count || '');
+        if (context) context.textContent = String(presentation.context || '');
+        jump.hidden = data.count === 0;
+        if (data.count > 0) {
+            jump.textContent = data.labels.jump;
+            jump.href = '#' + String((data.blockers[0] || {}).target_id || 'deploy-blocker-1');
+        }
+    }
+
+    // Session end, 403 or a network error. The submit stays blocked for the
+    // modes whose network/WDS findings are hard blockers; for start/autostart
+    // the client deliberately does NOT invent a global lock, because it has no
+    // blocker data at all and the server re-checks the complete union at
+    // submit time anyway. That asymmetry is a decision, not an oversight: a
+    // client that disables the button on every hiccup teaches operators to
+    // reload rather than to read. It is pinned by DeployBlockerContractTest.
+    function renderFailure(message) {
+        list.replaceChildren();
+        var box = document.createElement('div');
+        var mode = form.elements.mode ? String(form.elements.mode.value || '') : '';
+        var hardMode = hardNetworkModes.indexOf(mode) !== -1;
+        box.className = hardMode ? 'alert alert-error' : 'alert alert-warning';
+        if (hardMode) {
+            box.setAttribute('data-deploy-blocker', '');
+        }
+        box.textContent = String(message || root.getAttribute('data-error-message') || '');
+        list.appendChild(box);
+        root.setAttribute('data-preparation-state', 'unreliable');
+        status.textContent = root.getAttribute('data-unreliable-message') || '';
+        jump.hidden = true;
+        button.disabled = hardMode;
+    }
+
+    async function refresh() {
+        requestSequence += 1;
+        var sequence = requestSequence;
+        if (controller) {
+            controller.abort();
+        }
+        controller = new AbortController();
+        try {
+            var response = await fetch(root.getAttribute('data-endpoint') + '?' + queueParams().toString(), {
+                credentials: 'same-origin',
+                headers: {'Accept': 'application/json'},
+                signal: controller.signal
+            });
+            var contentType = response.headers.get('content-type') || '';
+            if (contentType.indexOf('application/json') === -1 || sequence !== requestSequence) {
+                if (sequence === requestSequence) {
+                    renderFailure(root.getAttribute('data-error-message'));
+                }
+                return;
+            }
+            var data = await response.json();
+            if (sequence !== requestSequence) {
+                return;
+            }
+            if (response.status === 401 || response.status === 403) {
+                stopped = true;
+                renderFailure(data.message);
+                return;
+            }
+            if (response.ok && data.ok && Array.isArray(data.blockers)) {
+                render(data);
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                renderFailure(root.getAttribute('data-error-message'));
+            }
+        }
+    }
+
+    function scheduleRefresh() {
+        if (stopped) {
+            return;
+        }
+        window.clearTimeout(timer);
+        root.setAttribute('data-preparation-state', 'checking');
+        status.textContent = root.getAttribute('data-checking-message') || '';
+        jump.hidden = true;
+        timer = window.setTimeout(refresh, 250);
+    }
+
+    jump.addEventListener('click', function () {
+        var id = jump.getAttribute('href') || '';
+        var target = id.charAt(0) === '#' ? document.getElementById(id.slice(1)) : null;
+        if (target) window.setTimeout(function () { target.focus(); }, 0);
+    });
+
+    // A live response may have rendered while the operator was still changing
+    // another field. Refresh the one-shot draft at the actual submit boundary,
+    // including server-rendered remedy forms, so a fast click cannot restore
+    // an older live-request snapshot.
+    root.addEventListener('submit', function (event) {
+        var actionField = event.target.querySelector('input[name="action"]');
+        if (actionField && actionField.value === 'open_remedy') {
+            appendDraftFields(event.target);
+        }
+    }, true);
+
+    form.addEventListener('input', scheduleRefresh);
+    form.addEventListener('change', scheduleRefresh);
+}());

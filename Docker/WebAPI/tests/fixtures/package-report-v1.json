@@ -1,0 +1,181 @@
+{
+  "base": {
+    "schema_version": 1,
+    "run_id": "018f2f49-5e41-4d55-8f05-8f55a5334101",
+    "event": "started",
+    "event_seq": 1,
+    "mac_candidates": ["00:50:56:AA:BB:CC"],
+    "rollout_revision": 3,
+    "device_generation": "018f2f49-5e41-4d55-8f05-8f55a5334102",
+    "acceptance_generation": "018f2f49-5e41-4d55-8f05-8f55a5334103",
+    "project_name": "Example-App",
+    "package_version": "2.4.1",
+    "client_started_at": "2026-09-21T12:00:00.123Z",
+    "event_at": "2026-09-21T12:00:00.456Z",
+    "context": "system",
+    "total": 300
+  },
+  "validation_cases": [
+    {
+      "name": "started is self describing",
+      "patch": {},
+      "expect": {"status": 200, "event": "started"}
+    },
+    {
+      "name": "first failure beyond normal detail limit",
+      "patch": {
+        "event": "step_result",
+        "event_seq": 301,
+        "step_index": 300,
+        "script_name": "300-final.ps1",
+        "result": "fail",
+        "is_first_failure": true,
+        "error_category": "child_exit",
+        "child_exit_code": 1,
+        "duration_ms": 42,
+        "detail_path": "C:\\ProgramData\\VirtuSphere\\Logs\\300-final.log"
+      },
+      "expect": {"status": 200, "event": "step_result"}
+    },
+    {
+      "name": "completed carries reserved failure and wrapper core",
+      "patch": {
+        "event": "completed",
+        "event_seq": 302,
+        "wrapper_result": "failed",
+        "wrapper_exit_code": 1,
+        "detection_result": "not_attempted",
+        "processed_count": 300,
+        "ok_count": 299,
+        "skip_count": 0,
+        "fail_count": 1,
+        "last_processed_index": 300,
+        "first_failure": {
+          "step_index": 300,
+          "script_name": "300-final.ps1",
+          "error_category": "child_exit",
+          "child_exit_code": 1,
+          "detail_path": "C:\\ProgramData\\VirtuSphere\\Logs\\300-final.log"
+        },
+        "payload_omitted_count": 43,
+        "wrapper_log_path": "C:\\ProgramData\\VirtuSphere\\Logs\\wrapper.log",
+        "reporting_log_path": "C:\\ProgramData\\VirtuSphere\\Logs\\reporting.log"
+      },
+      "expect": {"status": 200, "event": "completed"}
+    },
+    {
+      "name": "unknown fields are not silently accepted",
+      "patch": {"future_field": true},
+      "expect": {"status": 400, "error": "unknown_field"}
+    },
+    {
+      "name": "identity is canonical lowercase UUID",
+      "patch": {"run_id": "018F2F49-5E41-4D55-8F05-8F55A5334101"},
+      "expect": {"status": 400, "error": "invalid_identity"}
+    },
+    {
+      "name": "numeric strings are not integers",
+      "patch": {"total": "300"},
+      "expect": {"status": 400, "error": "invalid_total"}
+    },
+    {
+      "name": "unknown total is explicit null not an omitted field",
+      "patch": {},
+      "remove": ["total"],
+      "expect": {"status": 400, "error": "invalid_metadata"}
+    },
+    {
+      "name": "calendar-invalid timestamps are rejected",
+      "patch": {"event_at": "2026-02-31T12:00:00Z"},
+      "expect": {"status": 400, "error": "invalid_metadata"}
+    },
+    {
+      "name": "step index cannot exceed known total",
+      "patch": {
+        "event": "step_result",
+        "event_seq": 5,
+        "total": 4,
+        "step_index": 5,
+        "script_name": "005.ps1",
+        "result": "ok",
+        "is_first_failure": false
+      },
+      "expect": {"status": 400, "error": "inconsistent_step"}
+    },
+    {
+      "name": "completion counts cannot hide a failed step",
+      "patch": {
+        "event": "completed",
+        "event_seq": 302,
+        "wrapper_result": "failed",
+        "wrapper_exit_code": 1,
+        "detection_result": "not_attempted",
+        "processed_count": 300,
+        "ok_count": 299,
+        "skip_count": 0,
+        "fail_count": 1,
+        "last_processed_index": 300,
+        "first_failure": null,
+        "payload_omitted_count": 43,
+        "wrapper_log_path": null,
+        "reporting_log_path": null
+      },
+      "expect": {"status": 400, "error": "inconsistent_first_failure"}
+    },
+    {
+      "name": "MAC candidates normalize only their set order",
+      "patch": {"mac_candidates": ["00:50:56:FF:EE:DD", "00:50:56:AA:BB:CC"]},
+      "expect": {
+        "status": 200,
+        "event": "started",
+        "mac_candidates": ["00:50:56:AA:BB:CC", "00:50:56:FF:EE:DD"]
+      }
+    }
+  ],
+  "state_sequences": [
+    {
+      "name": "identical replay does not refresh retention",
+      "requests": ["started", "started-identical"],
+      "responses": [
+        {"status": 200, "accepted": true, "deduplicated": false},
+        {"status": 200, "accepted": false, "deduplicated": true}
+      ],
+      "db": {"runs": 1, "events": 1, "expires_at_changed": false}
+    },
+    {
+      "name": "same event key with different content conflicts atomically",
+      "requests": ["step-1-ok", "step-1-fail"],
+      "responses": [
+        {"status": 200, "accepted": true, "deduplicated": false},
+        {"status": 409, "error": "event_conflict"}
+      ],
+      "db": {"runs": 1, "events": 1, "steps": 1, "partial_write": false}
+    },
+    {
+      "name": "normal detail cap preserves first late failure and completion",
+      "requests": ["steps-1-through-256", "step-257-ok", "step-300-first-fail", "completed"],
+      "responses": [
+        {"status": 200, "accepted": true},
+        {"status": 422, "error": "detail_limit"},
+        {"status": 200, "accepted": true},
+        {"status": 200, "accepted": true}
+      ],
+      "db": {"normal_steps": 256, "reserved_first_failure": 1, "completed": 1}
+    },
+    {
+      "name": "expired tombstone rejects replay without recreating a run",
+      "requests": ["completed-after-expiry"],
+      "responses": [{"status": 410, "error": "report_expired"}],
+      "db": {"runs": 0, "tombstones": 1, "expires_at_changed": false}
+    },
+    {
+      "name": "restore rotates acceptance generation",
+      "requests": ["old-generation-after-restore", "new-run-current-generation"],
+      "responses": [
+        {"status": 409, "error": "acceptance_generation_mismatch"},
+        {"status": 200, "accepted": true}
+      ],
+      "db": {"old_run_recreated": false, "new_runs": 1}
+    }
+  ]
+}

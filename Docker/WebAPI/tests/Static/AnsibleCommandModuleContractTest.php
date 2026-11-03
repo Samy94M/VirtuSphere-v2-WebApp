@@ -1,0 +1,194 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
+use PHPUnit\Framework\TestCase;
+
+require_once dirname(__DIR__, 2) . '/lib/ansible_command_modules.php';
+
+/**
+ * Pins the public surface of the deploy-mode and preflight command layer across
+ * its Etappe 8 (ADR-0006) split. Same reason as AnsibleInventoryModuleContractTest:
+ * a static contract that reads exactly one source file stops guarding the moment
+ * that file is split into domain modules, silently and while still green.
+ *
+ * The surface list is what a caller of the old single file could call. It is
+ * checked twice on purpose: once by loading only the facade, which proves the
+ * require path still delivers everything, and once against the functions the
+ * registered modules actually define, which proves nothing was added outside
+ * the registry or defined twice.
+ */
+final class AnsibleCommandModuleContractTest extends TestCase
+{
+    private const SURFACE = [
+        'ansible_job_payload',
+        // AN-04: the strict mission-mode reader; no fallback sequence behind it.
+        'ansible_payload_mode',
+        'ansible_filter_vms',
+        'ansible_playbooks_for_mode',
+        'ansible_modes_using_powercycle',
+        'ansible_modes_using_start',
+        'ansible_mode_expects_mac_result',
+        'ansible_mode_creates_vms',
+        // K16: modes that address existing VMs by their bound instance UUID.
+        'ansible_mode_requires_bound_instance_uuid',
+        // K10 (DF-E2): which modes write to ESXi, derived from the sequence.
+        'ansible_mode_writes_esxi',
+        'ansible_step_marker_line',
+        'ansible_step_marker_parse',
+        'ansible_step_failure_suffix',
+        'ansible_remote_steps',
+        'ansible_remote_cleanup_command',
+        // K21 (VT-04): the one command that removes accounts.yml alone, next to
+        // the recursive job-directory cleanup it must never be confused with.
+        'ansible_remote_secret_remove_command',
+        'ansible_preflight_checks',
+        'ansible_pinned_collection_version',
+        'ansible_pinned_collection_versions',
+        'ansible_runtime_version_probe_command',
+        'ansible_async_workspace_probe_command',
+        // K21-F: the timer hint of the preflight (component secret-cleanup), its
+        // embedded probe and the reader of its verdict line.
+        'ansible_secret_cleanup_probe_source',
+        'ansible_secret_cleanup_probe_command',
+        'ansible_embedded_script_source',
+        'ansible_collection_probe_command',
+        'ansible_preflight_command',
+        'ansible_probe_opener_source',
+        'ansible_allowlist_probe_source',
+        'ansible_preflight_allowlist_verdict',
+        'ansible_preflight_failed_component',
+        'ansible_preflight_strip_markers',
+        'ansible_secret_cleanup_timer_state',
+        'ansible_sh_quote',
+        // Etappe 14B-E: the four control calls of one create unit. They are
+        // remote commands like the sequence steps above and belong to the same
+        // family, but they are built differently on purpose - no cleanup trap,
+        // because the async job they start outlives the call - so they are
+        // their own module rather than a branch inside ansible_remote_steps().
+        'ansible_create_unit_dir',
+        'ansible_create_async_dir',
+        'ansible_create_result_file',
+        'ansible_create_assert_remote_dir',
+        'ansible_create_control_command',
+        'ansible_create_assert_extra_vars',
+        'ansible_create_extra_vars_json',
+    ];
+
+    public function testRegistryMatchesTheFilesystemInBothDirections(): void
+    {
+        $root = str_replace('\\', '/', dirname(__DIR__, 2));
+        $files = array_map(
+            static fn (string $path): string => 'lib/' . basename($path),
+            glob($root . '/lib/ansible_command*.php') ?: []
+        );
+        $files = array_values(array_diff($files, ['lib/ansible_command_modules.php']));
+        self::assertNotSame([], $files, 'Zero match: no ansible_command module was found on disk.');
+
+        self::assertSame(
+            $this->sorted($files),
+            $this->sorted(VIRTUSPHERE_ANSIBLE_COMMAND_MODULES),
+            'The Ansible command owner registry and filesystem disagree.'
+        );
+    }
+
+    #[RunInSeparateProcess]
+    public function testFacadeAloneDefinesTheCompleteSurface(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_command.php';
+
+        $missing = array_values(array_filter(self::SURFACE, static fn (string $name): bool => !function_exists($name)));
+        self::assertSame([], $missing, 'The facade does not define: ' . implode(', ', $missing));
+    }
+
+    public function testEveryFunctionHasExactlyOneRegisteredOwner(): void
+    {
+        $root = dirname(__DIR__, 2) . '/';
+        $owners = [];
+        foreach (VIRTUSPHERE_ANSIBLE_COMMAND_MODULES as $module) {
+            if ($module === 'lib/ansible_command.php') {
+                // The facade itself defines no function of its own; it only
+                // requires the domain modules.
+                continue;
+            }
+            $source = (string) file_get_contents($root . $module);
+            preg_match_all('/^function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/m', $source, $matches);
+            foreach ($matches[1] as $function) {
+                $owners[$function][] = $module;
+            }
+        }
+        self::assertNotSame([], $owners, 'No function was found in the registered Ansible command modules.');
+
+        $duplicates = array_filter($owners, static fn (array $files): bool => count($files) !== 1);
+        self::assertSame([], $duplicates, 'An Ansible command function has more than one owner.');
+        self::assertSame($this->sorted(self::SURFACE), $this->sorted(array_keys($owners)));
+    }
+
+    public function testShellQuotingHasExactlyOneImplementation(): void
+    {
+        // The split's one real risk: two remote-command domains, each tempted
+        // to keep a local quoting helper. A second rule is a command-injection
+        // difference that nobody notices while both files still look right.
+        $root = dirname(__DIR__, 2) . '/';
+        $definitions = [];
+        foreach (glob($root . 'lib/*.php') ?: [] as $file) {
+            $source = (string) file_get_contents($file);
+            if (preg_match('/^function\s+ansible_sh_quote\s*\(/m', $source) === 1) {
+                $definitions[] = 'lib/' . basename($file);
+            }
+        }
+
+        self::assertSame(['lib/ansible_command_shell.php'], $definitions);
+    }
+
+    public function testStepMarkerParserHasExactlyOnePresentationConsumer(): void
+    {
+        // Etappe 13 landed the complete reader this assertion was waiting for,
+        // so it now pins the shape that reader has to keep: the parser is
+        // DEFINED once and CONSUMED once, by the phase timeline. Two consumers
+        // would be two opinions about what a phase is, and the second one would
+        // be written by whoever needed a heading in a hurry; that is exactly how
+        // a hand-kept playbook order drifts away from the sequence the worker
+        // actually ran. The definition site counts once for the function itself.
+        $root = dirname(__DIR__, 2);
+        $references = [];
+        foreach (['lib', 'portal'] as $productionDir) {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($root . '/' . $productionDir, FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if (!$file->isFile() || $file->getExtension() !== 'php') {
+                    continue;
+                }
+                $source = (string) file_get_contents($file->getPathname());
+                $count = preg_match_all('/\bansible_step_marker_parse\s*\(/', $source);
+                if ($count > 0) {
+                    $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
+                    $references[$relative] = $count;
+                }
+            }
+        }
+
+        self::assertSame(
+            [
+                // The definition itself.
+                'lib/ansible_command_steps.php' => 1,
+                // The one reader: deploy_log_phase_timeline() calls it once per
+                // stored line and decides from the event which way the phase
+                // goes. One call site is one opinion about what a phase is.
+                'lib/deploy_log_phases.php' => 1,
+            ],
+            $references,
+            'The step-marker parser must have exactly one definition and exactly one presentation consumer.'
+        );
+    }
+
+    /** @param array<int, string> $values @return array<int, string> */
+    private function sorted(array $values): array
+    {
+        sort($values);
+
+        return $values;
+    }
+}

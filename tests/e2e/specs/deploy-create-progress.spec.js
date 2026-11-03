@@ -1,0 +1,308 @@
+// Etappe 14B, Teiletappe G: the per-VM create progress card and the paging that
+// works without JavaScript.
+//
+// The plan's acceptance for this stage is one specific picture: more than 1,500
+// log lines, a terminal error at the end of the tail, and a progress of 14 of 15
+// with one unresolved unit. That combination is the incident this whole stage
+// exists for, and it is the one a green run never produces, so it is seeded.
+//
+// Two of the assertions here cannot be made anywhere else. That the card counts
+// from the stored rows and not from the log is only visible when the log says
+// something different from the rows, which is exactly what a truncated window
+// does. And that the "load older" control works without scripting is a property
+// of the rendered anchor, not of any function: it was a `<button type="button">`
+// for three stages while the endpoint accepted the cursor the whole time.
+
+const { test, expect } = require('../lib/test');
+const { ROLES } = require('../lib/auth');
+const { runPhp, phpJson } = require('../lib/php');
+
+test.use({ storageState: ROLES.admin.storageState });
+
+const MARK = 'e2ecreateprogress';
+
+function cleanup() {
+  runPhp(`
+$db = db();
+$payloadPattern = '%${MARK}%';
+$cleanupStmt = $db->prepare('DELETE FROM deploy_create_vm_results WHERE job_id IN (SELECT id FROM deploy_jobs WHERE payload_json LIKE ?)');
+$cleanupStmt->bind_param('s', $payloadPattern);
+$cleanupStmt->execute();
+$cleanupStmt = $db->prepare('DELETE FROM deploy_job_logs WHERE job_id IN (SELECT id FROM deploy_jobs WHERE payload_json LIKE ?)');
+$cleanupStmt->bind_param('s', $payloadPattern);
+$cleanupStmt->execute();
+$cleanupStmt = $db->prepare('DELETE FROM deploy_jobs WHERE payload_json LIKE ?');
+$cleanupStmt->bind_param('s', $payloadPattern);
+$cleanupStmt->execute();
+$missionPattern = '${MARK}%';
+$cleanupStmt = $db->prepare('DELETE FROM deploy_missions WHERE mission_name LIKE ?');
+$cleanupStmt->bind_param('s', $missionPattern);
+$cleanupStmt->execute();
+echo 'CLEANED';
+`);
+}
+
+test.beforeAll(() => cleanup());
+test.afterAll(() => cleanup());
+
+/** Fourteen created units, one unresolved, and a log long enough to be windowed. */
+function seedIncident(logLines) {
+  return phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'create', 'fixture' => '${MARK}'], JSON_THROW_ON_ERROR);
+$status = 'failed';
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (NULL, ?, ?)');
+$stmt->bind_param('ss', $status, $payload);
+$stmt->execute();
+$job = (int) $db->insert_id;
+
+for ($i = 1; $i <= 15; $i++) {
+    $name = sprintf('${MARK}-VM%03d', $i);
+    if ($i <= 14) {
+        $stmt = $db->prepare(
+            'INSERT INTO deploy_create_vm_results (job_id, vm_name, position, total, action, status, outcome,'
+            . ' changed, existed_before, vm_moid, vm_instance_uuid, started_at, finished_at)'
+            . " VALUES (?, ?, ?, 15, 'create', 'succeeded', 'created', 1, 0, ?, ?, NOW(), NOW())"
+        );
+        $moid = sprintf('vm-%d', 900 + $i);
+        $uuid = sprintf('5001%04d-0000-0000-0000-00000000%04d', $i, $i);
+        $stmt->bind_param('isiss', $job, $name, $i, $moid, $uuid);
+    } else {
+        $stmt = $db->prepare(
+            'INSERT INTO deploy_create_vm_results (job_id, vm_name, position, total, action, status,'
+            . ' existed_before, error_code, error_detail, started_at, finished_at)'
+            . " VALUES (?, ?, ?, 15, 'create', 'uncertain', 0, 'transport_lost', 'connection lost during the call', NOW(), NOW())"
+        );
+        $stmt->bind_param('isi', $job, $name, $i);
+    }
+    $stmt->execute();
+}
+
+$total = ${Number(logLines)};
+for ($start = 1; $start <= $total; $start += 250) {
+    $values = [];
+    for ($seq = $start; $seq <= min($total, $start + 249); $seq++) {
+        $values[] = sprintf("(%d,%d,'ansible','${MARK} line %d')", $job, $seq, $seq);
+    }
+    $db->query('INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES ' . implode(',', $values));
+}
+$last = $total + 1;
+$db->query(sprintf("INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES (%d,%d,'worker_error','${MARK} create step ended without a result for position 15')", $job, $last));
+echo 'JSON' . json_encode(['job' => $job, 'last' => $last]) . 'JSON';
+`, ['lib/repo/deploy_jobs.php']);
+}
+
+/** All persisted outcome classes a person must be able to tell apart. */
+function seedMixedOutcomes() {
+  return phpJson(`
+$db = db();
+$mission = repo_create_mission($db, [
+    'mission_name' => '${MARK}-mixed',
+    'hypervisor_datastorage' => 'QA-Datastore',
+    'hypervisor_datacenter' => 'QA-Datacenter',
+    'domain' => 'qa.invalid',
+], false, null);
+$payload = json_encode(['mode' => 'create', 'fixture' => '${MARK}', 'vm_ids' => []], JSON_THROW_ON_ERROR);
+$status = 'failed';
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (?, ?, ?)');
+$stmt->bind_param('iss', $mission, $status, $payload);
+$stmt->execute();
+$job = (int) $db->insert_id;
+$units = [
+    ['succeeded', 'created', 1, 0, 'vm-mixed-1', '5001-mixed-1', '123456789012.1', '', ''],
+    ['succeeded', 'updated', 1, 1, 'vm-mixed-2', '5001-mixed-2', '123456789012.2', '', ''],
+    ['succeeded', 'unchanged', 0, 1, 'vm-mixed-3', '5001-mixed-3', '123456789012.3', '', ''],
+    ['failed', '', null, 0, '', '', '123456789012.4', 'module_failed', 'The create module reported a failure.'],
+    ['uncertain', '', null, 0, '', '', '123456789012.5', 'async_state_missing', 'The async result state is missing.'],
+];
+foreach ($units as $offset => [$unitStatus, $outcome, $changed, $existedBefore, $moid, $instanceUuid, $asyncJid, $errorCode, $errorDetail]) {
+    $position = $offset + 1;
+    $name = sprintf('${MARK}-MIX%03d', $position);
+    $stmt = $db->prepare(
+        'INSERT INTO deploy_create_vm_results (job_id, vm_name, position, total, action, status, outcome,'
+        . ' changed, existed_before, vm_moid, vm_instance_uuid, async_jid, async_deadline_at,'
+        . ' error_code, error_detail, started_at, finished_at)'
+        . " VALUES (?, ?, ?, 5, 'create', ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?,"
+        . " DATE_ADD(NOW(), INTERVAL 1 HOUR), NULLIF(?, ''), NULLIF(?, ''), NOW(), NOW())"
+    );
+    $stmt->bind_param(
+        'isissiisssss',
+        $job, $name, $position, $unitStatus, $outcome, $changed, $existedBefore,
+        $moid, $instanceUuid, $asyncJid, $errorCode, $errorDetail
+    );
+    $stmt->execute();
+}
+echo 'JSON' . json_encode(['job' => $job]) . 'JSON';
+`, ['lib/repo/missions.php']);
+}
+
+test('the card counts fourteen of fifteen with one unresolved, from the rows and not from the log', async ({ page }) => {
+  const seed = seedIncident(1600);
+  await page.goto(`deploy_log.php?id=${seed.job}`);
+
+  const card = page.locator('[data-deploy-create-progress]');
+  await expect(card).toBeVisible();
+
+  // 14, not 15. deploy_create_summary() counts the unresolved unit as processed
+  // because the worker did get to it, which is the right meaning there; putting
+  // that number in front of a person would say the job finished and that
+  // something is open in one line.
+  await expect(card.locator('[data-create-position]')).toContainText('14');
+  await expect(card.locator('[data-create-position]')).toContainText('15');
+  await expect(card.locator('[data-create-count="created"]')).toHaveText('14');
+  await expect(card.locator('[data-create-count="uncertain"]')).toHaveText('1');
+  // The one confusion that must never happen: unresolved counted as failed.
+  // A failure says the VM does not exist; unresolved says nobody knows, and the
+  // two lead an operator to opposite actions.
+  await expect(card.locator('[data-create-count="failed"]')).toHaveText('0');
+
+  // The current unit is the unresolved one, and it is not described as running.
+  const current = card.locator('[data-create-current-label]');
+  await expect(current).toContainText(`${MARK}-VM015`);
+  await expect(current).not.toHaveText('');
+
+  // The log window is bounded and therefore does NOT contain the first lines,
+  // which is what makes the assertion above meaningful: the numbers cannot have
+  // come from the text on screen.
+  const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
+  await expect(rows).toHaveCount(1000);
+  await expect(rows.last()).toContainText('ended without a result for position 15');
+  await expect(rows.first()).not.toContainText('line 1 ');
+});
+
+test('older lines are reachable without JavaScript', async ({ browser }) => {
+  const seed = seedIncident(1600);
+  // A context with scripting disabled is the honest test: a spec that clicks
+  // the control with JS running proves the handler, not the fallback, and the
+  // fallback is what was missing.
+  const context = await browser.newContext({
+    storageState: ROLES.admin.storageState,
+    javaScriptEnabled: false,
+  });
+  const page = await context.newPage();
+  await page.goto(`deploy_log.php?id=${seed.job}`);
+
+  const older = page.locator('[data-deploy-log-older]');
+  await expect(older).toBeVisible();
+  // An anchor with a real cursor, not a button that needs a handler.
+  expect(await older.evaluate((element) => element.tagName.toLowerCase())).toBe('a');
+  const href = await older.getAttribute('href');
+  expect(href).toContain('before_seq=');
+
+  await older.click();
+  await page.waitForLoadState('domcontentloaded');
+  const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
+  await expect(rows).not.toHaveCount(0);
+  // The page moved BACKWARDS: the newest line of this page is older than the
+  // oldest line of the first one.
+  const newest = Number(await rows.last().getAttribute('data-log-seq'));
+  expect(newest).toBeLessThan(seed.last);
+
+  // The card is server-rendered, so it is still there and still correct with no
+  // script running at all.
+  await expect(page.locator('[data-deploy-create-progress] [data-create-count="uncertain"]')).toHaveText('1');
+  await context.close();
+});
+
+test('stored create outcomes and their failure classes stay distinguishable while retry is blocked', async ({ page }) => {
+  const seed = seedMixedOutcomes();
+  await page.goto(`deploy_log.php?id=${seed.job}`);
+
+  const card = page.locator('[data-deploy-create-progress]');
+  await expect(card.locator('[data-create-count="created"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="updated"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="unchanged"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="failed"]')).toHaveText('1');
+  await expect(card.locator('[data-create-count="uncertain"]')).toHaveText('1');
+
+  // After the end the card says what exists (E1) and leaves the list of
+  // affected VMs to the result block, which names cause and place in the log.
+  await expect(card.locator('[data-create-position]')).toHaveText('3 of 5 created, 1 failed, 1 unresolved');
+  await expect(card.locator('[data-create-finding-list] li')).toHaveCount(0);
+  const outcome = page.locator('[data-deploy-create-outcome] li');
+  await expect(outcome).toHaveCount(2);
+  // Only the readable sentence: raw stored text reads as another problem on
+  // the first look (user decision 29.10.2026) and stays in the details.
+  await expect(outcome.locator('code')).toHaveCount(0);
+  await expect(outcome.nth(0)).not.toContainText('The create module reported a failure.');
+  expect(await outcome.nth(0).textContent()).not.toBe(await outcome.nth(1).textContent());
+  // Each line leads to that unit's own FAIL or HOLD lines.
+  await expect(outcome.nth(0).locator('a')).toHaveAttribute('href', /q=%5B4%2F5%5D\+FAIL\+create/);
+  await expect(outcome.nth(1).locator('a')).toHaveAttribute('href', /q=%5B5%2F5%5D\+HOLD\+create/);
+  // Codes live in the technical details, collapsed and open to every reader.
+  const technical = page.locator('[data-deploy-technical]');
+  await expect(technical).not.toHaveAttribute('open', /.*/);
+  await technical.locator('summary').click();
+  await expect(technical).toContainText('module_failed');
+  await expect(technical).toContainText('async_state_missing');
+  // This row predates the recorded origin (migration 0067), so its text is
+  // labelled as stored text, never as the message of the host (B8).
+  const stored = technical.locator('p', { hasText: 'The create module reported a failure.' });
+  await expect(stored.locator('.muted')).toHaveText('Stored text:');
+  await expect(page.locator('[data-deploy-retry-blocked]')).toBeVisible();
+});
+
+test('error lines are marked with a word, filtered on request, and a finished job runs no step', async ({ page }) => {
+  // Prod job 1527 (E1/B1): the FAIL line of the one failed VM sat unmarked in
+  // the output, and the open create step of the finished job read "running".
+  const seed = phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'create', 'fixture' => '${MARK}'], JSON_THROW_ON_ERROR);
+$status = 'partial';
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (NULL, ?, ?)');
+$stmt->bind_param('ss', $status, $payload);
+$stmt->execute();
+$job = (int) $db->insert_id;
+$lines = [
+    ansible_step_marker_line(VIRTUSPHERE_ANSIBLE_STEP_BEGIN, VIRTUSPHERE_PLAYBOOKS['create']),
+    '[1/2] RUN create ${MARK}-A',
+    '[1/2] DONE create ${MARK}-A created',
+    '[2/2] RUN create ${MARK}-B',
+    'fatal: [localhost]: FAILED! => {"msg": "503 Service Unavailable"}',
+    '[2/2] FAIL create ${MARK}-B module_failed: 503 Service Unavailable',
+];
+foreach ($lines as $index => $line) {
+    $seq = $index + 1;
+    $stmt = $db->prepare("INSERT INTO deploy_job_logs (job_id, seq, stream, line) VALUES (?, ?, 'system', ?)");
+    $stmt->bind_param('iis', $job, $seq, $line);
+    $stmt->execute();
+}
+echo 'JSON' . json_encode(['job' => $job]) . 'JSON';
+`, ['lib/repo/deploy_jobs.php', 'lib/ansible_command_modes.php']);
+
+  await page.goto(`deploy_log.php?id=${seed.job}`);
+  const marked = page.locator('[data-deploy-log-body] tr.log-row-error');
+  await expect(marked).toHaveCount(2);
+  await expect(marked.nth(0).locator('.log-flag')).toHaveText('Ansible error');
+  await expect(marked.nth(1).locator('.log-flag')).toHaveText('Failed');
+
+  const phases = page.locator('[data-deploy-phases]');
+  await expect(phases).toContainText('Create VMs');
+  await expect(phases).toContainText('Not completed');
+  await expect(phases).not.toContainText('Running now');
+  await expect(phases).not.toContainText('createVMLaunch-ESXi_playbook.yml');
+
+  await page.getByLabel('Errors only').check();
+  await page.getByRole('button', { name: 'Filter', exact: true }).click();
+  await expect(page).toHaveURL(/errors=1/);
+  const rows = page.locator('[data-deploy-log-body] [data-log-seq]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1)).toContainText('FAIL create');
+});
+
+test('a job without a create section shows no card at all', async ({ page }) => {
+  // Not a card at zero: an inventory pull creates nothing, and a zeroed card
+  // would teach readers that the card means nothing on every other job too.
+  const seed = phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'inventory', 'fixture' => '${MARK}'], JSON_THROW_ON_ERROR);
+$status = 'succeeded';
+$stmt = $db->prepare('INSERT INTO deploy_jobs (mission_id, status, payload_json) VALUES (NULL, ?, ?)');
+$stmt->bind_param('ss', $status, $payload);
+$stmt->execute();
+echo 'JSON' . json_encode(['job' => (int) $db->insert_id]) . 'JSON';
+`, ['lib/repo/deploy_jobs.php']);
+
+  await page.goto(`deploy_log.php?id=${seed.job}`);
+  await expect(page.locator('[data-deploy-create-progress]')).toHaveCount(0);
+});

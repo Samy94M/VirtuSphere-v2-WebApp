@@ -1,0 +1,528 @@
+// TESTPLAN 3.5 / E6: the deploy actions. Every seeded job is *scheduled*
+// (scheduled_at in the future), because the claim query skips those (ADR-0022):
+// the real worker of the stack can never grab a fixture mid-test, which makes
+// cancel/cancel_group deterministic. Only the retry test creates a job the
+// worker may claim; its assertions do not depend on the job's later fate.
+
+const { test, expect } = require('../lib/test');
+const { ROLES } = require('../lib/auth');
+const { runPhp, phpJson } = require('../lib/php');
+
+test.use({ storageState: ROLES.admin.storageState });
+
+const MARK = 'e2edeploy';
+
+function seedBase() {
+  return phpJson(`
+$db = db();
+$admin = (int) ($db->query("SELECT id FROM deploy_users WHERE role='admin' LIMIT 1")->fetch_assoc()['id'] ?? 1);
+$esxi = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'root'], 'secret123', $admin);
+$ans = repo_create_credential($db, ['type' => 'ansible', 'name' => '${MARK}-ans', 'host' => '127.0.0.1', 'port' => 1, 'username' => 'ans'], 'secret123', $admin);
+$mid = repo_create_mission($db, ['mission_name' => '${MARK}-m1', 'hypervisor_datastorage' => 'ds1', 'hypervisor_datacenter' => 'DC1', 'domain' => 'seed.example.local'], false, $admin);
+$vmIds = [];
+foreach (['E2EDVM1', 'E2EDVM2'] as $i => $vmName) {
+    $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os) VALUES (?, ?, ?, 'Win11')");
+    $stmt->bind_param('iss', $mid, $vmName, $vmName);
+    $stmt->execute();
+    $vmId = (int) $db->insert_id;
+    $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', 'WDS', ?, 'dhcp')");
+    $mac = sprintf('00:50:56:CC:DD:%02X', $vmId % 256);
+    $stmt->bind_param('is', $vmId, $mac);
+    $stmt->execute();
+}
+test_prepare_network_mac_fixture($db, $mid, $esxi, 'WDS', 'DC1');
+echo 'JSON' . json_encode(['admin' => $admin, 'esxi' => $esxi, 'ansible' => $ans, 'missionId' => $mid]) . 'JSON';
+`, ['lib/repo/credentials.php', 'lib/repo/missions.php', 'tests/Support/NetworkMacFixtures.php']);
+}
+
+function seedScheduledJob(seed) {
+  return phpJson(`
+$db = db();
+$payload = ['mode' => 'export', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT];
+$jobId = repo_create_deploy_job($db, ${seed.missionId}, ${seed.admin}, ${seed.esxi}, ${seed.ansible}, $payload, gmdate('Y-m-d H:i:s', time() + 7200));
+echo 'JSON' . json_encode(['jobId' => $jobId]) . 'JSON';
+`, ['lib/deploy_constants.php', 'lib/repo/deploy_jobs.php']).jobId;
+}
+
+function jobRow(id) {
+  return phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT status, cancelled_at, scheduled_at FROM deploy_jobs WHERE id = ?');
+$id = ${Number(id)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc() ?: null) . 'JSON';
+`);
+}
+
+function missionJobs(missionId) {
+  return phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT id, status, scheduled_at, group_id, correlation_id FROM deploy_jobs WHERE mission_id = ? ORDER BY id');
+$id = ${Number(missionId)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_all(MYSQLI_ASSOC)) . 'JSON';
+`);
+}
+
+function seedFailedJob(seed) {
+  return phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'export', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => 5], JSON_THROW_ON_ERROR);
+$stmt = $db->prepare("INSERT INTO deploy_jobs (mission_id, user_id, status, payload_json, credential_esxi_id, credential_ansible_id, last_error) VALUES (?, ?, 'failed', ?, ?, ?, 'seeded failure')");
+$mid = ${seed.missionId};
+$uid = ${seed.admin};
+$esxi = ${seed.esxi};
+$ans = ${seed.ansible};
+$stmt->bind_param('iisii', $mid, $uid, $payload, $esxi, $ans);
+$stmt->execute();
+echo 'JSON' . json_encode(['id' => (int) $db->insert_id]) . 'JSON';
+`).id;
+}
+
+function cleanup() {
+  runPhp(`
+$db = db();
+$db->query("DELETE FROM deploy_jobs WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${MARK}%')");
+$db->query("DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE '${MARK}%')");
+$db->query("DELETE FROM deploy_missions WHERE mission_name LIKE '${MARK}%'");
+$db->query("DELETE FROM deploy_credentials WHERE name LIKE '${MARK}%'");
+echo 'CLEANED';
+`);
+}
+
+// Before EACH test: every test seeds its own mission and credentials, and the
+// credential names are unique per type, so a leftover seed would make the next
+// seedBase() throw.
+test.beforeEach(() => cleanup());
+test.afterAll(() => cleanup());
+
+// Queueing requires a configured API base URL ($apiBaseUrlReady); a fresh dev
+// stack leaves it empty. Set it for the spec's lifetime, restore what was there.
+let apiBaseUrlBefore = '';
+test.beforeAll(() => {
+  apiBaseUrlBefore = phpJson(`
+$v = repo_setting_value(db(), VIRTUSPHERE_SETTING_API_BASE_URL, '');
+repo_set_setting(db(), VIRTUSPHERE_SETTING_API_BASE_URL, 'http://127.0.0.1:8021');
+echo 'JSON' . json_encode(['v' => $v]) . 'JSON';
+`, ['lib/deploy_constants.php', 'lib/repo/settings.php']).v;
+});
+test.afterAll(() => {
+  runPhp(`repo_set_setting(db(), VIRTUSPHERE_SETTING_API_BASE_URL, '${apiBaseUrlBefore}'); echo 'OK';`, ['lib/deploy_constants.php', 'lib/repo/settings.php']);
+});
+
+function localDatetimeIn(hours) {
+  const dt = new Date(Date.now() + hours * 3600 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+// e2e-covers: deploy.php:start
+test('start (scheduled): the preview must be confirmed, then a scheduled job is queued', async ({ page }) => {
+  const seed = seedBase();
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  // Not select[name="mission_id"]: the jobs filter form below carries one too.
+  const form = page.locator('form:has(select[name="credential_esxi_id"])');
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(seed.esxi));
+  await form.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
+  await form.locator('input[name="start_mode"][value="scheduled"]').check();
+  // +26h: in the future in any timezone the portal may be configured for, and
+  // far inside the scheduling horizon.
+  await form.locator('input[name="scheduled_at"]').fill(localDatetimeIn(26));
+  await form.locator('button[type="submit"]').click();
+
+  // B3.3: no redirect; the page renders the computed start times and a confirm
+  // form that re-submits with confirmed=1.
+  const confirm = page.locator('form:has(input[name="confirmed"])');
+  await expect(confirm, 'the schedule preview offers the confirm step').toBeVisible();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('deploy.php') && r.request().method() === 'POST'),
+    confirm.locator('button[type="submit"]').click(),
+  ]);
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'the schedule is confirmed with a flash').toBeVisible();
+
+  const jobs = missionJobs(seed.missionId);
+  expect(jobs.length, 'exactly one job was queued').toBe(1);
+  expect(jobs[0].status, 'the job waits as queued').toBe('queued');
+  expect(jobs[0].scheduled_at, 'the job carries its start time').not.toBeNull();
+  await expect(outcome, 'queue persistence is not presented as execution').toContainText(String(jobs[0].id));
+  await expect(outcome, 'queue persistence is not presented as execution').toContainText(/not yet.*executed/i);
+  await expect(outcome.locator('.alert-actions a'), 'the next step opens this exact job').toHaveAttribute('href', `deploy_log.php?id=${jobs[0].id}`);
+
+  // ADR-0032, matrix point 9: the browser-enqueued job carries the request's
+  // correlation id, and the same id sits on the queue line and on the audit
+  // row the same request wrote - one click, one trace across three tables.
+  const correlation = String(jobs[0].correlation_id || '');
+  expect(correlation, 'the job carries the enqueueing request id').toMatch(/^[0-9a-f]{8,32}$/);
+  const trace = phpJson(`
+$db = db();
+$id = ${Number(jobs[0].id)};
+$stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_job_logs WHERE job_id = ? AND correlation_id = ?');
+$c = '${correlation}';
+$stmt->bind_param('is', $id, $c);
+$stmt->execute();
+$logLines = (int) $stmt->get_result()->fetch_assoc()['c'];
+$stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_logs WHERE correlation_id = ? AND log_message LIKE 'queued deploy job id%'");
+$stmt->bind_param('s', $c);
+$stmt->execute();
+$auditRows = (int) $stmt->get_result()->fetch_assoc()['c'];
+echo 'JSON' . json_encode(['logLines' => $logLines, 'auditRows' => $auditRows]) . 'JSON';
+`);
+  expect(trace.logLines, 'the queue line carries the same trace').toBeGreaterThan(0);
+  expect(trace.auditRows, 'the audit row carries the same trace').toBeGreaterThan(0);
+});
+
+// K17 (FM-01, FM-E1): a VM bound through access A, Create through access B on
+// another host. The warning names the previous host live, and queueing stops at
+// a confirmation page first, so nothing is queued unseen. With access A itself
+// there is no warning. Nothing is confirmed here: a queued Create would be a
+// job the stack's worker may claim.
+// e2e-covers: deploy.php:start
+test('create on another host: warning names the previous host and queueing needs a confirmation', async ({ page }) => {
+  const seed = seedBase();
+  const second = phpJson(`
+$db = db();
+$esxiB = repo_create_credential($db, ['type' => 'esxi', 'esxi_cert_kind' => 'none', 'name' => '${MARK}-esxi-b', 'host' => '127.0.0.2', 'port' => 1, 'username' => 'root'], 'secret123', ${seed.admin});
+test_prepare_network_mac_fixture($db, ${seed.missionId}, $esxiB, 'WDS', 'DC1');
+$stmt = $db->prepare("UPDATE deploy_vms SET vm_moid = 'vm-17', vm_instance_uuid = '4217e2e0-0000-4000-8000-000000000017', vm_bound_credential_id = ?, vm_bound_esxi_host = '127.0.0.1' WHERE mission_id = ? AND vm_name = 'E2EDVM1'");
+$esxiA = ${seed.esxi};
+$mid = ${seed.missionId};
+$stmt->bind_param('ii', $esxiA, $mid);
+$stmt->execute();
+echo 'JSON' . json_encode(['esxiB' => $esxiB]) . 'JSON';
+`, ['lib/repo/credentials.php', 'tests/Support/NetworkMacFixtures.php']);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const form = page.locator('form:has(select[name="credential_esxi_id"])');
+  await form.locator('select[name="mode"]').selectOption('create');
+  await form.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
+  const warnings = page.locator('[data-deploy-warning-list]');
+
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(seed.esxi));
+  await expect(warnings, 'the access the VM was bound through warns nothing').not.toContainText('127.0.0.1');
+
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(second.esxiB));
+  await expect(warnings, 'the live warning names the previous host').toContainText('127.0.0.1');
+  await expect(warnings).toContainText('E2EDVM1');
+
+  await form.locator('button[type="submit"]').click();
+  const hostMove = page.locator('[data-deploy-preview] [data-deploy-host-move]');
+  await expect(hostMove, 'queueing stops at the confirmation first').toBeVisible();
+  await expect(hostMove).toContainText('127.0.0.1');
+  await expect(page.locator('form:has(input[name="confirmed"])'), 'the confirmation re-submits explicitly').toBeVisible();
+  expect(missionJobs(seed.missionId).length, 'nothing was queued before the confirmation').toBe(0);
+});
+
+// K18 (FM-04, FM-E3): a scheduled job that started late shows its actual start
+// and the delay in the job list and on its log page; an on-time job shows
+// neither. Both jobs are terminal seeds, so no worker can touch them.
+test('late scheduled start: list and log name the delay, an on-time job stays quiet', async ({ page }) => {
+  const seed = seedBase();
+  const jobs = phpJson(`
+$db = db();
+$payload = json_encode(['mode' => 'export', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => 5], JSON_THROW_ON_ERROR);
+$ids = [];
+foreach ([['late', 7200, 5400], ['ontime', 7200, 7140]] as [$tag, $plannedAgo, $startedAgo]) {
+    $stmt = $db->prepare("INSERT INTO deploy_jobs (mission_id, user_id, status, payload_json, credential_esxi_id, credential_ansible_id, terminal_reason_code, terminal_reason_detail, scheduled_at, started_at) VALUES (?, ?, 'succeeded', ?, ?, ?, 'completed', 'seeded', DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND), DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND))");
+    $mid = ${seed.missionId};
+    $uid = ${seed.admin};
+    $esxi = ${seed.esxi};
+    $ans = ${seed.ansible};
+    $stmt->bind_param('iisiiii', $mid, $uid, $payload, $esxi, $ans, $plannedAgo, $startedAgo);
+    $stmt->execute();
+    $ids[$tag] = (int) $db->insert_id;
+}
+echo 'JSON' . json_encode($ids) . 'JSON';
+`);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const lateRow = page.locator('tr', { has: page.locator(`a[href="deploy_log.php?id=${jobs.late}"]`) });
+  const onTimeRow = page.locator('tr', { has: page.locator(`a[href="deploy_log.php?id=${jobs.ontime}"]`) });
+  await expect(lateRow.locator('[data-deploy-late-start]'), 'the late job names its delay').toContainText('30');
+  await expect(onTimeRow.locator('[data-deploy-late-start]'), 'an on-time job shows no note').toHaveCount(0);
+
+  await page.goto(`deploy_log.php?id=${jobs.late}`);
+  await expect(page.locator('[data-deploy-late-start]'), 'the log page names the delay too').toContainText('30');
+  await page.goto(`deploy_log.php?id=${jobs.ontime}`);
+  await expect(page.locator('[data-deploy-late-start]')).toHaveCount(0);
+});
+
+// WM-E2a: "adopt identity" was removed. A foreign namesake blocks with links to
+// the portal VM and to the inventory refresh, and a hand-made adopt_vm POST
+// (an old tab, a bookmark) binds nothing and writes no audit row.
+test('identity conflict: links instead of adoption, a forged adopt_vm POST changes nothing', async ({ page }) => {
+  const seed = seedBase();
+  const fixture = phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT id, vm_name FROM deploy_vms WHERE mission_id = ? ORDER BY id LIMIT 1');
+$mid = ${Number(seed.missionId)};
+$stmt->bind_param('i', $mid);
+$stmt->execute();
+$vm = $stmt->get_result()->fetch_assoc();
+repo_esxi_inventory_replace_kind($db, ${Number(seed.esxi)}, VIRTUSPHERE_INVENTORY_KIND_VM, [[
+    'name' => $vm['vm_name'],
+    'meta_json' => ['moid' => 'vm-e2e-44', 'instance_uuid' => 'e2e-instance-uuid-44', 'power_state' => 'poweredOff'],
+]], true);
+echo 'JSON' . json_encode($vm) . 'JSON';
+`, ['lib/repo/esxi_inventory.php']);
+
+  const identity = () => phpJson(`
+$db = db();
+$id = ${Number(fixture.id)};
+$objectId = (string) $id;
+$stmt = $db->prepare("SELECT v.vm_moid, v.vm_instance_uuid, (SELECT COUNT(*) FROM deploy_logs l WHERE l.event_code = 'vm.identity_adopted' AND l.object_type = 'vm' AND l.object_id = ?) AS adopted_audits FROM deploy_vms v WHERE v.id = ?");
+$stmt->bind_param('si', $objectId, $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
+`);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}&credential_esxi_id=${seed.esxi}`);
+  const queue = page.locator('#deploy-queue-form');
+  await queue.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
+  await queue.locator('select[name="mode"]').selectOption('powercycle');
+
+  const blocker = page.locator('[data-deploy-blocker]', { hasText: fixture.vm_name });
+  await expect(blocker, 'a foreign namesake still blocks the queue').toBeVisible();
+  await expect(page.locator('form:has(input[name="action"][value="adopt_vm"])'), 'no adoption is offered').toHaveCount(0);
+  await expect(blocker.locator('input[name="remedy_code"][value^="identity_conflict_"]'), 'the portal VM is linked').toHaveCount(1);
+  await expect(blocker.locator('a[data-deploy-blocker-help]'), 'the inventory refresh is linked').toHaveAttribute('href', /system_status\.php/);
+
+  const csrf = await page.getByRole('banner').locator('form[action="logout.php"] input[name="_csrf"]').inputValue();
+  const response = await page.request.post(`deploy.php?mission_id=${seed.missionId}`, {
+    form: {
+      _csrf: csrf,
+      action: 'adopt_vm',
+      mission_id: String(seed.missionId),
+      credential_esxi_id: String(seed.esxi),
+      vm_id: String(fixture.id),
+    },
+    maxRedirects: 0,
+  });
+  expect(response.status(), 'the retired action is answered by the plain redirect').toBe(302);
+  const after = identity();
+  expect(after.vm_moid, 'a forged adoption binds no MOID').toBeNull();
+  expect(after.vm_instance_uuid, 'a forged adoption binds no instance UUID').toBeNull();
+  expect(Number(after.adopted_audits), 'a forged adoption writes no audit row').toBe(0);
+  expect(missionJobs(seed.missionId), 'nothing is enqueued').toHaveLength(0);
+});
+
+// e2e-covers: deploy.php:cancel
+// e2e-covers-cancel: deploy.php:cancel
+test('cancel: Cancel keeps the job queued, Confirm cancels it', async ({ page }) => {
+  const seed = seedBase();
+  const jobId = seedScheduledJob(seed);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const row = page.locator('tbody tr', { hasText: `${MARK}-m1` }).first();
+  const dialog = page.locator('[data-confirm-dialog]');
+  const cancelButton = row.locator('form:has(input[name="action"][value="cancel"]) button');
+
+  await cancelButton.click();
+  await expect(dialog, 'cancelling a job asks first').toBeVisible();
+  await expect(page.locator('[data-confirm-msg]'), 'the dialog names the mission').toContainText(`${MARK}-m1`);
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(jobRow(jobId).status, 'dismissing the dialog keeps the job queued').toBe('queued');
+
+  await cancelButton.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/deploy\.php/),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  const after = jobRow(jobId);
+  expect(after.status, 'the job is cancelled').toBe('cancelled');
+  expect(after.cancelled_at, 'the cancellation is timestamped').not.toBeNull();
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'cancellation does not promise rollback').toContainText(/does not roll back/i);
+  await expect(outcome.locator('.alert-actions a'), 'the log remains the evidence path').toHaveAttribute('href', `deploy_log.php?id=${jobId}`);
+});
+
+// e2e-covers: deploy.php:cancel_group
+// e2e-covers-cancel: deploy.php:cancel_group
+test('cancel_group: Cancel keeps the slots, Confirm cancels every queued slot', async ({ page }) => {
+  const seed = seedBase();
+  runPhp(`
+$db = db();
+// Power-cycle skips VMs without an Instance UUID (K16); bind them like created VMs.
+$stmt = $db->prepare("UPDATE deploy_vms SET vm_instance_uuid = CONCAT('e2e-cg-', id) WHERE mission_id = ?");
+$missionId = ${seed.missionId};
+$stmt->bind_param('i', $missionId);
+$stmt->execute();
+$payload = ['mode' => 'powercycle', 'verbose' => false, 'vm_ids' => [], 'powercycle_wait' => VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT];
+$result = repo_enqueue_deploy_group($db, ${seed.missionId}, ${seed.admin}, ${seed.esxi}, ${seed.ansible}, $payload, gmdate('Y-m-d H:i:s', time() + 7200), 5);
+echo 'GROUP=' . $result['group_id'];
+`, ['lib/deploy_constants.php', 'lib/repo/deploy_jobs.php']);
+
+  const before = missionJobs(seed.missionId);
+  expect(before.length, 'one slot per VM was queued').toBe(2);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const groupCancel = page.locator('form:has(input[name="action"][value="cancel_group"]) button').first();
+
+  await groupCancel.click();
+  await expect(dialog, 'cancelling the group asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  for (const job of missionJobs(seed.missionId)) {
+    expect(job.status, 'dismissing the dialog keeps every slot queued').toBe('queued');
+  }
+
+  await groupCancel.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/deploy\.php/),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  for (const job of missionJobs(seed.missionId)) {
+    expect(job.status, 'every queued slot is cancelled').toBe('cancelled');
+  }
+});
+
+// e2e-covers: deploy.php:retry
+// e2e-covers-cancel: deploy.php:retry
+test('retry: Cancel creates nothing, Confirm queues a new job for the failed one', async ({ page }) => {
+  const seed = seedBase();
+  const failedId = seedFailedJob(seed);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const retry = page.locator('form:has(input[name="action"][value="retry"]) button').first();
+
+  await retry.click();
+  await expect(dialog, 'retrying asks first').toBeVisible();
+  await expect(page.locator('[data-confirm-msg]'), 'the dialog names the mission').toContainText(`${MARK}-m1`);
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(missionJobs(seed.missionId).length, 'dismissing the dialog created no job').toBe(1);
+
+  await retry.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    // A successful retry redirects into the new job's log page.
+    page.waitForURL(/deploy_log\.php\?id=/),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  const jobs = missionJobs(seed.missionId);
+  expect(jobs.length, 'the retry queued a second job').toBe(2);
+  expect(Number(jobs[0].id), 'the original job is untouched').toBe(failedId);
+  const newId = Number(jobs[1].id);
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'retry names the new queued job').toContainText(String(newId));
+  await expect(outcome, 'retry is not presented as execution').toContainText(/not yet.*executed/i);
+  await expect(outcome.locator('.alert-actions a')).toHaveAttribute('href', `deploy_log.php?id=${newId}`);
+});
+
+test('deploy_log retry: Cancel keeps the failed job alone, Confirm queues its current scope', async ({ page }) => {
+  const seed = seedBase();
+  const failedId = seedFailedJob(seed);
+
+  await page.goto(`deploy_log.php?id=${failedId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const retry = page.locator('form:has(input[name="action"][value="retry"]) button');
+  await expect(retry, 'a retryable log exposes the same repository decision').toBeVisible();
+
+  await retry.click();
+  await expect(dialog, 'retrying from the log asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(missionJobs(seed.missionId), 'dismissing the log action creates no job').toHaveLength(1);
+
+  await retry.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForURL((url) => url.pathname.endsWith('/deploy_log.php')
+      && Number(url.searchParams.get('id')) !== failedId),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  const jobs = missionJobs(seed.missionId);
+  expect(jobs, 'confirming from the log queues one successor').toHaveLength(2);
+  expect(Number(jobs[0].id), 'the original failed job remains immutable').toBe(failedId);
+  expect(Number(new URL(page.url()).searchParams.get('id')), 'the browser follows the successor log')
+    .toBe(Number(jobs[1].id));
+});
+
+test('deploy_log cancel: Cancel keeps the job, Confirm cancels it and stays on the log page', async ({ page }) => {
+  const seed = seedBase();
+  const jobId = seedScheduledJob(seed);
+
+  await page.goto(`deploy_log.php?id=${jobId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const cancelButton = page.locator('form:has(input[name="action"][value="cancel"]) button');
+
+  await cancelButton.click();
+  await expect(dialog, 'cancelling from the log page asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(jobRow(jobId).status, 'dismissing the dialog keeps the job queued').toBe('queued');
+
+  await cancelButton.click();
+  await expect(dialog).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((response) => response.request().resourceType() === 'document'
+      && new URL(response.url()).pathname.endsWith('/deploy_log.php')),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  await expect(page).toHaveURL(new RegExp(`deploy_log\\.php\\?id=${jobId}$`));
+  expect(jobRow(jobId).status, 'the job is cancelled').toBe('cancelled');
+  await expect(cancelButton, 'a terminal job no longer offers cancellation').toHaveCount(0);
+});
+
+// The job scope ceiling as the operator meets it: a blocker above the form,
+// before anything is queued, naming both numbers and carrying two follow-ups.
+//
+// The geometry is the assertion, not the markup. Two underlined links with one
+// space between them read as a single long link, and this blocker is the first
+// place in the deploy list that has two of them; the markup looks correct
+// either way, so only the real bounding boxes can show the gap.
+test('an oversize selection blocks before queueing and carries repair and help side by side', async ({ page }) => {
+  const seed = seedBase();
+  const overLimit = phpJson(`
+require_once '/var/www/html/lib/network_mac_constants.php';
+$db = db();
+$mid = ${seed.missionId};
+$limit = VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS;
+$existing = (int) ($db->query("SELECT COUNT(*) c FROM deploy_vms WHERE mission_id = $mid")->fetch_assoc()['c'] ?? 0);
+for ($i = $existing; $i <= $limit; $i++) {
+    $name = sprintf('E2EDSCOPE%03d', $i);
+    $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, vm_os) VALUES (?, ?, ?, 'Win11')");
+    $stmt->bind_param('iss', $mid, $name, $name);
+    $stmt->execute();
+    $vmId = (int) $db->insert_id;
+    $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', 'WDS', '', 'dhcp')");
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+}
+$total = (int) ($db->query("SELECT COUNT(*) c FROM deploy_vms WHERE mission_id = $mid")->fetch_assoc()['c'] ?? 0);
+echo 'JSON' . json_encode(['limit' => $limit, 'total' => $total]) . 'JSON';
+`);
+  expect(overLimit.total, 'the fixture must really exceed the ceiling').toBeGreaterThan(overLimit.limit);
+
+  await page.goto(`deploy.php?mission_id=${seed.missionId}`);
+  const blocker = page.locator('[data-deploy-blocker]').filter({ hasText: String(overLimit.limit) }).first();
+  await expect(blocker, 'the ceiling is named before anything is queued').toBeVisible();
+  await expect(blocker, 'the sentence names the limit and what was selected')
+    .toContainText(String(overLimit.total));
+  await expect(page.locator('[data-deploy-queue-button]'), 'queueing stays disabled').toBeDisabled();
+
+  const repair = blocker.getByRole('button', { name: 'Open the mission VMs' });
+  const help = blocker.locator('a[data-deploy-blocker-help]');
+  await expect(repair, 'the way to change the selection').toBeVisible();
+  await expect(help, 'the way to the reason the ceiling exists').toBeVisible();
+
+  const gap = await blocker.evaluate((node) => {
+    const actions = [...node.querySelectorAll('.alert-actions .button-as-link, .alert-actions a')]
+      .map((action) => action.getBoundingClientRect());
+    return actions.length === 2 ? actions[1].left - actions[0].right : -1;
+  });
+  expect(gap, 'repair and help stay visibly separate links').toBeGreaterThanOrEqual(10);
+
+  // The help link lands on a section the help page really renders.
+  await help.click();
+  await expect(page).toHaveURL(/help\.php#help-network-contract$/);
+  await expect(page.locator('#help-network-contract')).toBeVisible();
+});

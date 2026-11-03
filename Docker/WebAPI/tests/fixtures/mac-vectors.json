@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Cross-language SSoT for MAC canonicalization. Three implementations agree on this",
+    "table or a build fails: virtusphere_normalize_mac() (lib/mac.php), ConvertTo-VsNormalizedMac",
+    "(Powershell-MECM/mecm/VirtuSphere-Common.ps1) and its client twin",
+    "(Powershell-MECM/clients/VirtuSphere-Client-Common.ps1).",
+    "",
+    "Why this file exists: the portal writes the MAC, MECM looks it up by exact match.",
+    "A canonicalization that drifts on one side makes a VM invisible to MECM with no error",
+    "(TESTPLAN finding 2.2, P1). PHPUnit MacNormalizeTest and Pester Mac.Tests.ps1 both read",
+    "this table, so the two languages cannot drift apart silently.",
+    "",
+    "expected: null means 'not a MAC address' (the caller must reject the value).",
+    "Separators are stripped, not validated: any non-hex byte is a separator. That is",
+    "deliberate and shared - both sides do it, and this table pins that they keep doing it."
+  ],
+  "canonical": "AA:BB:CC:DD:EE:FF",
+  "vectors": [
+    { "input": "AA:BB:CC:DD:EE:FF", "expected": "AA:BB:CC:DD:EE:FF", "why": "already canonical, idempotent" },
+    { "input": "aa:bb:cc:dd:ee:ff", "expected": "AA:BB:CC:DD:EE:FF", "why": "lowercase colon form (ESXi/Ansible)" },
+    { "input": "AA-BB-CC-DD-EE-FF", "expected": "AA:BB:CC:DD:EE:FF", "why": "hyphen form printed by Windows ipconfig /all" },
+    { "input": "aa-bb-cc-dd-ee-ff", "expected": "AA:BB:CC:DD:EE:FF", "why": "lowercase hyphen form" },
+    { "input": "aabb.ccdd.eeff", "expected": "AA:BB:CC:DD:EE:FF", "why": "Cisco dotted form" },
+    { "input": "AABBCCDDEEFF", "expected": "AA:BB:CC:DD:EE:FF", "why": "raw 12 hex, no separators" },
+    { "input": "aabbccddeeff", "expected": "AA:BB:CC:DD:EE:FF", "why": "raw lowercase" },
+    { "input": "  AA:BB:CC:DD:EE:FF  ", "expected": "AA:BB:CC:DD:EE:FF", "why": "surrounding whitespace" },
+    { "input": "AA:bb-CC.dd EE:ff", "expected": "AA:BB:CC:DD:EE:FF", "why": "mixed separators: stripped, not validated" },
+    { "input": "00:50:56:AB:CD:EF", "expected": "00:50:56:AB:CD:EF", "why": "VMware OUI, leading zeroes survive" },
+    { "input": "00-50-56-ab-cd-ef", "expected": "00:50:56:AB:CD:EF", "why": "the exact case from finding 2.2" },
+    { "input": "", "expected": null, "why": "empty" },
+    { "input": "   ", "expected": null, "why": "whitespace only" },
+    { "input": "not-a-mac", "expected": null, "why": "no hex payload of the right length" },
+    { "input": "AA:BB:CC:DD:EE", "expected": null, "why": "10 hex, one group short" },
+    { "input": "AA:BB:CC:DD:EE:FF:11", "expected": null, "why": "14 hex, one group long" },
+    { "input": "ZZ:BB:CC:DD:EE:FF", "expected": null, "why": "non-hex letters do not become a MAC" },
+    { "input": "AA:BB:CC:DD:EE:FG", "expected": null, "why": "single bad nibble drops it below 12 hex" },
+    { "input": "0", "expected": null, "why": "single digit" },
+    { "input": "AABBCCDDEEFF00", "expected": null, "why": "too long without separators" }
+  ]
+}

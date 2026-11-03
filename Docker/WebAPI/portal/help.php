@@ -1,0 +1,51 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../lib/bootstrap.php';
+require_once __DIR__ . '/../lib/layout.php';
+// The system-status help panel interpolates the ESXi traffic-light thresholds
+// (ADR-0023); without this require the constants are undefined here and PHP
+// fatals mid-render, truncating every panel after it. The same panel renders the
+// cause table from connection_error_message(), the SSoT for that wording.
+require_once __DIR__ . '/../lib/deploy_constants.php';
+require_once __DIR__ . '/../lib/deploy_display.php';
+require_once __DIR__ . '/../lib/vm_network_contract.php';
+require_once __DIR__ . '/../lib/ansible_command_modes.php';
+require_once __DIR__ . '/../lib/connection_errors.php';
+// The same panel renders the three Ampel legends through the SSoT renderer the
+// System status page itself uses, so neither side can list a state the other
+// does not (system_status.php's legend used to omit `missing`).
+require_once __DIR__ . '/../lib/system_status.php';
+// The users panel quotes the configured password minimum, not a hardcoded one.
+require_once __DIR__ . '/../lib/password_policy.php';
+// The missions panel quotes how long an import preview stays valid; that bound
+// lives next to the importer, not in constants.php.
+require_once __DIR__ . '/../lib/mission_transfer.php';
+require_once __DIR__ . '/../lib/help_page.php';
+
+$user = portal_require_user($connection);
+
+$helpTabs = help_tabs_for_user($user);
+$canUsers = can('users.manage', $user);
+
+layout_header(__t('help.title'), $user, 'help');
+?>
+<div class="stack" data-tabs>
+    <div class="tab-list" role="tablist" aria-label="<?php echo h(__t('help.tabs_label')); ?>" data-tab-list hidden>
+        <?php foreach ($helpTabs as $tabKey => $tabLabel): ?>
+            <button type="button" class="tab" id="tab-<?php echo h($tabKey); ?>" role="tab"
+                    aria-controls="panel-<?php echo h($tabKey); ?>" aria-selected="false"
+                    data-tab-target="panel-<?php echo h($tabKey); ?>"><?php echo h($tabLabel); ?></button>
+        <?php endforeach; ?>
+    </div>
+
+    <?php
+    foreach (VIRTUSPHERE_HELP_PANELS as $panel => $definition) {
+        if (help_panel_visible($panel, $user)) {
+            require __DIR__ . '/../lib/help/' . $definition['partial'];
+        }
+    }
+    ?>
+</div>
+<?php layout_footer(); ?>

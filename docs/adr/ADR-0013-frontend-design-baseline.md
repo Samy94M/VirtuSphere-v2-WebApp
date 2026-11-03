@@ -1,0 +1,202 @@
+# ADR-0013: Frontend Design Baseline
+
+Date: 2026-06-28
+Updated: 2026-08-11
+Status: Accepted
+
+## Context
+
+The web portal should be functional, dense and comfortable for repeated admin workflows.
+
+## Decision
+
+Use a restrained local design system with cyan accent tokens, light/dark support, left navigation and role-gated sections.
+
+Solid accent fill (`.button`) is reserved for the single highest-emphasis action per view (create/save/confirm) and for destructive actions (`.button-danger`, in the danger token). Supporting actions use the outlined/ghost treatment (`.button-secondary`/`.button-ghost`: `--surface-muted` background, `--accent`/`--accent-strong` border and text) — `--surface-muted`, not `--surface`, so the outline reads as a control against the panel/card background it sits on instead of blending into it. Identity and "current location" indicators (the topbar account avatar/link, the active sidebar nav item) must not reuse the solid accent fill either, since that collides with the button-emphasis meaning of the same fill — they use the same outlined/tinted `--surface-muted` treatment.
+
+Solid-button fill and text colors come from the per-theme `--btn-bg`/`--btn-fg` tokens in `base.css`, not from hardcoded values on `.button`. Light theme fills with `--accent-strong` on white text; dark theme fills with the brighter `--accent`/`--danger` on dark (`--btn-fg`) text. This keeps filled buttons at WCAG-AA contrast in both themes — do not hardcode `#fff` or an accent color directly on a button.
+
+Accessibility and responsiveness are part of the baseline, not add-ons:
+- Form semantics have one renderer in `lib/forms.php`. `form_control_attrs()`
+  owns the stable control ID, `aria-invalid` and the complete
+  `aria-describedby` list; `form_hint_id()`, `form_error_id()` and
+  `form_error_html()` own the referenced nodes. A field error is therefore
+  never colour-only or an unreferenced sibling. A shared explanation belongs
+  to a real `fieldset` or `role="group"`, and its ID describes that group.
+  Repeated controls include their row scope in the generated ID; a template
+  keeps `__INDEX__` in name and ID until one monotonic browser-side replacement
+  fills both. Dynamic hints add and remove their ID with their visible state.
+- A visible keyboard focus ring (`:focus-visible`, accent outline) is defined globally in `base.css`; do not remove it per-component. A wrapping control may *relocate* that ring onto itself: an option card matches `:has(input:focus-visible)` and draws the identical 2px accent outline, while the 16px box's own outline is suppressed. Relocation reuses the same tokens and is allowed; inventing a softer indicator is not, because a translucent accent halo misses the 3:1 non-text contrast floor at every alpha that still reads as soft.
+- Wide content (data tables) scrolls inside its own `.table-wrap`; grid/stack children carry `min-width: 0` so a wide table never forces the whole page to scroll horizontally. The page body must never scroll sideways on mobile.
+- Below the 860px breakpoint the left navigation collapses behind a header toggle (`[data-nav-toggle]` in `lib/layout.php`, handler in `assets/core.js`, styles in `layout.css`) so content is reachable without scrolling past the full nav. The toggle is a real button with `aria-expanded`; no inline handlers (CSP).
+- The base font is a local system-font stack (`system-ui, "Segoe UI", …`); no web-font download (air-gap/CSP).
+
+Operational status must name the evidence it actually represents. A badge is not a generic “works” verdict: its label and timestamp identify the check that produced it, while materially narrower runtime evidence is shown as a separate fact with its own outcome, time and diagnostic link. One signal must never silently refresh or recolour another. Staleness means missing current evidence, not failure, and is written that way; known failures do not age into neutral. Colour is never the only distinction. If an operator can repair or renew a state from the portal, the status row carries the permission-gated action and the existing audit/log route instead of requiring knowledge of another page.
+
+The System-status overview keeps each title above its status badge inside one linked card. Both remain left aligned and fully visible; the local card badge may wrap at words and, only as a final containment fallback, inside an unbroken token. The global badge contract remains single-line. Cards derive their height from content, preserve the shared focus outline and use the responsive grid rather than clipping, ellipsis or smaller text to force a fixed row.
+
+Restrained ("dezent") glassmorphism is part of the baseline (Paket D). A single token set in `base.css` (`--glass-bg`, `--glass-border`, `--glass-blur`, `--glass-shadow`, plus a subtle `--bg-accent-glow` body gradient, per theme) drives it — no scattered values. Glass (translucent background + `backdrop-filter`) applies only to the structural/chrome surfaces: sidebar, topbar, panels/cards, alerts and modals (`.modal-box`). **Data surfaces stay solid** — tables (`.table-wrap`) and form controls keep an opaque `--surface` background so contrast is unaffected. Rules: at most two stacked blur layers; both light and dark are styled and stay WCAG-AA on the glass; a `@supports not (backdrop-filter)` fallback swaps every glass surface back to opaque `--surface` (no grey haze). All assets stay local (no external blur/image); no inline styles.
+
+Spacing and form layout follow shared primitives, not per-page margins, so density stays comfortable without going cramped. The primitives are named: `base.css` `:root` carries a four-step spacing scale (`--space-1` … `--space-4`) plus `--radius-md`, in the light block only, because a distance is not a colour and must not move with the theme toggle. The scale is *derived from its callers*, never set in advance — a step nothing uses is the same drift as a rule without markup, only in the direction no guard sees, so it is dropped rather than kept for later. Two rules make it hold: **(1) the distance belongs to the container, not to the child.** A block that stacks its parts is a `display: grid` with a `gap`; the parts hand their own margins back entirely rather than being reset in bulk, because a blanket `.block p { margin: 0 }` outranks the (0,1,0) of the very hint rules it is meant to leave alone — that cascade trap is what left two `margin-top` declarations on the System status page dead and unnoticed through a full cleanup. **(2) A page whose blocks are proper names gets its own stylesheet** next to the four domain sheets (`status.css` for the System status block), linked *after* all of them, and shared vocabulary stays behind: the panel shell, `.empty-state`, `.section-heading-actions`, and anything a second page renders from the same helper. A page sheet owns inner rhythm, never the shell. A panel's vertical rhythm comes from the stack/grid gap and the shared `.panel > p`/heading margins; forms use `.form-grid` (labelled fields, four columns) and `.form-grid-full` (a full-width section) instead of hand-rolled widths. The durable rules: (1) a label sits above its control with a small gap (`label > input/select/textarea` `margin-top`), never flush. (2) Checkboxes and radios keep their intrinsic size and never inherit the text-field `width:100%`/`min-height` (a bare toggle in a table header must not render as a large box); this is enforced globally in `base.css`. (3) Repeated toggles go in a `.checkbox-grid` (multi-column), not a stack of full-width bordered bars. Its two variants are chosen by what the options are, not by how many there are: an open-ended list whose length depends on data (catalog packages, a mission's VMs) keeps the `auto-fit` stretch, while a fixed option set that belongs to the fields around it adds `.checkbox-grid-aligned` and mirrors the `.form-grid` tracks, so each option box is exactly as wide as the inputs above it (the VM editor's Hot-Add pair). An option card carries its selected state in the outlined/tinted pattern (accent border plus a light accent wash), never a solid fill. (4) Inside a `.form-grid-full` the individual controls do not run the whole panel width: single toggle/radio rows size to their label and a standalone field caps at a comfortable field width (~22rem); only multi-column grids stretch, and explanatory `.hint` prose stops at a readable measure (~78ch) instead of spanning the panel. (5) Row action buttons live in a `td.actions` cell that stays a real table-cell and is never `display:flex` — a flex `<td>` does not stretch to the row height, so its bottom border floats up at the button height and the row separator breaks into detached stubs under the column (worst when data cells wrap, e.g. long OS names). The buttons lay out inline and compact; a cell that instead carries form controls (the user-admin role/password inputs) opts into vertical stacking with `.actions-stack`. New form or table layout is verified with the light/dark Playwright screenshot pass before shipping, since spacing regressions are visual and are not caught by the PHP or lint checks.
+
+Confirmation is a portal component, never a browser prompt. `window.confirm()` and `alert()` do not appear in portal code. Every destructive or hard-to-undo action carries `data-confirm="<localized question>"` on the button that performs it, and that attribute is the whole contract: the single `<dialog class="modal modal-confirm">` in `lib/layout_modals.php`, rendered once per page by `layout_footer()`, and its handler in `assets/core.js` are the only place a confirmation is built. Both portal modals live in that module (ADR-0006: split by domain); a new modal belongs there too, not in `layout.php` and not in a page. Modals are native `<dialog>` elements opened with `showModal()`, so the browser owns the top layer, the focus trap and Escape; the `.modal` element is itself the dim layer, which is how a backdrop click is detected. Do not hand-roll a modal, a focus trap or a `z-index` stack next to this one. Modal content sits centred on the dialog axis: icon, title and the action-button row all centre (the `.modal-actions` base rule in `feedback.css`), and so does a message short enough to fit one line. Only a message that wraps reads left-aligned, because there the left edge is what carries the reader. Both come from the shared `.modal-msg` rule, never from a per-dialog override: `width: fit-content` plus auto inline margins let the text length pick the alignment, so no rule has to guess at the sentence count and a third dialog inherits the behaviour instead of restating it. That rule also sets `overflow-wrap`, because a confirm question names its target and a target name is user input; a name wide enough to clip would defeat the naming rule that exists to stop the wrong row being confirmed. A new dialog inherits that centring and does not add a per-dialog `justify-content` override; a right-aligned button row breaks the axis the icon and title establish.
+
+**Which actions ask is a closed question, not a judgement call.** Every action a portal form can POST is either confirmed in markup or declared safe with the reason it cannot lose anything; there is no third state. The first version of this rule named destructive verbs (delete, clear, reset) and therefore never looked at `generate_token`, which silently invalidates the token deployed in the MECM server's registry, nor at `set_role`, by which an admin can demote themselves out of user management. A guard that guesses which actions are dangerous will always trail the code that adds them.
+
+The rules that keep it correct:
+- Ask on the destructive **branch**, not the button. A toggle asks before deactivating and not before activating; a generator asks only when it overwrites. Omit the attribute in the harmless branch rather than rendering `data-confirm=""`, because the selector matches a blank value; core.js treats blank as "not configured" and lets the submit through.
+- Confirmation and the danger fill are independent signals. `.button-danger` says the action destroys data and selects the dialog's danger variant; an overwriting create (`generate_token`) confirms without it.
+- Name the target in the question. A row action confirmed as "Delete this?" invites confirming the wrong row; `:name` makes the prompt about the record the user pointed at.
+- `__t()` substitutes placeholders but does not pluralize, so the count picks the sentence (`_unused` / `_one` / `_many`) instead of a "VM(s)" dodge that reads wrong at both ends.
+- **A confirmation is a UX guard, not a security control.** Without JavaScript the POST goes straight through, so authorization (`can()`), CSRF and validation in the POST handler stay the real gate. Never let a `data-confirm` stand in for a server-side check. A browser without `<dialog>` behaves exactly like one without JavaScript; there is no `window.confirm()` fallback, because the portal stylesheets already rely on `:has()` and no engine shipped that before `<dialog>`.
+- **Never re-submit with `form.submit()`.** Because the dialog cannot block like `window.confirm()` did, the click is cancelled and replayed on accept via `form.requestSubmit(trigger)`, which preserves the trigger as the form's *submitter*. A plain `form.submit()` drops it and silently strips a `name="action"` button's value, turning a delete into a no-op.
+- Constraint validation runs before the dialog opens, so a rejected field never costs the user an answered prompt.
+- The accept button names its action by reusing the trigger's own (already localized) label; `data-confirm-action` overrides it where that label would collide with the dismiss button. A `.button-danger` trigger selects the danger variant. No translatable string lives in `core.js` (ADR-0014).
+- Confirmation text is a `module.confirm_*` key with DE/EN parity, and it names what is actually lost. Wording that is wrong for a variant of the same form (a template is not a mission) needs its own key.
+
+The login page is the one sanctioned exception to the restrained rule. As the unauthenticated entry point it has no data density to protect, so it carries deliberately more atmosphere — but scoped entirely to `.login-*` selectors so no authenticated page inherits it and no shared `.panel`/`.button`/token rule changes. It reuses the same `base.css` tokens (no new colors): a soft, slowly drifting aurora behind the panel (built from the `--bg-accent-glow` accent/info tones), an elevated card with a thin accent hairline, a gradient wordmark, a glowing logo (the real logo image, glow via `drop-shadow`), icon-prefixed inputs and an accent-gradient submit button. Its inputs are the only place a component may substitute the shared `:focus-visible` outline: they swap it for an equivalent accent border plus a soft outward glow, allowed only because that replacement stays clearly visible and WCAG-AA. All motion (the aurora drift and the card entrance) is gated behind `prefers-reduced-motion`, and everything stays local and CSP-clean (inline SVG icons, no external assets, no inline styles).
+
+Wrapping layout has one additional spacing contract: a heading/action row's `gap` separates only its own flex children; it does not create space to a following table, grid or card list. That following block gets the shared inter-block gap from a parent stack or an explicit reusable sibling/component rule. The wrap case must be exercised at a narrow viewport. A spacing boundary that caused a regression gets a Playwright geometry assertion at the viewport that forces the wrap, in addition to the light/dark screenshot pass, because PHP and lint checks cannot see that boundary.
+
+## Consequences
+
+No marketing landing page and no decorative dependency-heavy UI. All assets remain local.
+
+Fill is a single-purpose signal: solid accent means "primary/destructive action," nothing else. New components that need to show selection, identity or active state must use the outlined/tinted pattern, not a full accent fill.
+
+Button color changes happen in the `--btn-*` tokens so both themes stay in contrast; new pages inherit focus rings, horizontal-overflow containment and the collapsible mobile nav from the shared layout and stylesheets without extra work.
+
+The confirmation rules above are enforced by `tests/Static/PortalConfirmContractTest.php`, not by review alone: it fails when a postable action is neither confirmed nor declared in `SAFE_ACTIONS`, when a `SAFE_ACTIONS` entry goes stale or contradicts the markup, when a `.button-danger` submit ships without `data-confirm`, when a prompt is a literal instead of a `__t()` key, when a page hand-rolls `window.confirm()`/`alert()` or any `<dialog>` of its own, when the replay uses `form.submit()` instead of `requestSubmit()`, and when `layout_footer()` stops calling the modal renderers (which would ship a portal whose destructive buttons submit with no prompt at all). A genuinely non-destructive action that matches the verb list is exempted in `UNCONFIRMED_BY_DESIGN` with its reason, so the exception is a recorded decision rather than an omission.
+
+One registry decides which stylesheets the portal loads and in which order (Etappe 16). `components.css` had grown to 1850 lines and bundled five independent component families; it is split into `panels.css` (data and page elements), `tables.css` (rows, pinned action column, pagination, log lines), `controls.css` (buttons, action rows, the form grid and its children) and `feedback.css` (badges, alerts, empty state, field errors, the two dialogs), while `base.css`, `layout.css` and `status.css` keep their ownership. The split moved rules between files and renamed none: it was cut so that concatenating the four in load order reproduces the cascade of the file they came from, verified as an exact permutation of all 260 rules and then measured in a browser against the old sheet. **The ORDER is the contract, not the list.** Two equally specific rules are resolved by position, so once the component rules live in four files the file order IS that position, and `status.css` must stay last. `layout_app_styles()` in `lib/layout.php` is the one place that order exists, used by the portal shell and by `login.php`, which had already drifted and was missing `status.css` entirely. Every entry is cache-busted through `layout_asset_url()`; no sheet may `@import` another, because an imported sheet bypasses both the version query and the registry, and the portal is air-gapped. `tests/Static/PortalStyleRegistryContractTest.php` fails on a stylesheet that exists but is not loaded, on a registered sheet that does not exist, on a hand-written `<link>` beside the registry and on a returning monolith.
+
+The identity is slate with an indigo accent, measured rather than chosen (Etappe 16). Normal text clears 4.5:1 on every ground it is rendered on and the parts that carry meaning without text clear 3:1, both verified in the browser against ALPHA-COMPOSITED backgrounds: a panel is translucent, so its text sits on the panel over the page over the body, and a ratio taken from a token describes a colour nothing on screen has. Large text is only large at 24 CSS px, or 18.66 px when bold; nothing else takes the 3:1 floor. Three decisions carry the rest. **Info is not a second indigo:** it stays a cyan-leaning blue 44 degrees away in OKLCH hue, so "this is a note" and "this is the action" are still tellable apart at a glance. **The sidebar is its own surface,** with its own four tokens rather than the panel glass it used to borrow, because sharing them made the rail and the content read as one sheet with a line drawn on it; it is darker than the content in both themes, so the panels come forward. **A control border is not a separator:** `--border` separates rows and edges and may stay quiet, while `--control-border` outlines a control and takes the 3:1 that WCAG 1.4.11 requires, which one token could not do without making every table look like a spreadsheet.
+
+Glass got quieter and shallower. Opacity went up (86 percent light, 72 percent dark) and blur down to 8px, because every point of transparency is contrast the text underneath has to survive. Two elements left the glass entirely: an alert, which sits inside a panel that is already a blur layer and is the one thing on the page whose whole job is to be read, and a modal box, which sat above a dim layer that already blurs the page. That takes the deepest stack of blur layers from four to two. The single opaque `@supports not (backdrop-filter)` fallback was adjusted rather than duplicated, and the sidebar keeps its own surface inside it, or the rail would vanish into the page exactly on the browsers that cannot blur.
+
+Under `forced-colors: active` the portal hands its palette back. `forced-colors.css` is that policy, it is the one sheet allowed to name a system colour, and it loads last because its rules are specificity-equal with the component defaults they replace. It removes what a forced palette cannot express (glass, shadows, the login aurora) and says in system pairs the two things that must survive: the boundary of a surface and the focus ring, which keeps `Highlight` rather than an accent the user agent has already replaced. Badges, capacity bars and controls get an explicit border there, because without colour they have no boundary left at all.
+The palette has one home and one door (Etappe 16). `base.css` declares every colour the portal owns; the other sheets consume tokens. A shadow, a dim layer and a sheen are colours too, so `--shadow-lift`, `--shadow-modal`, `--modal-backdrop` and `--sheen` live there rather than being spelled out where they are used; the login button now takes the existing `--btn-fg` pair instead of a hardcoded `#ffffff` plus a dark-theme override, which also reads better against both ends of its gradient (7.73 and 10.81 versus 7.54 and 10.54). System colours belong to the user agent and are allowed only inside `@media (forced-colors: active)`, in matching pairs. `tests/Static/CssColorTokenContractTest.php` parses for all of this.
+
+The spacing scale is enforced by `tests/Static/StatusSpacingContractTest.php`, because no hook in this repo reads CSS at all: it fails on a raw length in any `gap`/`padding`/`margin`/`border-radius` inside `status.css`, on a token used there that `base.css` does not define, on a defined step nothing calls, and on a `<link>` order that does not put `status.css` last — several page rules are specificity-equal with the panel defaults and win only on position, so swapping the two elements restores every margin without touching a declaration.
+
+The modal axis is enforced the same way, by `tests/Static/ModalAxisContractTest.php`, because nothing else in the toolchain reads a stylesheet. It globs `portal/assets/css/*.css` in the layout's `<link>` order rather than naming one file, so moving the modal rules into another sheet cannot switch the guard off silently; it shares its parser with the spacing guard through `tests/Support/CssRules.php`. It fails when a rule other than `.modal[open]`, `.modal-box`, `.modal-msg` or `.modal-actions` aligns modal content, when one of those four stops making its decision, and when `.modal-msg` loses the `fit-content`/auto-margin sizing or its `overflow-wrap`. The rule it protects was learned rather than designed: the alignment first sat on `.modal-confirm .modal-msg`, so the session modal never inherited it and looked correct only because its one message happens to fit a line.
+
+## Amendment (2026-08-28): queue blockers are one live and server-authoritative model
+
+The deploy form presents every reason that currently prevents queuing as an
+explicit error box. Its count, singular/plural summary, jump target and disabled
+state are derived only from `deploy_queue_blockers()`. Non-blocking inventory,
+host, capability and capacity observations use notice wording that explicitly
+says the job can still be queued; colour is supporting information only.
+
+The browser may refresh the same model after a short debounce, but it is never
+the enforcement boundary. It serializes every form control including disabled
+but populated values, accepts only JSON, discards stale responses and stops on
+lost authentication or permission. Preview and the action handler run the same
+aggregator again, with the last check immediately before the repository write.
+This keeps no-JavaScript operation complete and prevents a forged enabled button
+from bypassing the queue rules.
+
+UX01 keeps that decision intact but gives it one preparation summary. Its state
+is derived only from the complete union, while mode and materialized VM count
+describe the normalized scope. Individual cause cards no longer repeat a
+generic prefix; they retain canonical order and every action. Only the concise
+ready/blocked/checking/unreliable sentence is an `aria-live` region. With
+JavaScript disabled, a separate `action=check` submitter renders corrected
+inputs and the same decision without preview, redirect, audit or job write;
+`action=start` remains the only queue submitter and still rechecks before every
+write.
+
+Remedy navigation is a CSRF-protected POST whose server recomputes the named
+cause from the current complete blocker and warning union before using its
+permission-filtered link. It stores only the allowlisted queue fields in the
+session for at most one hour; secrets and CSRF tokens never enter that draft or
+a return URL. The draft is consumed once when deployment is opened again.
+(Identity adoption, which carried the same draft, was removed by the ADR-0036
+amendment of 2026-10-05.) Cancelling
+a schedule preview is an in-document jump to the still-rendered POST form and
+therefore neither discards values nor creates another server action.
+
+Help navigation follows the same deep-link discipline as settings, logs and
+System status. `help_url()` validates a closed panel/section registry against
+the partials and rendered ids. When `core.js` opens a fragment inside a hidden
+help panel, it activates that panel and focuses the nested target, so keyboard
+and assistive-technology users land at the content the link promised.
+
+Mission and VM drill-down navigation uses a bounded URL context rather than a
+session-wide last-page value. Six closed scalar fields preserve mission/template
+list type, filter and ordering plus VM ordering independently in each tab. No
+free return URL, form value, bulk selection, secret or CSRF token is carried.
+Canonical URL helpers rebuild every destination, and object/permission checks
+remain local to that destination. Stable mission/VM row fragments provide the
+no-JavaScript return target; the shared hash handler only enhances them with
+focus. A removed or missing row never receives an invented focus target.
+
+Unsaved-change protection is an opt-in editor behavior, not draft persistence.
+Mission settings and the VM editor compare their visible named controls with an
+in-memory confirmed baseline; dynamic rows and disabled visible values count,
+while hidden values, button values and the contents of password/file fields do
+not. A failed POST begins dirty and may recover only a matching baseline from a
+read-only same-origin GET; uncertainty never produces a saved claim. Links and
+cross-form submits reuse the single shared confirmation dialog through DOM
+events, while browser reload/back/close uses native `beforeunload`. The editor's
+own submit is never labelled saved before the server accepts it. No URL,
+session, localStorage or sessionStorage carries a form snapshot, and no-JS
+operation keeps the ordinary server contracts without promising the warning.
+
+Effective-value summaries are projections of existing deploy owners, not a new
+configuration layer. The VM editor names whether Datastore, Datacenter and
+autostart come from the VM, the mission or a later target-host resolution, and
+calls them intended values rather than an observed ESXi state. A missing
+Datacenter may remain unresolved until a credential is chosen; a missing
+Datastore has no host fallback. Mission-off autostart remains effectively off
+while its VM preference is preserved, and blank delay differs from explicit
+zero. The server renders the complete truth for no-JavaScript operation; a
+page-specific module only reflects live controls. Its reset accelerator clears
+an already-inheritable control and emits normal change events, never writes or
+submits on its own.
+
+Action outcomes reuse the one-shot structured flash surface rather than adding
+toasts or a second status model. A successful portal write names only the local
+transition it committed: queued and scheduled jobs are not described as
+executed, cancellation does not imply rollback, and retry creates a newly named
+job. The one optional action points to the existing read owner, normally the
+exact job log or filtered job list. Bulk VM results name processed and selected
+scope; any skipped target changes the semantic variant to warning. Portal-row
+deletion, MECM re-queue and external hypervisor/MECM effects remain explicitly
+different claims. This is complete server-rendered content; JavaScript remains
+limited to the pre-action confirmation already owned by the shared dialog.
+
+## Amendment (2026-09-12): page-specific assets preserve the one global order
+
+The stylesheet and script registries now classify the closed set of rendered
+portal entrypoints. Common shell assets remain universal; table/status sheets
+and feature modules name only the pages that render their vocabulary or hooks.
+Selection is subtraction from the existing global order, never a second order.
+An unknown page fails closed so a new entrypoint cannot silently receive every
+module or none. `status.css` stays intact and is selected for both System status
+and Deploy log: the latter intentionally reuses its fact-grid and technical
+detail rules, so moving those declarations merely to reduce a request would be
+a cascade change without corresponding product value.
+
+## Amendment (2026-09-13): copying is an accelerator over visible text
+
+VM identities, configured network values and job IDs use one server-rendered
+copy control and the existing delegated `core.js` handler. The displayed text or
+input remains the value owner and stays selectable without JavaScript. A static
+display copies exactly its escaped visible value; an editor button references
+the form control and reads its current value only when activated, so an edit
+cannot leave a stale copy payload behind. Empty and DHCP-disabled configured-IP
+values expose no action. Clipboard absence or refusal is a visible localized
+failure and never a success claim. Controls inside forms are non-submit buttons,
+keep keyboard focus and give repeated IP/MAC values an adapter-specific name.
+
+## Amendment (2026-10-17): no copy controls in the VM list and VM editor
+
+The operator removed the copy buttons beside VM name, Windows hostname, active
+rollout name, configured IP address and MAC address in the VM list and VM
+editor. Those values are plain text and form inputs again. The shared control,
+its `core.js` handler and its failure branch stay for the job id, the
+correlation id and the package report. The DHCP-dependent visibility and the
+adapter-specific button names of the 2026-09-13 amendment had no other caller
+and were removed with it.

@@ -1,0 +1,320 @@
+:root {
+    color-scheme: light;
+    /* Slate ground, indigo accent (ADR-0013, Etappe 16). Every value here is
+       measured rather than picked: normal text clears 4.5:1 on every ground it
+       is rendered on, including the alpha-composited glass surfaces, and the
+       parts that carry meaning without text clear 3:1. The numbers are in the
+       stage's acceptance row; the shape of the palette is in the ADR. */
+    --bg: #f3f5f9;
+    --surface: #ffffff;
+    --surface-muted: #eaeef5;
+    --text: #1a2130;
+    --muted: #555f73;
+    /* Two borders, because they answer different questions. `--border` separates
+       (table rows, panel edges) and may stay quiet; `--control-border` outlines
+       a CONTROL, which WCAG 1.4.11 requires to be tellable from its surroundings
+       at 3:1. One token could not be both without making every table look like a
+       spreadsheet. */
+    --border: #ccd3e0;
+    --control-border: #7c8497;
+    --accent: #4f46e5;
+    --accent-strong: #4338ca;
+    --success: #1f7a4d;
+    --warning: #8f5200;
+    --danger: #a42935;
+    /* Info stays a cyan-leaning blue rather than a second indigo: it sits 44
+       degrees away from the accent in OKLCH hue, which is what keeps "this is a
+       note" apart from "this is the action" at a glance. */
+    --info: #0f6f96;
+    --shadow: 0 10px 24px rgba(23, 31, 48, 0.07);
+    --btn-bg: var(--accent-strong);
+    --btn-fg: #ffffff;
+    /* The sidebar is its own surface, not a tinted copy of the content area
+       (Etappe 16). It carries its own four tokens so the rail can read as a rail
+       while the panels keep theirs; the composited result stays clear of the
+       content surface, which a shared token set cannot promise. */
+    --sidebar-bg: #e7ebf3;
+    --sidebar-text: #1a2130;
+    --sidebar-muted: #4d5668;
+    --sidebar-border: #c3ccdb;
+    --sidebar-active-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+    /* Dezentes Glas-Design (ADR-0013): translucent surfaces on nav/cards/modals;
+       tables and form controls stay solid. Single token set, no scattered values.
+       Etappe 16 raised the opacity and lowered the blur: the glass was doing
+       more work than it earned, and every point of transparency is contrast the
+       text underneath has to survive. */
+    --glass-bg: color-mix(in srgb, var(--surface) 86%, transparent);
+    --glass-border: color-mix(in srgb, #ffffff 45%, var(--border));
+    --glass-blur: 8px;
+    --glass-shadow: var(--shadow);
+    /* The four effect colours the component sheets used to spell out. They are
+       declared here for the same reason every other colour is: base.css is the
+       one file allowed to name a colour, and a shadow, a dim layer and a sheen
+       are colours whatever else they also are. Keeping them out here is what
+       let a hard black shadow sit on a light page and two near-identical
+       near-blacks describe the same button text. */
+    --shadow-lift: 0 6px 16px rgba(23, 31, 48, 0.16);
+    --shadow-modal: 0 16px 40px rgba(23, 31, 48, 0.22);
+    --modal-backdrop: color-mix(in srgb, #0d1220 62%, transparent);
+    --sheen: rgba(255, 255, 255, 0.32);
+    --bg-accent-glow:
+        radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+        radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 5%, transparent), transparent 55%);
+    /* Spacing scale (ADR-0013). Four steps and one radius, derived from what the
+       status block actually needed rather than set in advance: a token nobody
+       uses on its first day is the same drift as a rule without markup, only in
+       the direction no guard sees. StatusSpacingContractTest fails on an unused
+       step, so the scale can only grow with a caller.
+       Themed values live in the dark block below; these do not. An indent is not
+       a colour. */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --radius-md: 8px;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f131b;
+    --surface: #171d28;
+    --surface-muted: #212837;
+    --text: #e9edf6;
+    --muted: #a6b0c4;
+    --border: #333c4e;
+    --control-border: #6e788d;
+    --accent: #8f8cf8;
+    --accent-strong: #aba9fb;
+    --success: #64c18c;
+    --warning: #e1a449;
+    --danger: #ef7d87;
+    --info: #6ec1e4;
+    --shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+    --btn-bg: var(--accent);
+    --btn-fg: #111524;
+    /* Darker than the content surface rather than lighter: the rail recedes and
+       the panels come forward, which is the same reading order the light theme
+       gives with a tinted rail on white. */
+    --sidebar-bg: #090d13;
+    --sidebar-text: #e9edf6;
+    --sidebar-muted: #aeb8cc;
+    --sidebar-border: #2b3446;
+    --sidebar-active-bg: color-mix(in srgb, var(--accent) 16%, transparent);
+    --glass-bg: color-mix(in srgb, var(--surface) 72%, transparent);
+    --glass-border: color-mix(in srgb, #ffffff 12%, var(--border));
+    --bg-accent-glow:
+        radial-gradient(1100px 620px at 8% -10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%),
+        radial-gradient(900px 520px at 100% 0%, color-mix(in srgb, var(--info) 6%, transparent), transparent 55%);
+    --shadow-lift: 0 6px 18px rgba(0, 0, 0, 0.42);
+    --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.5);
+    --modal-backdrop: color-mix(in srgb, #05080e 76%, transparent);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Skip link (WCAG 2.4.1): the page's first tab stop, clipped sr-only style
+   while unfocused so it stays in the tab order, shown as a floating button
+   once focused. Above the sidebar/topbar (layout.css), below the modals. */
+.skip-link {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 20;
+    padding: 10px 16px;
+    background: var(--surface);
+    color: var(--accent-strong);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+}
+
+.skip-link:not(:focus) {
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* The skip target is a container, not a control: a focus ring around the
+   whole content area adds noise where the jump itself is the feedback. */
+.content:focus-visible {
+    outline: none;
+}
+
+html {
+    min-width: 320px;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg-accent-glow), var(--bg);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: system-ui, "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+}
+
+a {
+    color: var(--accent-strong);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+input,
+select,
+textarea {
+    width: 100%;
+    min-height: 38px;
+    /* A control is identified by its own boundary, so this border is a UI part
+       under WCAG 1.4.11 and takes the 3:1 token rather than the quiet separator
+       one. The fill alone does not carry it: surface-muted against surface is a
+       1.2 tint, which is a hint and not an outline. */
+    border: 1px solid var(--control-border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--surface-muted);
+    color: var(--text);
+}
+
+/* Checkboxes and radios keep their intrinsic size. The width:100% / min-height
+   above targets text and select fields; a bare toggle (e.g. the select-all in a
+   table header, or a per-row bulk checkbox) was inheriting it and rendering as a
+   large box. */
+input[type="checkbox"],
+input[type="radio"] {
+    width: auto;
+    min-height: auto;
+}
+
+input:read-only,
+input:disabled,
+select:disabled,
+textarea:read-only,
+textarea:disabled {
+    color: var(--muted);
+    background: var(--surface);
+}
+
+textarea {
+    min-height: 110px;
+    resize: vertical;
+}
+
+/* Author display rules (label/.stack grids) otherwise beat the UA [hidden]
+   rule; normalize it globally so the attribute reliably hides elements. */
+[hidden] {
+    display: none !important;
+}
+
+label {
+    display: block;
+    font-weight: 700;
+    color: var(--text);
+}
+
+small,
+.muted {
+    color: var(--muted);
+}
+
+/* Inline command and path examples run longer than a narrow phone viewport
+   (WCAG 1.4.10 reflow): wrap them at any point instead of widening the page.
+   Wide tables already scroll inside .table-wrap; bare <code> has no wrapper. */
+code {
+    overflow-wrap: anywhere;
+}
+
+.table-wrap {
+    overflow: auto;
+    max-height: 70vh;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+table {
+    width: 100%;
+    min-width: 720px;
+    border-collapse: collapse;
+}
+
+th,
+td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface-muted);
+    font-size: 13px;
+    color: var(--muted);
+}
+
+/* Sortable column headers: inherit the muted header colour but read as clickable
+   and keep the arrow glyph on the same line as the label. */
+.sort-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: inherit;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.sort-link:hover,
+.sort-link:focus-visible {
+    color: var(--text);
+    text-decoration: underline;
+}
+
+tr:last-child td {
+    border-bottom: 0;
+}
+
+/* Wide tables are read by scanning across many columns; a hover tint keeps the
+   eye on one row. Same token as the sticky header and the row-editor drawer, so
+   no existing row background is fought. */
+.table-wrap tbody tr:hover > td {
+    background: var(--surface-muted);
+}

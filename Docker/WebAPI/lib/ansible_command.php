@@ -1,0 +1,38 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Deploy-mode planning and the remote shell commands the worker runs:
+ * compatibility facade.
+ *
+ * This is still the only require path callers need (ADR-0006 refactoring
+ * contract, Etappe 8 of docs/audits/2026-08-11-deploy-reliability-master-plan.md):
+ * it loads the domain modules in a deterministic order, so a caller that
+ * required this file before the split keeps every function it had. The split
+ * is structural only; every function kept its name, signature, marker wording
+ * and quoting.
+ *
+ * Static scanners read the owner registry in lib/ansible_command_modules.php
+ * rather than this filename - a contract that scans a single file stops
+ * guarding the moment that file is split, without turning red.
+ *
+ * Ownership map:
+ * - ansible_command_shell.php      the one shell-quoting primitive
+ * - ansible_command_steps.php      the step markers around each playbook
+ * - ansible_command_modes.php      payload/VM filter, mode-to-playbook SSoT,
+ *                                  mission remote command
+ * - ansible_command_probes.php     the shell/Python programs embedded into
+ *                                  remote commands, each self-contained
+ * - ansible_command_preflight.php  preflight components and command, output
+ *                                  readers
+ * - ansible_command_create.php    the four control calls of one create unit
+ *                                  (Etappe 14B), built without a cleanup trap
+ *                                  because the async job outlives the call
+ */
+
+require_once __DIR__ . '/ansible_command_shell.php';
+require_once __DIR__ . '/ansible_command_modes.php';
+require_once __DIR__ . '/ansible_command_probes.php';
+require_once __DIR__ . '/ansible_command_preflight.php';
+require_once __DIR__ . '/ansible_command_create.php';

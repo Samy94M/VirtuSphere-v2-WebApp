@@ -1,0 +1,400 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/constants.php';
+
+function virtusphere_status_meta(string $legacyStatus): array
+{
+    return match ($legacyStatus) {
+        VIRTUSPHERE_STATUS_INITIALIZING => ['label' => 'Initializing', 'badge' => 'neutral'],
+        VIRTUSPHERE_STATUS_REGISTERED => ['label' => 'Registered', 'badge' => 'info'],
+        VIRTUSPHERE_STATUS_DEPLOYED => ['label' => 'Deployed', 'badge' => 'success'],
+        VIRTUSPHERE_STATUS_OS_INSTALLING => ['label' => 'OS Installing', 'badge' => 'warning'],
+        VIRTUSPHERE_STATUS_OS_INSTALLED => ['label' => 'OS Installed', 'badge' => 'success'],
+        default => ['label' => $legacyStatus, 'badge' => 'neutral'],
+    };
+}
+
+function virtusphere_lifecycle_meta(string $lifecycleState): array
+{
+    return match ($lifecycleState) {
+        VIRTUSPHERE_LIFECYCLE_INITIALIZING => ['badge' => 'neutral'],
+        VIRTUSPHERE_LIFECYCLE_READY => ['badge' => 'info'],
+        VIRTUSPHERE_LIFECYCLE_DEPLOYING => ['badge' => 'warning'],
+        VIRTUSPHERE_LIFECYCLE_DEPLOYED => ['badge' => 'success'],
+        VIRTUSPHERE_LIFECYCLE_OS_INSTALLING => ['badge' => 'warning'],
+        VIRTUSPHERE_LIFECYCLE_OS_INSTALLED => ['badge' => 'success'],
+        VIRTUSPHERE_LIFECYCLE_FAILED => ['badge' => 'danger'],
+        default => ['badge' => 'neutral'],
+    };
+}
+
+/**
+ * How far along the lifecycle a state is, for the one rule that has no other
+ * home: a state write must never move a VM BACKWARDS.
+ *
+ * mecm_updateid.php wrote `os_installing` unconditionally, so a VM that had
+ * already reported `os_installed` fell visibly back to 4/5 on every renewed
+ * registration - the device-sync re-reports a ResourceID whenever the VM
+ * re-enters its queue, so this was not a rare race. The operator saw a finished
+ * machine start installing again.
+ *
+ * `failed` deliberately shares the bottom rank with `initializing`: a failed VM
+ * that registers again IS moving forward, and refusing that would strand it.
+ *
+ * A new lifecycle state has to be ranked here, and the default THROWS rather
+ * than guessing: a silent fallback would rank an unknown state as either the
+ * furthest along or the furthest behind, and both answers let the guard fail
+ * open on the state it knows least about.
+ */
+function virtusphere_lifecycle_rank(string $lifecycleState): int
+{
+    return match ($lifecycleState) {
+        VIRTUSPHERE_LIFECYCLE_INITIALIZING => 0,
+        VIRTUSPHERE_LIFECYCLE_FAILED => 0,
+        VIRTUSPHERE_LIFECYCLE_READY => 1,
+        VIRTUSPHERE_LIFECYCLE_DEPLOYING => 2,
+        VIRTUSPHERE_LIFECYCLE_DEPLOYED => 3,
+        VIRTUSPHERE_LIFECYCLE_OS_INSTALLING => 4,
+        VIRTUSPHERE_LIFECYCLE_OS_INSTALLED => 5,
+        default => throw new InvalidArgumentException('Unranked lifecycle state: ' . $lifecycleState),
+    };
+}
+
+function virtusphere_mecm_sync_meta(string $mecmSyncState): array
+{
+    return match ($mecmSyncState) {
+        VIRTUSPHERE_MECM_SYNC_NOT_READY => ['badge' => 'neutral'],
+        VIRTUSPHERE_MECM_SYNC_PENDING => ['badge' => 'warning'],
+        VIRTUSPHERE_MECM_SYNC_REGISTERED => ['badge' => 'success'],
+        VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED => ['badge' => 'danger'],
+        default => ['badge' => 'neutral'],
+    };
+}
+
+function virtusphere_legacy_status_from_states(string $lifecycleState, string $mecmSyncState): string
+{
+    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED) {
+        return VIRTUSPHERE_STATUS_OS_INSTALLED;
+    }
+    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
+        return VIRTUSPHERE_STATUS_OS_INSTALLING;
+    }
+    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecmSyncState === VIRTUSPHERE_MECM_SYNC_PENDING) {
+        return VIRTUSPHERE_STATUS_DEPLOYED;
+    }
+    if ($lifecycleState === VIRTUSPHERE_LIFECYCLE_READY) {
+        return VIRTUSPHERE_STATUS_REGISTERED;
+    }
+
+    return VIRTUSPHERE_STATUS_INITIALIZING;
+}
+
+// The boundary is emit-only: no inverse exists, every machine-API write names
+// both states and passes the legacy string as a literal (mecm_client_ack.php,
+// mecm_updateid.php, db_importMAC.php). Accepting a legacy string would need an
+// inverse plus an ADR-0008 note: five strings onto two axes is not lossless.
+
+// getDeviceList emits the stored MECM token; the deploy failure mark keeps its
+// wire name `failed` (migration 0070, ADR-0019 amendment 5).
+function virtusphere_mecm_sync_wire_value(string $mecmSyncState): string
+{
+    return $mecmSyncState === VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED ? 'failed' : $mecmSyncState;
+}
+
+function virtusphere_is_lifecycle_state(string $state): bool
+{
+    return in_array($state, VIRTUSPHERE_LIFECYCLE_STATES, true);
+}
+
+function virtusphere_assert_lifecycle_state(string $state): string
+{
+    if (!virtusphere_is_lifecycle_state($state)) {
+        throw new InvalidArgumentException('Unknown VM lifecycle state: ' . $state);
+    }
+
+    return $state;
+}
+
+// --- Integration heartbeat staleness (ADR-0018) -----------------------------
+// Display-only derivation; timestamps are server-side (NOW()) and untrusted
+// client clocks never enter these calculations.
+
+function virtusphere_heartbeat_staleness(?string $lastSeenAt, int $intervalSeconds, ?string $lastStatus = null, ?int $now = null): string
+{
+    if ($lastStatus === VIRTUSPHERE_HEARTBEAT_STATUS_FAIL) {
+        return 'danger';
+    }
+    if ($lastSeenAt === null || $lastSeenAt === '') {
+        return 'unknown';
+    }
+
+    $current = $now ?? time();
+    $seenTs = virtusphere_evidence_timestamp($lastSeenAt, $current);
+    if ($seenTs === null) {
+        return 'unknown';
+    }
+
+    $age = max(0, $current - $seenTs);
+    $warnAfter = max($intervalSeconds * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER, VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS);
+    $dangerAfter = max($intervalSeconds * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER, VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS);
+
+    if ($age > $dangerAfter) {
+        return 'danger';
+    }
+    if ($age > $warnAfter) {
+        return 'warning';
+    }
+
+    return 'ok';
+}
+
+function virtusphere_heartbeat_meta(string $staleness): array
+{
+    return match ($staleness) {
+        'ok' => ['badge' => 'success'],
+        // 'legacy' = a fresh V1 heartbeat whose result the script has not yet
+        // confirmed. Yellow like a warning, but a distinct, benign label.
+        'legacy' => ['badge' => 'warning'],
+        'warning' => ['badge' => 'warning'],
+        // 'missing' = expected but never seen (another source already reported).
+        'missing' => ['badge' => 'warning'],
+        'danger' => ['badge' => 'danger'],
+        // 'stale' = a green result that has aged out of being evidence. Grey,
+        // not yellow: nothing is known to be broken, it is simply unconfirmed.
+        'stale' => ['badge' => 'neutral'],
+        default => ['badge' => 'neutral'],
+    };
+}
+
+/**
+ * Severity order of an Ampel state, for "worst of a group" roll-ups. One ranking
+ * for every group (heartbeat sources, ESXi credentials, Ansible credentials):
+ * three copies used to exist and had already disagreed about whether `missing`
+ * outranks `warning`, which is a difference the tiles must never show.
+ */
+function virtusphere_heartbeat_state_rank(string $state): int
+{
+    return match ($state) {
+        'danger' => 5,
+        // Worse than a delayed source: it has never reported at all, while its
+        // siblings do, so nothing is going to recover on its own.
+        'missing' => 4,
+        'warning' => 3,
+        // A fresh legacy heartbeat: the task is alive but its result is
+        // unconfirmed, milder than a stale reporter.
+        'legacy' => 2,
+        'ok' => 0,
+        // 'stale' shares the rank of 'unknown' (the default) on purpose: an
+        // expired green and a never-tested credential say the same thing about
+        // the present, so a roll-up must not report one as healthier.
+        default => 1,
+    };
+}
+
+/**
+ * Traffic-light state for an Ansible credential's last preflight test: 'ok',
+ * 'warning', 'danger' (last test failed), 'stale' (last test passed but is too
+ * old to still be evidence) or 'unknown' (never tested).
+ *
+ * The schedule may be disabled or delayed, so evidence expiry is independent.
+ * Only a passing result ages: a failure stays red until a current re-test,
+ * because ageing a known break into grey would hide it.
+ *
+ * @param array<string, mixed>|null $state
+ */
+function ansible_preflight_ampel(?array $state, ?int $now = null, int $intervalHours = 0): string
+{
+    if ($state === null
+        || (array_key_exists('evidence_current', $state) && !$state['evidence_current'])
+        || trim((string) ($state['last_status'] ?? '')) === ''
+    ) {
+        return 'unknown';
+    }
+
+    // Literal comparison rather than the constants: the value set is owned by
+    // lib/repo/ansible_preflight.php, which this module does not load.
+    $ampel = match ((string) $state['last_status']) {
+        'ok' => 'ok',
+        'warning' => 'warning',
+        default => 'danger',
+    };
+    if ($ampel === 'danger') {
+        return $ampel;
+    }
+
+    $checkedAt = trim((string) ($state['last_checked_at'] ?? ''));
+    if ($checkedAt === '') {
+        return 'unknown';
+    }
+    $current = $now ?? time();
+    $checkedEpoch = virtusphere_evidence_timestamp($checkedAt, $current);
+    if ($checkedEpoch === null) {
+        return 'unknown';
+    }
+
+    return ($current - $checkedEpoch) > max(VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS * 86400, 2 * max(0, $intervalHours) * 3600)
+        ? 'stale'
+        : $ampel;
+}
+
+require_once __DIR__ . '/status_evidence.php';
+
+// --- V2 result-reporting derivation (ADR-0018 reportRun) --------------------
+// Display-only, server-clock only. `last_event` is the sole driver of legacy vs
+// V2 and running vs completed; `report_version` never enters these.
+
+// Maps an integration source to its display group kind: 'sync' (the three MECM
+// sync tasks, subject to the V2/legacy result semantics), 'site' (the MECM
+// site-health reporter, completed-only) or 'internal' (the maintenance worker,
+// plain liveness that is never shown as legacy).
+function virtusphere_integration_source_kind(string $source): string
+{
+    if (in_array($source, VIRTUSPHERE_INTEGRATION_MECM_SYNC_SOURCES, true)) {
+        return 'sync';
+    }
+    if (in_array($source, VIRTUSPHERE_INTEGRATION_MECM_SITE_SOURCES, true)) {
+        return 'site';
+    }
+
+    return 'internal';
+}
+
+// A run in progress (two-clock model): the badge keeps the last completed
+// result, and the row is not treated as stale until the run itself exceeds
+// max(3x interval, 60s, RUN_GRACE). Beyond that the reporter is stuck and ages
+// out normally.
+function virtusphere_run_running_state(array $row, ?int $now = null): string
+{
+    $current = $now ?? time();
+    $interval = (int) ($row['interval_seconds'] ?? 0);
+    $attemptAt = isset($row['last_attempt_at']) ? (string) $row['last_attempt_at'] : null;
+    $attemptTs = virtusphere_evidence_timestamp($attemptAt, $current);
+    if ($attemptTs === null) {
+        return 'unknown';
+    }
+    $age = $current - $attemptTs;
+    $grace = max(
+        $interval * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER,
+        VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS,
+        VIRTUSPHERE_RUN_GRACE_SECONDS
+    );
+    if ($age > $grace) {
+        $dangerAfter = max(
+            $interval * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER,
+            VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS
+        );
+
+        return $age > $dangerAfter ? 'danger' : 'warning';
+    }
+
+    if (empty($row['last_result_at'])
+        || virtusphere_evidence_timestamp((string) $row['last_result_at'], $current) === null
+    ) {
+        return 'unknown';
+    }
+
+    return match ((string) ($row['last_status'] ?? '')) {
+        VIRTUSPHERE_RUN_OUTCOME_FAIL => 'danger',
+        VIRTUSPHERE_RUN_OUTCOME_OK => 'ok',
+        VIRTUSPHERE_RUN_OUTCOME_WARNING => 'warning',
+        default => 'unknown',
+    };
+}
+
+// A source that only sent a legacy heartbeat: a fresh beat is 'legacy' (yellow,
+// result not confirmed) and it ages out through the normal thresholds. Follows
+// last_event, so a script rollback from V2 back to heartbeats shows legacy again.
+function virtusphere_run_legacy_state(array $row, ?int $now = null): string
+{
+    $stale = virtusphere_heartbeat_staleness(
+        isset($row['last_seen_at']) ? (string) $row['last_seen_at'] : null,
+        (int) ($row['interval_seconds'] ?? 0),
+        isset($row['last_status']) ? (string) $row['last_status'] : null,
+        $now
+    );
+
+    return $stale === 'ok' ? 'legacy' : $stale;
+}
+
+// Central display-state derivation for one integration source row (ADR-0018).
+// $kind comes from virtusphere_integration_source_kind(); $anySeen is whether
+// any source in the SAME group has reported, so missing is derived per group.
+function virtusphere_integration_row_state(?array $row, string $kind, bool $anySeen, ?int $now = null): string
+{
+    if ($row === null) {
+        return $anySeen ? 'missing' : 'unknown';
+    }
+
+    if ($kind === 'internal') {
+        return virtusphere_heartbeat_staleness(
+            isset($row['last_seen_at']) ? (string) $row['last_seen_at'] : null,
+            (int) ($row['interval_seconds'] ?? 0),
+            isset($row['last_status']) ? (string) $row['last_status'] : null,
+            $now
+        );
+    }
+
+    if ($kind === 'site') {
+        return virtusphere_site_completed_state($row, $now);
+    }
+
+    return match ((string) ($row['last_event'] ?? VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT)) {
+        VIRTUSPHERE_RUN_EVENT_COMPLETED => virtusphere_run_completed_state($row, $now),
+        VIRTUSPHERE_RUN_EVENT_STARTED => virtusphere_run_running_state($row, $now),
+        default => virtusphere_run_legacy_state($row, $now),
+    };
+}
+
+// Derives the display state of one client deploy phase from its latest event
+// row (deploy_client_events): none|running|unconfirmed|finished|failed.
+function virtusphere_client_phase_state(?array $latestEvent, ?int $now = null): string
+{
+    if ($latestEvent === null) {
+        return 'none';
+    }
+
+    $event = (string) ($latestEvent['event'] ?? '');
+    if ($event === VIRTUSPHERE_CLIENT_EVENT_FINISHED) {
+        return 'finished';
+    }
+    if ($event === VIRTUSPHERE_CLIENT_EVENT_FAILED) {
+        return 'failed';
+    }
+    if ($event === VIRTUSPHERE_CLIENT_EVENT_STARTED) {
+        $startedTs = strtotime((string) ($latestEvent['created_at'] ?? ''));
+        if ($startedTs !== false && (($now ?? time()) - $startedTs) > VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS) {
+            return 'unconfirmed';
+        }
+
+        return 'running';
+    }
+
+    return 'none';
+}
+
+function virtusphere_client_phase_meta(string $phaseState): array
+{
+    return match ($phaseState) {
+        'running' => ['badge' => 'info'],
+        'unconfirmed' => ['badge' => 'warning'],
+        'finished' => ['badge' => 'success'],
+        'failed' => ['badge' => 'danger'],
+        default => ['badge' => 'neutral'],
+    };
+}
+
+function virtusphere_is_mecm_sync_state(string $state): bool
+{
+    return in_array($state, VIRTUSPHERE_MECM_SYNC_STATES, true);
+}
+
+function virtusphere_assert_mecm_sync_state(string $state): string
+{
+    if (!virtusphere_is_mecm_sync_state($state)) {
+        throw new InvalidArgumentException('Unknown MECM sync state: ' . $state);
+    }
+
+    return $state;
+}

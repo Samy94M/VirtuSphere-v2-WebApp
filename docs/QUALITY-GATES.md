@@ -1,0 +1,138 @@
+# Quality Gates: Bedeutung, Voraussetzungen, Interpretation
+
+Rollentrennung (AP9): `scripts/check.ps1` ist die **ausführbare** SSoT der Gates; diese Seite erklärt, was jedes Gate beweist, was es voraussetzt und wie ein rotes Ergebnis zu lesen ist. Bedienung und lokale Fehlersuche stehen in `docs/QA.md`; die Entscheidungen hinter Runner, Lanes und Skip-Politik in ADR-0031, ADR-0015 (Amendment) und ADR-0028 (Revision). Diese Seite nennt bewusst keine Testzahlen, Laufzeiten oder Baselines: solche Werte gehören in die erzeugten QA-Artefakte (`-Json`), nicht in Doku, die still veraltet.
+
+## Ergebnisklassen und Exitcodes
+
+Jedes Gate endet als `pass`, `fail`, `skip`, `not_applicable` oder `infrastructure_error`. Ein fehlendes Tool ist **immer** `infrastructure_error`, nie ein Skip; `not_applicable` ist nur für bewusste Plattform-/Flag-Entscheidungen zulässig (windows-only-Gate auf Linux, Netz-Gate unter `-NoNetwork`) und trägt seinen Grund im Artefakt. Runner-Exitcodes: `0` alle verpflichtenden Gates grün, `1` mindestens ein Gate rot (dominiert), `2` Prüfumgebung unvollständig, `3` ungültiger Aufruf.
+
+Ausführungsformen: **nativ** (Host-Tools), **containerisiert** (läuft über Docker; auf Windows-Hosts setzt die Fast-Lane Docker deshalb ausdrücklich voraus), **windows-only** (eigener Windows-Runner in CI). Netz-Gates beziehen Advisories/Toolimages nur in verbundener CI; das Runtime-System bleibt offline (ADR-0007).
+
+## Fast-Lane (jeder PR, lokaler Vorabcheck)
+
+| Gate | Beweist | Form | Rot heißt meist |
+|---|---|---|---|
+| `compose-config` | Compose-Dateien valide und interpolierbar | containerisiert | Syntax-/Env-Fehler in `docker-compose.yml`/`.env` |
+| `compose-hardening` | Bestehende Container-Härtung als Vertrag: `read_only`+tmpfs, `cap_drop: ALL` + dokumentierte `cap_add`, `no-new-privileges`, Limits, Healthchecks, `service_healthy`-Ordnung, phpMyAdmin nur im `tools`-Profil auf Loopback, Tag+Digest-Pins, gemeinsames versioniertes PHP-`runtime`-Target, kein Docker-Socket, **und der Umgebungssatz je Container** (nginx bekommt nichts, phpMyAdmin genau `PMA_HOST`/`PMA_PORT`, MySQL seine vier `MYSQL_*`) | containerisiert | Abweichung vom dokumentierten Vertrag; keine Guardlockerung zur Umgehung. Eine gemessene notwendige Vertragsänderung aktualisiert Compose und exakten Erwartungswert gemeinsam mit einer Gegenprobe. Der Umgebungsbefund nennt nur Schlüsselnamen, nie Werte |
+| `php-lint` | Jede First-Party-PHP-Datei parst | containerisiert | Syntaxfehler; Datei in der Fehlzeile |
+| `phpunit-unit` | Unit- + Static-Suiten, `--fail-on-skipped`; Portal-Require-Closure per AST einschließlich bedingter Aufrufe, Callbacks, deklarierter Owner und negativer/leerfallbezogener Gegenproben | containerisiert | Regression oder verletzter Contract-Test; ein Skip ist hier ein Defekt (ADR-0015-Amendment) |
+| `phpstan` | Statische Analyse auf dem Level aus `phpstan.neon.dist`, Baseline nur als Ratchet | containerisiert | Neuer Befund: an der Quelle fixen, nie re-baselinen |
+| `composer-validate` | `composer.json`/Lock konsistent, Plattformanforderungen erfüllbar | containerisiert | Lock-Drift nach Handedit |
+| `composer-audit` | Bekannte Advisories der PHP-Abhängigkeiten | containerisiert, Netz | Neues Advisory: bewerten, updaten oder begründet ausnehmen |
+| `lang-parity` | DE/EN-Schlüssel- und Platzhalter-Parität, echte Umlaute, kein Gedankenstrich in Portal-Prosa (ADR-0014) | nativ | Key nur in einer Sprache oder Platzhalter-Drift |
+| `enum-sync` | PHP-Konstanten == ENUM-Spiegel in `struktur.sql`/`migrate.php`, ordnungs-exakt (ADR-0016) | nativ | Spiegel vergessen; am SSoT (Konstante) beginnen |
+| `php-version-sync` | Dockerfile-`FROM` == composer.json == constants == Doku | nativ | Version an einer Stelle angehoben |
+| `version-sync` | Release-Nummer `Docker/WebAPI/lib/VERSION` (SSoT) == `Powershell-MECM/VERSION`, Form `JJJJ.MM.N` mit Monat 01 bis 12 und N 1 bis 99 | nativ | Nummer nur in einer Kopie angehoben oder falsch geschrieben; beide Kopien im Release-Commit gemeinsam anheben |
+| `bounds-sync` | Kein Portal-Text schreibt eine Zahl aus, die eine Konstante besitzt; `BOUNDS_EXEMPT` nicht veraltet; die Audit-Kontextgrenze in `struktur.sql` gleicht der PHP-Konstante | nativ | Zahl statt Platzhalter im Text, verwaiste Ausnahme, oder Byte-Grenze zwischen App und Frischschema auseinandergelaufen |
+| `audit-contract` | Persistierte Ereignisse haben genau einen Owner: jeder Producer nennt einen registrierten Ereigniscode, nur `lib/repo/log.php` schreibt in `deploy_logs`, kein Kontextfeld kann ein Secret oder eine ganze Payload tragen, `addLog()`/`audit_auth()` bleiben entfernt, keine Log-/Auditsignatur nimmt einen Token entgegen, und kein registriertes Ereignis bleibt ohne Producer (ADR-0026), außer historischen Ereignissen aus `VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL`, die von dieser Pflicht ausgenommen sind und nie wieder geschrieben werden dürfen | nativ | Freier Producer, unbekannter Code oder neu geschriebenes historisches Ereignis; am SSoT (`lib/audit_event_definitions.php`) beginnen, nicht am Aufrufer |
+| `doc-hygiene` | Keine Changelog-Marker, leeren Dateien oder überschrittenen Zeilen-/UTF-8-Bytebudgets in AGENTS/GROK/CLAUDE/README; Bytegrenzen gelten auch bei wenigen langen Zeilen | nativ | Historie auslagern, Einstieg kürzen und Fachreferenzen gezielt laden; Budgets besitzt `scripts/check-doc-hygiene.sh`, Bytes sind keine exakte Tokenmessung |
+| `doc-semantics` | Betriebsdoku behauptet keine veraltbaren Stände: keine `[x]`/Datums-Nachweise in `PRE-SHIP-CHECKLIST.md`, keine hartcodierten Test-/Migrationszahlen oder Messwerte, PHPStan-Level-, MySQL- und Node-Nennungen gegen ihre SSoT, stillgelegte Backup-Pfade nur mit Stilllegungs-Marker | nativ | Doku nennt einen Ist-Stand als Zahl; interpolieren, streichen oder ins Artefakt/Archiv verschieben |
+| `file-size` | ADR-0006-Dateigrößenbudget (400 Zeilen) für `lib/` und `portal/`; Ausnahmeliste als Ratchet in beide Richtungen (`file-size.oversize`/`grown`/`stale`), leerer Scan ist ein Befund (`zero-match`); läuft in allen Lanes | nativ | PHP-Datei über Budget, gewachsene oder veraltete Ausnahme; `php scripts/check-file-size.php --list` zeigt die Größen |
+| `csp-patterns` | Keine `BLOCK:`-Muster (interpolierte SQL, Secret-Fallbacks, Inline-Handler, externe Assets) im Worktree | nativ | Hard-Finding; Fundstelle in der Ausgabe |
+| `js-syntax` | `node --check` der Portal-Skripte | nativ | Syntaxfehler in `core.js`/`forms.js`/den Deploy-Modulen |
+| `powershell-syntax` | Alle `.ps1`/`.psm1`/`.psd1` parsen (5.1-kompatibel) | nativ | Parser-Fehler; Datei in der Ausgabe |
+| `powershell-tests` | PSScriptAnalyzer (Server-Regelsatz inkl. 5.1-Kompatibilitätsregeln über `Powershell-MECM/`, Tooling-Regelsatz über `scripts/` und `tests/powershell/`) + Pester über die getrennten MECM-Server-/Clientpakete; ein Pesterlauf zählt nur grün, wenn das Laufobjekt `Passed` meldet und kein Test, Container oder Setup-Block scheiterte; darunter MAC-Vektoren sowie gespiegelter Logschema-/Redaction-/Retention-/Sinkvertrag, Marker-Selbstheilung, zustandsfreie Versionsprüfung, atomarer Packaging-Rollback und unveränderte Reportpayloads (ADR-0029) | nativ | Regelverstoß, gebrochener Vektor-/Zwillings-Contract oder unvollständiger, gemischter beziehungsweise falsch versionierter Paketsatz |
+| `yaml-lint` / `actionlint` | YAML-Stil und Workflow-Semantik | containerisiert | Echte YAML-/Actions-Fehler; Linter-Zeile lesen |
+| `ansible-syntax` / `ansible-lint` | Playbooks parsen und bestehen `--strict` | containerisiert | Playbook-Änderung verletzt Lint-Profil |
+| `ansible-module-contract` | Jedes benutzte `community.vmware`-Modul lädt im QA-Ansible-Image gegen die gepinnte Collection (Verbindungsfehler gegen 127.0.0.1 ist der Gutfall; fehlende Python-Bibliothek, Argumentfehler oder verschwundenes Modul nicht), benutzte und geprobte Module sind dieselbe Menge, Deprecations der installierten Collection stehen in `module-deprecations.txt` | containerisiert | Modul lädt nicht (z. B. fehlende Bibliothek wie `requests`), Argument-Spec verletzt, ungeprobtes Modul oder unerfasste Deprecation |
+| `ansible-powercycle-selection` | Die Auswahl-Ketten des Power-Cycle-Playbooks (wen darf der Lauf schalten) laufen zeichengleich gegen Fixtures: an/aus/suspendiert, fehlendes `needs_mac`, leere Eingaben, kaputte Modulantworten; Produktionsablauf mit lokalen Action-Doubles beweist Ein/Pause/Aus je VM, echte Sekundenpause und Abbruch vor der nächsten VM bei Fehlern, dazu Wiederholung nach einem ESXi-Fehler und W2 (unklares Einschalten wird gelesen, nie blind wiederholt); `esxi-step-retry-contract.py` beweist dasselbe für Export, Start und Autostart samt `[n/total]`-Zeilen | containerisiert | Auswahl weicht vom Vertrag ab, Fixture-Datei driftet vom Playbook (`PowercyclePlaybookContractTest` pinnt beide) oder ein Schritt wiederholt, zählt oder meldet anders als vereinbart |
+| `ansible-create-async` | Die Async-Naht des per-VM-Create gegen einen Sleep-Stub, ohne ESXi: Start mit `poll: 0` liefert eine wiederauffindbare Job-ID im dedizierten Verzeichnis, eine eigene spätere Abfrage meldet erst laufend und dann fertig, der gezielte Cleanup entfernt genau diese Statusdatei. Pinnt außerdem, dass eine unbekannte Job-ID als `finished` ohne `failed` antwortet, weshalb die Unterscheidung an der Statusdatei hängt | containerisiert | Job-ID nicht wiederauffindbar, falsches Async-Verzeichnis, Cleanup lässt etwas liegen, oder die Laufzeit meldet einen verlorenen Job anders (dann Fixture und Status-Playbook gemeinsam nachziehen) |
+| `ansible-output-buffering` | Ankunftszeiten der Playbookausgabe im QA-Ansible-Image: ohne `PYTHONUNBUFFERED` kommen die Zeilen einer sequenziellen Schleife gesammelt am Ende, mit ihr laufend. Beide Fälle sind Teil der Aussage; der Kontrollfall hält den Beweis am Leben | containerisiert | Der Kontrollfall puffert nicht mehr (Laufzeit hat sich geändert, nicht die Schwelle anfassen) oder ein Produktionsaufruf liefert seine Zeilen weiter gesammelt |
+| `host-secret-cleanup` | Die Regeln, mit denen der Ansible-Host verwaiste `accounts.yml` (ESXi-Passwort) per systemd-Timer entfernt (K21-F, Entscheidung 5): nur `/tmp/virtusphere-job-*/accounts.yml`, eine Ebene tief, eigenes Konto, in einem Auftragsordner dieses Kontos, älter als 24 h, Verknüpfungen nie gefolgt, fremde Auftragsordner bleiben, gesperrte Auftragsordner bleiben (den Schutz laufender Aufträge leistet das Alter, die Sperre schließt nur einen zweiten Lauf aus), Abbruch als root, Installer mit ersetztem Platzhalter und geprüftem Kontonamen. Jede Regel hat einen Kontrollfall; der alte, eigene, ungesperrte Fall muss entfernt werden, sonst wären die Behalte-Fälle auch bei einem Lauf ohne Wirkung grün | containerisiert (`debian:bookworm-slim`, Digest in `scripts/tool-lock.json`, ohne Netz) | Ein Fall ist rot: eine Löschregel oder der Installer verletzt die Regel, oder der Kontrollfall wurde nicht entfernt. Fehlt Docker oder das Image: `infrastructure_error`, nie pass |
+| `ansible-vars-files-lifetime` | Zwei Tatsachen der Ansible-Laufzeit, auf denen das Löschen von `accounts.yml` unter einem nicht zurückgekehrten Schritt ruht (K21, ADR-0041 Amendment 2026-10-12): `vars_files` wird je Task neu gelesen, eine gelöschte Datei macht ihre Werte ab dem nächsten Task undefiniert, auch im `always`; ein Playbook ohne lesenden Kanal endet an seiner nächsten Ausgabe, bevor sein nächster Task startet. Jeder Fall mit Kontrollfall | containerisiert | Werte bleiben nach dem Löschen lesbar, oder ein Playbook ohne Leser läuft weiter (Laufzeit hat sich geändert: Begründung im Amendment neu lesen, nicht die Probe anpassen); Kontrollfall scheitert (`infrastructure_error`) |
+| `yaml-roundtrip` | Golden-Mission rendert durch die Produktions-Generatoren und PyYAML liest sie semantisch identisch (Anhang-C-Nachfolger) | containerisiert | Generator-Änderung ohne nachgezogenen `expected`-Block; genau dieses Gespräch ist gewollt |
+| `shellcheck` / `hadolint` | Shell-Skripte und Dockerfiles | containerisiert | Echte Findings; Ausnahmen nur inline mit Grund |
+| `python-client-tests` | `upload_mac_list.py` (stdlib-only) inkl. Exitcode-Vertrag 0/20-24 sowie geschlossener 8R-O-Runner-Vertrag, Redaction, Atomizität und read-only Preflight | containerisiert | Rückkanal-Contract (ADR-0030) oder Durable-Runner-Protokoll (ADR-0040) verletzt |
+
+## Integration-Lane (Merge, Nightly, Release-Kandidaten)
+
+Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
+
+| Gate | Beweist | Form | Rot heißt meist |
+|---|---|---|---|
+| `qa-stack` | Eigener Compose-Stack (`virtusphere-qa`) aus `struktur.sql`, Migrationen, Seed, Health; berührt nie den Dev-Stack | containerisiert | Fresh-Install-Pfad gebrochen; vor allen DB-Gates fixen |
+| `migrate-check` | Migrations-Preflight `pending=0` gegen den QA-Stack | containerisiert | Migration fehlt oder ist nicht idempotent |
+| `phpunit-full` | Volle Suite inkl. Integrationstests, `--fail-on-skipped`; Allowlist-/Credential-Zustände arrangieren die Tests selbst | containerisiert | Ein dynamischer Skip oder eine echte Integrations-Regression |
+| `schema-convergence` | `struktur.sql` allein == `struktur.sql` + alle Migrationen, inkl. der 0019/0020-Edge-Cases | containerisiert | Schema-Änderung nur auf einer Seite |
+| `health-contract` | `health.php` 200/`ok` mit vergröberter PHP-Version, `/tests/` 403; phpMyAdmin im QA-`tools`-Profil als `www-data`, ohne Capabilities, mit erzeugter Konfiguration, nicht schreibbarem Vendorbaum und authentifizierter MySQL-TCP-Anmeldung | containerisiert | Exposure- oder phpMyAdmin-Laufzeitregression; HTTP 200 allein beweist keine Anmeldung |
+| `e2e-portal` | Playwright Chromium gegen den QA-Stack: der E6-Abdeckungsvertrag (unten) | nativ, Netz für Toolbezug | Browser-beweisbare Regression; Report im Artefakt |
+| `visual-contract` | Statische Hälfte des Visualvertrags: Browserresolver, Metadatenvergleich, Update-Verweigerung, Maskendeklaration und Manifest (`node --test "tests/*.test.js"` in `tests/e2e`); läuft in Integration und Release nach `e2e-portal` | nativ | Visual-/Resolververtrag verletzt; fehlendes `node_modules` ist ein Infrastrukturfehler (erst `e2e-portal`) |
+| `guard-harness` | Jeder Guard positiv, negativ (Mutation wird erkannt) und im Zero-Match-Fall bewiesen (`scripts/test-guards.ps1`) | nativ | Ein Guard schützt nicht mehr, was er behauptet |
+
+`phpunit-full` wiederholt Unit/Static bewusst. O08 hat die exakten JUnit-Fälle
+verglichen; der Anteil blieb unter dem vorab festgelegten Änderungswert. Eine
+spätere disjunkte Ausführung muss deshalb neu vor der Messung geplant werden,
+den vollständigen Einzelaufruf des Gates erhalten und darf einen roten oder
+nicht gelaufenen Unit-Gate nie durch eine Integration-only-Auswahl verdecken.
+
+## Release-Lane (vor jeder Auslieferung)
+
+| Gate | Beweist | Form | Rot heißt meist |
+|---|---|---|---|
+| `e2e-browser-matrix` | Dieselbe Playwright-Suite wie `e2e-portal` auf Firefox und WebKit (ADR-0028-Revision: die volle Browser-Matrix gehört zur Release-Lane) | nativ, Netz für Toolbezug | Engine-spezifische Regression; Report im Artefakt |
+| `e2e-msedge` | Dieselbe Suite auf Windows-Edge über den `msedge`-Channel | windows-only, Netz für Toolbezug | Edge-spezifische Regression; off-Windows `not_applicable` |
+| `restore-drill` | Backup + Restore in isolierten Containern: Hash/Manifest, Rowcounts, Schemafingerprint, Invarianten, App-Smoke, Credential-Entschlüsselung mit richtigem und Scheitern mit falschem `APP_KEY` (ADR-0017) | containerisiert | Restore-Pfad oder Schlüsselmaterial-Handling gebrochen |
+| `secret-scan` | Kein Secret in der vollständigen Git-Historie; ohne gescannte Commits (etwa im Worktree, dessen `.git` der Container nicht auflöst) `infrastructure_error` statt Pass | containerisiert, Netz | Neues Secret committet: rotieren, nicht nur löschen; null gescannte Commits: aus einem echten Clone prüfen |
+| `sbom` | SPDX-SBOM je Runtime-Image | containerisiert, Netz | Toolfehler; SBOM gehört ins Artefakt |
+| `image-cve` | Trivy-Scan, blockend nur bei fixbaren Critical/High; Ausnahmen in `.trivyignore.yaml` mit ID, Grund, Owner, Ablauf, und eine abgelaufene Ausnahme bricht wie eine fehlende. Die Liste ist seit 2026-09-07 leer: ein Fund mit verfügbarem Fix gehört in das Image, nicht hierher | containerisiert, Netz | Neues fixbares CVE oder abgelaufene Ausnahme; erst prüfen, ob es einen Fix gibt, dann erst über eine Ausnahme reden |
+| `offline-bundle` | Bundle (Kernimages plus getrennt verifiziertes optionales Tools-Teilbundle, vollständige Image-Manifeste, vendor, Collections, SBOM, CVE-Bericht, Quelle, `SHA256SUMS`) verifiziert sich selbst offline | containerisiert, Netz beim Bau | Bundle unvollständig; `verify.sh` beziehungsweise `tools/SHA256SUMS` lesen |
+| `npm-audit` | Advisories des E2E-Dev-Tooling (`tests/e2e`), blockend ab high | nativ, Netz | Dev-Tooling-Advisory; Update oder begründete Ausnahme |
+
+## E2E-Abdeckungsvertrag (E6, ADR-0028-Revision)
+
+Playwright beweist jede **Aktion** genau einmal im echten Browser; **Felder** werden erschöpfend in PHPUnit geprüft. Das Inventar ist maschinell geschlossen, nicht diese Seite:
+
+- Das Inventar ist der geschlossene Action-Scan `tests/Support/PortalActionInventory.php` (derselbe, den `PortalConfirmContractTest` klassifiziert); `tests/Static/E2eActionCoverageContractTest.php` erzwingt, dass jede Action einen `// e2e-covers:`-Marker in einer Spec trägt (Confirm-Aktionen zusätzlich `e2e-covers-cancel:`). Eine neue Action bricht den Build, bis ihre Spec existiert oder die Schuld offen in `PENDING_ACTIONS` gebucht ist.
+- Confirm-Aktionen beweisen beide Zweige (Abbrechen ändert nichts, per DB-Beweis; Bestätigen führt aus); Verifikation läuft immer über Zustand (DB, frisches GET), nie über die POST-Antwort.
+- Bewusst **nicht** im Browser: die erschöpfende Feld-Wertematrix. Sie lebt in `ValidatorRulesTest` (jede Regel, jede Grenze); der Browser fährt nur die feindliche Wertematrix je Render-Kontextklasse (`field-roundtrip.spec.js`). Alles andere wäre eine langsame, flake-anfällige Duplikation der PHPUnit-Schicht.
+
+### Seiteninventar mit Prüffokus (überführt aus TESTPLAN Anhang A)
+
+`health-matrix.spec.js` prüft **jede** Portalseite aus `tests/e2e/lib/pages.js` basal (Ladezustand je Rolle, kein PHP-Fehlertext, keine Konsolen-/CSP-Fehler, kein Off-Host-Request, kein roher i18n-Key, beide Themes); `accessibility.spec.js` scannt jede Seite mit Axe in beiden Themes. `PortalPageInventoryContractTest` hält diese Liste gegen `portal/` vollständig; eine noch nicht gescannte Seite steht mit Grund in `MATRIX_DEFERRED_PAGES`; `rbac-csrf.spec.js` beweist die Ablehnungs-Diagonale (fehlendes/fremdes Token, unberechtigte Rolle, anonym) quer über die POST-Actions. Die Spalte nennt die darüber hinaus vertiefende Spec.
+
+Das Seiteninventar liegt in `tests/e2e/lib/pages.js`. Eine Seite, die ohne Parameter nichts Konkretes rendert, trägt dort einen `query`-Bauer und bekommt ihre IDs aus `tests/e2e/lib/matrix-seed.js`; so stehen `mission_details.php`, `vm_edit.php` und `deploy.php` **mit** Mission in der Matrix, letzteres, weil ohne Mission weder Speichertabelle noch Warnboxen im DOM existieren, und `deploy_log.php` mit einem geseedeten fehlgeschlagenen Export-Auftrag samt Protokollzeilen. Beide Matrizen prüfen zusätzlich, dass die Seite nicht wegleitet: ein Redirect antwortet mit 200 von seinem Ziel, und alle weiteren Prüfungen liefen dann unter falschem Namen gegen eine andere Seite. Die i18n-Präfixe leitet der Spec aus den Katalog-Dateinamen ab statt sie zu listen und bricht ab, wenn die Ableitung leer ist. Geprüft wird dabei die vom Browser ausgehandelte Sprache; dass die andere dieselben Schlüssel hat, sichert `lang-audit --ci` (Parität), nicht ein zweiter Durchlauf.
+
+| Seite | Besonderer Prüffokus | Vertiefende Spec |
+|---|---|---|
+| login/logout/session_ping | Fixation/Rotation, `ip_locked`, serverseitige Invalidierung, CSRF-Exemption | `session-security.spec.js` |
+| index/dashboard | Redirect je Auth-Zustand, Aggregate, Live-Deploy-Badge | `health-matrix.spec.js`, `session-security.spec.js` |
+| missions | CRUD, Template-Erkennung, Confirm-Zweige | `crud-mission.spec.js` |
+| mission_details | Bulk-Aktionen, Transfer-Export/-Import-Round-Trip | `mission-transfer.spec.js` |
+| vms / vm_edit | Bulk mit Confirm; dynamische Disk/NIC-Zeilen, vNIC-Enum, Overrides, Hotplug, Bearbeitungskonflikt | `crud-vm.spec.js` |
+| deploy / deploy_log | Enqueue, Scheduling, Cancel (`data-confirm-action`), Retry inkl. partial-Zweig, Live-Status bis Terminal inkl. `partial` | `deploy-actions.spec.js` |
+| os / packages / vlans | Geteilter Statusfilter, Status-Normalisierung sichtbar, MECM-owned read-only (UI und POST) | `crud-catalog.spec.js` |
+| credentials | Nie Klartext-Rendering, Verbindungstest-Kategorien, Referenzschutz lokalisiert | `crud-credential.spec.js`, `crud-negative.spec.js` |
+| system_status | Ampel getrennt nach Integration/MECM-Site (Legacy, Ergebnis, Site-Zustand, Providerfehler grau), Inventory-Enqueue, Intervall, kompakte ESXi-Karten, Fehlerdetail hinter `<details>`; Legende deckt alle drei Ampeln und stimmt mit der Hilfe überein, Handlungsanweisung nur an reparierbaren Zeilen, Abweichungs-Zählung nach Anzahl bzw. „Nicht geprüft" | `system-status.spec.js`, `system-status-actions.spec.js`, `system-status-ampel.spec.js` |
+| users / account | Rollen, Policy in UI und Backend identisch, Selbstpflege | `crud-users.spec.js` |
+| settings | Tab-Fragment-Redirects, One-Time-Report-Token, HTTPS-Karte (Upload, Ablehnfälle, Enable/Disable) | `settings-flow.spec.js`, `https-flow.spec.js` |
+| logs | Tab+Kategorie-Deep-Links, CSV-Export | `csv-injection.spec.js` |
+| CSV-Exporte | Header, BOM, Formel-Injection-Werte erneut im heruntergeladenen Artefakt | `csv-injection.spec.js` |
+| help | Vollständigkeit gegen UI-Delta, Anker | `health-matrix.spec.js` |
+| health.php | 200/`ok`, generisch bei Störung, kein Detail-Leak | `health-contract`-Gate |
+
+Die Maschinen-API ist kein Portal: ihre Endpunkte sind über `MachineApiWireTest`/`MachineApiErrorShapeContractTest`/`MecmReportWireTest` gepinnt (Wire-Felder eingefroren, keine Lokalisierung; `.claude/rules/machine-api.md`).
+
+### Feld-Wertematrix (überführt aus TESTPLAN Anhang B)
+
+Die Wertklassen und was sie fangen; erschöpfend je Validator-Regel in `ValidatorRulesTest`, je Render-Kontext im Browser in `field-roundtrip.spec.js` (DB byte-exakt, kein Entity in der Speicherung, jeder Kontext escaped, Dialog-Handler beweist Nicht-Ausführung):
+
+| Wertklasse | Fängt |
+|---|---|
+| Umlaute/ß | Encoding (utf8mb4), Rendering |
+| HTML-Metazeichen, `<script>`, Attribut-Breakout | fehlendes Escaping, Doppel-Escaping, XSS |
+| SQL-Sonderzeichen | Round-Trip durch Prepared Statements |
+| Führendes/trailing Whitespace | Trim-Konsistenz DB vs. Anzeige |
+| Exakt Maximallänge / +1 | Grenzlängen (`mb_strlen` == VARCHAR-Semantik), Truncation vs. Validierung |
+| 4-Byte-Emoji | utf8mb4-Vollständigkeit |
+| Locale-Zahlen/-Datum | Formatierungs-Idempotenz beim Re-Save (ADR-0022) |
+| Leerstring nach gefülltem Wert | NULL-vs.-`''`-Konsistenz |
+| YAML-Zeichen und C0-Steuerbytes | Weiterverwendung im Deploy-YAML; Chokepoint ist der Escaper (`yaml-roundtrip`-Gate) |
+
+## Bewusst manuelle Release-Gates
+
+Nicht automatisierbar bzw. bewusst menschlich; sie gehören zur Release-Abnahme (`PRE-SHIP-CHECKLIST.md`) und werden als Blocker dokumentiert, nie als Skip umgedeutet:
+
+- **Tastatur-, Fokus- und Screenreader-Durchgang** der Kernflüsse in beiden Themes: Axe findet Attribut-, nicht Bedienbarkeitsfehler.
+- **SYSTEM-Smoke** der PowerShell-Clients in einer Wegwerf-Windows-VM und **MECM-Staging-Abnahme**: braucht echte MECM-Infrastruktur.
+- **Reales Ansible-/ESXi-Staging** mit zweitem Idempotenzlauf (`changed=0`-Erwartung): der Sandbox-Stub beweist die Choreografie, nicht das Zielsystem.
+- **Clean-Checkout-Releaseprobe** auf frischem Host (Rollout-Schritt 9/10).

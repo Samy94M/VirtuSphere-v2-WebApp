@@ -1,0 +1,363 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
+use PHPUnit\Framework\TestCase;
+
+require_once dirname(__DIR__, 2) . '/lib/ansible_command.php';
+require_once dirname(__DIR__, 2) . '/lib/connection_errors.php';
+require_once dirname(__DIR__, 2) . '/lib/ssh.php';
+
+/**
+ * The Ansible-host preflight: the shell command the credential test and the
+ * deploy worker run, and the reader that names the component that broke the
+ * && chain. These pin the marker-before-check grammar, the lenient/strict
+ * collection split, the optional portal probe and the failure attribution.
+ */
+final class AnsiblePreflightTest extends TestCase
+{
+    public function testEachComponentEchoesItsMarkerBeforeItsCheck(): void
+    {
+        $command = ansible_preflight_command();
+        $cursor = 0;
+        foreach (array_keys(ansible_preflight_checks()) as $component) {
+            $marker = strpos($command, VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ' . $component, $cursor);
+            self::assertNotFalse($marker, 'marker missing for ' . $component);
+            $cursor = $marker;
+        }
+        // One && chain, so the first failing check stops before the next marker.
+        self::assertStringContainsString(' && ', $command);
+    }
+
+    public function testEveryPythonLibraryTheCollectionNeedsIsProbedInOneInterpreter(): void
+    {
+        // The preflight checked pyvmomi and then asked ansible-doc whether the
+        // collection is present. ansible-doc only reads documentation, so it
+        // succeeds on a host where not a single module can run: every
+        // community.vmware module the playbooks call imports the collection's
+        // vmware_rest_client, which aborts with "Failed to import the required
+        // Python library (requests)" before it reads an argument. pyvmomi does
+        // not pull requests in, so the test reported a healthy host and six of
+        // the seven inventory queries would have answered "0 datastores" under
+        // ignore_errors.
+        //
+        // What the collection really needs is proven where the collection is
+        // installed: check.ps1 -Gate ansible-module-contract calls every used
+        // module against 127.0.0.1:443 in the QA image. This test only keeps the
+        // portal's side from silently losing a probe again, because
+        // Docker/qa-ansible is not mounted into the PHP container and a glob on
+        // it here would be permanently empty.
+        $checks = ansible_preflight_checks();
+
+        foreach (['pyvmomi', 'requests'] as $library) {
+            self::assertArrayHasKey($library, $checks, $library . ' has no preflight component');
+        }
+        // One interpreter: two libraries importable in two different pythons are
+        // not a working host, and the deploy runs whatever `python3` resolves to.
+        foreach (['pyvmomi', 'requests'] as $library) {
+            self::assertStringStartsWith('python3 -c ', $checks[$library]);
+        }
+        self::assertStringContainsString('import requests', $checks['requests']);
+    }
+
+    public function testLenientProbeUsesVmwareGuestAndStrictUsesAutostartModule(): void
+    {
+        $lenient = ansible_preflight_command();
+        self::assertStringContainsString('community.vmware.vmware_guest', $lenient);
+        self::assertStringNotContainsString('vmware_host_auto_start', $lenient);
+
+        $strict = ansible_preflight_command('', true);
+        self::assertStringContainsString('community.vmware.vmware_host_auto_start', $strict);
+    }
+
+    public function testCollectionProbeIsSilentOnSuccessAndRejectsAnUnknownModule(): void
+    {
+        $probe = ansible_collection_probe_command('community.vmware.vmware_guest');
+
+        self::assertStringContainsString('ansible-doc', $probe);
+        self::assertStringContainsString('--json', $probe);
+        self::assertStringContainsString('module not in documents', $probe);
+        self::assertStringContainsString('capture_output=True', $probe);
+        self::assertStringNotContainsString('ansible-doc -t module community.vmware.vmware_guest 2>&1', $probe);
+    }
+
+    public function testNoEmbeddedProbeSourceCarriesACarriageReturn(): void
+    {
+        // This file is checked out with CRLF on Windows and with LF elsewhere,
+        // and a heredoc carries whatever the checkout had. The carriage returns
+        // survive the shell quoting and reach the remote shell inside every
+        // line: the async probe failed on Alpine with "TERM: invalid signal
+        // specification" and "exit: Illegal number: 1", and it would have
+        // depended on where the image was built. Every embedded source is
+        // normalized, so the assertion is on the built command, not on the file.
+        foreach (ansible_preflight_checks() as $component => $command) {
+            self::assertStringNotContainsString(
+                "\r",
+                $command,
+                'the ' . $component . ' probe carries a carriage return into the remote shell'
+            );
+        }
+        self::assertStringNotContainsString("\r", ansible_preflight_command('http://portal.lan/', false, ''));
+    }
+
+    public function testTheRuntimeVersionProbeComparesAgainstTheInstalledArtifacts(): void
+    {
+        $probe = ansible_preflight_checks()['runtime-versions'];
+
+        // The pinned version travels as an argument, and the floor is read from
+        // the installed collection's own meta/runtime.yml. No second version
+        // pair in PHP: that is what would keep passing while it stops meaning
+        // the same thing.
+        self::assertStringContainsString(ansible_pinned_collection_version(), $probe);
+        self::assertStringContainsString('requires_ansible', $probe);
+        self::assertStringContainsString('ansible-galaxy', $probe);
+        $requirements = (string) file_get_contents(ansible_source_dir() . DIRECTORY_SEPARATOR . 'requirements.yml');
+        self::assertMatchesRegularExpression(
+            '/name:\s*community\.vmware\s*\R\s*version:\s*["\']?' . preg_quote(ansible_pinned_collection_version(), '/') . '["\']?/',
+            $requirements,
+            'the runtime probe must consume the community.vmware pin from the effective requirements.yml'
+        );
+    }
+
+    /**
+     * AN-11: a failed `ansible-galaxy collection list` used to read as an empty
+     * listing and was reported as "is not installed", which hid the real cause.
+     * The probe checks the exit code and names the failure with a bounded part
+     * of the tool's stderr; "is not installed" stays for a readable listing that
+     * really lacks the collection.
+     */
+    public function testAFailedCollectionListingIsReportedAsItsOwnFailure(): void
+    {
+        $probe = ansible_preflight_checks()['runtime-versions'];
+
+        self::assertStringContainsString('if listing.returncode != 0:', $probe);
+        self::assertStringContainsString('ansible-galaxy collection list exited', $probe);
+        self::assertStringContainsString('printed no readable JSON', $probe);
+        self::assertStringContainsString('bounded(listing.stderr)', $probe);
+        self::assertStringContainsString('is not installed for this ansible-galaxy', $probe);
+        // The one-line bound must stay small enough for a job-log line.
+        self::assertMatchesRegularExpression('/\[:300\]/', $probe);
+    }
+
+    public function testTheCompleteCollectionLockPinsTheDirectAndTransitiveCollections(): void
+    {
+        self::assertSame([
+            'community.vmware' => '6.2.0',
+            'vmware.vmware' => '2.9.0',
+        ], ansible_pinned_collection_versions());
+
+        $probe = ansible_preflight_checks()['runtime-versions'];
+        foreach (ansible_pinned_collection_versions() as $collection => $version) {
+            self::assertStringContainsString($collection, $probe);
+            self::assertStringContainsString($version, $probe);
+        }
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testPinnedVersionUsesTheExplicitAnsibleSourceDirectory(): void
+    {
+        $sourceDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'virtusphere-ansible-source-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($sourceDir, 0770, true));
+        file_put_contents(
+            $sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml',
+            "collections:\n  - name: community.vmware\n    version: \"9.8.7\"\n  - name: vmware.vmware\n    version: \"2.9.0\"\n"
+        );
+        putenv('ANSIBLE_SOURCE_DIR=' . $sourceDir);
+
+        try {
+            self::assertSame(realpath($sourceDir), ansible_source_dir());
+            self::assertSame('9.8.7', ansible_pinned_collection_version());
+        } finally {
+            putenv('ANSIBLE_SOURCE_DIR');
+            unlink($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml');
+            rmdir($sourceDir);
+        }
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testUnreadablePinIsALocalConfigurationFailure(): void
+    {
+        $sourceDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'virtusphere-ansible-source-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($sourceDir, 0770, true));
+        file_put_contents($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml', "collections:\n  - name: other.collection\n    version: 1.0.0\n");
+        putenv('ANSIBLE_SOURCE_DIR=' . $sourceDir);
+
+        try {
+            ansible_pinned_collection_version();
+            self::fail('A missing community.vmware pin must fail before a remote preflight is built.');
+        } catch (SshTransportConfigurationException $exception) {
+            self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_CONFIG, ansible_connection_error_category($exception));
+        } finally {
+            putenv('ANSIBLE_SOURCE_DIR');
+            unlink($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml');
+            rmdir($sourceDir);
+        }
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testCredentialTestRejectsTheLocalPinBeforeSsh(): void
+    {
+        $sourceDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'virtusphere-ansible-source-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($sourceDir, 0770, true));
+        file_put_contents($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml', "collections: []\n");
+        putenv('ANSIBLE_SOURCE_DIR=' . $sourceDir);
+
+        try {
+            $result = credential_test_ansible(
+                ['type' => VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE, 'host' => 'must-not-resolve.invalid', 'port' => 22, 'username' => 'nobody'],
+                'unused-secret'
+            );
+            self::assertFalse($result['ok']);
+            self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_CONFIG, $result['code']);
+            self::assertStringContainsString('requirements.yml', $result['detail']);
+        } finally {
+            putenv('ANSIBLE_SOURCE_DIR');
+            unlink($sourceDir . DIRECTORY_SEPARATOR . 'requirements.yml');
+            rmdir($sourceDir);
+        }
+    }
+
+    public function testPortalProbeIsAppendedOnlyWithAnApiBaseUrl(): void
+    {
+        self::assertStringNotContainsString('health.php', ansible_preflight_command(''));
+
+        $withUrl = ansible_preflight_command('http://portal.lan:8021/', true);
+        // Trailing slash trimmed, health path appended, and named as its own step.
+        self::assertStringContainsString('http://portal.lan:8021/portal/health.php', $withUrl);
+        self::assertStringContainsString(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ' . VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL, $withUrl);
+    }
+
+    public function testPortalProbePassesUrlThroughEnvNotSourceInterpolation(): void
+    {
+        // The URL is operator-controlled: it must reach python via the environment,
+        // never spliced into the -c source, so a crafted value cannot break quoting.
+        $command = ansible_preflight_command('http://portal.lan:8021', true);
+        self::assertStringContainsString('VS_PF_URL=', $command);
+        self::assertStringContainsString('os.environ["VS_PF_URL"]', $command);
+    }
+
+    public function testAllowlistProbeIsAppendedOnlyWithAnApiBaseUrlAndUsesTheEnv(): void
+    {
+        self::assertStringNotContainsString('db_importMAC.php', ansible_preflight_command(''));
+
+        $withUrl = ansible_preflight_command('http://portal.lan:8021/', true);
+        // Probes the exact endpoint the deploy's MAC upload posts to, named as
+        // its own step, with the URL through the environment like the portal probe.
+        self::assertStringContainsString('http://portal.lan:8021/db_importMAC.php', $withUrl);
+        self::assertStringContainsString(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ' . VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST, $withUrl);
+        self::assertStringContainsString('VS_PF_MAC_URL=', $withUrl);
+        self::assertStringContainsString('os.environ["VS_PF_MAC_URL"]', $withUrl);
+        // Only the legacy 403 may read as denied; the expected 405 must not.
+        self::assertStringContainsString('403', $withUrl);
+    }
+
+    public function testHttpsProbesCarryTheUploadsPinLogic(): void
+    {
+        // The MAC upload pins the portal certificate by SHA-256 when the portal
+        // runs on a self-signed certificate (upload_mac_list.py). The probes
+        // must accept exactly the portals the upload accepts: a bare urlopen()
+        // failed the preflight against a self-signed portal whose callback
+        // would have worked, so the deploy died in its own precheck.
+        $pin = str_repeat('ab', 32);
+        $command = ansible_preflight_command('https://portal.lan', false, $pin);
+
+        // The fingerprint travels in the environment like the URLs do, and both
+        // probes route through the shared pinned opener.
+        self::assertStringContainsString("VS_PF_PIN='" . $pin . "'", $command);
+        self::assertSame(2, substr_count($command, 'VS_PF_PIN='), 'portal and allowlist probe both need the pin');
+        self::assertSame(2, substr_count($command, 'getpeercert'), 'both probes verify the served certificate');
+        self::assertStringContainsString('hashlib.sha256', $command);
+        self::assertStringContainsString('vs_urlopen', $command);
+    }
+
+    public function testAnHttpPortalKeepsAnEmptyPinAndTheProbesStillRun(): void
+    {
+        // http has nothing to pin: the pin env is empty and the opener falls
+        // back to plain urlopen, exactly like the upload's default_opener().
+        $command = ansible_preflight_command('http://portal.lan:8021', false, '');
+        self::assertStringContainsString("VS_PF_PIN=''", $command);
+        self::assertStringContainsString('portal/health.php', $command);
+        self::assertStringContainsString('db_importMAC.php', $command);
+    }
+
+    public function testAllowlistVerdictReadsOkDeniedAndUnknown(): void
+    {
+        $chain = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " portal\n" . VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " allowlist\n";
+
+        self::assertSame(
+            ['status' => 'ok', 'ip' => ''],
+            ansible_preflight_allowlist_verdict($chain . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' ok')
+        );
+        self::assertSame(
+            ['status' => 'denied', 'ip' => '10.89.7.4'],
+            ansible_preflight_allowlist_verdict($chain . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' denied 10.89.7.4')
+        );
+        self::assertSame(
+            ['status' => 'unknown', 'ip' => ''],
+            ansible_preflight_allowlist_verdict($chain . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' unknown')
+        );
+    }
+
+    public function testAllowlistVerdictIsAbsentWithoutTheProbeAndDropsANonIpEcho(): void
+    {
+        // Output from a run without an API base URL, or from before the probe
+        // existed: no verdict line at all.
+        self::assertSame(
+            ['status' => 'absent', 'ip' => ''],
+            ansible_preflight_allowlist_verdict(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " portal\nok")
+        );
+        // The echoed IP crossed a remote shell, so anything that does not parse
+        // as an IP is discarded rather than carried into audit lines.
+        self::assertSame(
+            ['status' => 'denied', 'ip' => ''],
+            ansible_preflight_allowlist_verdict(VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' denied not-an-ip')
+        );
+    }
+
+    public function testFailedComponentRecognisesTheAllowlistToken(): void
+    {
+        $output = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " portal\n"
+            . VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " allowlist\nTraceback (most recent call last):";
+        self::assertSame(VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST, ansible_preflight_failed_component($output));
+    }
+
+    public function testStripMarkersRemovesTheAllowlistVerdictLineToo(): void
+    {
+        $output = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " allowlist\n"
+            . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . " denied 10.89.7.4\nreal remote output";
+        self::assertSame('real remote output', ansible_preflight_strip_markers($output));
+    }
+
+    public function testFailedComponentIsTheLastMarkerReached(): void
+    {
+        $output = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " ansible-playbook\nansible-playbook 2.19\n"
+            . VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " python3\nPython 3.13\n"
+            . VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " pyvmomi\nModuleNotFoundError: No module named 'pyVmomi'";
+        self::assertSame('pyvmomi', ansible_preflight_failed_component($output));
+    }
+
+    public function testFailedComponentRecognisesTheOptionalPortalToken(): void
+    {
+        $output = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " community.vmware\n"
+            . VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " portal\nurllib.error.URLError";
+        self::assertSame(VIRTUSPHERE_ANSIBLE_PREFLIGHT_PORTAL, ansible_preflight_failed_component($output));
+    }
+
+    public function testFailedComponentIsNullWithoutAMarkerAndIgnoresUnknownTokens(): void
+    {
+        self::assertNull(ansible_preflight_failed_component("bash: command failed\n"));
+        self::assertNull(ansible_preflight_failed_component(VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' not-a-component'));
+    }
+
+    public function testStripMarkersLeavesOnlyTheRemoteOutput(): void
+    {
+        $output = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " pyvmomi\nModuleNotFoundError: No module named 'pyVmomi'\n"
+            . VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' community.vmware';
+        self::assertSame("ModuleNotFoundError: No module named 'pyVmomi'", ansible_preflight_strip_markers($output));
+    }
+}

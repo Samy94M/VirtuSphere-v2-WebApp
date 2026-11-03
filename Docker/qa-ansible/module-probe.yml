@@ -1,0 +1,206 @@
+---
+# Modulprobe der gepinnten Collection (QA-Werkzeug, wird nicht ausgeliefert).
+#
+# Ruft JEDES community.vmware-Modul, das die Playbooks unter Ansible/ benutzen,
+# mit gueltigen Argumenten und Wegwerf-Zugangsdaten gegen 127.0.0.1:443 auf. Kein
+# ESXi-Host ist beteiligt: die Verbindung wird zwangslaeufig abgelehnt, und genau
+# das ist das Bestehenskriterium.
+#
+# Was diese Probe beweist, ohne einen Host zu haben:
+#   1. das Modul existiert in der gepinnten Version ueberhaupt,
+#   2. die Argumente, die wir uebergeben, erfuellen seine argument_spec,
+#   3. jede Python-Bibliothek, die es importiert, ist installiert.
+#
+# Punkt 3 war der Anlass. Alle elf Module importieren community.vmware's
+# vmware_rest_client, der ohne `requests` mit "Failed to import the required
+# Python library (requests)" abbricht - und `requests` stand weder in den
+# dokumentierten Host-Voraussetzungen noch in der QA-Toolchain. Auf einem korrekt
+# nach Doku aufgesetzten Ansible-Host war damit der komplette ESXi-Teil des
+# Produkts funktionslos, und sieben der acht Inventar-Abfragen laufen unter
+# ignore_errors: die haetten "0 Datastores" gemeldet statt eines Fehlers.
+#
+# Ausgewertet wird von module-contract.sh, nicht hier: die Pruefung ist eine Liste
+# VERBOTENER Meldungen (fehlende Bibliothek, Argumentfehler, unbekanntes Modul),
+# nicht eine erwartete. Eine neue Formulierung des Verbindungsfehlers darf die
+# Probe nicht rot machen, ein neuer Argumentname schon.
+#
+# Jedes Modul, das ein Playbook benutzt, MUSS hier stehen:
+# tests/Static/AnsiblePlaybookHygieneContractTest.php laeuft beide Richtungen.
+- name: Modulprobe der gepinnten community.vmware-Version
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # Nicht routbar in dem Sinne, dass dort nichts lauscht: der Aufruf kommt bis
+    # zum connect() und scheitert daran. Ein erreichbarer Host wuerde die Probe
+    # von der Frage "laedt das Modul" auf "antwortet ESXi" verschieben.
+    probe: &probe
+      hostname: 127.0.0.1
+      port: 443
+      username: virtusphere-probe
+      password: virtusphere-probe
+      validate_certs: false
+  tasks:
+    - name: vmware_about_info
+      community.vmware.vmware_about_info:
+        <<: *probe
+      ignore_errors: true
+
+    - name: vmware_datacenter_info
+      community.vmware.vmware_datacenter_info:
+        <<: *probe
+      ignore_errors: true
+
+    - name: vmware_datastore_info
+      community.vmware.vmware_datastore_info:
+        <<: *probe
+      ignore_errors: true
+
+    # esxi_hostname ist Pflicht (eines von cluster_name/esxi_hostname). Genau
+    # dieser Argumentfehler hat einmal 13 Portgruppen als 0 gemeldet, weil die
+    # Aufgabe unter ignore_errors lief; siehe .claude/rules/ansible.md.
+    - name: vmware_portgroup_info
+      community.vmware.vmware_portgroup_info:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+      ignore_errors: true
+
+    # datacenter ist Pflicht.
+    - name: vmware_dvs_portgroup_info
+      community.vmware.vmware_dvs_portgroup_info:
+        <<: *probe
+        datacenter: ha-datacenter
+      ignore_errors: true
+
+    - name: vmware_host_facts
+      community.vmware.vmware_host_facts:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+      ignore_errors: true
+
+    - name: vmware_host_auto_start
+      community.vmware.vmware_host_auto_start:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+      ignore_errors: true
+
+    # AN-13: autostartVMs-ESXi_playbook.yml. Erst die Host-Standardwerte
+    # (system_defaults), dann die VM-Form mit Instance-UUID und power_info.
+    # Die Schluessel sind die des Playbooks; die Werte sind gueltige Beispiele.
+    - name: vmware_host_auto_start (system_defaults)
+      community.vmware.vmware_host_auto_start:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+        system_defaults:
+          enabled: true
+          start_delay: 120
+          stop_delay: 120
+          stop_action: guestShutdown
+          wait_for_heartbeat: false
+      ignore_errors: true
+
+    - name: vmware_host_auto_start (power_info, Instance-UUID)
+      community.vmware.vmware_host_auto_start:
+        <<: *probe
+        esxi_hostname: virtusphere-probe-host
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        power_info:
+          start_action: powerOn
+          start_order: -1
+          start_delay: 120
+          stop_delay: 120
+          stop_action: systemDefault
+          wait_for_heartbeat: systemDefault
+      ignore_errors: true
+
+    - name: vmware_guest_info
+      community.vmware.vmware_guest_info:
+        <<: *probe
+        name: virtusphere-probe-vm
+      ignore_errors: true
+
+    # AN-13: die Form, mit der die Playbooks den Ist-Zustand lesen (gebundene
+    # Instance-UUID statt Name). Dieselbe argument_spec wie oben, andere Schalter.
+    - name: vmware_guest_info (Instance-UUID)
+      community.vmware.vmware_guest_info:
+        <<: *probe
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        datacenter: ha-datacenter
+      ignore_errors: true
+
+    # Dieselben Schalter wie die Identitaetspruefung und der Inventarabruf: so
+    # prueft die echte argument_spec ihre Namen, nicht nur die Dokumentation,
+    # aus der das Gate ansible-create-async sie ableitet.
+    - name: vmware_vm_info
+      community.vmware.vmware_vm_info:
+        <<: *probe
+        show_allocated: false
+        show_attribute: false
+        show_cluster: false
+        show_datacenter: false
+        show_datastore: false
+        show_esxi_hostname: false
+        show_folder: false
+        show_mac_address: false
+        show_net: false
+        show_resource_pool: false
+        show_tag: false
+      ignore_errors: true
+
+    - name: vmware_guest_powerstate
+      community.vmware.vmware_guest_powerstate:
+        <<: *probe
+        name: virtusphere-probe-vm
+        state: powered-on
+      ignore_errors: true
+
+    # AN-13: startVMs und powercycle_vm_tasks schalten per Instance-UUID.
+    - name: vmware_guest_powerstate (Instance-UUID)
+      community.vmware.vmware_guest_powerstate:
+        <<: *probe
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        folder: "/"
+        datacenter: ha-datacenter
+        state: powered-on
+        force: false
+      ignore_errors: true
+
+    - name: vmware_guest
+      community.vmware.vmware_guest:
+        <<: *probe
+        name: virtusphere-probe-vm
+        datacenter: ha-datacenter
+      ignore_errors: true
+
+    # AN-13: createVMLaunch in der Form fuer eine vorhandene VM (Instance-UUID,
+    # Hardware, Disk, Netz). Die Hardwareversion ist im Playbook nur fuer neue
+    # VMs gesetzt; ihr Schluessel gehoert trotzdem zur argument_spec.
+    - name: vmware_guest (Instance-UUID, createVMLaunch)
+      community.vmware.vmware_guest:
+        <<: *probe
+        uuid: "00000000-0000-0000-0000-000000000000"
+        use_instance_uuid: true
+        state: present
+        folder: "/"
+        guest_id: otherGuest64
+        datacenter: ha-datacenter
+        datastore: datastore1
+        disk:
+          - size_gb: 1
+            type: thin
+        hardware:
+          memory_mb: 1024
+          num_cpus: 1
+          hotadd_cpu: true
+          hotadd_memory: true
+          version: "21"
+          scsi: lsilogicsas
+          secure_boot: true
+          boot_firmware: efi
+          vpmc_enabled: true
+        networks:
+          - name: VM Network
+            device_type: vmxnet3
+      ignore_errors: true

@@ -1,0 +1,1052 @@
+-- Fresh schema must converge with Docker/WebAPI/lib/migrate.php.
+-- ENUM/default literals below mirror PHP SSoT constants; future enum value
+-- changes need both this file and an explicit MODIFY migration.
+-- Tables are not declared in strict foreign-key order (deploy_esxi_inventory
+-- references deploy_credentials before it is created), so defer FK validation
+-- for the whole load, as mysqldump does; checks are re-enabled at the end.
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE IF NOT EXISTS deploy_users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    auth_source ENUM('local','active_directory') NOT NULL DEFAULT 'local',
+    password VARCHAR(255) NULL,
+    email VARCHAR(255) NOT NULL,
+    role ENUM('admin','user') NOT NULL DEFAULT 'user',
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    must_change_password TINYINT(1) NOT NULL DEFAULT 0,
+    ad_object_guid BINARY(16) NULL,
+    ad_upn VARCHAR(255) NULL,
+    ad_sam_account_name VARCHAR(255) NULL,
+    ad_display_name VARCHAR(255) NULL,
+    ad_account_enabled TINYINT(1) NULL,
+    ad_last_checked_at TIMESTAMP NULL,
+    password_changed_at TIMESTAMP NULL,
+    last_seen_at TIMESTAMP NULL,
+    locked_until TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY user_name_unique (name),
+    UNIQUE KEY deploy_users_ad_guid_unique (ad_object_guid),
+    INDEX deploy_users_auth_active (auth_source, is_active),
+    CONSTRAINT deploy_users_auth_shape CHECK (
+        (auth_source = _utf8mb4'local' AND password IS NOT NULL AND ad_object_guid IS NULL)
+        OR
+        (auth_source = _utf8mb4'active_directory' AND password IS NULL AND ad_object_guid IS NOT NULL AND ad_upn IS NOT NULL AND must_change_password = 0 AND locked_until IS NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_missions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    mission_name VARCHAR(255) NOT NULL,
+    mission_status VARCHAR(255) NOT NULL,
+    mission_notes TEXT,
+    wds_vlan VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    hypervisor_datastorage VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    hypervisor_datacenter VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    domain VARCHAR(255),
+    -- Provenance snapshot (username, not an FK), mirroring deploy_vms.vm_creator.
+    -- Stamped from the session on create; NULL for rows that predate migration 0015.
+    mission_creator VARCHAR(255),
+    -- ESXi autostart defaults (ADR-0025). They become the host's system_defaults;
+    -- a VM inherits them unless it stores an own value. autostart_stop_action
+    -- mirrors VIRTUSPHERE_AUTOSTART_STOP_ACTIONS (lib/deploy_constants.php, SSoT).
+    autostart_enabled TINYINT(1) NOT NULL DEFAULT 0,
+    autostart_start_delay INT NOT NULL DEFAULT 120,
+    autostart_stop_delay INT NOT NULL DEFAULT 120,
+    autostart_stop_action ENUM('guestShutdown','powerOff','suspend','none') NOT NULL DEFAULT 'guestShutdown',
+    autostart_wait_for_heartbeat TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    edit_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    UNIQUE KEY mission_name_unique (mission_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_vms (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    mission_id INT NOT NULL,
+    vm_name VARCHAR(255) NOT NULL,
+    vm_hostname VARCHAR(255) NOT NULL,
+    vm_domain VARCHAR(255),
+    vm_os VARCHAR(255),
+    vm_ram VARCHAR(255),
+    vm_cpu VARCHAR(255),
+    vm_disk VARCHAR(255),
+    vm_datastore VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    vm_datacenter VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    vm_guest_id VARCHAR(255),
+    -- CPU/RAM hot-add options, applied only at VM creation (Paket F). Default on.
+    cpu_hotplug TINYINT(1) NOT NULL DEFAULT 1,
+    ram_hotplug TINYINT(1) NOT NULL DEFAULT 1,
+    -- Per-VM ESXi autostart override (ADR-0025). -1 = inherit the mission default;
+    -- 0 = no wait. The two are NOT interchangeable, see lib/deploy_constants.php.
+    autostart_enabled TINYINT(1) NOT NULL DEFAULT 0,
+    autostart_start_delay INT NOT NULL DEFAULT -1,
+    autostart_stop_delay INT NOT NULL DEFAULT -1,
+    vm_creator VARCHAR(255),
+    -- Mirrors VIRTUSPHERE_STATUS_REGISTERED (lib/constants.php, the SSoT). Free-text
+    -- status, so it sits outside the ENUM-sync check; keep both in step by hand.
+    vm_status VARCHAR(64) NOT NULL DEFAULT '2/5 Registered',
+    lifecycle_state ENUM('initializing','ready','deploying','deployed','os_installing','os_installed','failed') NOT NULL DEFAULT 'ready',
+    mecm_sync_state ENUM('not_ready','pending','registered','deploy_failed') NOT NULL DEFAULT 'not_ready',
+    mecm_id VARCHAR(255),
+    -- Rollout identity (Etappe 14D, ADR-0043). Internal runtime, NOT a second
+    -- desired value: vm_hostname above stays the one editable business SSoT.
+    -- `mecm_rollout_hostname` is the name this rollout hands MECM and the PXE
+    -- client, frozen at hand-off so a later portal correction cannot silently
+    -- reinterpret a device MECM already accepted. `mecm_rollout_revision` fences
+    -- every mutating callback of the rollout. `mecm_previous_id` is a delete
+    -- tombstone that keeps the next hand-off fail-closed until the administrator
+    -- has removed the old device in MECM; VirtuSphere never deletes there.
+    -- Templates keep all three NULL: they have no rollout to freeze.
+    mecm_rollout_hostname VARCHAR(255) NULL,
+    mecm_rollout_revision BIGINT UNSIGNED NULL,
+    mecm_previous_id VARCHAR(255) NULL,
+    updated TINYINT(1) NOT NULL DEFAULT 0,
+    -- AV-P0 (migration 0058): counts every queueing for the device-sync. The
+    -- sync reports the value it read back, and `updated` is cleared only for
+    -- that transfer, so one queued meanwhile is not lost.
+    mecm_transfer_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    edit_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    -- Package-report VM incarnation (ADR-0044). A new deploy_vms row receives
+    -- a new UUID; ordinary edits and MECM reset retain it.
+    package_report_generation BINARY(16) NOT NULL DEFAULT (UUID_TO_BIN(UUID())),
+    -- Dedicated progress observations (ADR-0038). They are not lifecycle
+    -- timestamps: warnings derived from them never change VM state.
+    mecm_pending_since TIMESTAMP NULL,
+    os_install_watch_started_at TIMESTAMP NULL,
+    vm_notes TEXT,
+    -- Hypervisor identity (Entscheidung 6): the instance UUID is who the VM is,
+    -- the MOID is the host's current handle for it (re-register changes only the
+    -- MOID). Written by the MAC-import callback and the explicit adoption action;
+    -- NULL means "never seen on a host", never "matches anything".
+    vm_moid VARCHAR(64) NULL,
+    vm_instance_uuid VARCHAR(64) NULL,
+    -- K17 (migration 0061): where the identity above was proven, written with
+    -- it by the create commit and the MAC export. The host is a snapshot of the
+    -- access target at that time; NULL means unknown, never "anywhere". Create
+    -- warns before it builds a bound VM anew on another host.
+    vm_bound_credential_id INT NULL,
+    vm_bound_esxi_host VARCHAR(255) NULL,
+    UNIQUE KEY mission_vm_unique (mission_id, vm_name),
+    INDEX deploy_vms_mecm_pending_watch (mecm_sync_state, mecm_pending_since),
+    INDEX deploy_vms_os_install_watch (lifecycle_state, os_install_watch_started_at),
+    CONSTRAINT fk_deploy_vms_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_vms_bound_credential FOREIGN KEY (vm_bound_credential_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Globally unique effective MECM names (Etappe 14D, ADR-0043). The uniqueness
+-- has to be decided INSIDE the writing transaction: a preceding SELECT lets two
+-- missions created in parallel both read "free" and both write, and the estate
+-- then has two Windows machines answering to one name. The primary key decides,
+-- so the loser gets a duplicate-key error instead.
+--
+-- The key stored here is already the output of mecm_hostname_key(), so ascii_bin
+-- compares exactly what PHP compared. A case-insensitive collation would put the
+-- folding rule in a second place, and the two would disagree about the Turkish
+-- dotless i the moment somebody changed the collation.
+--
+-- One VM may hold TWO rows while a rollout is frozen: its old rollout name and
+-- its new desired name. A key still belongs to exactly one VM. Templates hold
+-- none. The rows cascade with the VM, which frees the local claim but proves no
+-- deletion in MECM: a new VM with that name stays fail-closed on the tombstone.
+CREATE TABLE IF NOT EXISTS deploy_vm_hostname_claims (
+    hostname_key VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    vm_id INT NOT NULL,
+    desired_claim TINYINT(1) NOT NULL DEFAULT 0,
+    rollout_claim TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (hostname_key),
+    INDEX deploy_vm_hostname_claims_vm (vm_id),
+    CONSTRAINT deploy_vm_hostname_claims_purpose CHECK (desired_claim = 1 OR rollout_claim = 1),
+    CONSTRAINT fk_deploy_vm_hostname_claims_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_interfaces (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vm_id INT NOT NULL,
+    ip VARCHAR(255) NOT NULL,
+    subnet VARCHAR(255) NOT NULL,
+    gateway VARCHAR(255) NOT NULL,
+    dns1 VARCHAR(255),
+    dns2 VARCHAR(255),
+    vlan VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin,
+    mac VARCHAR(255),
+    mode VARCHAR(255),
+    type VARCHAR(255),
+    KEY deploy_interfaces_mac_lookup (mac),
+    CONSTRAINT fk_deploy_interfaces_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_disks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vm_id INT NOT NULL,
+    disk_name VARCHAR(255) NOT NULL,
+    disk_size BIGINT NOT NULL,
+    disk_type VARCHAR(255) NOT NULL,
+    CONSTRAINT fk_deploy_disks_vm_id FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_packages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    package_name VARCHAR(255) NOT NULL,
+    package_basename VARCHAR(255) NOT NULL DEFAULT '',
+    package_version VARCHAR(255) NOT NULL,
+    package_status VARCHAR(255) NOT NULL,
+    retired_at TIMESTAMP NULL,
+    -- Set when the version relink moved this row's VM assignments to a successor.
+    -- The purge additionally requires NULL here: the relink removes the very
+    -- reference the purge protection reads, so without this marker the row lost
+    -- its protection through the one mechanism that made it worth protecting.
+    assignments_relinked_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY package_name_unique (package_name),
+    INDEX deploy_packages_basename_lookup (package_basename)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_vm_packages (
+    vm_id INT NOT NULL,
+    package_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (vm_id, package_id),
+    CONSTRAINT fk_deploy_vm_packages_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_vm_packages_package FOREIGN KEY (package_id) REFERENCES deploy_packages(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_vlan (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vlan_name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+    -- VLAN catalog becomes ESXi-owned (ADR-0023): retire instead of delete when a
+    -- portgroup disappears from every host with a fresh successful fetch.
+    retired_at TIMESTAMP NULL,
+    UNIQUE KEY vlan_name_unique (vlan_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ESXi inventory cache (ADR-0023): a read-only mirror of what the registered
+-- ESXi credentials report. ESXi is the source; this is only a display/warning
+-- cache, never a block. kind ENUM is mirrored from VIRTUSPHERE_INVENTORY_KINDS.
+CREATE TABLE IF NOT EXISTS deploy_esxi_inventory (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    credential_id INT NOT NULL,
+    kind ENUM('datacenter','datastore','network','host','vm') NOT NULL,
+    name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+    capacity_bytes BIGINT NULL,
+    free_bytes BIGINT NULL,
+    meta_json JSON NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_esxi_inventory_unique (credential_id, kind, name),
+    CONSTRAINT fk_deploy_esxi_inventory_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_esxi_inventory_state (
+    credential_id INT PRIMARY KEY,
+    last_success_at TIMESTAMP NULL,
+    last_attempt_at TIMESTAMP NULL,
+    last_status VARCHAR(32) NULL,
+    last_error_category VARCHAR(32) NULL,
+    -- Exact job that produced last_status/last_attempt_at. The job and its log
+    -- remain authoritative; deleting them at the retention boundary clears only
+    -- this pointer, so System status never renders a dead link.
+    last_job_id INT NULL,
+    failure_streak INT NOT NULL DEFAULT 0,
+    paused_until_credential_change TINYINT(1) NOT NULL DEFAULT 0,
+    -- Capability facts of the last SUCCESSFUL pull (ADR-0023 amendment 3). All
+    -- nullable, because NULL means "not known" (never pulled, or the module did
+    -- not report it) and must never be read as false. A failed pull leaves them
+    -- untouched: they describe the host, not the fetch.
+    api_type VARCHAR(32) NULL,
+    product_version VARCHAR(191) NULL,
+    license_product VARCHAR(191) NULL,
+    license_free TINYINT(1) NULL,
+    in_ha_cluster TINYINT(1) NULL,
+    in_maintenance TINYINT(1) NULL,
+    -- Per-kind answered-at stamps (migration 0030): {"datastore": "...", ...},
+    -- written for kinds whose every inventory query ANSWERED in a pull. Covers
+    -- the two states row timestamps cannot: a kind known empty as of T, and a
+    -- kind whose frozen rows outlived its failing query. Keys are validated in
+    -- PHP against VIRTUSPHERE_INVENTORY_KINDS (deliberately no second ENUM).
+    kind_freshness_json JSON NULL,
+    -- Per-kind exact-name contract. Missing keys remain legacy semantics 1;
+    -- only a fully answered kind is promoted atomically to semantics 2.
+    kind_name_semantics_json JSON NULL,
+    -- Last attempt per kind, independent from the last positive evidence.
+    kind_observation_json JSON NULL,
+    INDEX deploy_esxi_inventory_state_last_job (last_job_id),
+    CONSTRAINT fk_deploy_esxi_inventory_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_esxi_inventory_state_last_job FOREIGN KEY (last_job_id) REFERENCES deploy_jobs(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- On-demand Ansible preflight result (migration 0023). Unlike the ESXi inventory
+-- state above there is no scheduler: a row is written only when an operator hits
+-- "Test", so last_checked_at is shown verbatim and the reader judges staleness.
+-- last_status is a plain VARCHAR ('ok'/'warning'/'failed'), not a DB ENUM.
+CREATE TABLE IF NOT EXISTS deploy_ansible_preflight_state (
+    credential_id INT PRIMARY KEY,
+    last_status VARCHAR(16) NOT NULL,
+    last_checked_at TIMESTAMP NULL,
+    last_component VARCHAR(64) NULL,
+    tested_config_revision BIGINT UNSIGNED NULL,
+    test_generation BIGINT UNSIGNED NULL,
+    CONSTRAINT fk_deploy_ansible_preflight_state_credential FOREIGN KEY (credential_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- deploy_tokens fiel mit dem Desktop-Client (ADR-0035, Migration 0034).
+
+CREATE TABLE IF NOT EXISTS deploy_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ip VARCHAR(255) NOT NULL,
+    category VARCHAR(32) NOT NULL DEFAULT 'system',
+    log_message TEXT NOT NULL,
+    user_id INT NULL,
+    -- ADR-0032: request correlation, diagnostic only.
+    correlation_id VARCHAR(32) NULL,
+    -- Etappe 10C: new rows are registry-owned and structured. Historical rows
+    -- keep every field NULL and retain log_message as their unchanged fallback.
+    event_code VARCHAR(96) NULL,
+    object_type VARCHAR(64) NULL,
+    object_id VARCHAR(191) NULL,
+    result VARCHAR(16) NULL,
+    context_json LONGTEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- O07: category-scoped cursor windows stop after the requested id range.
+    INDEX deploy_logs_category_lookup (category, id),
+    INDEX deploy_logs_event_object_time (event_code, object_type, object_id, created_at),
+    -- Etappe 15: the correlation id became a searched column (audit table, its
+    -- count, and the jobs of one traced request). id trails the key because
+    -- every reader orders by the primary key descending.
+    INDEX deploy_logs_correlation_lookup (correlation_id, id),
+    CONSTRAINT fk_deploy_logs_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT deploy_logs_structured_audit_check CHECK (
+        (event_code IS NULL AND object_type IS NULL AND object_id IS NULL AND result IS NULL AND context_json IS NULL) OR
+        (event_code IS NOT NULL AND object_type IS NOT NULL AND result IS NOT NULL AND
+            (context_json IS NULL OR (JSON_VALID(context_json) = 1 AND JSON_TYPE(context_json) = _utf8mb4'OBJECT' AND OCTET_LENGTH(context_json) <= 4096)))
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- SP3 (migration 0069): the VMs an audit row names in its context `vm_ids`
+-- (bulk change, convergence sweep), written by audit_event() with its row. The
+-- foreign key follows the log retention; no key to deploy_vms, because a bulk
+-- delete names VMs that are gone.
+CREATE TABLE IF NOT EXISTS deploy_log_vm_refs (
+    vm_id INT NOT NULL,
+    log_id INT NOT NULL,
+    PRIMARY KEY (vm_id, log_id),
+    INDEX deploy_log_vm_refs_log (log_id),
+    CONSTRAINT fk_deploy_log_vm_refs_log FOREIGN KEY (log_id) REFERENCES deploy_logs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_os (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    os_name VARCHAR(255) NOT NULL,
+    os_status VARCHAR(255) NOT NULL,
+    retired_at TIMESTAMP NULL,
+    UNIQUE KEY os_name_unique (os_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_accessToWebAPI (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ipAddress VARCHAR(45) NOT NULL,
+    description VARCHAR(255),
+    -- K20 (migration 0063): the one caller role this entry admits
+    -- (lib/machine_api_roles.php owns the set and the endpoint map). NULL is a
+    -- legacy entry that still opens every machine endpoint; System status
+    -- counts those until a role is assigned.
+    role VARCHAR(16) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT deploy_access_role_check CHECK (role IS NULL OR role IN (_utf8mb4'mecm_server', _utf8mb4'ansible_host', _utf8mb4'client'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_migrations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(191) UNIQUE NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_login_attempts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(255) NOT NULL,
+    auth_source ENUM('local','active_directory') NOT NULL DEFAULT 'local',
+    ip_address VARCHAR(45) NOT NULL,
+    success TINYINT(1) NOT NULL DEFAULT 0,
+    result ENUM('pending','success','credential_failure','infrastructure') NOT NULL DEFAULT 'pending',
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX login_attempt_lookup (username, ip_address, attempted_at),
+    INDEX login_attempt_source_lookup (auth_source, username, ip_address, attempted_at),
+    INDEX login_attempt_result_lookup (result, attempted_at),
+    INDEX login_attempt_user_lookup (auth_source, username, attempted_at, result),
+    INDEX login_attempt_ip_lookup (ip_address, attempted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_ad_config (
+    id TINYINT UNSIGNED PRIMARY KEY,
+    enabled TINYINT(1) NOT NULL DEFAULT 0,
+    revision INT UNSIGNED NOT NULL DEFAULT 1,
+    default_naming_context VARCHAR(1024) NULL,
+    user_search_base_dn VARCHAR(1024) NULL,
+    bind_upn VARCHAR(255) NOT NULL,
+    bind_secret_ciphertext TEXT NOT NULL,
+    ca_certificate_pem MEDIUMTEXT NOT NULL,
+    automatic_bind_blocked_revision INT UNSIGNED NULL,
+    automatic_bind_blocked_at TIMESTAMP NULL,
+    automatic_bind_blocked_reason VARCHAR(64) NULL,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT deploy_ad_config_singleton CHECK (id = 1),
+    CONSTRAINT fk_deploy_ad_config_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_ad_config_updated_by FOREIGN KEY (updated_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_ad_controllers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    config_id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    host VARCHAR(253) NOT NULL,
+    port INT UNSIGNED NOT NULL DEFAULT 636,
+    priority INT UNSIGNED NOT NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 0,
+    validated_revision INT UNSIGNED NULL,
+    validated_at TIMESTAMP NULL,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_ad_controller_endpoint_unique (config_id, host, port),
+    UNIQUE KEY deploy_ad_controller_priority_unique (config_id, priority),
+    CONSTRAINT fk_deploy_ad_controllers_config FOREIGN KEY (config_id) REFERENCES deploy_ad_config(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_ad_controllers_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_ad_controllers_updated_by FOREIGN KEY (updated_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_ad_controller_state (
+    controller_id INT PRIMARY KEY,
+    config_revision INT UNSIGNED NOT NULL,
+    last_attempt_at TIMESTAMP NULL,
+    last_success_at TIMESTAMP NULL,
+    last_outcome VARCHAR(64) NOT NULL DEFAULT 'unavailable',
+    consecutive_transport_failures INT UNSIGNED NOT NULL DEFAULT 0,
+    retry_after TIMESTAMP NULL,
+    certificate_sha256 VARCHAR(95) NULL,
+    certificate_not_after TIMESTAMP NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_deploy_ad_controller_state_controller FOREIGN KEY (controller_id) REFERENCES deploy_ad_controllers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_credentials (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    type ENUM('esxi','ansible') NOT NULL,
+    name VARCHAR(191) NOT NULL,
+    host VARCHAR(255) NOT NULL,
+    port INT NULL,
+    username VARCHAR(191) NOT NULL,
+    secret_ciphertext TEXT NOT NULL,
+    esxi_trust_mode ENUM('legacy_insecure','strict') NOT NULL DEFAULT 'strict',
+    esxi_cert_kind ENUM('ca_bundle','server_certificate') NULL,
+    esxi_certificate_pem MEDIUMTEXT NULL,
+    esxi_strict_tested_at TIMESTAMP NULL,
+    created_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    config_revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    ansible_test_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    ansible_test_started_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_key_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_first_seen_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_confirmed_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_confirmed_by INT NULL,
+    ansible_host_observed_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_observed_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    ansible_host_observed_at TIMESTAMP NULL DEFAULT NULL,
+    ansible_host_accept_new TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    UNIQUE KEY credential_name_type_unique (type, name),
+    CONSTRAINT fk_deploy_credentials_created_by FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_jobs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    -- NULL for system jobs (e.g. ESXi inventory) that run without a mission (ADR-0023).
+    mission_id INT NULL,
+    user_id INT NULL,
+    -- cancelling (migration 0031, ADR-0033): a running job whose cancel was
+    -- requested; it keeps lock/heartbeat until the worker confirms at a step
+    -- boundary or the reaper converges a dead worker to cancelled.
+    -- outcome_unknown (migration 0065, WK-04/WK-07 A): the reaper ended a
+    -- running mission job after a stale heartbeat; its remote effect is unknown.
+    -- Since migration 0071 (U-01) the worker writes it too, with reason
+    -- ansible_connection_lost, after losing the Ansible host mid-step.
+    status ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial','outcome_unknown') NOT NULL DEFAULT 'queued',
+    locked_at TIMESTAMP NULL,
+    locked_by VARCHAR(191) NULL,
+    -- 8R-O-2 fencing fields are nullable while the active path is still the
+    -- pre-8R direct SSH contract. No runtime code may infer remote activation
+    -- from their presence.
+    lock_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    worker_epoch BIGINT UNSIGNED NULL,
+    execution_contract VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    execution_generation_id BINARY(16) NULL,
+    recovery_count INT UNSIGNED NOT NULL DEFAULT 0,
+    recovery_reason VARCHAR(32) NULL,
+    recovery_requested_at TIMESTAMP NULL,
+    heartbeat_at TIMESTAMP NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    payload_json JSON NULL,
+    result_json JSON NULL,
+    -- Etappe 10B: status is still the workflow truth. These bounded fields
+    -- explain a terminal transition; NULL denotes an unmigrated legacy row.
+    terminal_reason_code VARCHAR(32) NULL,
+    terminal_reason_detail VARCHAR(1024) NULL,
+    -- K4b (migration 0068): the VIRTUSPHERE_PLAYBOOKS key of the remote step
+    -- whose failure ended the job; NULL when no remote step failed. A retry of
+    -- a full pipeline continues there (deploy_job_retry_plan()).
+    failed_step VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    credential_esxi_id INT NULL,
+    credential_ansible_id INT NULL,
+    -- cancelled_at names the CONFIRMED end state only; the wish carries its
+    -- own timestamp and actor below (migration 0031). cancel_requested_by is
+    -- the historical user id, deliberately without FK: a deleted account must
+    -- not erase who asked, and the job log names the user anyway.
+    cancelled_at TIMESTAMP NULL,
+    cancel_requested_at TIMESTAMP NULL,
+    cancel_requested_by INT NULL,
+    -- Scheduling (ADR-0022): scheduled_at is a UTC run-not-before time;
+    -- group_id ties a staggered batch of per-VM jobs together.
+    scheduled_at DATETIME NULL,
+    -- K18 (migration 0062): UTC time of the first claim, written once. The
+    -- portal names a scheduled job that started late; locked_at is cleared at
+    -- every terminal transition and cannot carry it.
+    started_at DATETIME NULL,
+    -- Etappe 14B: UTC start of the create section and the persistent source of
+    -- its budget. Set by the worker at the first create unit, not at claim
+    -- time: queue waiting is not create work, and a budget starting there would
+    -- shrink with queue length. A retry is a new job and gets a new value.
+    create_started_at DATETIME NULL,
+    group_id CHAR(12) NULL,
+    -- Diagnostic correlation id (ADR-0032): ties the job to the portal request
+    -- that enqueued it. Opaque, never authorization; NULL predates the id.
+    correlation_id VARCHAR(32) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX deploy_jobs_mission_status (mission_id, status),
+    INDEX deploy_jobs_schedule (status, scheduled_at),
+    INDEX deploy_jobs_group (group_id),
+    -- System status reads the newest mission job a worker actually processed,
+    -- per Ansible credential: a backwards walk over this index that stops at
+    -- the first terminal row with attempts > 0. Completion time and id make
+    -- that lookup deterministic.
+    INDEX deploy_jobs_ansible_activity (credential_ansible_id, updated_at, id),
+    -- Etappe 15: the jobs of one traced portal request, read beside its audit
+    -- rows; same shape as the deploy_logs lookup.
+    INDEX deploy_jobs_correlation_lookup (correlation_id, id),
+    CONSTRAINT fk_deploy_jobs_mission FOREIGN KEY (mission_id) REFERENCES deploy_missions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_jobs_user FOREIGN KEY (user_id) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_jobs_esxi_credential FOREIGN KEY (credential_esxi_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_jobs_ansible_credential FOREIGN KEY (credential_ansible_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL,
+    CONSTRAINT deploy_jobs_execution_contract_check CHECK (execution_contract IS NULL OR execution_contract IN (_ascii'legacy_v1',_ascii'remote_v1')),
+    CONSTRAINT deploy_jobs_recovery_reason_check CHECK (recovery_reason IS NULL OR recovery_reason IN (_utf8mb4'remote_observation',_utf8mb4'legacy_uncertain',_utf8mb4'foreign_generation')),
+    CONSTRAINT deploy_jobs_terminal_reason_check CHECK (
+        (terminal_reason_code IS NULL AND terminal_reason_detail IS NULL) OR
+        (status = _utf8mb4'succeeded' AND terminal_reason_code = _utf8mb4'completed') OR
+        (status = _utf8mb4'partial' AND terminal_reason_code = _utf8mb4'partial_result') OR
+        (status = _utf8mb4'failed' AND terminal_reason_code IN (_utf8mb4'execution_failed',_utf8mb4'timeout',_utf8mb4'stale_heartbeat',_utf8mb4'ownership_lost',_utf8mb4'configuration_blocked')) OR
+        (status = _utf8mb4'cancelled' AND terminal_reason_code IN (_utf8mb4'operator_cancelled',_utf8mb4'cancel_converged')) OR
+        (status = _utf8mb4'outcome_unknown' AND terminal_reason_code IN (_utf8mb4'stale_heartbeat',_utf8mb4'ansible_connection_lost'))
+    ),
+    CONSTRAINT deploy_jobs_failed_step_check CHECK (
+        failed_step IS NULL OR failed_step IN (_ascii'powercycle',_ascii'export',_ascii'start',_ascii'autostart')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_job_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    job_id INT NOT NULL,
+    seq INT NOT NULL,
+    stream ENUM('stdout','stderr','system','ansible','worker_error') NOT NULL DEFAULT 'stdout',
+    line TEXT NOT NULL,
+    -- ADR-0032: the owning job's correlation id, filled by the insert helper.
+    correlation_id VARCHAR(32) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_job_logs_job_seq_unique (job_id, seq),
+    CONSTRAINT fk_deploy_job_logs_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8R-O-2: all durable-runner state ships inert. The random generation is
+-- created once with the schema; activations and claims stay disabled until an
+-- imported 8R-S site acceptance authorizes a later transition.
+CREATE TABLE IF NOT EXISTS deploy_runtime_identity (
+    id TINYINT UNSIGNED PRIMARY KEY,
+    current_generation_id BINARY(16) NOT NULL,
+    supervisor_contract VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    -- The supervisor's published state (migration 0049). Nullable and never
+    -- backfilled: under `worker_v1` these stay NULL, which is the truth, not a
+    -- gap. `supervisor_child_pid` is diagnostic only; a pid means nothing
+    -- outside the container that owns it, so nothing may act on it.
+    supervisor_heartbeat_at TIMESTAMP NULL,
+    supervisor_pid INT UNSIGNED NULL,
+    supervisor_phase VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    supervisor_child_pid INT UNSIGNED NULL,
+    supervisor_child_started_at TIMESTAMP NULL,
+    supervisor_restart_window_started_at TIMESTAMP NULL,
+    supervisor_restart_count INT UNSIGNED NOT NULL DEFAULT 0,
+    supervisor_next_retry_at TIMESTAMP NULL,
+    supervisor_contract_changed_at TIMESTAMP NULL,
+    supervisor_contract_changed_by INT NULL,
+    claim_state VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'accepting',
+    claim_changed_at TIMESTAMP NULL,
+    claim_changed_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    rotation_reason VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    rotated_by INT NULL,
+    CONSTRAINT deploy_runtime_identity_singleton CHECK (id = 1),
+    -- The `_ascii` introducers are load-bearing, not decoration. All four
+    -- columns below are ascii, and a CHECK literal without an introducer is
+    -- recorded with the CONNECTION charset at CREATE time (`_latin1` for the
+    -- client that loads this file). The moment any later ALTER rebuilds the
+    -- table, MySQL re-resolves the literals against the ascii column and stores
+    -- them as `_ascii` - so a fresh install and a migrated install end up with
+    -- textually different constraints for identical semantics, and
+    -- check-schema-convergence.sh fails. Migration 0049 is what surfaced it;
+    -- the divergence was latent here from the start, and the rest of this file
+    -- already writes the introducer (see deploy_jobs_execution_contract_check).
+    CONSTRAINT deploy_runtime_identity_supervisor_check CHECK (supervisor_contract IN (_ascii'worker_v1',_ascii'supervisor_v1')),
+    CONSTRAINT deploy_runtime_supervisor_phase_check CHECK (
+        supervisor_phase IS NULL OR supervisor_phase IN (_ascii'idle',_ascii'running',_ascii'stopping',_ascii'cooldown',_ascii'wait_retry',_ascii'manual',_ascii'stopped')
+    ),
+    CONSTRAINT deploy_runtime_identity_claim_check CHECK (claim_state IN (_ascii'accepting',_ascii'pause_after_current',_ascii'paused')),
+    CONSTRAINT deploy_runtime_identity_reason_check CHECK (rotation_reason IN (_ascii'install',_ascii'restore',_ascii'clone')),
+    CONSTRAINT fk_deploy_runtime_identity_rotated_by FOREIGN KEY (rotated_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_runtime_identity_claim_by FOREIGN KEY (claim_changed_by) REFERENCES deploy_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_runtime_supervisor_actor FOREIGN KEY (supervisor_contract_changed_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO deploy_runtime_identity (id, current_generation_id, supervisor_contract, rotation_reason)
+VALUES (1, RANDOM_BYTES(16), 'worker_v1', 'install')
+ON DUPLICATE KEY UPDATE id = VALUES(id);
+
+CREATE TABLE IF NOT EXISTS deploy_worker_leases (
+    lease_name VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+    epoch BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    owner_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    lease_until TIMESTAMP(6) NULL,
+    renewed_at TIMESTAMP(6) NULL,
+    claims_paused TINYINT(1) NOT NULL DEFAULT 1,
+    pause_reason VARCHAR(64) NULL,
+    updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    CONSTRAINT deploy_worker_leases_pause_check CHECK (claims_paused IN (0,1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO deploy_worker_leases (lease_name, claims_paused, pause_reason)
+VALUES ('deploy-worker', 1, '8R-S site acceptance missing')
+ON DUPLICATE KEY UPDATE lease_name = VALUES(lease_name);
+
+CREATE TABLE IF NOT EXISTS deploy_remote_mode_activations (
+    credential_ansible_id INT NOT NULL,
+    mode VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    state VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'disabled',
+    contract_version VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    host_preflight_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    fault_matrix_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    evidence_expires_at TIMESTAMP NULL,
+    changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    changed_by INT NULL,
+    optimistic_lock_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (credential_ansible_id, mode),
+    CONSTRAINT deploy_remote_activation_state_check CHECK (state IN ('disabled','legacy_explicit','pilot_remote','remote_enabled','rollback_pending')),
+    CONSTRAINT deploy_remote_activation_contract_check CHECK ((state = 'disabled' AND contract_version IS NULL) OR (state = 'legacy_explicit' AND contract_version = 'legacy_v1') OR (state IN ('pilot_remote','remote_enabled','rollback_pending') AND contract_version = 'remote_v1')),
+    CONSTRAINT fk_deploy_remote_activation_credential FOREIGN KEY (credential_ansible_id) REFERENCES deploy_credentials(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_remote_activation_changed_by FOREIGN KEY (changed_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_remote_executions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id INT NOT NULL,
+    job_attempt INT UNSIGNED NOT NULL,
+    step_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    protocol_version INT UNSIGNED NOT NULL,
+    run_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    unit_name VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    remote_dir VARCHAR(1024) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    instance_id BINARY(16) NOT NULL,
+    generation_id BINARY(16) NOT NULL,
+    controller_state VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    effect_state VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    reconciliation_state VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    cleanup_state VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    launch_intent_at TIMESTAMP(6) NULL, started_at TIMESTAMP(6) NULL,
+    last_observed_at TIMESTAMP(6) NULL, finished_at TIMESTAMP(6) NULL,
+    exit_code INT NULL, exit_signal INT NULL,
+    result_sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    log_offset BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    output_truncated TINYINT(1) NOT NULL DEFAULT 0,
+    recovery_count INT UNSIGNED NOT NULL DEFAULT 0,
+    last_probe_category VARCHAR(32) NULL, last_probe_detail VARCHAR(1024) NULL,
+    cleanup_due_at TIMESTAMP(6) NULL, cleanup_lease_until TIMESTAMP(6) NULL,
+    cleanup_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    cleanup_auto_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    cleanup_last_error VARCHAR(1024) NULL, cleanup_finished_at TIMESTAMP(6) NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY deploy_remote_execution_step_unique (job_id, job_attempt, step_key),
+    UNIQUE KEY deploy_remote_execution_token_unique (run_token),
+    UNIQUE KEY deploy_remote_execution_unit_unique (unit_name),
+    UNIQUE KEY deploy_remote_execution_dir_unique (remote_dir),
+    INDEX deploy_remote_execution_generation (generation_id, reconciliation_state),
+    CONSTRAINT fk_deploy_remote_execution_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
+    CONSTRAINT deploy_remote_execution_protocol_check CHECK (protocol_version = 1),
+    CONSTRAINT deploy_remote_execution_truncated_check CHECK (output_truncated IN (0,1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Per-VM create results (Etappe 14B): one durable row per VM per create job.
+-- The async directory, the cleanup counters and the cleanup backoff are NOT
+-- here; they belong to deploy_remote_executions, which this row binds to
+-- through remote_execution_id. The ENUM order of action, status and outcome
+-- mirrors lib/deploy_create_constants.php (ADR-0016, check-enum-sync).
+CREATE TABLE IF NOT EXISTS deploy_create_vm_results (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id INT NOT NULL,
+    vm_id INT NULL,
+    vm_name VARCHAR(191) NOT NULL,
+    position INT UNSIGNED NOT NULL,
+    total INT UNSIGNED NOT NULL,
+    -- In-job retry (migration 0066): the attempt this row is on. Step key and
+    -- async directory derive from it; a later attempt keeps the evidence of
+    -- the first one in the first_* columns.
+    attempt TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    action ENUM('create','verify_skip') NOT NULL,
+    status ENUM('pending','prepared','running','succeeded','failed','uncertain','skipped') NOT NULL DEFAULT 'pending',
+    outcome ENUM('created','updated','unchanged') NULL,
+    changed TINYINT(1) NULL,
+    existed_before TINYINT(1) NULL,
+    precheck_moid VARCHAR(64) NULL,
+    precheck_instance_uuid VARCHAR(64) NULL,
+    -- IDR-P02 (migration 0057): the stored instance UUID the preparation looked
+    -- for live and did not find. Only this fact lets the success commit replace
+    -- the binding of an externally deleted VM with the new instance.
+    replaced_instance_uuid VARCHAR(64) NULL,
+    async_jid VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    remote_execution_id BIGINT UNSIGNED NULL,
+    async_deadline_at DATETIME NULL,
+    vm_moid VARCHAR(64) NULL,
+    vm_instance_uuid VARCHAR(64) NULL,
+    error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    error_detail TEXT NULL,
+    -- B8 (migration 0067): 1 when error_detail is the module's own message, 0
+    -- when it is the inspector's fallback, NULL when not recorded.
+    error_detail_from_host TINYINT(1) NULL,
+    first_error_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    first_error_detail TEXT NULL,
+    first_async_jid VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    resumed_from_result_id BIGINT UNSIGNED NULL,
+    started_at DATETIME NULL,
+    finished_at DATETIME NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_create_result_position_unique (job_id, position),
+    UNIQUE KEY deploy_create_result_vm_unique (job_id, vm_id),
+    UNIQUE KEY deploy_create_result_remote_unique (remote_execution_id),
+    INDEX deploy_create_result_progress (job_id, status, position),
+    CONSTRAINT fk_deploy_create_result_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_create_result_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_create_result_remote FOREIGN KEY (remote_execution_id) REFERENCES deploy_remote_executions(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_create_result_resumed FOREIGN KEY (resumed_from_result_id) REFERENCES deploy_create_vm_results(id) ON DELETE SET NULL,
+    CONSTRAINT deploy_create_result_position_check CHECK (position >= 1 AND position <= total),
+    CONSTRAINT deploy_create_result_flags_check CHECK (
+        (changed IS NULL OR changed IN (0,1)) AND (existed_before IS NULL OR existed_before IN (0,1))
+    ),
+    -- The bound remote handle is NOT part of this check: MySQL refuses a column
+    -- in both a CHECK and a foreign key with a referential action. It is
+    -- enforced in deploy_create_assert_transition_fields(), the only writer.
+    CONSTRAINT deploy_create_result_running_check CHECK (
+        status <> _utf8mb4'running' OR
+        (async_jid IS NOT NULL AND async_deadline_at IS NOT NULL)
+    ),
+    CONSTRAINT deploy_create_result_success_check CHECK (
+        status NOT IN (_utf8mb4'succeeded', _utf8mb4'skipped') OR
+        (outcome IS NOT NULL AND changed IS NOT NULL AND vm_moid IS NOT NULL
+         AND vm_instance_uuid IS NOT NULL AND finished_at IS NOT NULL)
+    ),
+    -- The source row of a skip is likewise enforced in PHP, for the same
+    -- reason as above: resumed_from_result_id carries a referential action.
+    CONSTRAINT deploy_create_result_skip_check CHECK (
+        status <> _utf8mb4'skipped' OR action = _utf8mb4'verify_skip'
+    ),
+    CONSTRAINT deploy_create_result_failure_check CHECK (
+        status NOT IN (_utf8mb4'failed', _utf8mb4'uncertain') OR
+        (error_code IS NOT NULL AND error_detail IS NOT NULL AND finished_at IS NOT NULL)
+    ),
+    CONSTRAINT deploy_create_result_open_check CHECK (
+        status NOT IN (_utf8mb4'pending', _utf8mb4'prepared', _utf8mb4'running') OR finished_at IS NULL
+    ),
+    CONSTRAINT deploy_create_result_no_false_outcome_check CHECK (
+        status IN (_utf8mb4'succeeded', _utf8mb4'skipped') OR
+        (outcome IS NULL AND changed IS NULL AND vm_moid IS NULL AND vm_instance_uuid IS NULL)
+    ),
+    CONSTRAINT deploy_create_result_outcome_check CHECK (
+        outcome IS NULL OR
+        (outcome = _utf8mb4'created' AND existed_before = 0 AND changed = 1) OR
+        (outcome = _utf8mb4'updated' AND existed_before = 1 AND changed = 1) OR
+        (outcome = _utf8mb4'unchanged' AND existed_before = 1 AND changed = 0)
+    ),
+    CONSTRAINT deploy_create_result_replacement_check CHECK (
+        replaced_instance_uuid IS NULL OR existed_before = 0
+    ),
+    CONSTRAINT deploy_create_result_attempt_check CHECK (
+        (attempt = 1 AND first_error_code IS NULL AND first_error_detail IS NULL AND first_async_jid IS NULL)
+        OR (attempt > 1 AND first_error_code IS NOT NULL AND first_error_detail IS NOT NULL AND first_async_jid IS NOT NULL)
+    ),
+    CONSTRAINT deploy_create_result_detail_origin_check CHECK (
+        error_detail_from_host IS NULL OR (error_detail_from_host IN (0, 1) AND error_detail IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_recovery_resolutions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id INT NOT NULL,
+    remote_execution_id BIGINT UNSIGNED NULL,
+    create_result_id BIGINT UNSIGNED NULL,
+    resolution_scope VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    resolution_code VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    reason VARCHAR(1024) NOT NULL, reference VARCHAR(255) NULL,
+    evidence_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    actor_id INT NOT NULL, previous_state JSON NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    INDEX deploy_recovery_resolution_job (job_id, id),
+    -- The create-unit half of the scope rule (a `create_unit` row names its
+    -- result and no remote handle) is enforced in PHP: MySQL refuses a column
+    -- that appears both in a CHECK and in a foreign key with a referential
+    -- action, and SET NULL is the right action for create_result_id.
+    CONSTRAINT deploy_recovery_resolution_scope_check CHECK ((resolution_scope = _utf8mb4'remote_execution' AND remote_execution_id IS NOT NULL) OR (resolution_scope = _utf8mb4'legacy_job' AND remote_execution_id IS NULL) OR (resolution_scope = _utf8mb4'create_unit' AND remote_execution_id IS NULL)),
+    CONSTRAINT fk_deploy_recovery_resolution_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_recovery_resolution_remote FOREIGN KEY (remote_execution_id) REFERENCES deploy_remote_executions(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_deploy_recovery_resolution_create_result FOREIGN KEY (create_result_id) REFERENCES deploy_create_vm_results(id) ON DELETE SET NULL,
+    CONSTRAINT fk_deploy_recovery_resolution_actor FOREIGN KEY (actor_id) REFERENCES deploy_users(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+CREATE TABLE IF NOT EXISTS deploy_settings (
+    setting_key VARCHAR(191) PRIMARY KEY,
+    setting_value TEXT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_vm_status_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vm_id INT NOT NULL,
+    lifecycle_state VARCHAR(64) NOT NULL,
+    mecm_sync_state VARCHAR(64) NOT NULL,
+    legacy_status VARCHAR(64) NOT NULL,
+    note TEXT NULL,
+    created_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- Retention scans by age (migration 0032); without the index the hourly
+    -- purge full-scans a table that gets a row per state transition.
+    INDEX deploy_vm_status_events_created (created_at),
+    CONSTRAINT fk_deploy_vm_status_events_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_vm_status_events_user FOREIGN KEY (created_by) REFERENCES deploy_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- MECM membership provenance (migration 0033, ADR-0034): which direct
+-- membership rules are VirtuSphere's OWN (origin created, or explicitly
+-- adopted through the portal). Reconciliation may remove only owned rules;
+-- manual MECM rules stay untouched. Rows die with their VM (decision 1: a VM
+-- delete is purely local, the MECM rules stand). collection_type and origin
+-- are PHP-validated vocabularies (VIRTUSPHERE_MECM_RULE_*), deliberately no
+-- ENUM mirror.
+CREATE TABLE IF NOT EXISTS deploy_vm_mecm_rules (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vm_id INT NOT NULL,
+    collection_id VARCHAR(16) NOT NULL,
+    collection_name VARCHAR(255) NOT NULL,
+    collection_type VARCHAR(16) NOT NULL,
+    origin VARCHAR(32) NOT NULL DEFAULT 'created',
+    actor VARCHAR(191) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY deploy_vm_mecm_rules_unique (vm_id, collection_id),
+    CONSTRAINT fk_deploy_vm_mecm_rules_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_client_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vm_id INT NOT NULL,
+    mac VARCHAR(17) NOT NULL,
+    phase VARCHAR(32) NOT NULL,
+    event VARCHAR(16) NOT NULL,
+    detail VARCHAR(1024) NULL,
+    client_ip VARCHAR(45) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX deploy_client_events_vm_phase (vm_id, phase, id),
+    INDEX deploy_client_events_created (created_at),
+    CONSTRAINT fk_deploy_client_events_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Package-wrapper report foundation (ADR-0044). The singleton generation is
+-- rotated after a supported disaster restore and before report acceptance.
+CREATE TABLE IF NOT EXISTS deploy_package_report_state (
+    id TINYINT UNSIGNED NOT NULL,
+    acceptance_generation BINARY(16) NOT NULL,
+    rotated_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+    PRIMARY KEY (id),
+    CONSTRAINT deploy_package_report_state_singleton CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO deploy_package_report_state (id, acceptance_generation)
+VALUES (1, UUID_TO_BIN(UUID()))
+ON DUPLICATE KEY UPDATE id = VALUES(id);
+
+-- Markers deliberately outlive diagnostic rows and VMs. They contain only the
+-- run identity and immutable 90-day diagnostic expiry; no FK may cascade them.
+CREATE TABLE IF NOT EXISTS deploy_package_run_markers (
+    run_id BINARY(16) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+    PRIMARY KEY (run_id),
+    INDEX deploy_package_run_markers_expiry (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_package_runs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    run_id BINARY(16) NOT NULL,
+    vm_id INT NOT NULL,
+    catalog_id INT NULL,
+    device_generation BINARY(16) NOT NULL,
+    acceptance_generation BINARY(16) NOT NULL,
+    rollout_revision BIGINT UNSIGNED NOT NULL,
+    project_name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+    package_version VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NOT NULL,
+    run_context VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    mac_candidates JSON NOT NULL,
+    client_started_at DATETIME(6) NOT NULL,
+    total BIGINT UNSIGNED NULL,
+    first_received_at DATETIME(6) NOT NULL,
+    last_evidence_at DATETIME(6) NOT NULL,
+    completed_received_at DATETIME(6) NULL,
+    client_completed_at DATETIME(6) NULL,
+    wrapper_result VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    wrapper_exit_code INT NULL,
+    detection_result VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    processed_count BIGINT UNSIGNED NULL,
+    ok_count BIGINT UNSIGNED NULL,
+    skip_count BIGINT UNSIGNED NULL,
+    fail_count BIGINT UNSIGNED NULL,
+    last_processed_index BIGINT UNSIGNED NULL,
+    payload_omitted_count BIGINT UNSIGNED NULL,
+    wrapper_log_path VARCHAR(1024) NULL,
+    reporting_log_path VARCHAR(1024) NULL,
+    UNIQUE KEY deploy_package_runs_run (run_id),
+    INDEX deploy_package_runs_vm_received (vm_id, first_received_at, id),
+    INDEX deploy_package_runs_package_received (project_name, package_version, first_received_at, id),
+    CONSTRAINT fk_deploy_package_runs_marker FOREIGN KEY (run_id) REFERENCES deploy_package_run_markers(run_id),
+    CONSTRAINT fk_deploy_package_runs_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_package_runs_catalog FOREIGN KEY (catalog_id) REFERENCES deploy_packages(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_package_run_events (
+    package_run_id BIGINT UNSIGNED NOT NULL,
+    event_seq BIGINT UNSIGNED NOT NULL,
+    event_key VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    event_kind VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    semantic_sha256 BINARY(32) NOT NULL,
+    received_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (package_run_id, event_seq),
+    UNIQUE KEY deploy_package_run_events_key (package_run_id, event_key),
+    CONSTRAINT fk_deploy_package_run_events_run FOREIGN KEY (package_run_id) REFERENCES deploy_package_runs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_package_step_results (
+    package_run_id BIGINT UNSIGNED NOT NULL,
+    step_index BIGINT UNSIGNED NOT NULL,
+    script_name VARCHAR(255) NOT NULL,
+    result VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    storage_class VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    is_first_failure TINYINT(1) NOT NULL DEFAULT 0,
+    error_category VARCHAR(255) NULL,
+    child_exit_code INT NULL,
+    duration_ms BIGINT UNSIGNED NULL,
+    detail_path VARCHAR(1024) NULL,
+    source_event_seq BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (package_run_id, step_index),
+    INDEX deploy_package_step_storage (package_run_id, storage_class, step_index),
+    CONSTRAINT fk_deploy_package_step_run FOREIGN KEY (package_run_id) REFERENCES deploy_package_runs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_deploy_package_step_event FOREIGN KEY (package_run_id, source_event_seq) REFERENCES deploy_package_run_events(package_run_id, event_seq) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS deploy_integration_heartbeats (
+    source VARCHAR(64) PRIMARY KEY,
+    last_seen_at TIMESTAMP NULL,
+    last_checked_at TIMESTAMP NULL,
+    last_status VARCHAR(8) NOT NULL DEFAULT 'ok',
+    last_detail VARCHAR(2048) NULL,
+    last_ip VARCHAR(45) NOT NULL DEFAULT '',
+    interval_seconds INT NOT NULL DEFAULT 60,
+    beat_count BIGINT NOT NULL DEFAULT 0,
+    report_version TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    last_event VARCHAR(16) NOT NULL DEFAULT 'heartbeat',
+    last_run_id VARCHAR(32) NULL,
+    last_attempt_at TIMESTAMP NULL,
+    last_result_at TIMESTAMP NULL,
+    last_success_at TIMESTAMP NULL,
+    last_failure_at TIMESTAMP NULL,
+    last_error_category VARCHAR(64) NULL,
+    last_duration_ms INT UNSIGNED NULL,
+    failure_streak INT UNSIGNED NOT NULL DEFAULT 0,
+    last_summary JSON NULL,
+    last_script_version VARCHAR(32) NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Rate-limit store for machine_api_audit_warning(), not an audit trail. Keyed by
+-- (category, tag, scope) so one noisy caller cannot silence the same tag for
+-- every other client; `suppressed` keeps the count a bare timestamp loses.
+CREATE TABLE IF NOT EXISTS deploy_audit_throttle (
+    category VARCHAR(32) NOT NULL,
+    tag VARCHAR(64) NOT NULL,
+    scope VARCHAR(64) NOT NULL DEFAULT '',
+    last_written_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    suppressed INT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (category, tag, scope)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- K15: immutable per-job VM prestate; no historical backfill.
+CREATE TABLE IF NOT EXISTS deploy_job_vm_states (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        job_id INT NOT NULL,
+        vm_id INT NOT NULL,
+        lifecycle_before VARCHAR(32) NOT NULL,
+        mecm_before VARCHAR(32) NOT NULL,
+        marked_deploying TINYINT(1) NOT NULL DEFAULT 0,
+        esxi_touched TINYINT(1) NOT NULL DEFAULT 0,
+        create_launch_intent TINYINT(1) NOT NULL DEFAULT 0,
+        touch_phase VARCHAR(32) NULL,
+        captured_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        UNIQUE KEY deploy_job_vm_state_unique (job_id, vm_id),
+        INDEX deploy_job_vm_state_owner (vm_id, id),
+        CONSTRAINT fk_deploy_job_vm_state_job FOREIGN KEY (job_id) REFERENCES deploy_jobs(id) ON DELETE CASCADE,
+        CONSTRAINT fk_deploy_job_vm_state_vm FOREIGN KEY (vm_id) REFERENCES deploy_vms(id) ON DELETE CASCADE,
+        CONSTRAINT deploy_job_vm_state_flags CHECK (marked_deploying IN (0,1) AND esxi_touched IN (0,1) AND create_launch_intent IN (0,1))
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- K21 (VT-04): an ESXi access file left on an Ansible host until its removal is
+-- confirmed. No foreign key to deploy_jobs: a mission delete cascades the job
+-- while the file on the host survives it.
+CREATE TABLE IF NOT EXISTS deploy_remote_secret_files (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        job_id INT NOT NULL,
+        credential_ansible_id INT NULL,
+        remote_dir VARCHAR(255) NOT NULL,
+        target_host VARCHAR(255) NOT NULL,
+        target_port INT NOT NULL,
+        target_fingerprint VARCHAR(50) CHARACTER SET ascii COLLATE ascii_bin NULL,
+        uploaded_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        last_attempt_at DATETIME(6) NULL,
+        lease_until DATETIME(6) NULL,
+        UNIQUE KEY deploy_remote_secret_file_unique (job_id, remote_dir),
+        INDEX deploy_remote_secret_file_credential (credential_ansible_id, last_attempt_at),
+        CONSTRAINT fk_deploy_remote_secret_file_credential FOREIGN KEY (credential_ansible_id) REFERENCES deploy_credentials(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

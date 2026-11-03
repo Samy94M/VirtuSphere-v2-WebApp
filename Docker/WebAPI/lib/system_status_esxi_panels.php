@@ -1,0 +1,398 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/system_status_esxi_evidence.php';
+require_once __DIR__ . '/system_status_deviation_controls.php';
+
+/**
+ * The ESXi half of the System status page: inventory cards, host facts and the
+ * mission/VM deviation scan with its VLAN repair form.
+ *
+ * Split out of lib/system_status_panels.php, which crossed the ADR-0006 line
+ * budget when the host facts and the deviation branches were added. The seam is
+ * the data source, not the file size: everything here reads the ESXi inventory
+ * cache, everything left there reads integration heartbeats.
+ */
+
+require_once __DIR__ . '/backup_status.php';
+require_once __DIR__ . '/connection_errors.php';
+require_once __DIR__ . '/credentials_status.php';
+require_once __DIR__ . '/defaults.php';
+require_once __DIR__ . '/deploy_urls.php';
+require_once __DIR__ . '/esxi_capabilities.php';
+require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/system_status_shared_panels.php';
+
+/**
+ * What the last successful pull talked to: "through vCenter, VMware ESXi 8.0.2".
+ * Every fact is optional, so the line disappears rather than stating a dash. The
+ * endpoint kind matters operationally: an autostart deviation on a vCenter-
+ * managed host is expected, on a standalone host it is not.
+ *
+ * @param array<string, mixed>|null $state
+ */
+function system_status_capability_facts(?array $state): string
+{
+    $facts = esxi_capabilities($state);
+    $parts = [];
+    $apiType = $facts['api_type'] !== null ? mb_strtolower($facts['api_type']) : null;
+    if ($apiType === 'virtualcenter') {
+        $parts[] = __t('system_status.cap_api_vcenter');
+    } elseif ($apiType === 'hostagent') {
+        $parts[] = __t('system_status.cap_api_host');
+    }
+    if ($facts['product_version'] !== null) {
+        $parts[] = $facts['product_version'];
+    }
+
+    return $parts !== [] ? implode(' · ', $parts) : '';
+}
+
+function system_status_capability_badges(?array $state): string
+{
+    $html = '';
+    foreach (esxi_capability_warnings($state) as $warning) {
+        $label = match ($warning['key']) {
+            VIRTUSPHERE_ESXI_CAPABILITY_LICENSE_FREE => __t('system_status.cap_license_free'),
+            VIRTUSPHERE_ESXI_CAPABILITY_HA_CLUSTER => __t('system_status.cap_in_ha_cluster'),
+            VIRTUSPHERE_ESXI_CAPABILITY_MAINTENANCE => __t('system_status.cap_in_maintenance'),
+            default => (string) $warning['key'],
+        };
+        $html .= portal_badge((string) $warning['level'], $label);
+    }
+
+    return $html;
+}
+
+/**
+ * Host facts of one inventory row, read from the meta the pull already stores:
+ * core count, and a clock-skew warning past
+ * VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS. The pull has collected both since
+ * ADR-0023 and docs/operations/esxi-inventory.md documented the skew warning,
+ * but nothing rendered it, so a skew that breaks the Kerberos domain join of a
+ * fresh VM was diagnosable only in the database.
+ *
+ * @param array<string, mixed> $row
+ */
+function system_status_host_facts(array $row): string
+{
+    $meta = json_decode((string) ($row['meta_json'] ?? ''), true);
+    if (!is_array($meta)) {
+        return '';
+    }
+
+    $html = '';
+    $cores = (int) ($meta['cpu_cores'] ?? 0);
+    if ($cores > 0) {
+        $html .= ' <small>' . h($cores . ' ' . __t('system_status.inv_cores')) . '</small>';
+    }
+    // Only a skew that matters is shown; a few seconds is normal and would turn
+    // the warning into noise nobody reads.
+    $skew = isset($meta['clock_skew_seconds']) ? (int) $meta['clock_skew_seconds'] : 0;
+    if (abs($skew) >= VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS) {
+        $html .= ' ' . portal_badge('warning', __t('system_status.inv_clock_skew', [
+            'minutes' => (string) (int) round(abs($skew) / 60),
+        ]));
+    }
+
+    return $html;
+}
+
+/**
+ * Size line of one cached datastore row. A NULL free value is a hole in the
+ * cache (never pulled, a host that refused the property), and `(int) null`
+ * rendered it as a confident "0 B free" right next to a full capacity: the one
+ * reading an operator must not get from a row that knows nothing.
+ *
+ * The third caller of esxi_datastore_usable_free_bytes(), so this line, the
+ * deploy verdict and the picker label answer "how much space is here" with one
+ * rule: a datastore in maintenance has a size but no usable free space either.
+ *
+ * @param array<string, mixed> $row
+ */
+function system_status_datastore_size(array $row): string
+{
+    $capacity = $row['capacity_bytes'] ?? null;
+    if ($capacity === null) {
+        return '';
+    }
+    $free = esxi_datastore_usable_free_bytes(
+        $row['free_bytes'] !== null ? (int) $row['free_bytes'] : null,
+        $row['meta_json'] ?? null
+    );
+    if ($free === null) {
+        return __t('system_status.inv_free_unknown_of', ['total' => backup_status_human_bytes((int) $capacity)]);
+    }
+
+    return __t('system_status.inv_free_of', [
+        'free' => backup_status_human_bytes($free),
+        'total' => backup_status_human_bytes((int) $capacity),
+    ]);
+}
+
+/**
+ * The maintenance badge of one cached datastore row, or ''. Named next to the
+ * size line rather than folded into it: "free: unknown" says the number is
+ * missing, this says why, and the operator's next step differs (wait for the
+ * maintenance to end versus check why the pull reported nothing).
+ *
+ * @param array<string, mixed> $row
+ */
+function system_status_datastore_health_badge(array $row): string
+{
+    $health = esxi_datastore_health($row['meta_json'] ?? null);
+    $html = '';
+    if ($health['maintenance'] === true) {
+        $html .= ' ' . portal_badge('warning', __t('system_status.inv_ds_maintenance'));
+    }
+    if ($health['accessible'] === false) {
+        $html .= ' ' . portal_badge('danger', __t('system_status.inv_ds_inaccessible'));
+    }
+
+    return $html;
+}
+
+/**
+ * The per-kind "Stand" line of one detail group, or '' when no timestamp is
+ * known. The stamp map (migration 0030) wins because it also covers a kind
+ * that is KNOWN empty; the rows' own fetched_at is the fallback for caches
+ * from before the map existed. This line is what makes a frozen kind readable:
+ * after a pull whose datastore query failed, the datastore group shows an
+ * older Stand than the card's last success, which is exactly the truth.
+ *
+ * @param array<string, string> $kindFreshness
+ * @param array<int, array<string, mixed>> $rows
+ */
+function system_status_kind_freshness_line(array $kindFreshness, string $kind, array $rows): string
+{
+    $stamp = (string) ($kindFreshness[$kind] ?? '');
+    if ($stamp === '') {
+        foreach ($rows as $row) {
+            $fetched = (string) ($row['fetched_at'] ?? '');
+            if ($fetched !== '' && ($stamp === '' || $fetched > $stamp)) {
+                $stamp = $fetched;
+            }
+        }
+    }
+    if ($stamp === '') {
+        return '';
+    }
+
+    return __t('system_status.inv_kind_as_of', ['time' => portal_format_timestamp($stamp)]);
+}
+
+/**
+ * @param array<string,array<int,array<string,mixed>>> $detail
+ */
+function system_status_render_inventory_detail(array $detail, ?array $state = null): void
+{
+    foreach ([
+        VIRTUSPHERE_INVENTORY_KIND_HOST => __t('system_status.inv_th_hosts'),
+        VIRTUSPHERE_INVENTORY_KIND_DATACENTER => __t('system_status.inv_th_datacenters'),
+        VIRTUSPHERE_INVENTORY_KIND_DATASTORE => __t('system_status.inv_th_datastores'),
+        VIRTUSPHERE_INVENTORY_KIND_NETWORK => __t('system_status.inv_th_networks'),
+    ] as $kind => $label) {
+        $rows = $detail[$kind] ?? [];
+        $kindFreshness = json_decode((string) ($state['kind_freshness_json'] ?? ''), true);
+        $kindFreshness = is_array($kindFreshness) ? $kindFreshness : [];
+        $freshnessLine = system_status_kind_freshness_line($kindFreshness, $kind, $rows);
+        $evidence = esxi_inventory_kind_evidence($state, $kind, $rows, virtusphere_request_now());
+        ?>
+        <div class="inventory-detail-group"><h4><?php echo h($label); ?> (<?php echo h((string) count($rows)); ?>)<?php if ($freshnessLine !== '') { ?> <small class="muted"><?php echo h($freshnessLine); ?></small><?php } ?></h4>
+        <?php foreach (system_status_esxi_evidence_lines($evidence) as $line) { ?><p class="muted"><?php echo h($line); ?></p><?php } ?>
+        <?php if ($rows === []) { ?><p class="muted"><?php echo h(__t('system_status.inv_kind_empty')); ?></p><?php } else { ?><ul><?php foreach ($rows as $row) { $isDatastore = $kind === VIRTUSPHERE_INVENTORY_KIND_DATASTORE; $size = $isDatastore ? system_status_datastore_size($row) : ''; $classification = esxi_object_name_classify_raw((string) $row['name']); ?><li><?php if (!$classification['supported']) { ?><span aria-hidden="true">⟦</span><code class="inventory-raw-name"><?php echo h((string) $row['name']); ?></code><span aria-hidden="true">⟧</span> <small><?php echo h(__t('system_status.inv_unsupported_name', ['count' => mb_strlen((string) $row['name'], 'UTF-8')])); ?></small><?php } else { ?><span class="break-anywhere"><?php echo h((string) $row['name']); ?></span><?php } ?><?php if ($size !== '') { ?> <small><?php echo h($size); ?></small><?php } ?><?php if ($isDatastore) { echo system_status_datastore_health_badge($row); } ?><?php if ($kind === VIRTUSPHERE_INVENTORY_KIND_HOST) { echo system_status_host_facts($row); } ?></li><?php } ?></ul><?php } ?>
+        </div>
+        <?php
+    }
+}
+
+/** @param array<string,mixed> $snapshot */
+function system_status_render_esxi(array $snapshot, array $user, int $selectedId, ?array $selectedDetail): void
+{
+    $intervalHours = (int) ($snapshot['esxi']['interval_hours'] ?? 0);
+    $ansibleSelected = (bool) ($snapshot['esxi']['ansible_selected'] ?? false);
+    // Defaults true so a snapshot from before this key existed does not invent a
+    // blocker; integration_health() always sets it.
+    $deployWorkerAlive = (bool) ($snapshot['esxi']['deploy_worker_alive'] ?? true);
+    $maintenanceAlive = (bool) ($snapshot['esxi']['maintenance_alive'] ?? true);
+    $claimState = (string) ($snapshot['esxi']['claim_state'] ?? VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING);
+    ?>
+    <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI); ?>">
+        <div class="section-heading-actions"><div><h2><?php echo h(__t('system_status.inv_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.inv_hint')); ?></p></div>
+        <?php if (can('deploy.run', $user) && $snapshot['esxi']['rows'] !== []) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><button class="button" type="submit" data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_all')); ?></button></form><?php } ?></div>
+        <?php if ($snapshot['esxi']['rows'] === []) { ?>
+            <div class="empty-state"><p><?php echo h(__t('system_status.inv_empty')); ?></p><?php if (can('credentials.manage', $user)) { ?><a class="button button-secondary" href="credentials.php"><?php echo h(__t('system_status.inv_configure_credentials')); ?></a><?php } ?></div>
+        <?php } else { ?><div class="inventory-card-grid">
+        <?php foreach ($snapshot['esxi']['rows'] as $entry) {
+            $credential = $entry['credential'];
+            $credentialId = (int) $credential['id'];
+            $state = $entry['state'];
+            $pending = $entry['pending_job'];
+            $counts = $entry['counts'];
+            $isSelected = $credentialId === $selectedId && $selectedDetail !== null;
+            ?>
+            <article class="inventory-card<?php echo $isSelected ? ' inventory-card-open' : ''; ?>" data-deep-link-target id="credential-<?php echo h((string) $credentialId); ?>">
+                <header><div><h3><?php echo h((string) $credential['name']); ?></h3><code class="break-anywhere"><?php echo h((string) $credential['host']); ?></code></div><?php echo esxi_state_badge((string) $entry['health']); ?></header>
+                <?php $capabilityFacts = system_status_capability_facts($state); ?>
+                <?php if ($capabilityFacts !== '') { ?><p class="muted"><?php echo h(__t('system_status.cap_heading')); ?>: <?php echo h($capabilityFacts); ?></p><?php } ?>
+                <?php // Rendered unconditionally this empty div still took a track of the
+                      // card grid, so a healthy host carried a gap above its numbers that
+                      // nothing was in. ?>
+                <?php $capabilityBadges = system_status_capability_badges($state); ?>
+                <?php if ($capabilityBadges !== '') { ?><div class="capability-badges"><?php echo $capabilityBadges; ?></div><?php } ?>
+                <dl class="inventory-counts">
+                    <div><dt><?php echo h(__t('system_status.inv_th_hosts')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_HOST] ?? 0)); ?></dd></div>
+                    <div><dt><?php echo h(__t('system_status.inv_th_datacenters')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_DATACENTER] ?? 0)); ?></dd></div>
+                    <div><dt><?php echo h(__t('system_status.inv_th_datastores')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_DATASTORE] ?? 0)); ?></dd></div>
+                    <div><dt><?php echo h(__t('system_status.inv_th_networks')); ?></dt><dd><?php echo h((string) ($counts[VIRTUSPHERE_INVENTORY_KIND_NETWORK] ?? 0)); ?></dd></div>
+                </dl>
+                <?php echo system_status_fact_list([
+                    ['label' => __t('system_status.inv_last_attempt'), 'html' => ($state !== null && !empty($state['last_attempt_at']))
+                        ? h(portal_format_timestamp($state['last_attempt_at']))
+                        : h(__t('system_status.inv_never'))],
+                    ['label' => __t('system_status.inv_last_success'), 'html' => ($state !== null && !empty($state['last_success_at']))
+                        ? h(portal_format_timestamp($state['last_success_at']))
+                        : h(__t('system_status.inv_never'))],
+                ]); ?>
+                <?php // Which cycle actually refreshes these two timestamps, named by the
+                      // same predicate the scheduler skips on. "No live monitoring" was
+                      // true and useless: it did not say that a paused credential, a
+                      // missing Ansible host or a zero interval each stop the pull for a
+                      // different reason, and each needs a different fix. ?>
+                <small class="status-cadence"><?php echo h(credential_cadence_esxi($intervalHours, $state, $ansibleSelected, $deployWorkerAlive)); ?></small>
+                <?php if (!$maintenanceAlive) { ?><small class="status-cadence"><?php echo h(__t('system_status.inv_cadence_maintenance_down')); ?></small><?php } ?>
+                <?php if ($pending !== null) { ?><small class="status-cadence"><?php echo h(__t(
+                    (string) ($pending['status'] ?? '') === VIRTUSPHERE_DEPLOY_STATUS_RUNNING
+                        ? 'system_status.inv_cadence_running'
+                        : ($claimState === VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING
+                            ? 'system_status.inv_cadence_queued'
+                            : 'system_status.inv_cadence_waiting_resume')
+                )); ?></small><?php } elseif ($claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING) { ?><small class="status-cadence"><?php echo h(__t('system_status.inv_cadence_claims_paused')); ?></small><?php } ?>
+                <?php $lastJobId = $state !== null ? (int) ($state['last_job_id'] ?? 0) : 0; ?>
+                <?php $failedCategory = $state !== null ? (string) ($state['last_error_category'] ?? '') : ''; ?>
+                <?php // An ansible_* code names a fault on the Ansible host, and this card can
+                      // only offer the ESXi credential: the sentence said what broke and left
+                      // the operator to find the section that shows it. The target is a section
+                      // of this same already authorized page, so the link needs no permission of
+                      // its own; the full test and the credential action stay gated where they
+                      // live. Built with the anchor SSoT, never as a hand-written fragment.
+                      //
+                      // Both follow-ups go into the shared .alert-actions row rather than after
+                      // the sentence: two underlined links separated by one space read as a
+                      // single long link, and until this branch existed there was never more
+                      // than one of them. The row is only opened when something fills it, and
+                      // the two links keep the middle dot this file already separates facts
+                      // with, because the row's 6px gap alone was written for buttons. ?>
+                <?php
+                $showAnsibleLink = inventory_error_is_ansible($failedCategory);
+                $showJobLog = $lastJobId > 0 && can('deploy.run', $user);
+                $showJobLogGap = $lastJobId <= 0 && can('deploy.run', $user);
+                ?>
+                <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'failed' && $failedCategory !== '') { ?>
+                    <div class="alert alert-error">
+                        <?php echo h(connection_error_message($failedCategory, ['host' => (string) $credential['host']])); ?>
+                        <?php if ($showAnsibleLink || $showJobLog || $showJobLogGap) { ?>
+                            <div class="alert-actions">
+                                <?php if ($showAnsibleLink) { ?><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('system_status.inv_open_ansible_status')); ?></a><?php } ?>
+                                <?php if ($showAnsibleLink && $showJobLog) { ?><span class="muted" aria-hidden="true">&middot;</span><?php } ?>
+                                <?php if ($showJobLog) { ?><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_failed_job_log')); ?></a><?php } elseif ($showJobLogGap) { ?><span><?php echo h(__t('system_status.inv_job_log_unavailable')); ?></span><?php } ?>
+                            </div>
+                        <?php } ?>
+                    </div>
+                <?php } ?>
+                <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'ok' && $lastJobId > 0 && can('deploy.run', $user)) { ?>
+                    <p><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_last_job_log')); ?></a></p>
+                <?php } ?>
+                <?php // The pause names its own release condition, and that condition is
+                      // met on another page: without the link the row states a fix and
+                      // hides where it happens. ?>
+                <?php if ($state !== null && (int) ($state['paused_until_credential_change'] ?? 0) === 1) { ?><div class="alert alert-warning"><?php echo h(__t('system_status.inv_paused')); ?><?php if (can('credentials.manage', $user)) { ?> <a href="credentials.php"><?php echo h(__t('system_status.inv_open_credentials')); ?></a><?php } ?></div><?php } ?>
+                <?php if ($pending !== null) { ?><p><?php echo portal_badge($pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? 'info' : 'warning', $pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? __t('system_status.inv_job_running') : __t('system_status.inv_job_queued')); ?> <?php if (can('deploy.run', $user)) { ?><a href="<?php echo h(deploy_job_log_url((int) $pending['id'])); ?>"><?php echo h(__t('system_status.inv_open_job_log')); ?></a><?php } ?></p><?php } ?>
+                <div class="actions">
+                    <?php if ($isSelected) { ?><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('system_status.inv_close_details')); ?></a><?php } else { ?><a class="button button-secondary" href="<?php echo h(system_status_url('credential-' . $credentialId, ['inventory' => $credentialId])); ?>"><?php echo h(__t('system_status.inv_open_details')); ?></a><?php } ?>
+                    <?php if (can('deploy.run', $user)) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><input type="hidden" name="credential_id" value="<?php echo h((string) $credentialId); ?>"><button class="button" type="submit"<?php echo $pending !== null ? ' disabled' : ''; ?> data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_one')); ?></button></form><?php } ?>
+                </div>
+                <?php if ($isSelected) {
+                    ?><div class="inventory-details"><?php system_status_render_inventory_detail($selectedDetail, $state); ?></div><?php } ?>
+            </article>
+        <?php } ?>
+        </div><?php } ?>
+    </section>
+    <?php
+}
+
+/**
+ * The deviation section.
+ *
+ * $deviationCount is the count the page computed once and also handed to the
+ * overview strip (system_status_deviation_count()); null means no object kind
+ * is evaluable. The report keeps the distinct reasons: no configured source,
+ * or configured sources without one kind qualified across all of them.
+ *
+ * @param array<string,mixed> $view @param string[] $activeVlanNames
+ */
+function system_status_render_deviations(array $view, array $activeVlanNames, array $user, string $reassignFrom, ?int $deviationCount, ?array $report = null, array $query = []): void
+{
+    $hasEvaluableEvidence = $deviationCount !== null;
+    $deviations = (array) ($view['entries'] ?? []);
+    $hasVlanDeviation = (bool) ($view['has_vlan'] ?? false);
+    ?>
+    <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS); ?>">
+        <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount); ?></h2>
+        <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p>
+        <?php system_status_render_deviation_evidence($report); ?>
+        <?php if ($hasEvaluableEvidence) { ?>
+            <?php system_status_render_deviation_filters($view, $query); ?>
+        <?php } ?>
+        <?php if (!$hasEvaluableEvidence) { system_status_render_deviation_unavailable($report, $user); } elseif ($deviations === []) { ?><p class="muted"><?php echo h(system_status_deviation_empty_message($view, $report)); ?></p><?php } else { ?>
+            <div class="deviation-groups"><?php foreach ($deviations as $entry) { ?>
+                <article>
+                    <h3>
+                        <a href="<?php echo h(mission_details_url((int) $entry['mission_id'])); ?>"><?php echo h((string) $entry['mission_name']); ?></a>
+                        <?php // A deviation on a template is not an outage: it becomes one only when a mission is created from it.
+                              // The flag the scan computed, not a second str_starts_with: one predicate, one answer. ?>
+                        <?php if (!empty($entry['is_template'])) { echo ' ' . portal_badge('info', __t('system_status.dev_template_badge')); } ?>
+                        <?php if (!empty($entry['vm_name'])) { ?> · <a href="vm_edit.php?mission_id=<?php echo h((string) $entry['mission_id']); ?>&amp;vm_id=<?php echo h((string) $entry['vm_id']); ?>"><?php echo h((string) $entry['vm_name']); ?></a><?php } ?>
+                    </h3>
+                    <ul><?php foreach ($entry['issues'] as $issue) { ?>
+                        <li><?php echo h(__t('system_status.dev_field_' . $issue['field'])); ?>: <code class="break-anywhere"><?php echo h((string) $issue['value']); ?></code><?php if ($issue['field'] === 'vlan' && $activeVlanNames !== [] && can('missions.write', $user) && can('vms.write', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_REASSIGN, ['reassign_from' => $issue['value']])); ?>" title="<?php echo h(__t('system_status.dev_reassign_link_title')); ?>"><?php echo h(__t('system_status.dev_reassign_link')); ?></a><?php } ?></li>
+                    <?php } ?></ul>
+                </article>
+            <?php } ?></div>
+            <?php system_status_render_deviation_pagination($view, $query); ?>
+        <?php } ?>
+        <?php if ($hasVlanDeviation && can('missions.write', $user) && can('vms.write', $user) && $activeVlanNames !== []) { ?>
+            <details class="repair-actions" id="reassign"<?php echo form_has_state('vlan_reassign') || $reassignFrom !== '' ? ' open' : ''; ?>><summary><?php echo h(__t('system_status.repair_heading')); ?></summary>
+                <h3><?php echo h(__t('system_status.reassign_heading')); ?></h3>
+                <?php $reassignHintId = form_hint_id('vlan_reassign', 'group'); ?>
+                <p class="muted" id="<?php echo h($reassignHintId); ?>"><?php echo h(__t('system_status.reassign_hint')); ?></p>
+                <?php
+                $scopeFingerprint = form_old('vlan_reassign', 'scope_fingerprint');
+                $hasPreview = preg_match('/^[a-f0-9]{64}$/D', $scopeFingerprint) === 1;
+                $previewActiveJobs = (int) form_old('vlan_reassign', 'preview_active_jobs', '0');
+                $canConfirmPreview = $hasPreview && $previewActiveJobs === 0;
+                ?>
+                <form class="form-grid" method="post" action="system_status.php"<?php echo form_control_attrs('vlan_reassign', 'group', null, [$reassignHintId], ''); ?> role="group" autocomplete="off"><?php echo csrf_field(); ?>
+                    <label><?php echo h(__t('system_status.reassign_from')); ?><input name="vlan_from" maxlength="255" value="<?php echo h(form_old('vlan_reassign', 'vlan_from', $reassignFrom)); ?>"<?php echo form_control_attrs('vlan_reassign', 'vlan_from'); ?> required><?php echo form_error_html('vlan_reassign', 'vlan_from'); ?></label>
+                    <label><?php echo h(__t('system_status.reassign_to')); ?><select name="vlan_to"<?php echo form_control_attrs('vlan_reassign', 'vlan_to'); ?> required><option value=""><?php echo h(__t('system_status.reassign_choose')); ?></option><?php $oldTarget = form_old('vlan_reassign', 'vlan_to'); foreach ($activeVlanNames as $name) { ?><option value="<?php echo h($name); ?>"<?php echo $oldTarget === $name ? ' selected' : ''; ?>><?php echo h($name); ?></option><?php } ?></select><?php echo form_error_html('vlan_reassign', 'vlan_to'); ?></label>
+                    <?php if ($hasPreview) { ?>
+                        <input type="hidden" name="scope_fingerprint" value="<?php echo h($scopeFingerprint); ?>">
+                        <p class="muted"><?php echo h(__t('system_status.reassign_preview_counts', [
+                            'missions' => form_old('vlan_reassign', 'preview_missions', '0'),
+                            'templates' => form_old('vlan_reassign', 'preview_templates', '0'),
+                            'vms' => form_old('vlan_reassign', 'preview_vms', '0'),
+                            'interfaces' => form_old('vlan_reassign', 'preview_interfaces', '0'),
+                            'jobs' => (string) $previewActiveJobs,
+                        ])); ?></p>
+                    <?php } ?>
+                    <div class="actions">
+                        <button class="button button-secondary" type="submit" name="action" value="preview_vlan_reassign"><?php echo h(__t('system_status.reassign_preview_btn')); ?></button>
+                        <?php if ($canConfirmPreview) { ?><button class="button button-danger" type="submit" name="action" value="reassign_vlan" data-confirm="<?php echo h(__t('system_status.reassign_confirm')); ?>"><?php echo h(__t('system_status.reassign_btn')); ?></button><?php } ?>
+                    </div>
+                </form>
+            </details>
+        <?php } ?>
+    </section>
+    <?php
+}

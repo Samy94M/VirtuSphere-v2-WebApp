@@ -1,0 +1,43 @@
+// Infection (mutation testing) config. Dev-host-only tooling, like the Playwright
+// E2E layer (ADR-0028): it is NOT vendored into vendor/, NOT run in CI, and needs
+// a coverage driver (pcov or xdebug) that the air-gapped runtime image does not
+// carry. It answers a question the other tools cannot: does a test actually pin
+// the behaviour it names, or would it still pass if the code were subtly wrong?
+//
+// Run it on a dev host against the unit + static suites (the integration suite
+// needs a database and is too slow to mutate). Target the files where the payoff
+// is highest with --filter; a whole-lib run is slow and mutates view glue that a
+// mutation score says little about. See docs/QA.md for the run recipe.
+{
+  "$schema": "vendor/infection/infection/resources/schema.json",
+  "source": {
+    "directories": [
+      "lib"
+    ],
+    "excludes": [
+      // Thin bootstrap/wiring and view helpers: a surviving mutant here reflects
+      // that the code is glue, not that a test is weak. Keep the signal on logic.
+      "help",
+      "bootstrap.php",
+      "layout.php",
+      "layout_modals.php"
+    ]
+  },
+  "mutators": {
+    "@default": true
+  },
+  "testFramework": "phpunit",
+  "testFrameworkOptions": "--testsuite=unit",
+  "logs": {
+    "text": "infection.log",
+    "stryker": {
+      "badge": false
+    }
+  },
+  // A first honest baseline, not an aspiration. Raise these as weak tests are
+  // strengthened; do not lower them to make a run pass. The covered-MSI floor is
+  // the meaningful one (it ignores code the unit suite never exercises, e.g. the
+  // DB-backed paths that only the integration suite reaches).
+  "minMsi": 60,
+  "minCoveredMsi": 75
+}

@@ -1,0 +1,152 @@
+---
+# Writes the ESXi host's autostart configuration for the VMs of one mission
+# (ADR-0025). It is the persistent counterpart of startVMs-ESXi_playbook.yml:
+# that one powers VMs on once, this one teaches the host to do it after every
+# reboot or power loss.
+#
+# Two levels, mirroring the host client's "Verwalten -> System -> Autostart":
+#   1. system_defaults  = the mission's autostart defaults (host-wide).
+#   2. power_info       = per VM; -1 / systemDefault mean "inherit level 1".
+#
+# Requires API write access, so it does NOT work on a free ESXi licence, and it
+# is a silent no-op on a host inside a vSphere HA cluster. The worker checks both
+# from the cached capability facts before it ever gets here.
+#
+# start_order is pinned to -1 on purpose. community.vmware#1903 (still open)
+# rejects any value above 1, so a numeric order would be a trap; the mission
+# staggers its VMs through start_delay instead.
+#
+# K4a: every ESXi call survives a short host outage (W1). The identity read,
+# the level-1 write and every level-2 write get up to three more attempts with
+# the pauses of EsxiRetryPauseSeconds, each one a RETRY line carrying the
+# module's message. Both writes set a target state, so a repeated write changes
+# nothing. Progress lines follow the AGENTS.md contract:
+# `[n/total] RUN|pass|fail Autostart info <vm>` and `... Autostart <vm>`.
+- name: ESXi-Autostart-Richtlinie der Mission anwenden
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
+
+  vars:
+    # The module's `esxi_hostname` names the host OBJECT as the hypervisor knows
+    # itself, not the address we connect to. A credential holding an IP would not
+    # resolve to it, so the WebAPI passes the name from the inventory cache and we
+    # fall back to the connection address only when it has never been pulled.
+    vs_esxi_host: "{{ mission_configuration.autostart.esxi_host | default('', true) or esxi_hostname }}"
+
+  tasks:
+    - name: Ergebnisse initialisieren
+      ansible.builtin.set_fact:
+        vs_identity_results: []
+        autostart_failures: []
+        autostart_written: 0
+
+    # This check intentionally comes before the host-wide defaults write. A
+    # namesake must not make a job mutate even level 1 of the host policy.
+    # AN-01: the bound instance UUID addresses the VM, as the writes below do.
+    - name: Ziel-VMs fuer die Identitaetspruefung lesen
+      ansible.builtin.include_tasks: ./vm_identity_read_tasks.yml
+      vars:
+        vs_identity_step: Autostart
+        vs_identity_total: "{{ vm_configurations | length }}"
+      loop: "{{ vm_configurations }}"
+      loop_control:
+        loop_var: vs_identity_vm
+        index_var: vs_identity_index
+        label: "{{ vs_identity_vm['vm_name'] }}"
+
+    - name: Loop-Ergebnisform der Identitaetsabfrage erhalten
+      ansible.builtin.set_fact:
+        autostart_identity_results:
+          results: "{{ vs_identity_results }}"
+
+    - name: Name und Instance-UUID vor der Autostart-Aenderung validieren
+      ansible.builtin.assert:
+        that:
+          - ((item['instance'] | default({}))['hw_name'] | default('')) == ((item['item'] | default({}))['vm_name'] | default(''))
+          - >-
+            (
+              ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
+              and
+              ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
+              == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
+            )
+        # AN-07: both UUIDs are named, identity fields only (no module argument).
+        fail_msg: >-
+          VirtuSphere VM identity mismatch before autostart update for
+          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}:
+          stored instance UUID
+          {{ (item['item'] | default({}))['vm_instance_uuid'] | default('none', true) }},
+          live instance UUID
+          {{ (item['instance'] | default({}))['instance_uuid'] | default('none', true) }},
+          live VM name
+          {{ (item['instance'] | default({}))['hw_name'] | default('none', true) }}.
+      loop: "{{ autostart_identity_results.results | default([]) }}"
+      loop_control:
+        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+
+    # Level 1. Only ever enables the host's autostart manager, never disables it:
+    # one host can carry VMs of several missions, and switching the manager off
+    # would silently stop their autostart too. Turning a mission off is done by
+    # setting each of ITS VMs to start_action "none" (level 2 below).
+    - name: Autostart-Standardwerte des Hosts setzen
+      ansible.builtin.include_tasks: ./autostart_write_tasks.yml
+      vars:
+        autostart_position: "[1/1]"
+        autostart_unit: "Autostart defaults {{ vs_esxi_host }}"
+      when: mission_configuration.autostart.enabled | bool
+
+    # Nothing of level 2 is written while the host keeps its old defaults.
+    - name: Gescheiterte Standardwerte vor jedem VM-Eintrag melden
+      ansible.builtin.fail:
+        msg: >-
+          Autostart defaults of host {{ vs_esxi_host }} could not be written
+          after {{ autostart_write_attempt }} attempt(s):
+          {{ autostart_write_result['msg'] | default('no module message') }}.
+          No VM entry was written.
+      when:
+        - mission_configuration.autostart.enabled | bool
+        - autostart_write_result['failed'] | default(false) | bool
+
+    # Level 2. Every selected VM is written, participating or not: a VM whose
+    # checkbox was cleared must lose its entry, and "none" is how the host records
+    # that. `autostart.enabled` of each VM is already the EFFECTIVE value (the
+    # VM's own checkbox AND the mission's), computed in ansible_vm_autostart();
+    # this playbook does not re-derive it. A VM outside this job keeps what the
+    # host has for it.
+    #
+    # FC2-16: a write that fails for one VM even after its retries leaves the
+    # others with the policy they just received, so the step can end half done.
+    # The `always` part reports how many entries were written before the job
+    # fails, and the worker puts that number into the terminal reason.
+    - name: Autostart je VM schreiben und Ergebnis melden
+      when: autostart_identity_results.results | default([]) | length > 0
+      block:
+        - name: Autostart je VM schreiben
+          ansible.builtin.include_tasks: ./autostart_write_tasks.yml
+          vars:
+            autostart_position: "[{{ autostart_index + 1 }}/{{ autostart_identity_results.results | length }}]"
+            autostart_unit: "Autostart {{ autostart_vm['item']['vm_name'] }}"
+          loop: "{{ autostart_identity_results.results | default([]) }}"
+          loop_control:
+            loop_var: autostart_vm
+            index_var: autostart_index
+            label: "{{ (autostart_vm['item'] | default({}))['vm_name'] | default('unknown') }}"
+      always:
+        - name: Zahl geschriebener Autostart-Eintraege melden
+          ansible.builtin.debug:
+            msg: >-
+              ::virtusphere-autostart:: written={{ autostart_written | default(0) }} total={{ autostart_identity_results.results | default([]) | length }}
+
+    # Teilweise geschrieben: die genannten VMs behalten ihren alten Eintrag.
+    - name: Nicht geschriebene Autostart-Eintraege als Fehler des Schritts melden
+      ansible.builtin.fail:
+        msg: >-
+          {{ autostart_failures | length }} of {{ autostart_identity_results.results | length }}
+          VMs did not receive their autostart entry: {{ autostart_failures | join('; ') }}.
+      when: autostart_failures | length > 0

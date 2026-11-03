@@ -1,0 +1,309 @@
+# ADR-0023: ESXi Inventory (read-only) and ESXi-owned VLAN Catalog
+
+Date: 2026-07-09
+Status: Accepted
+
+## Context
+
+Missions and VMs referenced datacenter, datastore and VLAN/portgroup as free-text fields that admins had to type and keep in sync with ESXi by hand — an error source and a source of drift. We want the portal to read the real inventory from the registered ESXi credentials and offer it as choices, and we want the VLAN catalog to stop being hand-maintained.
+
+Hard constraints: the portal must stay LAN-only, server-rendered and read-only towards the hypervisor; an ESXi outage or a wrong/insufficient credential must never delete mission or VM data; and the ESXi service account must never be locked out by repeated bad logins.
+
+## Decision
+
+**Read-only inventory as system deploy jobs.** A new mission-less deploy mode `inventory` runs a read-only playbook (`inventoryESXi_playbook.yml`, only community.vmware `*_info`/`*_facts` modules) through the existing deploy worker on a separate branch, so the deploy path is untouched. The maintenance worker enqueues a pull per ESXi credential on an interval (`esxi_inventory_interval_hours`, default 6, 0 = off); saving a credential triggers an immediate pull; a manual refresh button exists on the system status page. Results land in `deploy_esxi_inventory` (per credential+kind) and a `deploy_esxi_inventory_state` row tracks the fetch health. The cache is **source-of-truth-is-ESXi, cache-is-mirror**: no *judgement* about a value is ever taken from it, and it never blocks on an assumption. The one thing it does gate is a **missing required value** it is the default source for, namely the mission datacenter (see the location chain below and Amendment 4, which draws the line).
+
+**Never destructive.** Writes are per-(credential,kind) atomic replaces with an **empty-result guard** (a successful fetch returning 0 items keeps the existing rows) and case-insensitive de-duplication. Atomicity is the repo function's own responsibility (`repo_transaction()`), not the caller's: a committed empty middle between the DELETE and the INSERTs would read to the VLAN sync as proof that the host lost its portgroups. Failed fetches are classified into `VIRTUSPHERE_INVENTORY_ERROR_*` and never count as an absence proof. An **auth failure pauses** the auto-pull until the credential is changed (lockout protection); there is no auto-retry on auth errors. A credential deletion cascades only its cache rows; mission/VM fields are name-strings and are never touched.
+
+**VLAN catalog becomes ESXi-owned** (E4b, the last rollout step). `deploy_vlan` becomes a mirror of the ESXi portgroups, upsert + `retired_at` instead of delete. Present is the union of **all** cached rows, fresh and frozen, so a portgroup on a currently unreachable host stays present through its frozen cache; a name absent from that union is retired, reappearance un-retires, the empty-guard applies. Retiring requires positive evidence: some credential must carry both `last_status = 'ok'` and a `last_success_at` timestamp, because a status word alone can exist without a fetch ever having run. `vlans.php` becomes a read-only catalog (ADR-0020 pattern) with an admin cleanup-delete for retired rows. Missions (`wds_vlan`) and interfaces (`vlan`) keep storing names as strings, so they are decoupled from catalog changes; a stored value always renders as an option, validation warns and never blocks. **Rollout precondition:** the VLAN switch activates only once a credential exists and at least one pull has succeeded; until then the previous VLAN maintenance is untouched. The legacy token API `createVLAN`/`updateVLAN` stays a known double-path until the E3 retirement (like the OS catalog).
+
+**Location resolves in one chain: VM override, then mission, then target host.** `deploy_vms.vm_datacenter` / `vm_datastore` are overrides; a non-empty value wins, an empty one inherits the mission value (`ansible_effective_datacenter` / `ansible_effective_datastore`). For the **datacenter** there is a third level: when the mission leaves it empty, the ESXi credential chosen at deploy time supplies it, but only when that credential reports **exactly one** datacenter (a standalone host's implicit `ha-datacenter`). Zero (never pulled) or several (vCenter) is not a guess the portal may make, so `repo_deploy_assert_mission_ready()` refuses the job at enqueue and `ansible_assert_mission_ready()` refuses it again at run time, because the cache can change in between. The **datastore stays mandatory** on the mission: a host almost always has several and `vmware_guest` has no default for it, while `datacenter` defaults to `ha-datacenter`. Consequently `hypervisor_datacenter` is optional in the mission validator, and the mission editor must **not** preselect a lone inventory value into it: that would store a copy of a derivable value, the same defect the VM columns had. Existing mission values are never auto-cleared, unlike the VM copies: a mission datacenter can be a deliberate choice, and with several credentials its redundancy cannot be proven.
+
+**The deploy never waits for a fresh ESXi read.** An inventory pull is a queued job (SSH preflight, SFTP upload, a remote `ansible-playbook` run), not an API call, and making a deploy depend on one would invert the cache-never-blocks guarantee above. Resolution reads the cache of the chosen credential instead.
+
+Both fields offer a hard picker from the inventory plus free text, because unlike VLAN they have no catalog table and no admin UI: with an empty or stale cache a pure dropdown would lock the operator out. (Superseded by the second amendment below: the free text now appears only while the inventory of that kind is empty.) A value outside the inventory is caught by the deviation report afterwards, not prevented up front. The deviation report and every warning path go through one predicate, `esxi_inventory_value_unknown()`, so an empty inventory of a kind never accuses a stored value. The picker's fallback option is deliberately the one exception: it matches exactly, so a stored value differing only in case keeps its own spelling as a selected option instead of silently snapping to the inventory's on the next save. Because the warn side stays case-insensitive, that option can never produce a warning; it only makes an unwarned difference visible. The same exception applies to the VLAN select.
+
+A mission stores no ESXi credential (the target host is chosen at deploy time), so the picker is a union. What drives the UI is whether the credentials **disagree**, not how many exist: identical name sets render flat (three standalone hosts all reporting `ha-datacenter` must not become three optgroups showing one entry each). How differing ones are grouped is settled by the 2026-07-25 amendment below. Preselecting the lone datastore and hiding the per-VM datacenter control require the union to be **exact**, meaning all credentials agree *and* every configured credential has contributed at least once; a never-pulled credential cannot prove what it holds.
+
+**Per-disk datastore is out of scope, not merely unbuilt.** The top-level `datastore` parameter of `community.vmware.vmware_guest` takes precedence over `disk[].datastore` and makes it be disregarded; `createVMLaunch-ESXi_playbook.yml` sets exactly that parameter. A per-disk field would therefore ship as a silently dead option. Changing it requires a playbook rewrite plus verification against a productive host. A consequence of the same asymmetry: only the create playbook reads `datastore_name`, while all four playbooks read `datacenter_name`, so a datastore override only takes effect when the VM is created.
+
+**Deviation detection is warn-only.** A mission whose datacenter, datastore or VLAN, a VM whose location override, or an interface whose VLAN is absent from the current (non-empty) inventory of that kind is flagged: a report on the system status page, an "inventory deviation" badge on the mission list and a hint when queuing a deploy. A kind is only evaluated when the inventory has at least one entry of it, so an empty/never-pulled inventory produces no false deviations. None of this blocks a deploy; it only surfaces a value worth checking.
+
+**Guided VLAN mass reassignment** (E4b.8) handles the rename-on-ESXi case, which appears as "old retired, new active" and cannot be auto-migrated (a rename is indistinguishable from delete+create). One transaction rewrites every mission `wds_vlan` and interface `vlan` name-string from one value to another, with one aggregated audit entry; it touches only portal records, never ESXi, and is gated by `missions.write` + `vms.write` (the button visibility matches that gate, not the page's `deploy.run`).
+
+**Required ESXi rights** are documented as two profiles (inventory read-only vs deploy) in `docs/operations/esxi-inventory.md`; insufficient rights surface as the `authz` error category.
+
+## Consequences
+
+- New schema (migration 0013): `deploy_jobs.mission_id` nullable, `deploy_esxi_inventory` (+ `kind` ENUM mirrored from `VIRTUSPHERE_INVENTORY_KINDS`), `deploy_esxi_inventory_state`, `deploy_vlan.retired_at`.
+- Making the overrides authoritative needed a data-only correction (migration 0014): the VM editor used to prefill both columns with the mission value and write it back, so existing rows hold copies, not overrides. Left alone they would have become silent, permanent overrides. The migration clears the exact copies (binary compare, so a deliberate case variant survives) and the editor now shows the mission value without prefilling it (since the second amendment: inside the "inherit" option's label). A field the UI hides adaptively still posts a hidden input, otherwise saving would wipe the override it hides.
+- The real playbook field paths and the exact privilege names are verified against a productive host on rollout (the `*_info` modules are documented read-only; community.vmware requires a non-free ESXi license, which the working create playbooks already prove).
+- Capacity bars and host RAM/CPU are snapshots, not monitoring; the dashboard stays untouched. An optional ESXi clock-skew diagnostic warns about NTP problems that can break domain joins.
+- Shipped in stages: schema + cache engine, then playbook + worker + automation, then the system-status display + settings, then the VLAN ownership switch.
+
+## Amendment (2026-07-09): multi-host hardening, visibility rules, VLAN IDs
+
+Rules added after auditing the layer for fleets of standalone hosts (many same-named portgroups, partial presence):
+
+- **Credential status is a precise deep link, not just page navigation.** The pointer badge on the credentials page targets the corresponding system-status row or card. The target is highlighted and uses the shared fragment-navigation clearance, so the sticky topbar never covers the entry operators were sent to.
+- **Bulk refresh respects the auth pause.** "Refresh all" skips auth-paused credentials and reports the skip; only the targeted single-credential refresh stays a deliberate retry. The pause exists to prevent ESXi account lockout, and a bulk click means "refresh what works", not "retry the known-bad password".
+- **Interval 0 disables the staleness warning.** With the automation deliberately off, age proves nothing; only failed fetches, the failure streak or the auth pause colour the traffic light. The thresholds are constants (`VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER`, `VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR`) and every legend interpolates them, so text and behaviour cannot drift.
+- **The catalog upsert follows the reported name case**, deterministically (hosts disagreeing on case: the lowest credential id wins, stable across syncs). Assignments differing only by case show the picker's "(not in inventory)" fallback until re-saved; all warn logic stays case-insensitive, so never a false warning. Deliberate, documented exception: the VLAN selects match the catalog case-sensitively while report/warnings compare case-insensitively; ci-matching in the selects would silently rewrite stored values on the next save and was rejected.
+- **Partial presence renders against an evidence denominator.** The catalog shows "on X of Y hosts" where Y counts only credentials with at least one successful pull; partial presence is a warning and names the missing hosts (the short, actionable list).
+- **The deviation report includes templates, flagged as such.** A stale VLAN living only in a template propagates silently into every mission created from it. The mission-list badge and the deploy hint keep excluding templates (they cannot deploy); the mass reassignment always rewrote templates too, now the report matches it.
+- **Two disjoint deploy warnings.** The mission-level union warning names values missing from every host; the live per-host warning (CSP-nonced JSON island driving the credential select) names values present on other hosts but missing from the chosen one, with the union misses subtracted. By construction the same value never appears in both boxes.
+- **Mission deploys claim before mission-less system jobs** (`ORDER BY (mission_id IS NULL), id`): an interval burst of inventory pulls must not delay an operator's deploy. Accepted starvation trade-off, fine because the cache is a warn-only mirror that re-enqueues every interval.
+- **The network inventory carries VLAN IDs as meta.** The playbook forwards raw portgroup objects (dumb transport); the PHP parser, unit-testable without a host, extracts name plus integer `vlan_id` and flags trunk ranges instead of comparing them. The catalog's VLAN-ID column shows a consistent ID quietly and different IDs across hosts as a danger badge: the one failure class that was previously invisible (same name, different network). Field paths are verified against the productive host on rollout; `default()` guards plus the empty-guard mean a wrong path yields silence, never data loss.
+- **Visibility conventions** for all inventory signals: one page per question (system status = aggregate health, vlans = per-VLAN facts, deploy = only what affects this deploy, mission list = pointer badge only); muted = information, warning = a deploy may fail depending on host choice, danger = probable misconfiguration or blocked automation; the shared vocabulary is "nicht im Inventar" plus a host reference, no synonyms.
+
+## Amendment (2026-07-09): hard location selects and the deploy storage estimate
+
+The compound control (free-text input plus convenience picker) made the two most consequential mission fields look like free-form text. It is replaced by one shared hard `<select>` (`inventory_select_field()`), which also gave the inventory cache a second job: showing what a deploy will cost.
+
+- **Hard select with a stored-unknown fallback.** A value the inventory does not know renders as an extra, selected option labelled "not in the inventory", so a stored value is never dropped. The match is exact, as in the VLAN selects, so a case variant shows the suffix instead of being silently re-cased on the next save; all warn logic stays case-insensitive and therefore never fires on it.
+- **Free text only while a kind's inventory is empty.** The lockout guard that justified the permanent free-text input is a server-side branch now: with zero cached names of a kind, the field is a plain input. Once names exist, new ones arrive the way they always did, through an inventory pull. Accepted trade-off: a value that exists only on a credential which was never pulled cannot be typed until that credential is pulled once. The other write paths (machine API, mission import, `repo_validate_mission_values`) keep accepting any string, so nothing about the wire contract changes.
+- **Free space decorates the datastore options.** `free_bytes` was already cached (migration 0013) and is surfaced through `esxi_inventory_options()['free_by_key']`. The option value stays the bare name; the size is label only. Grouped mode shows each credential's own number, the flat union shows the **minimum** across credentials, because the target host is not chosen yet and only the tightest number is safe. A NULL renders no suffix (datacenters carry no bytes). *(The grouped half is superseded by the 2026-07-25 amendment: there is no per-credential group any more, and every bucket shows the minimum across the hosts that report the name.)*
+- **The mission datacenter hides adaptively**, under the same rule the VM override already used: empty value, exact options, exactly one name. It then posts a hidden input, or saving would wipe it. The rule reads the `form_old()` value, so a validation failure with a filled datacenter shows the field again.
+- **Deploy storage estimate** (`lib/deploy_storage.php`): the requirement per target datastore comes from `ansible_storage_by_datastore()`, which reuses `ansible_vm_disks()` and `ansible_effective_datastore()` (including the default disk a VM without rows gets), so the preview and the create playbook cannot disagree. Provisioned sizes are the comparison basis; thin disks only defer the claim. It is compared against the chosen credential's cached `free_bytes`. **Warn-only, never a gate**, consistent with the cache-never-blocks rule: no credential, no cached datastore or a NULL free value all render as "unknown", not as a refusal. The schedule preview renders the verdict server-side (credential and VM selection are known there), so it holds without JavaScript; the queue form renders the requirement and lets `deploy_storage.js` refill free/verdict on every credential or VM-selection change.
+- **Datastore health is available but deliberately not surfaced yet.** *(Superseded by the 2026-07-25 amendment, which built it; the deferral below is the reasoning that preceded it, not the current state.)* `inventoryESXi_playbook.yml` forwards the raw `vmware_datastore_info` objects, which carry `accessible` and `maintenanceMode` next to `capacity`/`freeSpace`; `ansible_parse_inventory_output()` keeps only name, capacity and free space and drops the rest. Surfacing them (a datastore in maintenance or inaccessible should be visibly unavailable in the picker and count as "unknown" in the storage verdict, not as free space) needs no DDL, because `deploy_esxi_inventory.meta_json` already exists and carries the same kind of side data for networks and hosts. It is deferred rather than unbuilt: the two flags are a *health* signal, and the picker's rules for what a stale or partial cache may claim would have to be decided for them too, exactly as they were for names. Field paths would be verified against a productive host on rollout, like every other one here.
+
+## Amendment (2026-07-10): capability facts, and the ESXi test becomes a pull
+
+The two open questions this ADR left behind (the connection test's TLS strictness and its vCenter-only REST endpoint) were initially answered by deleting the thing that asked them. The `validate_certs: false` conclusion below is superseded by ADR-0037; the real inventory path remains the test, but now derives strict or visibly legacy trust from the credential.
+
+- **PHP no longer speaks to ESXi at all.** `credential_test_esxi()` probed `GET /rest/appliance/system/version` with PHP's default `verify_peer`, so it reported `tls` for the self-signed certificate every playbook accepts, and HTTP 404 for a standalone host that has no such path. It tested a transport production never uses. Pressing "Test" on an ESXi credential now clears the auth pause and enqueues a real inventory pull, the same call the credential save makes: the one path a deploy takes. The verdict is therefore no longer a one-shot flash but the traffic light, which survives the redirect and every reload. The certificate variant (self-signed, VMCA, a domain CA) stops mattering entirely, because the playbooks connect with `validate_certs: false`. Strict TLS remains a deliberate later hardening decision (WP7), and it is now the only place that decision has to be made.
+- **Capability facts are properties of a successful pull, not error categories.** `vmware_about_info` and a `schema: vsphere` host-facts call add `api_type`, `product_version`, `license_product`, `license_free`, `in_ha_cluster` and `in_maintenance` to `deploy_esxi_inventory_state`. They answer "what is this host and what is it doing", while `VIRTUSPHERE_INVENTORY_ERROR_*` answers "why did the fetch fail". Mixing them would make "this host has a free licence" look like "we could not reach this host", and only one of those is fixed by retrying. No new error vocabulary was needed.
+- **Every fact is tri-state and NULL means "not known".** A cache row from before this change, a module that did not report a field, a host never pulled: all yield NULL, which renders as nothing at all. A false `license_free` derived from silence would promise a write the host cannot perform, which is precisely the failure the facts exist to prevent. A refusal (ADR-0025) consequently requires a fact from a *fresh* successful pull.
+- **Visibility follows the existing convention.** The system status page keeps the detail (a capability line plus at most three badges: free licence and HA cluster warn, maintenance informs). The credentials page gets a pointer badge that links there. The dashboard gets a "Hypervisor" tile rolling the worst state over all ESXi credentials, hidden entirely when no ESXi credential exists. The deploy page renders the capability warning of the chosen credential in its own island, disjoint from the per-host value warning by construction: one names what the mission wants and the host lacks, the other names what the host itself cannot do.
+- **One traffic light, computed once.** `esxi_inventory_ampel()` is the fetch health, read by every badge: the credential row, the integrations heading and the dashboard rollup, which must never disagree on the same colour. It answers one question, "is the inventory pull healthy?", and a host capability does not colour it. A free licence, an HA cluster and maintenance mode are properties of a *successful* pull, so they surface as their own badges and gate deploys through the ADR-0025 preflight, not through this light. An earlier revision of this amendment lifted a healthy pull to `warning` on a blocking capability so a green tile would not read "all clear"; that made amber mean two unrelated things (a stale fetch and a licensing fact) and buried the fetch signal the light exists for, so the lift was removed. Deploy-blocking is enforced where it belongs, in the preflight; a fetch failure is `danger` on its own.
+
+## Amendment (2026-07-24): a pull reports which of its queries answered
+
+The tolerance this ADR granted the optional `*_info` modules (a failing one
+yields an empty list instead of failing the pull) had no counterpart: nothing
+recorded *that* a query had failed. An empty list therefore meant three
+different things at once, and a portgroup query that the module rejected on its
+argument spec read for months as "this host has no portgroups".
+
+- **Tolerated failure now costs a report.** The playbook forwards `failed`,
+  `skipped` and `msg` per query; the parser maps them to `answered`, `rejected`
+  or `skipped`, and the worker writes one job-log line under the counts. The
+  fields are projected rather than passed through whole, because a module result
+  carries `invocation` with every argument.
+- **The report is a log line, not a state.** Nothing is stored, no badge is
+  coloured, no job is refused. The traffic light keeps answering one question
+  ("did the pull run?"), consistent with the amendment above that removed the
+  capability lift for the same reason. Surfacing partial pulls in the UI is a
+  separate decision, and it would need this data first.
+- **The good case is logged too.** A line that only appears on failure never
+  teaches a reader that a pull has parts. `all N answered` is the sentence that
+  makes the other one legible.
+- **Silence beats a claim.** A pull from a playbook without the report yields no
+  line at all, rather than asserting a completeness it never measured.
+
+## Amendment (2026-07-23): compact System-status cards and Ansible selection
+
+- **One global Ansible execution credential for inventory.** With zero Ansible
+  credentials no pull can be queued; with exactly one it is used automatically;
+  with several, `esxi_inventory_ansible_credential_id` is mandatory. The shared
+  resolver returns `none`, `automatic`, `selected`, `ambiguous` or `invalid` and
+  is used by Settings, worker/enqueue and System status. Deleting the selected
+  credential or changing it away from Ansible clears and audits the dangling
+  setting.
+- **Compact by default, details on demand.** System status bulk-loads fetch state,
+  counts and pending jobs once and shows one compact card per ESXi credential.
+  Complete hosts/datacentres/datastores/portgroups load only for the validated
+  `?inventory=<esxi-id>` card. Deleted, unknown and non-ESXi IDs collapse to no
+  selection without revealing another credential.
+- **Queue state is feedback, not a second fetch.** A queued or running job is
+  shown on its card, disables the start action and links to its job log. Manual
+  and bulk requests distinguish queued, already open, auth-paused, missing,
+  ambiguous or invalid Ansible selection and unexpected failure. The action on
+  Credentials is named „Inventarabruf starten" / "Start inventory pull"; the
+  synchronous Ansible action remains „Verbindung und Umgebung prüfen".
+- **Terminology only, not a wire change.** The existing URL stays
+  `system_status.php`, while the visible page is System status. Mission/VM data,
+  machine APIs, playbook fields and PowerShell contracts are unchanged.
+
+## Amendment (2026-07-25): presence buckets instead of origin, and datastore health
+
+- **The picker groups by risk, not by origin.** An `<optgroup>` per credential
+  answered "who reported this". The operator's question at that field is "does
+  this value survive the host choice I make later", and on a mixed fleet the two
+  diverge: a datastore shared by four hosts appeared four times, identically, and
+  carried `selected` in each group, so the browser silently kept the last one.
+  `esxi_inventory_presence_buckets()` assigns every name to exactly one of
+  `all` / `some` / `only`, which removes the duplicates by construction rather
+  than by a de-duplication pass. Group labels carry credential **name and
+  address**, because a fleet named `esxi1`..`esxi6` is not something an operator
+  can map to a machine.
+- **The proof denominator is the credentials that pulled, not the ones that hold
+  rows.** `repo_esxi_inventory_pulled_credential_ids()` counts
+  `last_success_at IS NOT NULL`, the same rule as the VLAN presence report. A
+  host that pulled successfully and genuinely reports no datastore stays in the
+  denominator; counting groups would have promoted every other host's datastore
+  to "present everywhere" with a whole host unaccounted for. Without a single
+  successful pull nothing is labelled `all`.
+- **`exact` is untouched.** It remains the sole source for preselecting a lone
+  value and hiding a per-VM control. The buckets decide presentation only; the
+  two answer different questions and must not be collapsed.
+- **Free space and usability follow the worst reporting host.** The target host
+  is still open, so a shared name shows the smallest free value reported, and a
+  name that even one reporting host holds in maintenance shows no number at all.
+- **Datastore health needs no schema.** The pull always carried `accessible` and
+  `maintenanceMode`; the parser threw both away. They are kept in the existing
+  per-item `meta_json`, tri-state like the capability facts: a missing field
+  reads as "not known" and is never guessed to be healthy, and an unknown health
+  never withdraws a number the cache does have (cache-never-blocks).
+  `esxi_datastore_usable_free_bytes()` is the one reader of both ways a number
+  can be absent, shared by the inventory detail, the deploy verdict and the
+  picker label; a NULL free value used to render as a confident "0 B free" in
+  one of them and as "unknown" in another.
+- **The pull logs its health facts, including the good case.** One
+  `Datastore health:` line per pull, next to `Inventory queries:` and for the
+  same reason: a field path that stops matching looks exactly like a fleet with
+  nothing in maintenance, and only a line that also speaks when everything is
+  fine tells the two apart.
+- **The notes at the field describe what is rendered.** The multi-credential hint
+  used to hang on `exact` while the grouping hung on disagreement, so six
+  credentials with one pulled produced "grouped per credential" over a flat list.
+  `esxi_inventory_location_notes()` derives its tokens from the rendered option
+  sets, and the VM editor shows the same notes as the mission editor, which
+  previously showed none at all. A never-pulled credential is named at the field
+  with a link to its System-status card, so the free-text dead end this ADR
+  accepted knowingly is explained where it is met.
+
+## Amendment (2026-07-26): completed inventory jobs remain diagnosable
+
+- **The fetch state points to the exact job that produced it.**
+  `deploy_esxi_inventory_state.last_job_id` is a relationship, not a copied
+  status or log: `deploy_jobs` and `deploy_job_logs` remain authoritative. The
+  worker writes it together with success or failure, and migration 0029 only
+  backfills a retained job whose credential, outcome, inventory mode and narrow
+  completion window all match the existing state.
+- **The System-status card owns navigation for mission-less jobs.** Queued and
+  running pulls keep their active link; the latest completed pull is linked as
+  well, including success, because a green aggregate does not prove that every
+  optional query returned data. The shared `deploy_job_log_url()` builder owns
+  the viewer route, and the log viewer returns mission-less jobs to their exact
+  credential card rather than to an empty mission queue.
+- **Retention removes the relation atomically.** The foreign key uses
+  `ON DELETE SET NULL`, so purging a system job cannot leave a dead link. A
+  retained old failure without a job shows a retention explanation and asks for
+  a new pull; it never promises an unavailable log.
+- **A reaped pull is a fetch failure.** When a running inventory job loses its
+  heartbeat, the reaper records the `worker` error category and that job id in
+  the same durable state. Otherwise the active link would disappear while the
+  card could keep an older green result.
+
+## Amendment 4 (2026-07-26): "never a block" and the four refusals, reconciled
+
+The Decision above opened with "never a block" and, twelve lines later, mandated two refusals derived from the same table. Read literally, the two contradict each other, and a reader could take either as the rule. The refusals are correct; the sentence was too absolute. The distinction it was missing:
+
+**A cache-derived judgement needs a fresh fact, or it does not happen.** Refusing a job because of something the cache *claims about the host* is a decision made on possibly stale data, so it requires a successful, fresh pull. `esxi_autostart_preflight()` implements exactly that: `$fresh && $facts['license_free']` blocks, `$fresh && $facts['in_ha_cluster']` skips, and a stale or absent fact returns `ok` with a log line saying ESXi remains the authority. This is the rule "never a block" was written for, and it holds.
+
+**A missing required value is a different question.** The mission datacenter is mandatory for the generated `serverlist.yml`; the cache is only the place the portal looks to fill it in when the mission leaves it empty. Refusing to queue a job for which no datacenter resolves is not a judgement about the host, it is a required field with no value. Three gates do it (portal, enqueue, worker) because the cache can change between queueing and the run.
+
+Two things follow, and both are decided here rather than left to reading:
+
+- **A value the cache does not know is never a refusal.** A mission datacenter that is stored but absent from the cached list renders a warning, never a block, and a mission that carries a datacenter does not consult the cache at all. There is therefore no "the cache contradicts the mission" refusal anywhere, and none should be added: the cache is a mirror, and a mirror that has not been polished lately is not evidence.
+- **Letting the deploy run instead would be worse, not more consistent.** Checked against the pinned collection and Broadcom's own documentation: a standalone ESXi host has exactly one datacenter, it is always `ha-datacenter`, and `vmware_guest` hardcodes that name as its parameter default, so on this product's target topology the derivation succeeds as soon as one pull has worked. Dropping the gate would move the error from a sentence in the form to a `No datacenter named  was found` after a job was queued, dispatched and logged in, with `--check` validating nothing on the way. And "let the API reject it" is demonstrably unreliable on the very task this project runs: a wrong *datastore* is never null-checked on that code path, the raw string reaches `CreateVM_Task`, and the operator gets an unhandled pyVmomi exception instead of a message. The successor collection `vmware.vmware` validates every named object explicitly with an opt-in `fail_on_missing`, which is the same shape as this pre-check, one layer down.
+
+`docs/operations/esxi-inventory.md` said a refusal "always" requires a fresh successful pull. That is true of the capability refusal and precisely false of the datacenter one; it now says which is which.
+
+## Amendment 5 (2026-07-27): the per-query report decides what an empty result means
+
+The Decision's empty-result guard treated every empty fetch result as "keep the
+existing rows". That rule predates the per-query report (Amendment, 2026-07-24):
+once a pull says which of its queries answered, an unconditional guard preserves
+rows the host verifiably lost, and the mirror shows portgroups that do not exist.
+
+- **Answered-empty is authoritative.** A kind whose every query answered (for
+  portgroups: both sources) with an empty union is cleared for that credential.
+  The job log states it (`cleared (host reports none, N removed)`).
+- **Failed or skipped keeps rows, frozen.** The empty list proves nothing; the
+  existing rows stay and their freshness is NOT renewed. A pull without the
+  report (an older playbook) is never authoritative.
+- **Freshness is persisted per kind** (`kind_freshness_json`, migration 0030):
+  answered kinds get a stamp, including empty ones, because "known empty as of
+  T" is not representable by row timestamps. The inventory detail groups render
+  it, so a frozen kind visibly ages next to the card's last success.
+- **Normalization is balanced out loud.** The parser reports raw vs. kept per
+  kind and the worker logs it (`Inventory normalization: ...`), because an entry
+  whose shape stopped matching used to be indistinguishable from a host that
+  has less.
+- **Bounded scope: `connectionState` stays unqueried.** On the supported direct
+  standalone connection the pull itself proves connectivity, and failure
+  categories say more; the vCenter-side host state is monitored in vCenter. The
+  runbook documents this as a limit.
+
+The VLAN catalog's retire logic is unchanged: it already required fresh positive
+evidence and never deletes. `EsxiInventoryCacheTest` pins the three empty-result
+paths and the freshness stamps.
+
+## Amendment 6 (2026-08-31): exact raw names and per-kind evidence
+
+The earlier case-insensitive inventory de-duplication and comparison rules are
+superseded. ESXi object names are operative identifiers and are stored and
+compared as raw UTF-8 strings: case, whitespace and supported Unicode are part
+of the identity. Migration 0046 changes the inventory, VLAN catalog, mission
+location/WDS and VM location/interface VLAN columns to binary collation. `Prod`
+and `prod` can therefore coexist; only an exact duplicate is ambiguous. A
+case-folded diagnostic key may group likely mistakes for a warning, but can
+never prove presence, free capacity, a deploy target or callback success.
+
+Name validity is centralized in `lib/esxi_object_names.php`. Empty or
+whitespace-only values, NUL, Unicode categories Cc/Cf/Cs, invalid UTF-8 and
+names beyond the persisted bound are unsupported. A completely invalid
+inventory marker fails the pull instead of partially inventing truth. Other raw
+boundary characters remain visible as unsupported evidence but are excluded
+from pickers and every operative decision.
+
+Inventory name semantics and observations are now per kind. Semantics 2 means
+that one kind was fully answered and written by the exact-name writer; a
+success for another kind cannot upgrade it. `kind_observation_json` separates
+the last attempt from the last positive name evidence, so a later transport,
+authorization or parse failure remains visible without renewing freshness or
+erasing the previous evidence. VLAN retirement remains frozen until all
+relevant credentials have semantics-2 portgroup evidence.
+
+An omitted mission datacenter is derived only from exactly one supported,
+semantics-2 raw datacenter name whose positive evidence is no older than
+`VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS` (172800 seconds,
+inclusive). One request samples the current time once. An explicit mission
+datacenter bypasses derivation. Zero, unsupported, stale, future-dated or
+ambiguous evidence is a configuration blocker; a normal inventory deviation is
+still warn-only and never becomes an absence proof.
+
+## Amendment (2026-10-05): successful evidence expires with automation off
+
+`esxi_inventory_success_evidence_state()` owns the fetch-success freshness used
+by the portal traffic light and capability preflights. A positive schedule keeps
+the existing two-interval window. Schedule zero uses the separate
+`VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS` constant, initially seven days,
+matching the operational lifetime of an Ansible full test without coupling the
+two domain constants. Expiry is grey `stale`, ranked like `unknown`; an actual
+failed pull remains a warning or danger. Invalid or excessively future-dated
+timestamps cannot prove a current successful fetch.
+
+A cached foreign namesake continues to block admission even when old. Its exact
+inventory observation time and age are displayed next to the existing refresh
+link; the portal never assumes that expiry means the foreign VM disappeared.
+
+After any worker-owned terminal outcome of create/full, a stored Create
+`async_jid` is enough to schedule the existing credential inventory refresh.
+Failure, cancellation and uncertainty can all leave changes on ESXi. Publication
+and VM convergence retain their existing transactions and ownership fences;
+scheduling occurs afterwards, fail-soft and through the deduplicating writer.
+
+## Amendment 7 (2026-10-15): the reported release decides the hardware version of a new VM
+
+On 15.10.2026 job 1180 created nothing on a standalone ESXi 7.0.3 host: both create units ended `module_failed` with "The operation is not supported on the object". The create playbook had hardwired `version: 21` since 06.07.2026, and Broadcom KB 312100 documents vmx-21 as creatable only from ESXi 8.0 Update 2. The portal had the host release in its capability facts the whole time (`ESXi capabilities: product=VMware ESXi 7.0.3 ...` was the line before the failure). Before July the playbook set no version and ESXi chose, which is why "it worked before". The support matrix compensated with a create floor of 8.0 Update 2 and justified it with a desktop client that, as it turns out, never set a version either.
+
+Decided:
+
+- **The capability fact is the source of the hardware version.** `lib/esxi_create_compatibility.php` holds the one table (first release that can create each version: 7.0 → 17, 7.0 Update 1 → 18, 7.0 Update 2 → 19, 8.0 → 20, 8.0 Update 2 → 21) and the one verdict, `esxi_create_compatibility()`. Only a standalone host (`api_type = HostAgent`) with a fresh, parsed release pins a version; the worker writes it as `create_hardware_version` into `serverlist.yml`, and `createVMLaunch` passes it only for a VM that did not exist before. A release newer than the table keeps its last row: raising the version is its own decision with its own evidence.
+- **Unknown stays unknown, as in Amendment 4.** A stale or absent fact pins nothing and refuses nothing: the playbook then passes no version and ESXi uses its default, which is the pre-July behaviour and the one that cannot be wrong for this host.
+- **Two new refusals, both on a fresh fact only.** A release below the table cannot create any VM, and a VM whose guest identifier that release does not know (Windows Server 2022 from 7.0 Update 1, Windows 11 and Server 2025 from 8.0, per the vSphere API "Since") would fail the same way. Deploy page, single enqueue, stagger, retry and worker ask the same owner (`deploy_esxi_create_compatibility()`); the worker refusal is `configuration_blocked` before any upload. The guest floors live next to the options in `VIRTUSPHERE_GUEST_OS_OPTIONS`.
+- **An existing VM never gets a version.** `vmware_guest` upgrades a lower version with `UpgradeVM_Task`, which cannot be undone, and refuses a higher one as a downgrade. The hardwired 21 did the first to every powered-off VM it converged on an 8.0 Update 2 host. Converging now leaves the virtual hardware alone; upgrading it stays an operator action on the host.
+- **The guard derives from the table.** `check-doc-semantics.sh` rule 15 reads the table's pairs and requires each in the support matrix row about creating, and fails on any literal version in the playbook.

@@ -1,0 +1,171 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+require_once dirname(__DIR__) . '/Support/NetworkMacFixtures.php';
+
+require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/credentials.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/esxi_inventory.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/vm_identity.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
+require_once dirname(__DIR__, 2) . '/lib/deploy_blockers.php';
+
+/**
+ * Decision 6: an occupied name is not proof that the host VM is ours. The
+ * durable instance UUID decides ownership. Adopting a namesake was removed
+ * (WM-E2a): a foreign namesake blocks until it is renamed or deleted.
+ */
+final class VmIdentityCollisionTest extends TestCase
+{
+    private const PREFIX = 'phpunit_identity_';
+    private const VM_NAME = 'VS-ID-01';
+
+    private ?mysqli $db = null;
+    private int $missionId = 0;
+    private int $vmId = 0;
+    private int $esxiId = 0;
+    private int $ansibleId = 0;
+    private int $userId = 0;
+
+    protected function setUp(): void
+    {
+        try {
+            $this->db = db(true);
+        } catch (Throwable $exception) {
+            self::markTestSkipped('Database not reachable: ' . $exception->getMessage());
+        }
+        $this->cleanup();
+
+        $this->missionId = repo_create_mission($this->db, [
+            'mission_name' => self::PREFIX . 'mission',
+            'hypervisor_datastorage' => 'ds1',
+            'hypervisor_datacenter' => 'DC1',
+            'domain' => 'example.test',
+        ], true);
+        $this->vmId = repo_save_vm(
+            $this->db,
+            $this->missionId,
+            null,
+            [
+                'vm_name' => self::VM_NAME,
+                'vm_hostname' => self::VM_NAME,
+                'vm_os' => 'Windows Server 2022',
+                'vm_domain' => 'example.test',
+                'vm_guest_id' => 'windows2022srvNext_64Guest',
+                'vm_cpu' => 4,
+                'vm_ram' => 8192,
+            ],
+            [['ip' => '10.90.0.10', 'subnet' => '255.255.255.0', 'gateway' => '10.90.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN90', 'mac' => '']],
+            [['disk_name' => 'System', 'disk_size' => 80, 'disk_type' => 'thin']],
+            [],
+            '',
+            1
+        );
+        $this->esxiId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, 443);
+        $this->ansibleId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE, 22);
+        $this->userId = (int) repo_scalar($this->db, 'SELECT id FROM deploy_users ORDER BY id LIMIT 1');
+        self::assertGreaterThan(0, $this->userId, 'integration fixture requires one portal user');
+        test_prepare_network_mac_fixture($this->db, $this->missionId, $this->esxiId, 'VLAN90');
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->db !== null) {
+            $this->cleanup();
+        }
+    }
+
+    public function testForeignNamesakeBlocksSingleAndStaggeredEnqueue(): void
+    {
+        $this->setStoredIdentity('vm-old', '503c89f1-5734-4d4d-a930-4d92b97a7289');
+        $this->replaceInventoryVm('vm-24', 'uuid-foreign');
+
+        foreach (['single', 'group'] as $path) {
+            try {
+                if ($path === 'single') {
+                    repo_create_deploy_job($this->db, $this->missionId, $this->userId, $this->esxiId, $this->ansibleId, ['mode' => 'full']);
+                } else {
+                    repo_enqueue_deploy_group($this->db, $this->missionId, $this->userId, $this->esxiId, $this->ansibleId, ['mode' => 'start'], null, 10);
+                }
+                self::fail($path . ' enqueue accepted a foreign namesake');
+            } catch (VmIdentityConflictException $exception) {
+                self::assertSame([self::VM_NAME], array_column($exception->conflicts(), 'vm_name'));
+            }
+        }
+
+        self::assertSame(0, (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_jobs WHERE mission_id = ?', 'i', [$this->missionId]));
+    }
+
+    public function testMatchingInstanceUuidAllowsAChangedMoid(): void
+    {
+        $this->setStoredIdentity('vm-old', '503c89f1-5734-4d4d-a930-4d92b97a7289');
+        $this->replaceInventoryVm('vm-new', '503C89F1-5734-4D4D-A930-4D92B97A7289');
+
+        self::assertSame([], repo_vm_identity_conflicts($this->db, $this->missionId, $this->esxiId));
+        $jobId = repo_create_deploy_job($this->db, $this->missionId, $this->userId, $this->esxiId, $this->ansibleId, ['mode' => 'full']);
+        self::assertGreaterThan(0, $jobId);
+    }
+
+    private function replaceInventoryVm(string $moid, string $instanceUuid): void
+    {
+        repo_esxi_inventory_replace_kind($this->db, $this->esxiId, VIRTUSPHERE_INVENTORY_KIND_VM, [[
+            'name' => self::VM_NAME,
+            'meta_json' => ['moid' => $moid, 'instance_uuid' => $instanceUuid, 'power_state' => 'poweredOff'],
+        ]], true);
+    }
+
+    public function testAnOldNamesakeStillBlocksWithItsObservationAgeAndRefreshLink(): void
+    {
+        Lang::load('de');
+        $this->replaceInventoryVm('vm-24', 'uuid-foreign');
+        repo_execute($this->db, 'UPDATE deploy_esxi_inventory SET fetched_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 90 DAY) WHERE credential_id = ? AND kind = ?', 'is', [$this->esxiId, VIRTUSPHERE_INVENTORY_KIND_VM]);
+        $conflicts = repo_vm_identity_conflicts($this->db, $this->missionId, $this->esxiId);
+        self::assertCount(1, $conflicts);
+        self::assertNotEmpty($conflicts[0]['inventory_fetched_at']);
+        $items = deploy_queue_base_blockers(true, true, true, true, '', true, ['id' => $this->missionId], [['id' => $this->vmId]], $conflicts);
+        $item = array_values(array_filter($items, static fn (array $item): bool => $item['kind'] === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT))[0];
+        self::assertStringContainsString('Alter:', $item['message']);
+        self::assertStringContainsString(portal_format_timestamp($conflicts[0]['inventory_fetched_at']), $item['message']);
+        self::assertSame(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI), $item['help']['url']);
+        self::assertSame(vm_edit_url($this->missionId, $this->vmId), $item['action']['url']);
+    }
+
+    private function setStoredIdentity(string $moid, string $instanceUuid): void
+    {
+        $stmt = $this->db->prepare('UPDATE deploy_vms SET vm_moid = ?, vm_instance_uuid = ? WHERE id = ?');
+        $stmt->bind_param('ssi', $moid, $instanceUuid, $this->vmId);
+        $stmt->execute();
+    }
+
+    private function makeCredential(string $type, int $port): int
+    {
+        $stmt = $this->db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext) VALUES (?, ?, ?, ?, ?, ?)');
+        $name = self::PREFIX . $type;
+        $host = $type === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI ? 'esxi.example.test' : 'ansible.example.test';
+        $username = 'svc';
+        $secret = 'x';
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $username, $secret);
+        $stmt->execute();
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function cleanup(): void
+    {
+        $like = self::PREFIX . '%';
+        foreach ([
+            'DELETE FROM deploy_jobs WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE ?)',
+            'DELETE FROM deploy_missions WHERE mission_name LIKE ?',
+            'DELETE FROM deploy_credentials WHERE name LIKE ?',
+        ] as $sql) {
+            $stmt = $this->db->prepare($sql);
+            $stmt->bind_param('s', $like);
+            $stmt->execute();
+        }
+    }
+}

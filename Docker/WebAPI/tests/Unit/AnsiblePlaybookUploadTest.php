@@ -1,0 +1,140 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Every playbook a job can dispatch must actually be shipped to the Ansible
+ * host, and must exist in the source tree.
+ *
+ * It did not. There are two playbook maps -- VIRTUSPHERE_PLAYBOOKS for the
+ * mission modes and VIRTUSPHERE_SYSTEM_PLAYBOOKS for the ESXi inventory --
+ * and ansible_required_files() derived from the first one only, under a
+ * docblock claiming the two "never drift". So every ESXi inventory pull
+ * uploaded five playbooks, ran a sixth, and died on
+ *
+ *     ERROR! the playbook: inventoryESXi_playbook.yml could not be found
+ *
+ * On the operator's screen that became "the host answered unexpectedly" plus
+ * an empty inventory, which sends them to look at ESXi, the network and the
+ * credentials -- none of which were involved. Nothing caught it because no
+ * test connected the dispatch map to the upload list, and the local dev stack
+ * has no real Ansible host to fail against.
+ */
+final class AnsiblePlaybookUploadTest extends TestCase
+{
+    /** @return array<string, string> mode => playbook filename */
+    private function everyDispatchablePlaybook(): array
+    {
+        return array_merge(VIRTUSPHERE_PLAYBOOKS, VIRTUSPHERE_SYSTEM_PLAYBOOKS);
+    }
+
+    public function testEveryDispatchablePlaybookIsUploaded(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
+        $uploaded = ansible_required_files();
+        self::assertContains(VIRTUSPHERE_POWERCYCLE_VM_TASKS, $uploaded);
+        self::assertContains(VIRTUSPHERE_REPORT_VM_TOUCH_SCRIPT, $uploaded);
+        self::assertContains(VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, $uploaded);
+        self::assertContains(VIRTUSPHERE_EXPORT_VM_INFO_TASKS, $uploaded);
+
+        foreach ($this->everyDispatchablePlaybook() as $mode => $playbook) {
+            self::assertContains(
+                $playbook,
+                $uploaded,
+                'mode "' . $mode . '" runs ' . $playbook . ', but it is never copied to the Ansible host'
+            );
+        }
+    }
+
+    /**
+     * DF-S1: an included task file is shipped like a playbook, or the include
+     * dies on the Ansible host exactly as the inventory playbook once did. The
+     * targets are read from the uploaded YAML, never listed here.
+     */
+    public function testEveryIncludedTaskFileIsUploaded(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
+        $uploaded = ansible_required_files();
+        self::assertSame([], $this->missingIncludes($uploaded, ansible_source_dir()));
+
+        // Negative case: the same derivation must notice a dropped include.
+        foreach ([VIRTUSPHERE_POWERCYCLE_VM_TASKS, VIRTUSPHERE_POWERCYCLE_VM_INFO_TASKS, VIRTUSPHERE_EXPORT_VM_INFO_TASKS] as $requiredInclude) {
+            $without = array_values(array_diff($uploaded, [$requiredInclude]));
+            self::assertContains($requiredInclude, $this->missingIncludes($without, ansible_source_dir()));
+        }
+    }
+
+    /**
+     * @param list<string> $uploaded
+     * @return list<string> include targets of uploaded YAML files that are not uploaded
+     */
+    private function missingIncludes(array $uploaded, string $sourceDir): array
+    {
+        $targets = [];
+        foreach ($uploaded as $file) {
+            if (!str_ends_with($file, '.yml')) {
+                continue;
+            }
+            $source = (string) file_get_contents($sourceDir . DIRECTORY_SEPARATOR . $file);
+            preg_match_all('/\b(?:include|import)_tasks:\s*\.\/([\w.-]+\.yml)/', $source, $matches);
+            foreach ($matches[1] as $target) {
+                $targets[$target] = true;
+            }
+        }
+        self::assertNotSame([], $targets, 'no include_tasks found at all; the scan cannot be trusted');
+
+        return array_values(array_diff(array_keys($targets), $uploaded));
+    }
+
+    public function testEveryUploadedFileExistsInTheSourceTree(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
+        // ansible_source_dir() is the resolver the deploy path itself uses, so
+        // this asserts against the very directory a job would copy from.
+        $sourceDir = ansible_source_dir();
+        self::assertDirectoryExists($sourceDir);
+
+        foreach (ansible_required_files() as $file) {
+            self::assertFileExists(
+                $sourceDir . DIRECTORY_SEPARATOR . $file,
+                $file . ' is on the upload list but missing from the playbook source dir'
+            );
+        }
+    }
+
+    public function testTheInventoryPlaybookIsCoveredByBothChecks(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
+        // Named explicitly: it is the one that was missing, and a future
+        // refactor that drops the system map again must fail here loudly.
+        $inventory = VIRTUSPHERE_SYSTEM_PLAYBOOKS[VIRTUSPHERE_DEPLOY_MODE_INVENTORY];
+        self::assertSame('inventoryESXi_playbook.yml', $inventory);
+        self::assertContains($inventory, ansible_required_files());
+    }
+
+    public function testNoDuplicatesOnTheUploadListAndOnlyOneDeliberateOverlap(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/ansible_paths.php';
+        $uploaded = ansible_required_files();
+        self::assertSame(
+            array_values(array_unique($uploaded)),
+            array_values($uploaded),
+            'a file would be uploaded twice'
+        );
+
+        // Since Etappe 14B-E the maps DO overlap, in exactly one entry: the
+        // create mode's playbook is the launch playbook of the per-VM create
+        // contract. Asserting the size of that overlap keeps this a real guard
+        // instead of a comparison the deduplication makes vacuous - a second,
+        // unnoticed overlap would mean two maps claim the same file for two
+        // different reasons.
+        $overlap = array_values(array_intersect(
+            array_merge(array_values(VIRTUSPHERE_PLAYBOOKS), array_values(VIRTUSPHERE_SYSTEM_PLAYBOOKS)),
+            VIRTUSPHERE_CREATE_ARTIFACTS
+        ));
+        self::assertSame([VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH], $overlap);
+        self::assertSame(VIRTUSPHERE_CREATE_PLAYBOOK_LAUNCH, VIRTUSPHERE_PLAYBOOKS['create']);
+    }
+}

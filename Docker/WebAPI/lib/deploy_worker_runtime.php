@@ -1,0 +1,351 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_stored_mode.php';
+require_once __DIR__ . '/connection_errors.php';
+require_once __DIR__ . '/deploy_job_output.php';
+require_once __DIR__ . '/integration_health.php';
+require_once __DIR__ . '/repo/deploy_jobs.php';
+require_once __DIR__ . '/repo/heartbeats.php';
+require_once __DIR__ . '/worker_heartbeat.php';
+require_once __DIR__ . '/deploy_worker_vm_state.php';
+
+/**
+ * Worker runtime: the vocabulary and the per-tick bookkeeping every job path
+ * shares - the cancellation signal, the phase names a failure is classified by,
+ * secret redaction, the service's own status row, the job heartbeat and the
+ * ownership assertion.
+ *
+ * These are the pieces both the mission and the inventory processor call on
+ * every step, which is exactly why they must not live inside either of them.
+ */
+final class DeployWorkerCancelled extends RuntimeException
+{
+}
+
+// Where the inventory job was when it threw (B6). Not a wire vocabulary: these
+// exist so a thrown failure is classified by the phase that raised it first and
+// by text evidence second, instead of every throw falling back to `parse` and
+// blaming the host's answer.
+const VIRTUSPHERE_DEPLOY_PHASE_CONFIG = 'config';
+const VIRTUSPHERE_DEPLOY_PHASE_SSH = 'ssh';
+const VIRTUSPHERE_DEPLOY_PHASE_SFTP = 'sftp';
+const VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT = 'transport';
+const VIRTUSPHERE_DEPLOY_PHASE_MARKER = 'marker';
+const VIRTUSPHERE_DEPLOY_PHASE_DB = 'db';
+
+/**
+ * Classifies a thrown inventory-job failure into a VIRTUSPHERE_INVENTORY_ERROR_*
+ * category, in the binding order of the masterplan's section 3.
+ *
+ * Two rules are phase-independent, because their origin is certain wherever
+ * they surface: a database failure is ours, and a local transport
+ * misconfiguration is ours too. Everything else is decided by WHERE the job
+ * was. Only the three legs that actually talk to the Ansible host consult the
+ * message, because only there can wording distinguish anything (DNS vs.
+ * refused vs. auth), and there it is qualified through the one shared mapping
+ * (Etappe 7/8) so their fallback is `ansible_transport`, never `parse`. Config
+ * failures never reached the network; marker failures are the one true "the
+ * host answered unexpectedly"; an unknown phase is a coding error in the
+ * worker and reads as `worker`.
+ */
+function deploy_worker_classify_inventory_failure(string $phase, Throwable|string $failure): string
+{
+    // Section 3, rule 1. A database outage is not a statement about the remote
+    // host, and its phase says nothing about its origin: before this branch a
+    // mysqli failure handed through a transport phase came out as
+    // `ansible_transport` and actively blamed the Ansible host for it.
+    if ($failure instanceof mysqli_sql_exception || $failure instanceof DeployWorkerOutcomeUnpersisted) {
+        return VIRTUSPHERE_INVENTORY_ERROR_WORKER;
+    }
+    // Section 3, rule 2. Missing phpseclib, empty mandatory fields or an
+    // unreadable work directory are our own deployment, in every phase.
+    if ($failure instanceof SshTransportConfigurationException) {
+        return VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+    }
+    $message = $failure instanceof Throwable ? $failure->getMessage() : $failure;
+
+    switch ($phase) {
+        case VIRTUSPHERE_DEPLOY_PHASE_CONFIG:
+            // Rule 3. The budget and SFTP types are deliberately NOT consulted
+            // here: a budget type placed in a phase that never opened a socket
+            // is a coding error, not a remote timeout, and calling it
+            // `ansible_timeout` would name a host this phase never contacted.
+            return str_contains(strtolower($message), 'certificate')
+                ? VIRTUSPHERE_INVENTORY_ERROR_CERTIFICATE
+                : VIRTUSPHERE_INVENTORY_ERROR_CONFIG;
+        case VIRTUSPHERE_DEPLOY_PHASE_SSH:
+        case VIRTUSPHERE_DEPLOY_PHASE_SFTP:
+        case VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT:
+            // Rules 6 to 8, all three through the one shared function: exact
+            // type first (a generic RuntimeException with the same sentence is
+            // deliberately not promoted to a VirtuSphere budget), wording only
+            // afterwards.
+            $category = $failure instanceof Throwable
+                ? ansible_connection_error_category($failure)
+                : ansible_connection_error_category_for_text($message);
+
+            // Rule 9. Inside the upload leg the generic transport fallback can
+            // be said more precisely: this phase only ever runs SFTP, so the
+            // operator gets the file-transfer sentence instead of "somewhere
+            // on the way to the Ansible host".
+            return $phase === VIRTUSPHERE_DEPLOY_PHASE_SFTP
+                && $category === VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_TRANSPORT
+                    ? VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_SFTP
+                    : $category;
+        case VIRTUSPHERE_DEPLOY_PHASE_MARKER:
+            return VIRTUSPHERE_INVENTORY_ERROR_PARSE;
+        case VIRTUSPHERE_DEPLOY_PHASE_DB:
+        default:
+            return VIRTUSPHERE_INVENTORY_ERROR_WORKER;
+    }
+}
+
+/**
+ * Whether this failure is the ONSET of an ESXi auto-pull pause, i.e. the one
+ * moment worth an audit line.
+ *
+ * Two conditions, and both are load-bearing. The category must be exactly
+ * `auth`, because that is the only one that pauses at all: an Ansible-side
+ * rejection would otherwise announce a pause that never happened. And the row
+ * must not already be paused, because a paused credential keeps being retried
+ * by hand, and one audit line per retry buries the sign-in trail it lives in.
+ *
+ * @param array<string, mixed>|null $stateBefore The row as read BEFORE the
+ *        failure was recorded; null when the credential has no state row yet.
+ */
+function deploy_worker_inventory_pause_onset(?array $stateBefore, string $category): bool
+{
+    if ($category !== VIRTUSPHERE_INVENTORY_ERROR_AUTH) {
+        return false;
+    }
+
+    return $stateBefore === null || (int) ($stateBefore['paused_until_credential_change'] ?? 0) !== 1;
+}
+
+/**
+ * The deploy worker's own System status row: it reports that it is alive, and how
+ * deep its queue is.
+ *
+ * It had no traffic light at all. Its only liveness signal was a tmpfs file for
+ * the container healthcheck, which the PHP container cannot read, so a stopped or
+ * crash-looping worker left the page fully green above a queue that had stopped
+ * moving. The operator saw "everything ok" and a job sitting at `queued` forever,
+ * with nothing anywhere connecting the two.
+ *
+ * The queue depth and the age of the oldest waiting job are the two numbers that
+ * make the row actionable: a live worker with a growing queue and a dead worker
+ * with a growing queue look identical without them.
+ *
+ * Throttled to the reported interval, because the loop wakes every few seconds
+ * and the staleness thresholds are multiples of what is reported here.
+ */
+function deploy_worker_report_alive(mysqli $db, bool $ok = true, ?string $failureDetail = null): void
+{
+    static $lastReportedAt = 0;
+
+    $now = time();
+    if ($ok && $lastReportedAt !== 0 && ($now - $lastReportedAt) < VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS) {
+        return;
+    }
+    $lastReportedAt = $now;
+
+    try {
+        $detail = $failureDetail ?? deploy_worker_queue_detail($db);
+        repo_record_worker_result($db, VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER, VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS, $ok, $detail);
+    } catch (Throwable $exception) {
+        // The report is never allowed to break the worker: a job in flight matters
+        // more than its own status row.
+        fwrite(STDERR, '[deploy-worker] status report failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
+    }
+}
+
+/**
+ * "queue: N waiting, oldest 12 min" - the sentence the row needs to be worth
+ * reading. Without the age, a queue of one that has been waiting since yesterday
+ * looks like a queue of one that arrived a second ago.
+ */
+function deploy_worker_queue_detail(mysqli $db): string
+{
+    $queued = VIRTUSPHERE_DEPLOY_STATUS_QUEUED;
+    $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+    $row = repo_fetch_one(
+        $db,
+        'SELECT COUNT(*) AS waiting, TIMESTAMPDIFF(MINUTE, MIN(created_at), NOW()) AS oldest_minutes FROM deploy_jobs WHERE status = ? AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP())',
+        's',
+        [$queued]
+    ) ?? [];
+    $active = (int) repo_scalar($db, 'SELECT COUNT(*) FROM deploy_jobs WHERE status = ?', 's', [$running]);
+
+    $waiting = (int) ($row['waiting'] ?? 0);
+    $detail = 'queue: ' . $waiting . ' waiting, ' . $active . ' running';
+    if ($waiting > 0) {
+        $detail .= ', oldest ' . (int) ($row['oldest_minutes'] ?? 0) . ' min';
+    }
+
+    return $detail;
+}
+
+/**
+ * The transport-driven heartbeat: fires on every read slice of the bounded SSH
+ * transport (AP6), including the silent ones, and carries all three liveness
+ * signals of a busy worker. Lives here rather than in the CLI entrypoint so the
+ * integration tests can drive it against a real database (the entrypoint runs
+ * its main loop on require).
+ */
+function deploy_worker_heartbeat_tick(mysqli $db, int $jobId, string $workerId, int $intervalSeconds = VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS): void
+{
+    static $lastHeartbeat = [];
+
+    // Ticks fire on every read slice of the bounded transport (AP6), also the
+    // silent ones, so touching here keeps the container healthcheck green
+    // through playbook runs far longer than the loop cadence (AP8).
+    worker_heartbeat_touch();
+
+    // The System status row rides along, throttled to its own cadence inside
+    // deploy_worker_report_alive(). Without this, a healthy job inside one
+    // remote step longer than the danger window turned the row red: the report
+    // ran only at the top of the main loop, which does not spin while a
+    // playbook runs.
+    deploy_worker_report_alive($db);
+
+    $key = $jobId . ':' . $workerId;
+    $now = time();
+    if ($intervalSeconds > 0 && isset($lastHeartbeat[$key]) && ($now - $lastHeartbeat[$key]) < $intervalSeconds) {
+        return;
+    }
+
+    if (repo_touch_deploy_job_heartbeat($db, $jobId, $workerId)) {
+        $lastHeartbeat[$key] = $now;
+    }
+}
+
+/**
+ * Stops the worker as soon as the job in front of it is no longer its own to
+ * finish. There are four states and only one was checked:
+ *
+ *  - the operator cancelled it (the original check),
+ *  - the job row is GONE. `$job !== null` let exactly this case through: the
+ *    worker carried on against a deleted mission and then failed on a foreign
+ *    key while writing its next log line, which the error categorizer reports as
+ *    a remote problem, so the operator reads "the host answered unexpectedly"
+ *    for a row somebody deleted in the portal,
+ *  - it is no longer `running`: the heartbeat reaper concluded it and already
+ *    published a verdict plus marked its VMs, which writing on would overwrite,
+ *  - it is `running` under ANOTHER worker's lock (adopted after that reap), so
+ *    two workers would drive the same playbook sequence over the same VMs.
+ *
+ * All four raise DeployWorkerCancelled, because the outcome is the same: this
+ * worker stops without publishing a result of its own.
+ *
+ * Cancellation itself is honoured at step boundaries only, never mid-exec (AP6,
+ * by design): this check runs between the preflight, the SFTP upload and each
+ * playbook, so the sequence stops before the NEXT step. Killing a
+ * create/powercycle mid-run would leave the ESXi side in a state no later step
+ * could reason about (a half-cloned VM, a power operation of unknown outcome).
+ * The bounded SSH transport caps an individual step; cancel is cooperative at
+ * the seams, and the convergence sweep (L4) cleans up VMs left `deploying` if
+ * the worker dies before its own catch runs.
+ */
+function deploy_worker_assert_job_is_ours(mysqli $db, int $jobId, string $workerId, bool $atStepBoundary = true, ?array $claim = null): void
+{
+    $job = repo_deploy_job($db, $jobId);
+    if ($job === null) {
+        throw new DeployWorkerCancelled('Deploy job ' . $jobId . ' no longer exists.');
+    }
+    if ($claim !== null && !deploy_worker_claim_matches($claim, $job)) {
+        throw new DeployWorkerCancelled('Deploy job ' . $jobId . ' no longer belongs to this claim.');
+    }
+
+    $status = (string) $job['status'];
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLED) {
+        throw new DeployWorkerCancelled('Deploy job was cancelled.');
+    }
+    if ($status === VIRTUSPHERE_DEPLOY_STATUS_CANCELLING) {
+        if (!$atStepBoundary && (string) ($job['locked_by'] ?? '') === $workerId) {
+            return;
+        }
+        // The stop IS the confirmation (ADR-0033): this check runs exactly at
+        // the step boundaries where a cancel is honoured, so the worker that
+        // owns the lock concludes the state machine here via the ownership
+        // CAS. Under a foreign lock this worker only stops; the owner (or the
+        // reaper, if the owner died) delivers the confirmation.
+        if ((string) ($job['locked_by'] ?? '') === $workerId && deploy_worker_confirm_owned_cancel($db, $claim ?? $job)) {
+            throw new DeployWorkerCancelled('Cancel requested by operator; confirmed at this step boundary.');
+        }
+
+        throw new DeployWorkerCancelled('Deploy job is cancelling; another party owns its conclusion.');
+    }
+    if ($status !== VIRTUSPHERE_DEPLOY_STATUS_RUNNING) {
+        throw new DeployWorkerCancelled('Deploy job is no longer running (status ' . $status . '); another party concluded it.');
+    }
+    if ((string) ($job['locked_by'] ?? '') !== $workerId) {
+        throw new DeployWorkerCancelled('Deploy job is locked by ' . ((string) ($job['locked_by'] ?? '') ?: 'nobody') . ', not by this worker.');
+    }
+}
+
+/**
+ * This worker's ownership fence for the job it holds (Etappe 14B).
+ *
+ * The worker id alone is not a fence. It is derived from host and process and
+ * survives a restart, so a returning old worker could satisfy it while its
+ * successor holds the job. The claim therefore mints a random lock token and
+ * records the lease epoch alongside it, and every per-VM create write compares
+ * all three. Production supplies the original claim; a fresh read must never
+ * adopt a successor token just because its process name is identical.
+ *
+ * @return array{worker_id:string,lock_token:string,worker_epoch:int}
+ */
+function deploy_worker_job_fence(mysqli $db, int $jobId, string $workerId, ?array $claim = null): array
+{
+    if ($claim !== null) {
+        deploy_worker_assert_job_is_ours($db, $jobId, $workerId, false, $claim);
+        return ['worker_id' => $workerId, 'lock_token' => (string) $claim['lock_token'], 'worker_epoch' => (int) $claim['worker_epoch']];
+    }
+    $row = repo_fetch_one(
+        $db,
+        'SELECT locked_by, lock_token, worker_epoch FROM deploy_jobs WHERE id = ? LIMIT 1',
+        'i',
+        [$jobId]
+    );
+    if ($row === null || (string) ($row['locked_by'] ?? '') !== $workerId) {
+        throw new DeployWorkerCancelled('Deploy job ' . $jobId . ' is no longer locked by this worker.');
+    }
+    $token = (string) ($row['lock_token'] ?? '');
+    if ($token === '') {
+        // A job claimed before this stage. Its per-VM writes cannot be fenced,
+        // and a fence that silently degrades to "worker id only" is the kind of
+        // guard that stops guarding without turning red.
+        throw new DeployWorkerCancelled(
+            'Deploy job ' . $jobId . ' was claimed without a lock token and cannot drive per-VM create results. '
+            . 'Queue it again.'
+        );
+    }
+
+    return [
+        'worker_id' => $workerId,
+        'lock_token' => $token,
+        'worker_epoch' => (int) ($row['worker_epoch'] ?? 0),
+    ];
+}
+
+/**
+ * The payload the worker reads back from a stored job. A job whose mode is
+ * missing, not a string or unknown reads as mode '' and never as the full
+ * pipeline (AN-04): the worker refuses such a job as configuration_blocked
+ * before it derives any playbook sequence. The other keys are only the empty
+ * defaults; no caller may act on them for a '' mode.
+ *
+ * @return array<string, mixed>
+ */
+function deploy_worker_payload(array $job): array
+{
+    $payload = json_decode((string) ($job['payload_json'] ?? '{}'), true);
+    if (!is_array($payload) || deploy_job_stored_mode($payload) === null) {
+        return ['mode' => '', 'verbose' => false, 'vm_ids' => [], 'skipped_vm_ids' => []];
+    }
+
+    return deploy_job_payload($payload);
+}

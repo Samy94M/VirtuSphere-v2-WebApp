@@ -1,0 +1,1568 @@
+# Kein param-Block: der frueher hier reservierte Schalter -repair wurde von
+# niemandem gesetzt und von diesem Skript nie gelesen. Ein Parameter, der nichts
+# tut, ist eine Zusage an den Paketautor, die das Skript nicht einhaelt.
+# Aufgerufen wird immer parameterlos:
+#   powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File install.ps1
+
+# Set-StrictMode: ein vertippter Variablenname ist sonst ein stilles $null.
+# Dieses Skript laeuft als SYSTEM und startet fremde Teilskripte; ein stilles
+# $null entscheidet hier ueber Registry-Zweig und Detection-Wert. Version 1.0
+# aus demselben Grund wie in VirtuSphere-Common.ps1: ab 2.0 wuerde auch der
+# Zugriff auf ein legitim fehlendes JSON-Feld werfen.
+#
+# Fuer die Teilskripte aendert sich nichts: sie laufen ueber
+# & PowerShell.exe -File in einem eigenen Prozess, StrictMode wirkt nicht hinein.
+# $LASTEXITCODE wird erst NACH dem ersten &-Aufruf gelesen, ist dort also
+# gesetzt; eine spaetere Umstellung auf Version 2.0 muesste das pruefen.
+Set-StrictMode -Version 1.0
+
+# Set-Location: Wechselt das Arbeitsverzeichnis auf den Ordner, in dem install.ps1 liegt.
+# $PSScriptRoot: Automatische Variable - enthaelt immer den vollstaendigen Pfad des aktuellen Skripts.
+# Wichtig damit alle relativen Pfade (.\powershell\, .\config.json) korrekt aufgeloest werden.
+Set-Location $PSScriptRoot
+
+$script:VsPackageLogSchemaVersion = 1
+$script:VsPackageLogKeepCount = 5
+$script:VsPackageLogSinks = @{}
+$script:VsPackageLogPaths = @{}
+$script:VsPackageLogWarnings = @{}
+$script:VsPackageRunResults = New-Object System.Collections.Generic.List[object]
+$script:VsPackageRunStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$script:VsPackageRunCompleted = $false
+$script:VsPackageRunId = ([guid]::NewGuid()).ToString('D').ToLowerInvariant()
+$script:VsPackageRunStartedUtc = [DateTime]::UtcNow
+$script:VsPackageRunStamp = $script:VsPackageRunStartedUtc.ToString('yyyyMMddTHHmmssfffZ', [Globalization.CultureInfo]::InvariantCulture)
+$script:VsPackageReporterSession = $null
+$script:VsPackageReporterActiveClock = New-Object Diagnostics.Stopwatch
+$script:VsPackageReporterPhaseMs = @{ verifier = 0; host_start = 0; ipc = 0; teardown = 0 }
+$script:VsPackageReporterDisableReason = 'not_initialized'
+$script:VsPackageReporterNextSeq = 2
+$script:VsPackageReporterOmittedCount = 0
+$script:VsPackageReporterFirstFailure = $null
+
+# The package is executable content. Resolve only the installer-owned closed
+# generation, never a path supplied by config.json or by a manifest entry.
+# This is a read-only precondition for the later supervised reporter start.
+function Get-VsPackageVerifiedReporterBundle {
+    param([Parameter(Mandatory)][string]$PackageRoot)
+
+    try {
+        $expectedNames = @(
+            'VirtuSphere-Client-Common.ps1',
+            'VirtuSphere-Client-Logging.ps1',
+            'VirtuSphere-Package-Reporter.ps1',
+            'VirtuSphere-Package-ReporterHost.ps1'
+        ) | Sort-Object
+        $reporting = Join-Path $PackageRoot 'reporting'
+        $descriptorPath = Join-Path $reporting 'current.json'
+        $wrapperPath = Join-Path $PackageRoot 'install.ps1'
+        foreach ($directory in @($PackageRoot, $reporting)) {
+            $item = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+            if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        }
+        foreach ($path in @($wrapperPath, $descriptorPath)) {
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        }
+        if ((Get-Item -LiteralPath $descriptorPath -Force).Length -gt 8192) { return $null }
+        $descriptor = Get-Content -LiteralPath $descriptorPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ((@($descriptor.PSObject.Properties.Name | Sort-Object) -join '|') -cne
+            'bundle_id|contracts|schema_version|wrapper_sha256' -or
+            ($descriptor.schema_version -isnot [int] -and $descriptor.schema_version -isnot [long]) -or $descriptor.schema_version -ne 1 -or
+            $descriptor.bundle_id -isnot [string] -or $descriptor.bundle_id -cnotmatch '\A[0-9a-f]{64}\z' -or
+            $descriptor.wrapper_sha256 -isnot [string] -or $descriptor.wrapper_sha256 -cnotmatch '\A[0-9a-f]{64}\z') { return $null }
+        if ((Get-FileHash -LiteralPath $wrapperPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+            $descriptor.wrapper_sha256) { return $null }
+
+        $bundleRoot = Join-Path $reporting $descriptor.bundle_id
+        $bundleItem = Get-Item -LiteralPath $bundleRoot -Force -ErrorAction Stop
+        if (-not $bundleItem.PSIsContainer -or ($bundleItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        $manifestPath = Join-Path $bundleRoot 'manifest.json'
+        $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
+        if ($manifestItem.PSIsContainer -or ($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $manifestItem.Length -gt 16384) { return $null }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ((@($manifest.PSObject.Properties.Name | Sort-Object) -join '|') -cne
+            'bundle_id|contracts|files|schema_version' -or
+            ($manifest.schema_version -isnot [int] -and $manifest.schema_version -isnot [long]) -or $manifest.schema_version -ne 1 -or
+            $manifest.bundle_id -cne $descriptor.bundle_id) { return $null }
+        foreach ($contractSet in @($descriptor.contracts, $manifest.contracts)) {
+            if ($null -eq $contractSet -or
+                (@($contractSet.PSObject.Properties.Name | Sort-Object) -join '|') -cne 'adapter|common|host|logging') { return $null }
+            foreach ($name in @('common', 'logging', 'adapter', 'host')) {
+                $value = $contractSet.PSObject.Properties[$name].Value
+                if (($value -isnot [int] -and $value -isnot [long]) -or $value -ne 1) { return $null }
+            }
+        }
+
+        $entries = @($manifest.files)
+        if ($entries.Count -ne $expectedNames.Count) { return $null }
+        $basis = New-Object 'System.Collections.Generic.List[string]'
+        $verifiedPaths = New-Object 'System.Collections.Generic.List[string]'
+        for ($index = 0; $index -lt $expectedNames.Count; $index++) {
+            $entry = $entries[$index]
+            if ($null -eq $entry -or
+                (@($entry.PSObject.Properties.Name | Sort-Object) -join '|') -cne 'length|path|sha256' -or
+                $entry.path -isnot [string] -or $entry.path -cne $expectedNames[$index] -or
+                ($entry.length -isnot [int] -and $entry.length -isnot [long]) -or $entry.length -lt 0 -or
+                $entry.sha256 -isnot [string] -or $entry.sha256 -cnotmatch '\A[0-9a-f]{64}\z') { return $null }
+            $sourcePath = Join-Path $bundleRoot $entry.path
+            $sourceItem = Get-Item -LiteralPath $sourcePath -Force -ErrorAction Stop
+            if ($sourceItem.PSIsContainer -or ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+                $sourceItem.Length -ne [long]$entry.length -or
+                (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne $entry.sha256) { return $null }
+            [void]$basis.Add(('{0}|{1}|{2}' -f $entry.path, [long]$entry.length, $entry.sha256))
+            [void]$verifiedPaths.Add($sourcePath)
+        }
+        $actualNames = @(Get-ChildItem -LiteralPath $bundleRoot -Force -ErrorAction Stop | Sort-Object Name | ForEach-Object Name)
+        $allowedNames = @($expectedNames + 'manifest.json' | Sort-Object)
+        if (($actualNames -join '|') -cne ($allowedNames -join '|')) { return $null }
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $calculatedId = ([BitConverter]::ToString($sha.ComputeHash(
+                [Text.Encoding]::UTF8.GetBytes(($basis.ToArray() -join "`n")))).Replace('-', '')).ToLowerInvariant()
+        } finally { $sha.Dispose() }
+        if ($calculatedId -cne $descriptor.bundle_id) { return $null }
+        return [pscustomobject]@{ BundleId = $descriptor.bundle_id; Root = $bundleRoot; Files = $verifiedPaths.ToArray() }
+    } catch {
+        Write-Debug $_
+        return $null
+    }
+}
+
+# Create the worker suspended, bind only that new process to a private job,
+# then let its first instruction run. A failed assignment terminates the
+# suspended child. The wrapper alone retains the non-inherited job handle.
+function Start-VsPackageReporterJobProcess {
+    param(
+        [string]$ScriptPath,
+        [Parameter(Mandatory)][string]$PipeName,
+        [string]$VerifierCode
+    )
+
+    if ($PipeName -cnotmatch '\Avirtusphere-report-[0-9a-f]{32}\z') { return $null }
+    # The bundle verifier already authenticated this package path. Do not
+    # reopen its filesystem on the installation thread: a missing/unreadable
+    # host must fail inside its private job and bounded ready handshake.
+    if (-not $VerifierCode -and
+        ([string]::IsNullOrWhiteSpace($ScriptPath) -or
+         $ScriptPath.IndexOfAny([char[]]@(0, 10, 13, 34)) -ge 0)) { return $null }
+    $powerShellPath = Join-Path ([Environment]::GetFolderPath('System')) 'WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $powerShellPath -PathType Leaf)) { return $null }
+    try {
+        if (-not ('VirtuSphere.PackageReporterJobProcess' -as [type])) {
+            Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace VirtuSphere {
+    public sealed class PackageReporterJobProcess : IDisposable {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct STARTUPINFO {
+            public uint cb;
+            public IntPtr lpReserved, lpDesktop, lpTitle;
+            public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars;
+            public uint dwFillAttribute, dwFlags;
+            public ushort wShowWindow, cbReserved2;
+            public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION {
+            public IntPtr hProcess, hThread;
+            public uint dwProcessId, dwThreadId;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BASIC_LIMIT_INFORMATION {
+            public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public IntPtr Affinity;
+            public uint PriorityClass, SchedulingClass;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IO_COUNTERS {
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount;
+            public ulong ReadTransferCount, WriteTransferCount, OtherTransferCount;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct EXTENDED_LIMIT_INFORMATION {
+            public BASIC_LIMIT_INFORMATION BasicLimitInformation;
+            public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit, JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed, PeakJobMemoryUsed;
+        }
+        [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+        private static extern bool CreateProcessW(string application, StringBuilder commandLine,
+            IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
+            uint creationFlags, IntPtr environment, string currentDirectory,
+            ref STARTUPINFO startup, out PROCESS_INFORMATION process);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern IntPtr CreateJobObject(IntPtr security, string name);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool SetInformationJobObject(IntPtr job, int infoClass,
+            ref EXTENDED_LIMIT_INFORMATION limits, uint size);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern uint ResumeThread(IntPtr thread);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool CloseHandle(IntPtr handle);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool GetNamedPipeClientProcessId(IntPtr pipe, out uint pid);
+
+        private IntPtr job, process;
+        public uint ProcessId { get; private set; }
+        private PackageReporterJobProcess(IntPtr jobHandle, IntPtr processHandle, uint pid) {
+            job = jobHandle; process = processHandle; ProcessId = pid;
+        }
+        public bool IsRunning { get { return process != IntPtr.Zero && WaitForSingleObject(process, 0) == 0x102; } }
+        public bool WaitForExit(uint milliseconds) {
+            return process != IntPtr.Zero && WaitForSingleObject(process, milliseconds) == 0;
+        }
+        public bool IsExpectedPipeClient(IntPtr pipe) {
+            uint pid;
+            return process != IntPtr.Zero && GetNamedPipeClientProcessId(pipe, out pid) && pid == ProcessId;
+        }
+        public static PackageReporterJobProcess Start(string exe, string script, string pipeName) {
+            string args = "\"" + exe + "\" -NoProfile -ExecutionPolicy Bypass -NonInteractive -File \"" +
+                script + "\" -VsReporterPipeName " + pipeName;
+            return StartInternal(exe, args);
+        }
+        public static PackageReporterJobProcess StartEncoded(string exe, string code) {
+            string args = "\"" + exe + "\" -NoProfile -ExecutionPolicy Bypass -NonInteractive -EncodedCommand " + code;
+            return StartInternal(exe, args);
+        }
+        private static PackageReporterJobProcess StartInternal(string exe, string args) {
+            IntPtr jobHandle = IntPtr.Zero;
+            PROCESS_INFORMATION child = new PROCESS_INFORMATION();
+            bool created = false;
+            try {
+                jobHandle = CreateJobObject(IntPtr.Zero, null);
+                if (jobHandle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+                EXTENDED_LIMIT_INFORMATION limits = new EXTENDED_LIMIT_INFORMATION();
+                limits.BasicLimitInformation.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                if (!SetInformationJobObject(jobHandle, 9, ref limits,
+                    (uint)Marshal.SizeOf(typeof(EXTENDED_LIMIT_INFORMATION))))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                STARTUPINFO startup = new STARTUPINFO();
+                startup.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
+                if (!CreateProcessW(exe, new StringBuilder(args), IntPtr.Zero, IntPtr.Zero,
+                    false, 0x08000004, IntPtr.Zero, null, ref startup, out child))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                created = true;
+                if (!AssignProcessToJobObject(jobHandle, child.hProcess))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (ResumeThread(child.hThread) == 0xffffffff)
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                PackageReporterJobProcess result = new PackageReporterJobProcess(jobHandle, child.hProcess, child.dwProcessId);
+                jobHandle = IntPtr.Zero;
+                child.hProcess = IntPtr.Zero;
+                return result;
+            } catch {
+                if (created) {
+                    TerminateProcess(child.hProcess, 1);
+                    WaitForSingleObject(child.hProcess, 500);
+                }
+                throw;
+            } finally {
+                if (child.hThread != IntPtr.Zero) CloseHandle(child.hThread);
+                if (child.hProcess != IntPtr.Zero) CloseHandle(child.hProcess);
+                if (jobHandle != IntPtr.Zero) CloseHandle(jobHandle);
+            }
+        }
+        public void Dispose() {
+            if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; }
+            if (process != IntPtr.Zero) { CloseHandle(process); process = IntPtr.Zero; }
+            GC.SuppressFinalize(this);
+        }
+        ~PackageReporterJobProcess() { Dispose(); }
+    }
+}
+
+'@
+        }
+        if ($VerifierCode) {
+            return [VirtuSphere.PackageReporterJobProcess]::StartEncoded($powerShellPath, $VerifierCode)
+        }
+        return [VirtuSphere.PackageReporterJobProcess]::Start($powerShellPath, $ScriptPath, $PipeName)
+    } catch {
+        Write-Debug ("reporter process start failure: " + $_.Exception.ToString() + ' | ' + $_.ScriptStackTrace)
+        return $null
+    }
+}
+
+# Only the already executing wrapper is allowed to verify the publication.
+# The verifier is a separate, kill-on-close process: a stalled filesystem read
+# can no longer pin the installation's PowerShell thread indefinitely.
+function Get-VsPackageSupervisedReporterBundle {
+    param([Parameter(Mandatory)][string]$PackageRoot,
+          [Parameter(Mandatory)][ValidateRange(1, 7000)][int]$TimeoutMs)
+
+    $pipe = $null
+    $reader = $null
+    $job = $null
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $pipeName = 'virtusphere-report-' + ([guid]::NewGuid()).ToString('N')
+        $security = New-Object IO.Pipes.PipeSecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $security.AddAccessRule((New-Object IO.Pipes.PipeAccessRule($sid,
+            [IO.Pipes.PipeAccessRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow)))
+        $pipe = [IO.Pipes.NamedPipeServerStream]::new($pipeName,
+            [IO.Pipes.PipeDirection]::In, 1, [IO.Pipes.PipeTransmissionMode]::Byte,
+            [IO.Pipes.PipeOptions]::Asynchronous, 1024, 1024, $security)
+        # Encode the definitions already loaded by this wrapper. Reopening
+        # install.ps1 as child executable code would create a pre-hash race.
+        $rootB64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($PackageRoot))
+        $source = 'function Get-VsPackageVerifiedReporterBundle {' +
+            ${function:Get-VsPackageVerifiedReporterBundle}.ToString() + "}`n" +
+            'function Invoke-VsPackageBundleVerifyChild {' +
+            ${function:Invoke-VsPackageBundleVerifyChild}.ToString() + "}`n" +
+            'Invoke-VsPackageBundleVerifyChild -PipeName ' + $pipeName +
+            ' -PackageRoot ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String("' + $rootB64 + '")))'
+        $code = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($source))
+        if ($code.Length -gt 30000) { return $null }
+        $job = Start-VsPackageReporterJobProcess -PipeName $pipeName -VerifierCode $code
+        if ($null -eq $job) { return $null }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
+        $connection = $pipe.WaitForConnectionAsync()
+        if (-not $connection.Wait($remaining) -or
+            -not $job.IsExpectedPipeClient($pipe.SafePipeHandle.DangerousGetHandle())) { return $null }
+        $reader = New-Object IO.StreamReader($pipe, (New-Object Text.UTF8Encoding($false, $true)), $false, 1024, $true)
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
+        $read = $reader.ReadLineAsync()
+        if (-not $read.Wait($remaining)) { return $null }
+        $line = $read.Result
+        if ($null -eq $line -or $line.Length -gt 256) { return $null }
+        $answer = ConvertFrom-Json -InputObject $line -ErrorAction Stop
+        if ((@($answer.PSObject.Properties.Name | Sort-Object) -join '|') -cne 'bundle_id|schema_version' -or
+            $answer.schema_version -ne 1 -or $answer.bundle_id -isnot [string] -or
+            $answer.bundle_id -cnotmatch '\A[0-9a-f]{64}\z') { return $null }
+        $bundleRoot = Join-Path (Join-Path $PackageRoot 'reporting') $answer.bundle_id
+        $files = @('VirtuSphere-Client-Common.ps1', 'VirtuSphere-Client-Logging.ps1',
+            'VirtuSphere-Package-Reporter.ps1', 'VirtuSphere-Package-ReporterHost.ps1') |
+            Sort-Object | ForEach-Object { Join-Path $bundleRoot $_ }
+        return [pscustomobject]@{ BundleId = $answer.bundle_id; Root = $bundleRoot; Files = $files }
+    } catch {
+        Write-Debug ("supervised bundle failure: " + $_.Exception.Message)
+        return $null
+    } finally {
+        if ($null -ne $job) { try { $job.Dispose() } catch { Write-Debug $_.Exception.Message } }
+        if ($reader) { $reader.Dispose() }
+        if ($pipe) { $pipe.Dispose() }
+    }
+}
+
+function Invoke-VsPackageBundleVerifyChild {
+    param([Parameter(Mandatory)][string]$PipeName,
+          [Parameter(Mandatory)][string]$PackageRoot)
+    if ($PipeName -cnotmatch '\Avirtusphere-report-[0-9a-f]{32}\z') { return }
+    $pipe = $null
+    $writer = $null
+    try {
+        $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $PipeName, [IO.Pipes.PipeDirection]::Out,
+            [IO.Pipes.PipeOptions]::Asynchronous)
+        $pipe.Connect(2000)
+        $bundle = Get-VsPackageVerifiedReporterBundle -PackageRoot $PackageRoot
+        $bundleId = if ($null -eq $bundle) { '' } else { $bundle.BundleId }
+        $writer = New-Object IO.StreamWriter($pipe, (New-Object Text.UTF8Encoding($false)))
+        $writer.WriteLine((ConvertTo-Json -InputObject ([ordered]@{ schema_version = 1; bundle_id = $bundleId }) -Compress))
+        $writer.Flush()
+    } catch { Write-Debug $_ } finally {
+        if ($writer) { $writer.Dispose() }
+        if ($pipe) { $pipe.Dispose() }
+    }
+}
+
+# The parent owns the only server pipe and authenticates the connecting PID
+# against the process created in its private job. All waits are bounded; a
+# failed handshake closes the job before disposing the pipe.
+function Start-VsPackageReporterPipeSession {
+    param(
+        [Parameter(Mandatory)][object]$VerifiedBundle,
+        [Parameter(Mandatory)][ValidateRange(1, 5000)][int]$TimeoutMs
+    )
+
+    $pipe = $null
+    $reader = $null
+    $writer = $null
+    $job = $null
+    $ready = $false
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $workerPath = Join-Path $VerifiedBundle.Root 'VirtuSphere-Package-ReporterHost.ps1'
+        if (@($VerifiedBundle.Files) -cnotcontains $workerPath) { return $null }
+        $pipeName = 'virtusphere-report-' + ([guid]::NewGuid()).ToString('N')
+        $security = New-Object IO.Pipes.PipeSecurity
+        $security.SetAccessRuleProtection($true, $false)
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $security.AddAccessRule((New-Object IO.Pipes.PipeAccessRule($sid,
+            [IO.Pipes.PipeAccessRights]::FullControl,
+            [Security.AccessControl.AccessControlType]::Allow)))
+        $pipe = [IO.Pipes.NamedPipeServerStream]::new($pipeName,
+            [IO.Pipes.PipeDirection]::InOut, 1, [IO.Pipes.PipeTransmissionMode]::Byte,
+            [IO.Pipes.PipeOptions]::Asynchronous, 16384, 16384, $security)
+        $job = Start-VsPackageReporterJobProcess -ScriptPath $workerPath -PipeName $pipeName
+        if ($null -eq $job) { return $null }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
+        $connection = $pipe.WaitForConnectionAsync()
+        if (-not $connection.Wait($remaining) -or
+            -not $job.IsExpectedPipeClient($pipe.SafePipeHandle.DangerousGetHandle())) { return $null }
+        $encoding = New-Object Text.UTF8Encoding($false, $true)
+        $reader = New-Object IO.StreamReader($pipe, $encoding, $false, 1024, $true)
+        $writer = New-Object IO.StreamWriter($pipe, $encoding, 1024, $true)
+        $writer.AutoFlush = $true
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { return $null }
+        $hello = $reader.ReadLineAsync()
+        if (-not $hello.Wait($remaining) -or
+            $hello.Result -cne '{"schema_version":1,"state":"ready"}') { return $null }
+        $ready = $true
+        return [pscustomobject]@{ Pipe = $pipe; Reader = $reader; Writer = $writer; Job = $job; Disabled = $false }
+    } catch {
+        Write-Debug $_
+        return $null
+    } finally {
+        if (-not $ready) {
+            if ($job) { $job.Dispose() }
+            if ($writer) { $writer.Dispose() }
+            if ($reader) { $reader.Dispose() }
+            if ($pipe) { $pipe.Dispose() }
+        }
+    }
+}
+
+function Close-VsPackageReporterPipeSession {
+    param([AllowNull()][object]$Session)
+    if ($null -eq $Session) { return }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    # The job handle is first: even a blocked worker loses its life before
+    # stream disposal can wait for an outstanding I/O completion.
+    try { $Session.Job.Dispose() } catch { Write-Debug $_ }
+    try { $Session.Pipe.Dispose() } catch { Write-Debug $_ }
+    try { $Session.Writer.Dispose() } catch { Write-Debug $_ }
+    try { $Session.Reader.Dispose() } catch { Write-Debug $_ }
+    $clock.Stop()
+    $phaseMs = Get-Variable -Name VsPackageReporterPhaseMs -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($phaseMs -is [hashtable]) {
+        $phaseMs.teardown += $clock.ElapsedMilliseconds
+    }
+}
+
+function Invoke-VsPackageReporterPipeExchange {
+    param(
+        [Parameter(Mandatory)][object]$Session,
+        [Parameter(Mandatory)][object]$Message,
+        [Parameter(Mandatory)][ValidateRange(1, 2000)][int]$TimeoutMs
+    )
+
+    if ($Session.Disabled -or -not $Session.Job.IsRunning) { return $null }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    # Obergrenze einer IPC-Zeile in UTF-8-Bytes. Dieselbe Zahl steht unter demselben
+    # Namen im Empfaenger clients\VirtuSphere-Package-ReporterHost.ps1; ein Pester-Test
+    # haelt beide gleich (SD-11). Lokal statt Skriptvariable, damit die Funktion allein
+    # (Pester extrahiert sie einzeln) ohne den Rest der Vorlage korrekt rechnet.
+    $ipcMaxBytes = 16384
+    try {
+        $json = ConvertTo-Json -InputObject $Message -Compress -Depth 6 -ErrorAction Stop
+        if ([Text.Encoding]::UTF8.GetByteCount($json) -gt $ipcMaxBytes) { throw 'reporter IPC message too large' }
+        $send = $Session.Writer.WriteLineAsync($json)
+        if (-not $send.Wait($TimeoutMs)) { throw 'reporter IPC write timed out' }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { throw 'reporter IPC budget exhausted' }
+        $flush = $Session.Writer.FlushAsync()
+        if (-not $flush.Wait($remaining)) { throw 'reporter IPC flush timed out' }
+        $remaining = $TimeoutMs - [int]$clock.ElapsedMilliseconds
+        if ($remaining -lt 1) { throw 'reporter IPC budget exhausted' }
+        $read = $Session.Reader.ReadLineAsync()
+        if (-not $read.Wait($remaining)) { throw 'reporter IPC read timed out' }
+        $line = $read.Result
+        if ($null -eq $line -or [Text.Encoding]::UTF8.GetByteCount($line) -gt 1024) {
+            throw 'reporter IPC response invalid'
+        }
+        $answer = ConvertFrom-Json -InputObject $line -ErrorAction Stop
+        if ((@($answer.PSObject.Properties.Name | Sort-Object) -join '|') -cne
+                'attempted|confirmed|deduplicated|event|event_seq|reason|schema_version|status_code' -or
+            $answer.schema_version -ne 1 -or $answer.event -cne $Message.event -or
+            $answer.event_seq -ne $Message.event_seq -or
+            $answer.attempted -isnot [bool] -or $answer.confirmed -isnot [bool] -or
+            $answer.deduplicated -isnot [bool] -or
+            $answer.reason -isnot [string] -or $answer.reason -cnotmatch '\A[a-z_]{1,32}\z' -or
+            ($null -ne $answer.status_code -and
+                (($answer.status_code -isnot [int] -and $answer.status_code -isnot [long]) -or
+                    $answer.status_code -lt 100 -or $answer.status_code -gt 599))) {
+            throw 'reporter IPC response contract mismatch'
+        }
+        return $answer
+    } catch {
+        Write-Debug $_
+        $Session.Disabled = $true
+        Close-VsPackageReporterPipeSession -Session $Session
+        return $null
+    }
+}
+
+function ConvertTo-VsPackageLogText {
+    param(
+        [AllowNull()]
+        [object]$Value,
+
+        [int]$MaximumLength = 512
+    )
+
+    if ($null -eq $Value) { return $null }
+    $text = [string]$Value
+    $text = [regex]::Replace($text, '[\x00-\x1f\x7f]', ' ')
+    if ($MaximumLength -gt 0 -and $text.Length -gt $MaximumLength) {
+        return $text.Substring(0, $MaximumLength)
+    }
+    return $text
+}
+
+function Get-VsPackageIdentityHash {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectName,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $ascii = [System.Text.Encoding]::ASCII
+    $buffer = New-Object System.IO.MemoryStream
+    try {
+        foreach ($value in @($ProjectName, $Version)) {
+            $valueBytes = $utf8.GetBytes($value)
+            $lengthBytes = $ascii.GetBytes(($valueBytes.Length.ToString([Globalization.CultureInfo]::InvariantCulture) + ':'))
+            $buffer.Write($lengthBytes, 0, $lengthBytes.Length)
+            $buffer.Write($valueBytes, 0, $valueBytes.Length)
+        }
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha256.ComputeHash($buffer.ToArray()))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $buffer.Dispose()
+    }
+}
+
+function Test-VsPackageLogAccess {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        # Nur fuer die gemeinsame Logwurzel (PS-13): ein von C:\ProgramData geerbtes
+        # Benutzerschreibrecht bleibt zulaessig, weil der verwaltete Unterbau selbst
+        # geschuetzt ist. Ein explizit an die Wurzel gehaengtes Benutzerrecht ist
+        # dagegen eine fremde ACL und wird abgelehnt.
+        [switch]$IgnoreInherited
+    )
+
+    $broadWriteSids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-32-546')
+    $unsafeRights = [Security.AccessControl.FileSystemRights]::WriteData -bor
+        [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    try {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        foreach ($rule in $acl.Access) {
+            if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+            if ($IgnoreInherited -and $rule.IsInherited) { continue }
+            try {
+                $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+            } catch {
+                return $false
+            }
+            if ($broadWriteSids -contains $sid -and (($rule.FileSystemRights -band $unsafeRights) -ne 0)) {
+                return $false
+            }
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Legt einen verwalteten PackageWrapper-Ordner mit geschuetzter ACL an: keine
+# Vererbung von der Elternebene, nur SYSTEM und Administratoren mit Vollzugriff
+# (vererbt auf Unterordner und Dateien). Der Ordner entsteht mit dieser DACL und
+# nicht erst nach einem Set-Acl, damit es kein Zeitfenster mit der geerbten
+# ProgramData-ACL gibt (PS-13).
+function New-VsPackageManagedDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $security = New-Object Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $identity = New-Object Security.Principal.SecurityIdentifier($sid)
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+        $security.AddAccessRule($rule)
+    }
+    [IO.Directory]::CreateDirectory($Path, $security) | Out-Null
+}
+
+function Write-VsPackageLog {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('wrapper', 'reporting')][string]$Sink,
+        [Parameter(Mandatory = $true)][string]$Event,
+        [hashtable]$Fields = @{}
+    )
+
+    $writer = $script:VsPackageLogSinks[$Sink]
+    if ($null -eq $writer) { return }
+
+    try {
+        $record = [ordered]@{
+            schema_version = $script:VsPackageLogSchemaVersion
+            timestamp_utc = [DateTime]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+            elapsed_ms = [Math]::Floor($script:VsPackageRunStopwatch.Elapsed.TotalMilliseconds)
+            run_id = $script:VsPackageRunId
+            event = ConvertTo-VsPackageLogText -Value $Event -MaximumLength 64
+        }
+        foreach ($key in @($Fields.Keys | Sort-Object)) {
+            $value = $Fields[$key]
+            if ($value -is [string]) {
+                $limit = if ($key -in @('project_name', 'package_version', 'detail_path')) { 0 } else { 512 }
+                $value = ConvertTo-VsPackageLogText -Value $value -MaximumLength $limit
+            }
+            $record[[string]$key] = $value
+        }
+        $writer.WriteLine(($record | ConvertTo-Json -Compress -Depth 4))
+    } catch {
+        $script:VsPackageLogSinks[$Sink] = $null
+        if (-not $script:VsPackageLogWarnings.ContainsKey($Sink)) {
+            $script:VsPackageLogWarnings[$Sink] = $true
+            try { Write-Warning "VirtuSphere $Sink-Log ist ausgefallen; Paketablauf wird fortgesetzt." } catch { $null = $_ }
+        }
+        try { $writer.Dispose() } catch { $null = $_ }
+    }
+}
+
+function Open-VsPackageLogSink {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][ValidateSet('wrapper', 'reporting')][string]$Kind,
+        [Parameter(Mandatory = $true)][string]$PartnerName,
+        [Parameter(Mandatory = $true)][string]$ProjectName,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+
+    try {
+        $stream = New-Object System.IO.FileStream(
+            $Path,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::Read,
+            4096,
+            [System.IO.FileOptions]::WriteThrough
+        )
+        try {
+            $writer = New-Object System.IO.StreamWriter($stream, (New-Object System.Text.UTF8Encoding($true)))
+            $writer.AutoFlush = $true
+            $script:VsPackageLogSinks[$Kind] = $writer
+            $script:VsPackageLogPaths[$Kind] = $Path
+            Write-VsPackageLog -Sink $Kind -Event 'header' -Fields @{
+                log_kind = $Kind
+                partner_file = $PartnerName
+                project_name = $ProjectName
+                package_version = $Version
+                started_utc = $script:VsPackageRunStartedUtc.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+                process_id = $PID
+                process_identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+                powershell_version = [string]$PSVersionTable.PSVersion
+            }
+            return ($null -ne $script:VsPackageLogSinks[$Kind])
+        } catch {
+            try { $stream.Dispose() } catch { $null = $_ }
+            throw
+        }
+    } catch {
+        $script:VsPackageLogSinks[$Kind] = $null
+        if (-not $script:VsPackageLogWarnings.ContainsKey($Kind)) {
+            $script:VsPackageLogWarnings[$Kind] = $true
+            try { Write-Warning "VirtuSphere $Kind-Log konnte nicht angelegt werden; Paketablauf wird fortgesetzt." } catch { $null = $_ }
+        }
+        return $false
+    }
+}
+
+function Invoke-VsPackageLogRetention {
+    param(
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [Parameter(Mandatory = $true)][string]$CurrentStem
+    )
+
+    $directoryInfo = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if (($directoryInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'PackageWrapper-Logordner ist ein Reparse-Point.'
+    }
+    $directoryFull = [IO.Path]::GetFullPath($directoryInfo.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $pattern = '^(wrapper|reporting)_(?<stamp>\d{8}T\d{9}Z)_(?<run>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.log$'
+    $groups = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $directoryFull -File -Force -ErrorAction Stop)) {
+        $match = [regex]::Match($file.Name, $pattern, [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        if (-not $match.Success) { continue }
+        $parsedStamp = [DateTime]::MinValue
+        if (-not [DateTime]::TryParseExact(
+            $match.Groups['stamp'].Value,
+            "yyyyMMdd'T'HHmmssfff'Z'",
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal,
+            [ref]$parsedStamp
+        )) { continue }
+        if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+        if ([string]::Compare($file.DirectoryName, $directoryFull, [StringComparison]::OrdinalIgnoreCase) -ne 0) { continue }
+        $stem = '{0}_{1}' -f $match.Groups['stamp'].Value, $match.Groups['run'].Value
+        if (-not $groups.ContainsKey($stem)) {
+            $groups[$stem] = [pscustomobject]@{ Stem = $stem; Stamp = $match.Groups['stamp'].Value; Run = $match.Groups['run'].Value; Files = New-Object System.Collections.Generic.List[object] }
+        }
+        $groups[$stem].Files.Add($file)
+    }
+
+    $ordered = @($groups.Values | Sort-Object Stamp, Run -Descending)
+    $protected = @($ordered | Select-Object -First $script:VsPackageLogKeepCount | ForEach-Object { $_.Stem })
+    if ($protected -notcontains $CurrentStem) { $protected += $CurrentStem }
+    $warned = $false
+    foreach ($group in @($ordered | Where-Object { $protected -notcontains $_.Stem })) {
+        $locks = New-Object System.Collections.Generic.List[object]
+        try {
+            $lockFailed = $false
+            foreach ($file in $group.Files.ToArray()) {
+                try {
+                    $fresh = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    if (($fresh.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                        [string]::Compare($fresh.DirectoryName, $directoryFull, [StringComparison]::OrdinalIgnoreCase) -ne 0) {
+                        $lockFailed = $true
+                        break
+                    }
+                    $locks.Add((New-Object System.IO.FileStream(
+                        $fresh.FullName,
+                        [IO.FileMode]::Open,
+                        [IO.FileAccess]::ReadWrite,
+                        ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+                    )))
+                } catch {
+                    $lockFailed = $true
+                    break
+                }
+            }
+            if ($lockFailed) { continue }
+            foreach ($file in $group.Files.ToArray()) {
+                try {
+                    $fresh = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                    if (($fresh.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                        [string]::Compare($fresh.DirectoryName, $directoryFull, [StringComparison]::OrdinalIgnoreCase) -ne 0) {
+                        throw 'Logdatei hat die Zielgrenze verlassen.'
+                    }
+                    [IO.File]::Delete($fresh.FullName)
+                } catch [System.Management.Automation.ItemNotFoundException] {
+                    # Ein paralleler Bereiniger war schneller.
+                    $null = $_
+                } catch {
+                    if (-not $warned) {
+                        $warned = $true
+                        Write-Warning 'Alte VirtuSphere-PackageWrapper-Logs konnten nicht vollstaendig bereinigt werden.'
+                    }
+                }
+            }
+        } finally {
+            foreach ($handle in $locks) { try { $handle.Dispose() } catch { $null = $_ } }
+        }
+    }
+}
+
+function Invoke-VsPackageReporterEvent {
+    param(
+        [Parameter(Mandatory)][object]$Message,
+        [Parameter(Mandatory)][ValidateSet('started', 'step_result', 'completed')][string]$ReportEvent
+    )
+
+    if ($null -eq $script:VsPackageReporterSession) { return $null }
+    $cutoff = if ($ReportEvent -eq 'completed') { 9500 } else { 7500 }
+    $available = $cutoff - [long]$script:VsPackageReporterActiveClock.ElapsedMilliseconds
+    if ($available -lt 100) {
+        $script:VsPackageReporterDisableReason = 'budget_exhausted'
+        return $null
+    }
+    $timeoutMs = [int][Math]::Min(2000, $available)
+    $script:VsPackageReporterActiveClock.Start()
+    $phaseClock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $answer = Invoke-VsPackageReporterPipeExchange -Session $script:VsPackageReporterSession `
+            -Message $Message -TimeoutMs $timeoutMs
+        if ($null -eq $answer) {
+            $script:VsPackageReporterDisableReason = 'ipc_unconfirmed'
+            $script:VsPackageReporterSession = $null
+            return $null
+        }
+        Write-VsPackageLog -Sink reporting -Event 'report_attempt' -Fields @{
+            report_event = $ReportEvent
+            event_seq = $Message.event_seq
+            attempted = $answer.attempted
+            confirmed = $answer.confirmed
+            deduplicated = $answer.deduplicated
+            reason = $answer.reason
+            status_code = $answer.status_code
+        }
+        if ($ReportEvent -eq 'started' -and -not $answer.attempted -and
+            $answer.reason -notin @('backpressure', 'budget_exhausted')) {
+            $script:VsPackageReporterDisableReason = $answer.reason
+            Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession
+            $script:VsPackageReporterSession = $null
+        }
+        return $answer
+    } catch {
+        Write-Debug $_
+        $script:VsPackageReporterDisableReason = 'reporter_exception'
+        Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession
+        $script:VsPackageReporterSession = $null
+        return $null
+    } finally {
+        $phaseClock.Stop()
+        $script:VsPackageReporterPhaseMs.ipc += $phaseClock.ElapsedMilliseconds
+        $script:VsPackageReporterActiveClock.Stop()
+    }
+}
+
+function Start-VsPackageReporterForRun {
+    param([Parameter(Mandatory)][int]$Total)
+
+    $script:VsPackageReporterActiveClock.Start()
+    try {
+        $remaining = 7500 - [long]$script:VsPackageReporterActiveClock.ElapsedMilliseconds
+        if ($remaining -lt 100) {
+            $script:VsPackageReporterDisableReason = 'budget_exhausted'
+            return
+        }
+        $phaseClock = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            $bundle = Get-VsPackageSupervisedReporterBundle -PackageRoot $PSScriptRoot `
+                -TimeoutMs ([int][Math]::Min(5000, $remaining))
+        } finally {
+            $phaseClock.Stop()
+            $script:VsPackageReporterPhaseMs.verifier += $phaseClock.ElapsedMilliseconds
+        }
+        if ($null -eq $bundle) {
+            $script:VsPackageReporterDisableReason = 'bundle_unavailable'
+            return
+        }
+        $remaining = 7500 - [long]$script:VsPackageReporterActiveClock.ElapsedMilliseconds
+        if ($remaining -lt 100) {
+            $script:VsPackageReporterDisableReason = 'budget_exhausted'
+            return
+        }
+        $phaseClock = [Diagnostics.Stopwatch]::StartNew()
+        try {
+            # The host start gets up to 5 s: a client right after OS deployment can have a saturated CPU
+            # (BK-N9, 2.5 to 2.8 s measured at full load). $remaining still caps it inside the 7500 ms budget.
+            $script:VsPackageReporterSession = Start-VsPackageReporterPipeSession -VerifiedBundle $bundle `
+                -TimeoutMs ([int][Math]::Min(5000, $remaining))
+        } finally {
+            $phaseClock.Stop()
+            $script:VsPackageReporterPhaseMs.host_start += $phaseClock.ElapsedMilliseconds
+        }
+        if ($null -eq $script:VsPackageReporterSession) {
+            $script:VsPackageReporterDisableReason = 'supervisor_unavailable'
+            return
+        }
+        if ($script:VsPackageReporterActiveClock.ElapsedMilliseconds -ge 7500) {
+            Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession
+            $script:VsPackageReporterSession = $null
+            $script:VsPackageReporterDisableReason = 'budget_exhausted'
+            return
+        }
+        $script:VsPackageReporterDisableReason = ''
+    } catch {
+        Write-Debug $_
+        $script:VsPackageReporterDisableReason = 'initialization_error'
+        return
+    } finally {
+        $script:VsPackageReporterActiveClock.Stop()
+    }
+    $context = if ($config.InstallationBehaviorType -eq 'InstallForUser') { 'user' } else { 'system' }
+    $started = [pscustomobject]@{
+        event = 'started'
+        event_seq = 1
+        run_id = $script:VsPackageRunId
+        project_name = [string]$config.ProjectName
+        package_version = [string]$config.version
+        client_started_at = $script:VsPackageRunStartedUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+        event_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+        context = $context
+        total = $Total
+    }
+    $null = Invoke-VsPackageReporterEvent -Message $started -ReportEvent 'started'
+}
+
+function Add-VsPackageStepResult {
+    param(
+        [int]$Index,
+        [string]$ScriptName,
+        [ValidateSet('OK', 'SKIP', 'FAIL')][string]$Outcome,
+        [string]$Category,
+        [AllowNull()][object]$ChildExitCode,
+        [AllowNull()][string]$DetailPath,
+        [long]$DurationMs
+    )
+
+    $result = [pscustomobject]@{
+        index = $Index
+        script_name = ConvertTo-VsPackageLogText -Value $ScriptName -MaximumLength 260
+        outcome = $Outcome
+        category = $Category
+        child_exit_code = $ChildExitCode
+        detail_path = $DetailPath
+        duration_ms = $DurationMs
+    }
+    $script:VsPackageRunResults.Add($result)
+    $displayTotal = if ($null -ne $knownStepTotal) { $knownStepTotal } else { '?' }
+    Write-Host "[$Index/$displayTotal] $Outcome $ScriptName" -ForegroundColor Gray
+    Write-VsPackageLog -Sink wrapper -Event 'step_result' -Fields @{
+        index = $Index
+        script_name = $result.script_name
+        outcome = $Outcome
+        category = $Category
+        child_exit_code = $ChildExitCode
+        detail_path = $DetailPath
+        duration_ms = $DurationMs
+    }
+    $firstFailure = $false
+    $wireDetailPath = if ([string]::IsNullOrEmpty($DetailPath)) { $null } else { $DetailPath }
+    if ($Outcome -eq 'FAIL' -and $null -eq $script:VsPackageReporterFirstFailure) {
+        $firstFailure = $true
+        $script:VsPackageReporterFirstFailure = [pscustomobject]@{
+            step_index = $Index
+            script_name = $ScriptName
+            error_category = $Category
+            child_exit_code = $ChildExitCode
+            detail_path = $wireDetailPath
+        }
+    }
+    $seq = $script:VsPackageReporterNextSeq
+    $script:VsPackageReporterNextSeq++
+    if ($null -ne $script:VsPackageReporterSession) {
+        $message = [pscustomobject]@{
+            event = 'step_result'
+            event_seq = $seq
+            event_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+            step_index = $Index
+            script_name = $ScriptName
+            result = $Outcome.ToLowerInvariant()
+            is_first_failure = $firstFailure
+            error_category = $Category
+            child_exit_code = $ChildExitCode
+            duration_ms = $DurationMs
+            detail_path = $wireDetailPath
+        }
+        $answer = Invoke-VsPackageReporterEvent -Message $message -ReportEvent 'step_result'
+        if ($null -eq $answer -or -not $answer.attempted) { $script:VsPackageReporterOmittedCount++ }
+    }
+}
+
+function Complete-VsPackageRun {
+    param(
+        [AllowNull()][object]$ExitCode,
+        [Parameter(Mandatory = $true)][string]$Result,
+        [Parameter(Mandatory = $true)][ValidateSet('written', 'failed', 'not_attempted')][string]$DetectionStatus,
+        [AllowNull()][object]$Total
+    )
+
+    if ($script:VsPackageRunCompleted) { return }
+    $script:VsPackageRunCompleted = $true
+    $ok = @($script:VsPackageRunResults | Where-Object outcome -eq 'OK').Count
+    $skip = @($script:VsPackageRunResults | Where-Object outcome -eq 'SKIP').Count
+    $fail = @($script:VsPackageRunResults | Where-Object outcome -eq 'FAIL').Count
+    $processed = $ok + $skip + $fail
+    $notProcessed = if ($null -ne $Total) { [Math]::Max(0, ([int]$Total - $processed)) } else { $null }
+    Write-VsPackageLog -Sink wrapper -Event 'completed' -Fields @{
+        result = $Result
+        exit_code = $ExitCode
+        detection_status = $DetectionStatus
+        total = $Total
+        processed = $processed
+        ok = $ok
+        skip = $skip
+        fail = $fail
+        not_processed = $notProcessed
+        duration_ms = [Math]::Floor($script:VsPackageRunStopwatch.Elapsed.TotalMilliseconds)
+    }
+    $wrapperPath = $script:VsPackageLogPaths['wrapper']
+    $reportingPath = $script:VsPackageLogPaths['reporting']
+    try {
+        if ($null -ne $script:VsPackageReporterSession) {
+            $wireResult = if ($Result -eq 'success') { 'ok' } else { $Result }
+            $lastIndex = if ($processed -gt 0) { $script:VsPackageRunResults[$processed - 1].index } else { $null }
+            $message = [pscustomobject]@{
+                event = 'completed'
+                event_seq = $script:VsPackageReporterNextSeq
+                event_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+                wrapper_result = $wireResult
+                wrapper_exit_code = $ExitCode
+                detection_result = $DetectionStatus
+                processed_count = $processed
+                ok_count = $ok
+                skip_count = $skip
+                fail_count = $fail
+                last_processed_index = $lastIndex
+                first_failure = $script:VsPackageReporterFirstFailure
+                payload_omitted_count = $script:VsPackageReporterOmittedCount
+                wrapper_log_path = $wrapperPath
+                reporting_log_path = $reportingPath
+            }
+            $null = Invoke-VsPackageReporterEvent -Message $message -ReportEvent 'completed'
+        }
+    } catch {
+        Write-Debug $_
+        $script:VsPackageReporterDisableReason = 'completion_exception'
+    } finally {
+        if ($null -ne $script:VsPackageReporterSession) {
+            $script:VsPackageReporterActiveClock.Start()
+            try { Close-VsPackageReporterPipeSession -Session $script:VsPackageReporterSession } finally {
+                $script:VsPackageReporterActiveClock.Stop()
+                $script:VsPackageReporterSession = $null
+            }
+        }
+    }
+    if ($script:VsPackageReporterDisableReason) {
+        Write-VsPackageLog -Sink reporting -Event 'reporting_disabled' -Fields @{
+            reason = $script:VsPackageReporterDisableReason
+        }
+    }
+    Write-VsPackageLog -Sink reporting -Event 'reporting_budget' -Fields @{
+        active_ms = $script:VsPackageReporterActiveClock.ElapsedMilliseconds
+        target_ms = 10000
+        exceeded = ($script:VsPackageReporterActiveClock.ElapsedMilliseconds -gt 10000)
+        verifier_ms = $script:VsPackageReporterPhaseMs.verifier
+        host_start_ms = $script:VsPackageReporterPhaseMs.host_start
+        ipc_ms = $script:VsPackageReporterPhaseMs.ipc
+        teardown_ms = $script:VsPackageReporterPhaseMs.teardown
+    }
+    Write-Host "PackageWrapper Run-ID: $($script:VsPackageRunId)" -ForegroundColor Cyan
+    if ($wrapperPath) { Write-Host "Wrapper-Log: $wrapperPath" -ForegroundColor Cyan }
+    if ($reportingPath) { Write-Host "Reporting-Log: $reportingPath" -ForegroundColor Cyan }
+}
+
+function Close-VsPackageLogSink {
+    foreach ($kind in @('wrapper', 'reporting')) {
+        $writer = $script:VsPackageLogSinks[$kind]
+        if ($null -ne $writer) {
+            try { $writer.Dispose() } catch { $null = $_ }
+            $script:VsPackageLogSinks[$kind] = $null
+        }
+    }
+}
+
+# Konfigurationsdatei einlesen und PRUEFEN, bevor irgendein Teilskript laeuft.
+#
+# Ohne diese Pruefung lief das Skript mit $config = $null weiter: der
+# Registry-Pfad wurde zu "...\Packages\-", alle Teilskripte liefen trotzdem als
+# SYSTEM, und der Wrapper konnte mit 0 enden. MECM faengt das am Ende ueber die
+# nicht erfuellte Detection ab - da sind die Skripte aber schon gelaufen.
+# Dasselbe Skript hat weiter unten einen ausfuehrlich begruendeten Guard dafuer,
+# dass ein leerer powershell-Ordner ein Fehlschlag ist; fuer seine eigene
+# Konfigurationsdatei hatte es keinen.
+#
+# Bewusst ohne Helfer aus VirtuSphere-Common.ps1: diese Datei wird einzeln in
+# den Paketordner kopiert und laeuft dort ohne die Bibliothek (ADR-0029). Die
+# Pflichtfelder sind dieselben, die Read-VsPackageConfig serverseitig prueft;
+# ein Test haelt beide Listen gegeneinander.
+$configPath = ".\config.json"
+if (-not (Test-Path $configPath)) {
+    Write-Host "config.json fehlt im Paketordner ($PSScriptRoot) - ohne sie ist weder der Registry-Pfad noch die Version bestimmbar. Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
+try {
+    # UTF-8 wie der Server (Read-VsPackageConfig): ohne -Encoding liest Windows
+    # PowerShell 5.1 eine BOM-lose Datei als ANSI, und Umlaute werden zu Mojibake
+    # (PS-19). Ein ANSI-Fallback gibt es bewusst nicht; die Datei ist UTF-8.
+    $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+} catch {
+    Write-Host "config.json ist kein gueltiges JSON ($configPath): $($_.Exception.Message). Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
+if (-not $config -or -not $config.ProjectName -or -not $config.version) {
+    Write-Host "config.json ohne ProjectName/version ($configPath) - beide bilden den Registry-Pfad und den Detection-Wert. Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
+
+# Skriptverzeichnis und Konfigurationswerte aus der config.json uebernehmen
+$scriptDirectory = ".\powershell\"
+$projectName     = $config.ProjectName
+
+# $ErrorAction: Steuert das Verhalten bei Skriptfehlern.
+# Moegliche Werte aus config.json:
+#   "Stop"     - Bricht die gesamte Installation ab sobald ein Skript fehlschlaegt
+#   "Continue" - Faehrt mit dem naechsten Skript fort auch wenn eines fehlschlaegt
+$ErrorAction = $config.ErrorAction
+if ([string]$ErrorAction -notin @('Stop', 'Continue')) {
+    Write-Host 'config.json: ErrorAction muss Stop oder Continue sein. Installation abgebrochen.' -ForegroundColor Red
+    exit 1
+}
+
+# InstallationBehaviorType wie der Autoimporter (Read-VsPackageConfig): leer
+# heisst InstallForSystem, ein unbekannter Wert bricht ab, bevor Registry, Log
+# oder Teilskripte etwas tun (H01-3). Frueher lief jeder Wert ausser
+# InstallForUser still als Systeminstallation; nach einer von Hand geaenderten
+# config.json suchte die beim Import gesetzte Detection dann woanders, als das
+# Skript schrieb. Literal gespiegelt aus $script:VsInstallationBehaviorTypes
+# (VirtuSphere-Common.ps1, ADR-0029); ein Test haelt beide Listen gleich.
+$installationBehavior = [string]$config.InstallationBehaviorType
+if ([string]::IsNullOrWhiteSpace($installationBehavior)) {
+    $installationBehavior = 'InstallForSystem'
+}
+if ($installationBehavior -notin @('InstallForSystem', 'InstallForUser')) {
+    Write-Host "config.json: InstallationBehaviorType '$installationBehavior' ist unbekannt (erlaubt: InstallForSystem, InstallForUser). Installation abgebrochen." -ForegroundColor Red
+    exit 1
+}
+
+# Registrierungspfad je nach Installationstyp setzen
+# Erlaubt sind genau zwei Werte (SSoT: $script:VsInstallationBehaviorTypes in
+# VirtuSphere-Common.ps1, das diese Datei nie sieht - sie wird allein in den
+# Paketordner kopiert):
+# InstallForSystem: Installation fuer alle Benutzer - Registry unter HKLM (HKEY_LOCAL_MACHINE)
+# InstallForUser:   Installation nur fuer den aktuellen Benutzer - Registry unter HKCU (HKEY_CURRENT_USER)
+# Der Pfad enthaelt ProjectName und Version damit verschiedene Versionen nebeneinander
+# in der Registry erfasst werden koennen ohne sich zu ueberschreiben.
+#
+# Auf InstallForUser geprueft, nicht auf InstallForSystem: der Autoimporter legt
+# die Detection-Klausel genau so herum an. Andersherum fielen beide Seiten bei
+# einem fehlenden Feld in verschiedene Zweige - MECM suchte in HKLM, dieses
+# Skript schrieb nach HKCU, und die App galt nie als installiert.
+if($config.InstallationBehaviorType -eq "InstallForUser"){
+    $registryPath = "HKCU:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
+} else {
+    $registryPath = "HKLM:\Software\VirtuSphere\Packages\$($projectName)-$($config.version)"
+}
+
+# Benutzerinstallationen schreiben in den eigenen Profilbereich; SYSTEM-
+# Installationen in den geschuetzten Maschinenbereich.
+if ($config.InstallationBehaviorType -eq 'InstallForUser') {
+    $logDirectory = Join-Path $env:LOCALAPPDATA 'VirtuSphere\Logs'
+} else {
+    $logDirectory = Join-Path $env:ProgramData 'VirtuSphere\Logs'
+}
+
+# Die vorhandenen Teilskript-Logs und die neuen Gesamtlogs teilen nur die
+# Logwurzel. PackageWrapper verwaltet ausschliesslich seinen eigenen Unterbaum
+# und sichert ihn selbst ab (PS-13). Die geerbte Wurzel wird nicht repariert:
+# C:\ProgramData gibt BUILTIN\Users Schreibrecht weiter, also erbt auch eine
+# frisch angelegte Wurzel es. Bei Systeminstallationen wird die Wurzel nur bei
+# einem explizit gesetzten Benutzerschreibrecht (fremde ACL) abgelehnt; den
+# Unterbau PackageWrapper legt der Wrapper mit geschuetzter ACL (SYSTEM und
+# Administratoren) an.
+if (!(Test-Path $logDirectory)) {
+    New-Item -Path $logDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+}
+$packageLogReady = $true
+try {
+    $packageIdentity = Get-VsPackageIdentityHash -ProjectName ([string]$config.ProjectName) -Version ([string]$config.version)
+    $packageWrapperRoot = Join-Path $logDirectory 'PackageWrapper'
+    $packageLogDirectory = Join-Path $packageWrapperRoot $packageIdentity
+    $logRootInfo = Get-Item -LiteralPath $logDirectory -Force -ErrorAction Stop
+    # Nur Systeminstallationen dulden das geerbte Benutzerrecht der Wurzel; die
+    # Profilwurzel einer Benutzerinstallation wird wie bisher streng geprueft.
+    $systemLogRoot = $config.InstallationBehaviorType -ne 'InstallForUser'
+    if (($logRootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not (Test-VsPackageLogAccess -Path $logRootInfo.FullName -IgnoreInherited:$systemLogRoot)) {
+        throw 'Gemeinsame Logwurzel ist fuer PackageWrapper nicht sicher.'
+    }
+    foreach ($directory in @($packageWrapperRoot, $packageLogDirectory)) {
+        if (!(Test-Path -LiteralPath $directory)) {
+            # InstallForUser schreibt in das eigene Profil (LOCALAPPDATA): dort darf
+            # der Benutzer selbst schreiben, eine SYSTEM-only-ACL wuerde ihn aussperren.
+            if ($config.InstallationBehaviorType -eq 'InstallForUser') {
+                New-Item -Path $directory -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            } else {
+                New-VsPackageManagedDirectory -Path $directory
+            }
+        }
+        $directoryInfo = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+        if (($directoryInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Verwalteter PackageWrapper-Pfad ist ein Reparse-Point: $directory"
+        }
+        if (-not (Test-VsPackageLogAccess -Path $directoryInfo.FullName)) {
+            throw "Verwalteter PackageWrapper-Pfad besitzt keine sichere ACL: $directory"
+        }
+    }
+} catch {
+    $packageLogReady = $false
+    try { Write-Warning 'VirtuSphere-PackageWrapper-Logs sind fuer diesen Lauf deaktiviert; der Paketablauf wird fortgesetzt.' } catch { $null = $_ }
+}
+
+$currentLogStem = '{0}_{1}' -f $script:VsPackageRunStamp, $script:VsPackageRunId
+$wrapperLogName = "wrapper_$currentLogStem.log"
+$reportingLogName = "reporting_$currentLogStem.log"
+$wrapperLogInitialized = $false
+$reportingLogInitialized = $false
+if ($packageLogReady) {
+    $wrapperLogInitialized = Open-VsPackageLogSink -Path (Join-Path $packageLogDirectory $wrapperLogName) -Kind wrapper -PartnerName $reportingLogName -ProjectName ([string]$config.ProjectName) -Version ([string]$config.version)
+    $reportingLogInitialized = Open-VsPackageLogSink -Path (Join-Path $packageLogDirectory $reportingLogName) -Kind reporting -PartnerName $wrapperLogName -ProjectName ([string]$config.ProjectName) -Version ([string]$config.version)
+    if (-not $reportingLogInitialized) {
+        Write-VsPackageLog -Sink wrapper -Event 'partner_unavailable' -Fields @{ partner_file = $reportingLogName }
+    }
+    if (-not $wrapperLogInitialized) {
+        Write-VsPackageLog -Sink reporting -Event 'partner_unavailable' -Fields @{ partner_file = $wrapperLogName }
+    }
+    if ($wrapperLogInitialized -and $reportingLogInitialized) {
+        try {
+            Invoke-VsPackageLogRetention -Directory $packageLogDirectory -CurrentStem $currentLogStem
+        } catch {
+            Write-Warning 'Alte VirtuSphere-PackageWrapper-Logs konnten in diesem Lauf nicht sicher bereinigt werden.'
+        }
+    }
+}
+
+Write-Host "PackageWrapper Run-ID: $($script:VsPackageRunId)" -ForegroundColor Cyan
+if ($script:VsPackageLogPaths['wrapper']) { Write-Host "Wrapper-Log: $($script:VsPackageLogPaths['wrapper'])" -ForegroundColor Cyan }
+if ($script:VsPackageLogPaths['reporting']) { Write-Host "Reporting-Log: $($script:VsPackageLogPaths['reporting'])" -ForegroundColor Cyan }
+
+############ Ab hier nichts aendern
+
+# Exit-Codes eines Teilskripts, die als ERFOLG gelten. Genau einmal im Quelltext,
+# damit Kommentar und Bedingung nicht auseinanderlaufen koennen:
+#   0    - erfolgreich, kein Neustart notwendig
+#   1707 - MSI-Installationspaket erfolgreich installiert
+#   3010 - erfolgreich, ein Neustart wird empfohlen
+#   1641 - erfolgreich, der Neustart wurde bereits eingeleitet
+# Alles andere ist ein Fehler; 1 ist der generische Windows-Fehlercode.
+$successExitCodes = @(0, 1707, 3010, 1641)
+
+# Neustartcodes in der Reihenfolge, in der sie gewinnen. 1641 schlaegt 3010,
+# weil 1641 heisst, dass ein Teilskript den Neustart bereits eingeleitet hat:
+# MECM muss das wissen, um nicht selbst einen zweiten zu planen. Ein Fehlschlag
+# schlaegt beide, sonst meldet ein Paket "bitte neu starten" statt "hat nicht
+# funktioniert".
+$rebootExitCodes = @(1641, 3010)
+
+# Hoechster gesehener Neustartcode ueber alle Teilskripte dieses Laufs.
+# Vorher wurden 3010 und 1641 auf "Erfolg" eingeebnet und der Wrapper endete mit
+# 0, obwohl der Deployment-Type auf RebootBehavior = 'BasedOnExitCode' steht: das
+# Neustartverhalten war konfiguriert und vom Wrapper unerreichbar gemacht.
+$rebootCode = 0
+
+# $Fullsuccess: Gesamtstatus der Installation.
+# Startet als $true. Wird auf $false gesetzt sobald ein Teilskript fehlschlaegt.
+# Entscheidet am Ende ob der MECM-Detection-Key (Version) in die Registry geschrieben wird.
+$Fullsuccess = $true
+$restartInitiated = $false
+$completedSteps = 0
+$detectionStatus = 'not_attempted'
+$knownStepTotal = $null
+
+try {
+
+Write-Host @"
+
+
+
+    A      P P P    L       W   W   W
+   A A     P     P  L       W   W   W
+  AAAAA    P P P    L       W W W W W
+ A     A   P        L       W W W W W
+A       A  P        L L L   W   W   W
+
+
+VirtuSphere
+install.ps1
+"@
+
+write-host "ErrorAction: $ErrorAction`n`n"
+write-host "install.ps1 beginn" -ForegroundColor Magenta
+write-host "----------------------------" -ForegroundColor Magenta
+
+# Registry-Schluessel erstellen falls noch nicht vorhanden
+# Test-Path: Prueft ob ein Pfad (Datei, Ordner oder Registry-Key) existiert. Gibt $true oder $false zurueck.
+# New-Item: Erstellt einen neuen Eintrag - hier einen Registry-Schluessel.
+# -Force: Erstellt auch fehlende uebergeordnete Schluessel automatisch mit.
+if (!(Test-Path $registryPath)) {
+    New-Item -Path $registryPath -Force -ErrorAction Stop
+}
+
+# Alle PowerShell-Skripte im powershell-Unterordner alphabetisch abarbeiten
+# Get-ChildItem: Listet Dateien und Ordner auf - entspricht dem dir-Befehl in CMD.
+# -Filter *.ps1: Nur Dateien mit der Endung .ps1 werden zurueckgegeben.
+# Sort-Object Name: Sortiert die Ergebnisse alphabetisch nach Dateiname.
+#   Wichtig: 01.check-dcready.ps1 muss vor 02.dc-dns-konfig.ps1 laufen.
+#   Die Nummerierung im Dateinamen steuert die Reihenfolge.
+$dir_script = @(Get-ChildItem $scriptDirectory -Filter *.ps1 -ErrorAction Stop | Sort-Object Name)
+$knownStepTotal = $dir_script.Count
+Write-VsPackageLog -Sink wrapper -Event 'inventory' -Fields @{ total = $knownStepTotal }
+Write-Host "[0/$knownStepTotal] Paket-Skripte inventarisiert." -ForegroundColor Gray
+Start-VsPackageReporterForRun -Total $knownStepTotal
+if ($dir_script.Count -eq 0) {
+    Write-Host "Keine Skripte im Ordner $scriptDirectory gefunden - Installation gilt als fehlgeschlagen." -ForegroundColor Red
+    Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+    exit 1
+}
+
+# foreach-Statement statt "| ForEach-Object": beide teilen sich zwar denselben
+# Scope (das Setzen von $Fullsuccess wirkt in beiden Varianten nach aussen), aber
+# nur beim foreach-Statement ist das auch ohne PowerShell-Detailwissen ablesbar.
+# Genau diese Frage - "wirkt das $false ueberhaupt nach draussen?" - entscheidet
+# hier darueber, ob MECM eine fehlgeschlagene Installation als Erfolg meldet.
+$stepIndex = 0
+foreach ($scriptFile in $dir_script) {
+    $stepIndex++
+    $stepStopwatch = [Diagnostics.Stopwatch]::StartNew()
+    # Zeitstempel fuer den Log-Dateinamen
+    # Get-Date -Format: Formatiert das aktuelle Datum und die Uhrzeit als Text.
+    # Das Format yyyy-MM-dd_HH-mm-ss erzeugt z.B. "2025-04-08_14-30-00"
+    # Bindestriche statt Doppelpunkte weil Doppelpunkte in Dateinamen unter Windows nicht erlaubt sind.
+    $currentDateTime = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+
+    $scriptName      = $scriptFile.Name        # z.B. "01.check-dcready.ps1"
+    $scriptFullPath  = $scriptFile.FullName    # Vollstaendiger Pfad inkl. Laufwerk und Ordner
+    $logPath         = Join-Path $logDirectory "$($scriptName)_$currentDateTime.log"
+    Write-Host "[$stepIndex/$knownStepTotal] RUN $scriptName" -ForegroundColor Gray
+    Write-VsPackageLog -Sink wrapper -Event 'step_run' -Fields @{ index = $stepIndex; total = $knownStepTotal; script_name = $scriptName }
+    # Join-Path: Verbindet Pfadteile korrekt mit dem richtigen Trennzeichen (\).
+    # Ergebnis z.B.: C:\Program Files\VirtuSphere\Logs\01.check-dcready.ps1_2025-04-08_14-30-00.log
+
+    # Registry-Wertname pro Skript - enthaelt Projektname und Skriptname
+    # Jedes Teilskript bekommt seinen eigenen Eintrag unter dem Registry-Schluessel.
+    # Beispiel: "DC-Setup-01.check-dcready.ps1"
+    $registryValueName = "$projectName-$scriptName"
+
+    # Ein Erfolg gilt nur fuer exakt diesen Skriptinhalt. Der Registry-Pfad ist
+    # bereits an die Paketversion gebunden; der Hash verhindert zusaetzlich,
+    # dass ein nachtraeglich unter derselben Version geaendertes Teilskript nach
+    # einem Reboot oder Reparaturlauf blind uebersprungen wird.
+    try {
+        $scriptHash = (Get-FileHash -LiteralPath $scriptFullPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    } catch {
+        $stepStopwatch.Stop()
+        Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category 'hash_failed' -ChildExitCode $null -DetailPath $null -DurationMs $stepStopwatch.ElapsedMilliseconds
+        Complete-VsPackageRun -ExitCode $null -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+        throw
+    }
+    $successMarkerPrefix = "Erfolg:$scriptHash - "
+
+    # Pruefen ob das Skript bereits erfolgreich ausgefuehrt wurde
+    # Get-ItemPropertyValue: Liest den Wert eines Registry-Eintrags.
+    # -ea 0: Kurzform fuer -ErrorAction SilentlyContinue - Fehler werden still ignoriert.
+    # Wenn der Wert nicht existiert wirft Get-ItemPropertyValue eine Exception,
+    # die der catch-Block abfaengt und $status auf "not installed" setzt.
+    $fullregistrypath = "$registryPath"
+    if(Test-Path -Path "$fullregistrypath"){
+        try{
+            $status = Get-ItemPropertyValue -Path $registryPath -Name $registryValueName -ea 0
+        } catch {
+            $status = "not installed"
+        }
+    } else {
+        $status = "not installed"
+    }
+
+    write-host "Status $scriptName : $status" -ForegroundColor Gray
+
+    # Skript ausfuehren wenn es noch nicht erfolgreich war
+    # Nur ein Erfolg fuer denselben SHA-256-Inhalt darf uebersprungen werden.
+    # Alte Marker ohne Hash werden einmalig erneut ausgefuehrt.
+    if ($status -eq "not installed" -or -not ([string]$status).StartsWith($successMarkerPrefix, [System.StringComparison]::Ordinal)) {
+
+        # Erst der Hash-Miss macht diesen Aufruf zu einer Reparatur. Vor dem
+        # Kindprozess darf die alte Gesamt-Detection nicht mehr gelten, auch
+        # wenn das Kind fehlschlaegt oder mit 1641 einen Neustart einleitet.
+        # Fehlende Version ist normal; ein Lese-/Loeschfehler dagegen sperrt
+        # die Nutzlast. Erfolgreiche Hash-Skips beruehren den Marker nicht.
+        try {
+            $packageState = Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop
+            if ($null -ne $packageState.PSObject.Properties['Version']) {
+                Remove-ItemProperty -LiteralPath $registryPath -Name 'Version' -ErrorAction Stop
+            }
+        } catch {
+            Write-Host "Detection-Marker konnte vor der Reparatur nicht invalidiert werden: $($_.Exception.Message)" -ForegroundColor Red
+            $stepStopwatch.Stop()
+            Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category 'detection_invalidation_failed' -ChildExitCode $null -DetailPath $null -DurationMs $stepStopwatch.ElapsedMilliseconds
+            Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+            exit 1
+        }
+
+        $success = 'Fehler'
+        $stepFailed = $false
+        $stepCategory = 'child_exit'
+        $childExitCode = $null
+        try {
+            Write-Host "Fuehre Skript aus." -ForegroundColor Green
+
+            # Skript in einem neuen PowerShell-Prozess ausfuehren
+            # & (Aufrufoperator): Fuehrt einen Befehl oder eine Datei aus.
+            # -NoProfile: alles hier laeuft als SYSTEM, und ein maschinenweites
+            #   Profil (AllUsersAllHosts) ist Fremdcode im Installationsprozess -
+            #   es kann Kodierung, PSModulePath oder $ErrorActionPreference
+            #   setzen, die das Teilskript nicht erwartet.
+            # -ExecutionPolicy Bypass: umgeht die Ausfuehrungsrichtlinie fuer
+            #   diesen Prozess.
+            # -NonInteractive: ohne den Schalter kann eine Rueckfrage (Read-Host,
+            #   eine Bestaetigung) die Bereitstellung haengen lassen, bis MECM
+            #   sie abbricht. Ein Paketautor, der interaktiv liest, bekommt jetzt
+            #   einen Fehler statt eines Haengers.
+            # Dieselben Schalter wie $script:VsPowerShellArgs in
+            #   VirtuSphere-Common.ps1, hier als Literal: diese Datei wird
+            #   einzeln in den Paketordner kopiert und sieht Common nie.
+            # -File: Gibt an dass eine Skriptdatei ausgefuehrt werden soll.
+            # *> $logPath: Leitet alle Ausgaben (stdout und stderr) in die Log-Datei um.
+            & PowerShell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File $scriptFullPath *> $logPath
+
+            $childExitCode = $LASTEXITCODE
+
+            # $LASTEXITCODE: Automatische Variable - enthaelt den Exit-Code des zuletzt
+            # ausgefuehrten externen Prozesses (hier: PowerShell.exe).
+            # Die Erfolgscodes stehen als $successExitCodes am Kopf der Datei,
+            # samt ihrer Bedeutung - genau einmal.
+            if ($successExitCodes -contains $childExitCode) {
+                $success = "Erfolg"
+                Write-Host "Skript $scriptName wurde erfolgreich durchgelaufen. Exit-Code: $childExitCode" -ForegroundColor Green
+                # Neustartwunsch merken. Nur der HOECHSTRANGIGE gewinnt, und nur
+                # aus einem tatsaechlich gelaufenen Teilskript: ein Paket, das
+                # beim ersten Lauf 3010 lieferte und beim zweiten uebersprungen
+                # wird (Skip-Zweig unten), darf nicht ewig Neustarts anfordern.
+                foreach ($code in $rebootExitCodes) {
+                    if ($childExitCode -eq $code) {
+                        if ($rebootCode -eq 0 -or ($rebootExitCodes.IndexOf($code) -lt $rebootExitCodes.IndexOf($rebootCode))) {
+                            $rebootCode = $code
+                        }
+                        break
+                    }
+                }
+            } else {
+                $stepFailed = $true
+                $Fullsuccess = $false
+                $stepCategory = 'child_exit'
+                Write-Host "Fehler beim Ausfuehren von Skript $scriptName. Exit-Code: $childExitCode" -ForegroundColor Red
+            }
+
+            write-host "Log: $logPath" -ForegroundColor Cyan
+
+        } catch {
+            # catch: Faengt Fehler ab die PowerShell selbst ausloest (z.B. Datei nicht gefunden).
+            # Wird nicht ausgeloest durch exit-Codes der Teilskripte - nur durch echte PS-Exceptions.
+            $success = "Fehler"
+            $stepFailed = $true
+            $Fullsuccess = $false
+            $stepCategory = 'child_start_failed'
+            Write-Host "Ausnahme beim Ausfuehren von Skript $scriptName`: $($_.Exception.Message)" -ForegroundColor Red
+        }
+
+        # Ergebnis des Skripts in der Registry speichern
+        # Set-ItemProperty: Schreibt einen Wert in einen Registry-Schluessel.
+        # Format: "Erfolg:<sha256> - 2025-04-08 14:30:00" oder
+        # "Fehler:<sha256> - 2025-04-08 14:30:00"
+        # Beim naechsten Aufruf von install.ps1 wird dieser Wert gelesen.
+        # Nur ein Erfolg fuer denselben Inhalt wird uebersprungen (Skip-Logik oben).
+        $currentDateTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        try {
+            Set-ItemProperty -Path $registryPath -Name $registryValueName -Value "${success}:$scriptHash - $currentDateTime" -ErrorAction Stop
+        } catch {
+            Write-Host "Schrittstatus fuer $scriptName konnte nicht geschrieben werden: $($_.Exception.Message)" -ForegroundColor Red
+            $stepStopwatch.Stop()
+            Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category 'status_write_failed' -ChildExitCode $childExitCode -DetailPath $logPath -DurationMs $stepStopwatch.ElapsedMilliseconds
+            Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+            exit 1
+        }
+
+        if ($stepFailed) {
+            $stepStopwatch.Stop()
+            Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome FAIL -Category $stepCategory -ChildExitCode $childExitCode -DetailPath $logPath -DurationMs $stepStopwatch.ElapsedMilliseconds
+            if ($ErrorAction -eq 'Stop') {
+                Write-Host "ErrorAction ist auf Stop. Exit" -ForegroundColor DarkYellow
+                Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+                exit 1
+            }
+            Write-Host "ErrorAction ist auf Continue. Fahre mit naechstem Skript fort..." -ForegroundColor DarkYellow
+            continue
+        }
+
+        $stepStopwatch.Stop()
+        Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome OK -Category 'child_success' -ChildExitCode $childExitCode -DetailPath $logPath -DurationMs $stepStopwatch.ElapsedMilliseconds
+        $completedSteps++
+        if ($childExitCode -eq 1641) {
+            # Der Neustart laeuft bereits. Keine weitere Nutzlast starten und
+            # den finalen Detection-Marker erst im Folgelauf setzen.
+            $restartInitiated = $true
+            Write-Host 'Exit-Code 1641: Neustart wurde eingeleitet. Weitere Schritte warten bis zum Folgelauf.' -ForegroundColor Yellow
+            break
+        }
+
+    } else {
+        write-host "Skript $scriptFullPath wurde bereits erfolgreich ausgefuehrt. Skip" -ForegroundColor Gray
+        $stepStopwatch.Stop()
+        Add-VsPackageStepResult -Index $stepIndex -ScriptName $scriptName -Outcome SKIP -Category 'hash_match' -ChildExitCode $null -DetailPath $null -DurationMs $stepStopwatch.ElapsedMilliseconds
+        $completedSteps++
+    }
+}
+
+# MECM Detection Clause schreiben
+# Nur wenn ALLE Skripte erfolgreich waren wird der Version-Wert in die Registry geschrieben.
+# MECM prueft nach der Installation genau diesen Registry-Wert als Detection Clause:
+#   Pfad:  HKLM\Software\VirtuSphere\Packages\{ProjectName}-{Version}
+#   Wert:  Version = "{version}"
+# Existiert dieser Wert, markiert MECM die Application als "Installiert".
+# Fehlt er (weil $Fullsuccess = $false), zeigt MECM "Fehler" an.
+if ($Fullsuccess -and -not $restartInitiated -and $completedSteps -eq $dir_script.Count) {
+    try {
+        Set-ItemProperty -Path $registryPath -Name "Version" -Value $config.version -ErrorAction Stop
+        $detectionStatus = 'written'
+    } catch {
+        $detectionStatus = 'failed'
+        Write-Host "Detection-Marker konnte nicht geschrieben werden: $($_.Exception.Message)" -ForegroundColor Red
+        Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+        exit 1
+    }
+}
+
+write-host "----------------------------" -ForegroundColor Magenta
+write-host "install.ps1 finish" -ForegroundColor Magenta
+
+# Gesamtergebnis als Exit-Code zurueckgeben. Rangfolge:
+#
+#   Fehler (1)  >  1641 (Neustart eingeleitet)  >  3010 (Neustart noetig)  >  0
+#
+# Ein Fehlschlag gewinnt, sonst meldete ein Paket "bitte neu starten" statt "hat
+# nicht funktioniert". 1641 gewinnt gegen 3010, weil der Neustart dort schon
+# eingeleitet ist und MECM sonst einen zweiten planen wuerde.
+#
+# 3010 und 1641 stehen in der MECM-Standard-Rueckgabecodetabelle als
+# Neustart-Erfolg; es ist also kein Eingriff in der Konsole noetig, damit der
+# Deployment-Type sie versteht (er steht auf RebootBehavior = 'BasedOnExitCode').
+if (-not $Fullsuccess) {
+    write-host "Mindestens ein Teilskript ist fehlgeschlagen - Exit-Code 1." -ForegroundColor Red
+    Complete-VsPackageRun -ExitCode 1 -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+    exit 1
+}
+if ($restartInitiated) {
+    Write-Host 'Neustart wurde bereits eingeleitet - Exit-Code 1641 wird an MECM weitergereicht.' -ForegroundColor Yellow
+    Complete-VsPackageRun -ExitCode 1641 -Result 'reboot_initiated' -DetectionStatus $detectionStatus -Total $knownStepTotal
+    exit 1641
+}
+if ($rebootCode -ne 0) {
+    write-host "Alle Teilskripte erfolgreich, ein Neustart ist noetig - Exit-Code $rebootCode wird an MECM weitergereicht." -ForegroundColor Yellow
+    Complete-VsPackageRun -ExitCode $rebootCode -Result 'reboot_required' -DetectionStatus $detectionStatus -Total $knownStepTotal
+    exit $rebootCode
+}
+Complete-VsPackageRun -ExitCode 0 -Result 'success' -DetectionStatus $detectionStatus -Total $knownStepTotal
+exit 0
+} catch {
+    if (-not $script:VsPackageRunCompleted) {
+        Write-VsPackageLog -Sink wrapper -Event 'wrapper_exception' -Fields @{ category = 'unhandled_exception' }
+        Complete-VsPackageRun -ExitCode $null -Result 'failed' -DetectionStatus $detectionStatus -Total $knownStepTotal
+    }
+    throw
+} finally {
+    Close-VsPackageLogSink
+}

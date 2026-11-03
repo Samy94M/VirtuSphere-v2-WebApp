@@ -1,0 +1,286 @@
+<?php
+// Help panel partial, included by portal/help.php. Not directly reachable
+// (nginx denies /lib/).
+declare(strict_types=1);
+
+// The page size of the audit table is the one constant the logs text states.
+require_once __DIR__ . '/../log_filter.php';
+
+// Uses $user from the page scope: the cross reference to the deploy help is
+// gated on the panel that reader may actually open, so a link never leads to a
+// tab that is not rendered for them.
+/** @var array<string,mixed> $user */
+?>
+    <div class="stack" id="panel-system-status" role="tabpanel" aria-labelledby="tab-system-status" tabindex="0" data-tab-panel>
+        <nav aria-label="<?php echo h(__t('help_system_status.jump_heading')); ?>"><ul>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-overview')); ?>"><?php echo h(__t('help_system_status.jump_overview')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-deploy')); ?>"><?php echo h(__t('help_system_status.jump_deploy')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-directory')); ?>"><?php echo h(__t('help_system_status.jump_directory')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-mecm')); ?>"><?php echo h(__t('help_system_status.jump_mecm')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-esxi')); ?>"><?php echo h(__t('help_system_status.jump_esxi')); ?></a></li>
+        </ul></nav>
+        <section class="panel">
+            <h2 id="help-status-overview" tabindex="-1"><?php echo h(__t('help_system_status.system_status_roles_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.system_status_roles_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_single_site')); ?></p>
+            <h3><?php echo h(__t('help_system_status.system_status_signals_heading')); ?></h3>
+            <ul>
+                <li><?php echo h(__t('help_system_status.system_status_signal_heartbeat')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_signal_combination')); ?></li>
+            </ul>
+        </section>
+        <section class="panel">
+            <h2 id="help-status-deploy" tabindex="-1"><?php echo h(__t('help_system_status.service_card_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.service_card_p1')); ?></p>
+            <?php // One text, one owner: the state machine is explained in the
+                  // deploy help, and this page links to it rather than keeping a
+                  // second copy that would drift. The link is gated on the help
+                  // panel the reader may actually open. ?>
+            <?php if (help_panel_visible('deploy', $user)) { ?>
+                <p><a href="<?php echo h(help_url('deploy', 'help-deploy-service')); ?>"><?php echo h(__t('help_system_status.service_card_link')); ?></a></p>
+            <?php } ?>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_system_status.firstaid_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.firstaid_p1')); ?></p>
+            <ol>
+                <li><?php echo h(__t('help_system_status.firstaid_step1')); ?></li>
+                <li><?php echo h(__t('help_system_status.firstaid_step2')); ?></li>
+                <li><?php echo h(__t('help_system_status.firstaid_step3')); ?></li>
+                <li><?php echo h(__t('help_system_status.firstaid_step4')); ?></li>
+            </ol>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_system_status.system_status_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.system_status_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_p3')); ?></p>
+            <h3><?php echo h(__t('help_system_status.system_status_sources_heading')); ?></h3>
+            <ul>
+                <li><?php echo h(__t('help_system_status.system_status_source_1')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_source_2')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_source_3')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_source_4')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_source_5')); ?></li>
+            </ul>
+            <h3><?php echo h(__t('help_system_status.system_status_status_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.system_status_status_p1')); ?></p>
+            <?php // Same renderer as the page's own legend, so the two cannot list different states again. ?>
+            <?php system_status_legend_items('heartbeat'); ?>
+            <?php // What a dash in a row means. The fields are rendered unconditionally
+                  // (lib/system_status_shared_panels.php) so the same field stays in the
+                  // same column; that only reads correctly if the placeholder is
+                  // explained once, here, instead of guessed at per card. ?>
+            <p><?php echo h(__t('help_system_status.system_status_status_p2')); ?></p>
+            <?php // Directly after the field explanation, because the cause line sits
+                  // in the same card and is the only place a counter names a VM. ?>
+            <p><?php echo h(__t('help_system_status.system_status_status_p3')); ?></p>
+            <?php // One entry per cause code the autoimporter writes into the cause line. ?>
+            <ul>
+                <?php foreach (['membership_operation_uncertain', 'package_content_in_progress', 'package_content_unknown', 'package_content_failed', 'package_content_group_empty', 'package_definition_drift', 'package_cleanup_failed', 'package_folder_failed'] as $statusCode) { ?>
+                    <li><code><?php echo h($statusCode); ?></code>: <?php echo h(__t('help_system_status.system_status_status_code_' . $statusCode)); ?></li>
+                <?php } ?>
+            </ul>
+            <p><?php echo h(__t('help_system_status.system_status_status_counters')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_status_cleanup_p4')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_status_package_p5')); ?></p>
+            <?php // Etappe 14D: Die sieben Identitaetscodes bekommen je eine
+                  // Massnahme. Der Grenzwert kommt aus der Konstante, nicht aus
+                  // dem Satz, damit er nicht luegen kann, wenn er sich bewegt. ?>
+            <h3><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.system_status_identity_p1')); ?></p>
+            <ul>
+                <?php for ($identityCause = 1; $identityCause <= 9; $identityCause++) { ?>
+                    <li><?php echo h(__t('help_system_status.system_status_identity_' . $identityCause, [
+                        'max' => VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH,
+                    ])); ?></li>
+                <?php } ?>
+            </ul>
+            <h3><?php echo h(__t('help_system_status.system_status_work_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.system_status_work_0')); ?></p>
+            <ol>
+                <li><?php echo h(__t('help_system_status.system_status_work_1')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_work_2')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_work_3')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_work_4')); ?></li>
+            </ol>
+            <h3><?php echo h(__t('help_system_status.system_status_fix_heading')); ?></h3>
+            <ul>
+                <li><?php echo h(__t('help_system_status.system_status_fix_1')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_fix_2')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_fix_3')); ?></li>
+                <li><?php echo h(__t('help_system_status.system_status_fix_4')); ?></li>
+            </ul>
+        </section>
+
+        <section class="panel">
+            <h2 id="help-status-directory" tabindex="-1"><?php echo h(__t('help_system_status.directory_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.directory_p1')); ?></p>
+            <?php // Same sentence the card itself shows (system_status.directory_cadence),
+                  // not a second copy that could drift from it. ?>
+            <p><?php echo h(__t('system_status.directory_cadence')); ?></p>
+            <?php // Same renderer/state set as the card's per-controller table
+                  // (system_status_render_directory(), lib/system_status.php's
+                  // 'directory' legend kind), so a colour there can always be
+                  // looked up here. ?>
+            <?php system_status_legend_items('directory'); ?>
+            <p><?php echo h(__t('help_system_status.directory_p2')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2 id="help-status-mecm" tabindex="-1"><?php echo h(__t('help_system_status.mecmfolders_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.mecmfolders_p1')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_system_status.mecmfolders_item1')); ?></li>
+                <li><?php echo h(__t('help_system_status.mecmfolders_item2')); ?></li>
+                <li><?php echo h(__t('help_system_status.mecmfolders_item3')); ?></li>
+            </ul>
+            <p><?php echo h(__t('help_system_status.mecmfolders_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.mecmfolders_p3')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_system_status.clientphases_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.clientphases_p1')); ?></p><p><?php echo h(__t('help_system_status.k13_client_failure')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_system_status.clientphases_step1')); ?></li>
+                <li><?php echo h(__t('help_system_status.clientphases_step2')); ?></li>
+                <li><?php echo h(__t('help_system_status.clientphases_step3')); ?></li>
+                <li><?php echo h(__t('help_system_status.clientphases_step4')); ?></li>
+            </ul>
+            <p><?php echo h(__t('help_system_status.clientphases_p2', ['minutes' => intdiv(VIRTUSPHERE_CLIENT_PHASE_UNCONFIRMED_AFTER_SECONDS, 60)])); ?></p>
+            <p><?php echo h(__t('help_system_status.clientphases_p3')); ?></p>
+            <p><?php echo h(__t('help_system_status.clientphases_p4', [
+                'message_bytes' => VIRTUSPHERE_POWERSHELL_LOG_MESSAGE_MAX_BYTES,
+                'line_bytes' => VIRTUSPHERE_POWERSHELL_LOG_LINE_MAX_BYTES,
+                'days' => VIRTUSPHERE_POWERSHELL_LOG_RETENTION_DAYS,
+            ])); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('help_system_status.logs_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.logs_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.logs_p2', ['page_size' => VIRTUSPHERE_LOG_PAGE_SIZE])); ?></p>
+            <p><?php echo h(__t('help_system_status.logs_p2b')); ?></p>
+            <?php // The export cap is a constant, so the sentence interpolates it. ?>
+            <p><?php echo h(__t('help_system_status.logs_export', [
+                'limit' => VIRTUSPHERE_LOG_EXPORT_MAX_ROWS,
+            ])); ?></p>
+            <?php // Interpolates the constants the prune uses, so text and behaviour cannot drift. ?>
+            <p><?php echo h(__t('help_system_status.logs_p3', [
+                'security_days' => VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS,
+                'other_days' => VIRTUSPHERE_LOG_RETENTION_DAYS,
+                'attempt_days' => VIRTUSPHERE_LOGIN_ATTEMPT_RETENTION_DAYS,
+                'client_days' => VIRTUSPHERE_CLIENT_EVENT_RETENTION_DAYS,
+                'package_days' => VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS,
+            ])); ?></p>
+            <p><?php echo h(__t('help_system_status.logs_p4', [
+                'log_days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
+                'system_days' => VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS,
+            ])); ?></p>
+            <?php // What the free-text sentences of the log table mean. They are stored in English
+                  // with codes and never rewritten (the logs are not translated on read). ?>
+            <h3 id="help-log-texts" tabindex="-1"><?php echo h(__t('help_system_status.logs_texts_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.logs_texts_p1')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_system_status.logs_texts_mac')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_touch')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_catalog')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_recovery')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_refused')); ?></li>
+                <li><?php echo h(__t('help_system_status.logs_texts_settings')); ?></li>
+            </ul>
+        </section>
+
+        <section class="panel">
+            <h2 id="help-status-esxi" tabindex="-1"><?php echo h(__t('help_system_status.esxi_inv_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.esxi_inv_p1', ['hours' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT])); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_p2')); ?></p>
+            <?php // The cadence line each inventory card carries. The card names the
+                  // blocker that actually stops the pull (esxi_inventory_automation_blocker());
+                  // this says why the named one is the one to fix first. ?>
+            <p><?php echo h(__t('help_system_status.esxi_inv_cadence')); ?></p>
+            <h3><?php echo h(__t('help_system_status.esxi_inv_rights_heading')); ?></h3>
+            <ul>
+                <li><?php echo h(__t('help_system_status.esxi_inv_rights_read')); ?></li>
+                <li><?php echo h(__t('help_system_status.esxi_inv_rights_deploy')); ?></li>
+            </ul>
+            <p><?php echo h(__t('help_system_status.esxi_inv_p3')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_deviation')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_exact_names')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_name_evidence', [
+                'hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
+            ])); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_refresh_pause')); ?></p>
+            <h3><?php echo h(__t('help_system_status.esxi_inv_ampel_heading')); ?></h3>
+            <p><?php
+                // The legend interpolates the same constants the code uses, so
+                // text and behaviour cannot drift (ADR-0016 idea).
+                echo h(__t('help_system_status.esxi_inv_ampel_p1', [
+                    'streak' => VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER,
+                    'factor' => VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR,
+                    'days' => VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS,
+                ]));
+            ?></p>
+            <?php system_status_legend_items('esxi'); ?>
+            <h3><?php echo h(__t('help_system_status.esxi_test_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.esxi_test_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_test_p2')); ?></p>
+
+            <h3><?php echo h(__t('help_system_status.esxi_test_ansible_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.esxi_test_ansible_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_test_ansible_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_test_ansible_p3')); ?></p>
+            <p><?php echo h(__t('ansible_test.help')); ?></p>
+            <h4><?php echo h(__t('system_status.ansible_legend_heading')); ?></h4>
+            <?php system_status_legend_items('ansible'); ?>
+
+            <h3><?php echo h(__t('help_system_status.esxi_cap_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.esxi_cap_p1')); ?></p>
+            <ul>
+                <li><?php echo portal_badge('warning', __t('system_status.cap_license_free')); ?> <?php echo h(__t('system_status.cap_legend_license_free')); ?></li>
+                <li><?php echo portal_badge('warning', __t('system_status.cap_in_ha_cluster')); ?> <?php echo h(__t('system_status.cap_legend_in_ha_cluster')); ?></li>
+                <li><?php echo portal_badge('info', __t('system_status.cap_in_maintenance')); ?> <?php echo h(__t('system_status.cap_legend_in_maintenance')); ?></li>
+            </ul>
+            <p><?php echo h(__t('help_system_status.esxi_cap_unknown')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_host_facts', ['minutes' => intdiv(VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS, 60)])); ?></p>
+
+            <h3><?php echo h(__t('help_system_status.esxi_cause_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.esxi_cause_p1')); ?></p>
+            <div class="table-wrap"><table>
+                <thead><tr><th><?php echo h(__t('help_system_status.esxi_cause_th_cause')); ?></th><th><?php echo h(__t('help_system_status.esxi_cause_th_meaning')); ?></th><th><?php echo h(__t('help_system_status.esxi_cause_th_fix')); ?></th></tr></thead>
+                <tbody>
+                <?php foreach (VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES as $causeCode): ?>
+                    <tr>
+                        <td><code><?php echo h($causeCode); ?></code></td>
+                        <td><?php echo h(connection_error_message($causeCode, ['host' => __t('help_system_status.esxi_cause_host_placeholder')])); ?></td>
+                        <td><?php echo h(__t('help_system_status.esxi_cause_fix_' . $causeCode)); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table></div>
+
+            <?php // Sits after the failure table on purpose: this is the other case, a pull that succeeded and still left a category empty. ?>
+            <h3><?php echo h(__t('help_system_status.esxi_inv_zero_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.esxi_inv_zero_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_zero_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_zero_p3')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_zero_p4')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_zero_p5')); ?></p>
+
+            <h3><?php echo h(__t('help_system_status.esxi_inv_catalog_heading')); ?></h3>
+            <p><?php echo h(__t('help_system_status.esxi_inv_catalog_presence')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_catalog_vlanid')); ?></p>
+            <p><?php echo h(__t('help_system_status.esxi_inv_templates')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2 id="help-vlans" tabindex="-1"><?php echo h(__t('help_system_status.vlans_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.vlans_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.vlans_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.vlans_p3')); ?></p>
+            <p><?php echo h(__t('help_system_status.vlans_usage')); ?></p>
+        </section>
+    </div>

@@ -1,0 +1,585 @@
+#!/usr/bin/env python3
+"""Exercise the async seam and production Prepare, Launch and Status playbooks."""
+
+from __future__ import annotations
+
+import base64
+import functools
+import importlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import types
+
+
+MARKER = "::virtusphere-create::"
+# The shared identity check and the files it includes (K4a: the repeated
+# inventory read and the shared pause before the next attempt).
+IDENTITY_FILES = ("create_identity_check_tasks.yml", "create_identity_read_tasks.yml", "esxi_retry_wait_tasks.yml")
+
+
+def run(command: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True)
+
+
+def decode_marker(line: str) -> dict[str, object]:
+    parts = line.strip().split(" ")
+    if len(parts) != 3 or parts[:2] != [MARKER, "v1"]:
+        raise AssertionError(f"invalid create marker: {line!r}")
+    encoded = parts[2] + "=" * ((4 - len(parts[2]) % 4) % 4)
+    return json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+
+
+DEFAULT_INVENTORY = [{"guest_name": "fixture-vm", "moid": "vm-42", "instance_uuid": "fixture-uuid"}]
+
+
+@functools.lru_cache(maxsize=None)
+def vm_info_detail_switches() -> tuple[tuple[str, bool], ...]:
+    """The show_* switches of the PINNED vmware_vm_info, with their defaults.
+
+    Derived from the installed module rather than listed here: a later
+    collection that adds a switch which defaults to on would pass a written
+    list while the identity read quietly grew slow again. ansible-doc runs
+    without the stub on the collection path, so it answers for the real module.
+    """
+    completed = subprocess.run(
+        ["ansible-doc", "--json", "community.vmware.vmware_vm_info"],
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(f"ansible-doc cannot read the pinned vmware_vm_info\n{completed.stdout}\n{completed.stderr}")
+    options = json.loads(completed.stdout)["community.vmware.vmware_vm_info"]["doc"]["options"]
+    switches = tuple(sorted(
+        (name, bool(spec.get("default", False)))
+        for name, spec in options.items()
+        if name.startswith("show_") and spec.get("type") == "bool"
+    ))
+    if not switches:
+        raise AssertionError("the pinned vmware_vm_info documents no show_* switch; there is nothing to derive")
+    return switches
+
+
+def write_stub_collection(root: Path, inventory: list[dict[str, str]] | None = None, read_failure: str | None = None) -> Path:
+    modules = root / "ansible_collections" / "community" / "vmware" / "plugins" / "modules"
+    modules.mkdir(parents=True)
+    common = """from ansible.module_utils.basic import AnsibleModule
+def module(extra=None):
+    spec = dict(hostname=dict(type='str'), port=dict(type='int'), username=dict(type='str'), password=dict(type='str', no_log=True), validate_certs=dict(type='bool'), datacenter=dict(type='str'), moid=dict(type='str'))
+    spec.update(extra or {})
+    return AnsibleModule(argument_spec=spec)
+"""
+    listing = json.dumps(DEFAULT_INVENTORY if inventory is None else inventory)
+    # The stub takes exactly the pinned module's switches with their REAL
+    # defaults: a switch the task leaves out is recorded as the module would
+    # apply it, and a name the module does not know fails as unsupported.
+    vm_info_spec: dict[str, dict[str, object]] = {
+        name: {"type": "bool", "default": default} for name, default in vm_info_detail_switches()
+    }
+    vm_info_spec.update(vm_name={"type": "str"}, folder={"type": "str"}, vm_type={"type": "str", "default": "all"})
+    recorded = [name for name, _ in vm_info_detail_switches()] + ["vm_name", "folder"]
+    (modules / "vmware_vm_info.py").write_text(
+        common
+        + "import json\nimport os\nm=module(" + repr(vm_info_spec) + ")\n"
+        + "if os.environ.get('VS_VM_INFO_CALLS'):\n"
+        + "    with open(os.environ['VS_VM_INFO_CALLS'], 'a', encoding='utf-8') as calls:\n"
+        + "        calls.write(json.dumps({key: m.params[key] for key in " + repr(recorded) + "}) + '\\n')\n"
+        + ("m.fail_json(msg='synthetic identity read failure')\n" if read_failure == "identity" else "")
+        # K4a: a host that answers the first read with an error and then again.
+        + ("counter = os.environ['VS_VM_INFO_COUNTER']\n"
+           "seen = int(open(counter).read()) if os.path.exists(counter) else 0\n"
+           "open(counter, 'w').write(str(seen + 1))\n"
+           "if seen == 0:\n"
+           "    m.fail_json(msg='synthetic transient identity read failure')\n" if read_failure == "identity-first" else "")
+        + "m.exit_json(changed=False, virtual_machines=json.loads(" + repr(listing) + "))\n",
+        encoding="utf-8",
+    )
+    (modules / "vmware_guest_info.py").write_text(
+        common + "m=module()\n"
+        + ("m.fail_json(msg='synthetic power read failure')\n" if read_failure == "power" else "")
+        + "m.exit_json(changed=False, instance={'hw_power_status':'poweredOff'})\n",
+        encoding="utf-8",
+    )
+    (modules / "vmware_guest.py").write_text(
+        common + """import json
+import os
+m = module(dict(name=dict(type='str'), uuid=dict(type='str'), use_instance_uuid=dict(type='bool'), state=dict(type='str'), folder=dict(type='str'), guest_id=dict(type='str'), datastore=dict(type='str'), disk=dict(type='list'), hardware=dict(type='dict'), networks=dict(type='list')))
+with open(os.environ['VS_GUEST_CALLS'], 'a', encoding='utf-8') as calls:
+    calls.write(json.dumps({key: m.params[key] for key in ('name', 'uuid', 'use_instance_uuid', 'state')}) + '\\n')
+m.exit_json(changed=True)
+""",
+        encoding="utf-8",
+    )
+    return root
+
+
+def write_callback(root: Path) -> Path:
+    callbacks = root / "callbacks"
+    callbacks.mkdir()
+    (callbacks / "remove_async_state.py").write_text(
+        """from ansible.plugins.callback import CallbackBase
+import os
+class CallbackModule(CallbackBase):
+    CALLBACK_VERSION = 2.0
+    CALLBACK_TYPE = 'aggregate'
+    CALLBACK_NAME = 'remove_async_state'
+    def v2_runner_on_ok(self, result, **kwargs):
+        if result._task.get_name().endswith('Statusdatei des Async-Jobs gebunden lesen'):
+            target = os.environ.get('VS_REMOVE_ASYNC_STATE', '')
+            if target:
+                try:
+                    os.unlink(target)
+                except FileNotFoundError:
+                    pass
+""",
+        encoding="utf-8",
+    )
+    return callbacks
+
+
+def write_vars(work: Path, stored_uuid: str = "") -> None:
+    (work / "serverlist.yml").write_text(
+        """---
+vm_configurations:
+  - portal_vm_id: 1
+    vm_name: fixture-vm
+    vm_instance_uuid: '""" + stored_uuid + """'
+    datacenter_name: ha-datacenter
+    guest_id: windows9Server64Guest
+    datastore_name: fixture-datastore
+    memory: 4096
+    vcpus: 2
+    disks: []
+    network: []
+EsxiRetryPauseSeconds: [1, 1, 1]
+""",
+        encoding="utf-8",
+    )
+    (work / "accounts.yml").write_text(
+        """---
+esxi_hostname: fixture.invalid
+esxi_port: 443
+esxi_username: fixture
+esxi_password: synthetic-secret
+esxi_validate_certs: false
+esxi_ca_bundle_path: ''
+""",
+        encoding="utf-8",
+    )
+
+
+def run_status_case(repo: Path, label: str, source: str | None, expected: dict[str, object], remove_after_snapshot: bool = False, read_failure: str | None = None) -> None:
+    with tempfile.TemporaryDirectory(prefix="vs-create-status-") as raw:
+        work = Path(raw)
+        for name in (
+            "createVMStatus-ESXi_playbook.yml",
+            *IDENTITY_FILES,
+            "inspect_create_async_state.py",
+            "emit_create_result.py",
+        ):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work)
+        collection_root = write_stub_collection(work / "collections", read_failure=read_failure)
+        callback_root = write_callback(work)
+        async_dir = work / "async"
+        async_dir.mkdir()
+        jid = "1234567890.42"
+        state_file = async_dir / jid
+        if source is not None:
+            state_file.write_text(source, encoding="utf-8")
+        result_file = work / "status.json"
+
+        env = os.environ.copy()
+        installed = env.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections")
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
+        env["ANSIBLE_CALLBACK_PLUGINS"] = str(callback_root)
+        env["ANSIBLE_CALLBACKS_ENABLED"] = "remove_async_state"
+        calls_file = work / "vm-info-calls.jsonl"
+        env["VS_VM_INFO_CALLS"] = str(calls_file)
+        if remove_after_snapshot:
+            env["VS_REMOVE_ASYNC_STATE"] = str(state_file)
+
+        extra = {
+            "vs_portal_vm_id": 1,
+            "vs_async_jid": jid,
+            "vs_async_dir": str(async_dir),
+            "vs_result_file": str(result_file),
+        }
+        completed = run(
+            ["ansible-playbook", "createVMStatus-ESXi_playbook.yml", "-e", json.dumps(extra)],
+            cwd=work,
+            env=env,
+        )
+        if read_failure == "identity":
+            if completed.returncode == 0 or result_file.exists() or "synthetic identity read failure" not in completed.stdout:
+                raise AssertionError(f"{label}: identity read failure must abort without a marker\n{completed.stdout}\n{completed.stderr}")
+            # K4a: only Prepare repeats the read. Status keeps one read, so a
+            # poll never spends its control budget on pauses.
+            calls = calls_file.read_text(encoding="utf-8").splitlines() if calls_file.exists() else []
+            if len(calls) != 1 or "RETRY" in completed.stdout:
+                raise AssertionError(f"{label}: Status must read the inventory exactly once, got {len(calls)}\n{completed.stdout}")
+            return
+        if completed.returncode != 0:
+            raise AssertionError(f"{label}: production playbook failed\n{completed.stdout}\n{completed.stderr}")
+        emitted = run(["python3", "emit_create_result.py", str(result_file)], cwd=work, env=env)
+        if emitted.returncode != 0:
+            raise AssertionError(f"{label}: marker emission failed\n{emitted.stdout}\n{emitted.stderr}")
+        payload = decode_marker(emitted.stdout.strip())
+        for key, value in expected.items():
+            if payload.get(key) != value:
+                raise AssertionError(
+                    f"{label}: expected {key}={value!r}, got {payload!r}\n"
+                    f"production stdout:\n{completed.stdout}\nproduction stderr:\n{completed.stderr}"
+                )
+
+
+def run_launch_case(repo: Path, label: str, power_state: str | None) -> None:
+    """Execute the resumed prepared-unit path and observe actual module calls."""
+    with tempfile.TemporaryDirectory(prefix="vs-create-launch-") as raw:
+        work = Path(raw)
+        for name in ("createVMLaunch-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work, "fixture-uuid")
+        inventory = [dict(DEFAULT_INVENTORY[0])]
+        if power_state is not None:
+            inventory[0]["power_state"] = power_state
+        collection_root = write_stub_collection(work / "collections", inventory)
+        env = os.environ.copy()
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{env.get('ANSIBLE_COLLECTIONS_PATH', '/usr/share/ansible/collections')}"
+        calls_file = work / "guest-calls.jsonl"
+        env["VS_GUEST_CALLS"] = str(calls_file)
+        async_dir = work / "async"
+        async_dir.mkdir()
+        result_file = work / "launch.json"
+        extra = {"vs_portal_vm_id": 1, "vs_result_file": str(result_file), "vs_async_dir": str(async_dir),
+                 "vs_async_timeout": 15, "vs_expected_existed_before": True,
+                 "vs_expected_moid": "vm-42", "vs_expected_instance_uuid": "fixture-uuid"}
+        completed = run(["ansible-playbook", "createVMLaunch-ESXi_playbook.yml", "-e", json.dumps(extra)], cwd=work, env=env)
+        if completed.returncode != 0:
+            raise AssertionError(f"{label}: launch failed\n{completed.stdout}\n{completed.stderr}")
+        emitted = run(["python3", "emit_create_result.py", str(result_file)], cwd=work, env=env)
+        if emitted.returncode != 0:
+            raise AssertionError(f"{label}: marker emission failed\n{emitted.stdout}\n{emitted.stderr}")
+        payload = decode_marker(emitted.stdout.strip())
+        if power_state != "poweredOff":
+            if payload.get("event") != "rejected" or payload.get("error_code") != "vm_not_powered_off":
+                raise AssertionError(f"{label}: unsafe launch instead of power rejection: {payload!r}")
+            if calls_file.exists() or list(async_dir.iterdir()):
+                raise AssertionError(f"{label}: forbidden vmware_guest call or async launch")
+            return
+        if payload.get("event") != "launched" or payload.get("async_dir") != str(async_dir):
+            raise AssertionError(f"{label}: powered-off VM was not launched: {payload!r}")
+        state_file = async_dir / str(payload["async_jid"])
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+            except (FileNotFoundError, json.JSONDecodeError):
+                state = {}
+            if "changed" in state or state.get("failed"):
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError(f"{label}: stub async result did not become terminal")
+        if state.get("failed") or state.get("changed") is not True:
+            raise AssertionError(f"{label}: stub async execution failed: {state!r}")
+        calls = [json.loads(line) for line in calls_file.read_text(encoding="utf-8").splitlines()]
+        if calls != [{"name": None, "uuid": "fixture-uuid", "use_instance_uuid": True, "state": "present"}]:
+            raise AssertionError(f"{label}: expected exactly one UUID-bound mutation, got {calls!r}")
+
+
+def run_prepare_case(repo: Path, label: str, stored_uuid: str, inventory: list[dict[str, str]], expected: dict[str, object]) -> None:
+    """IDR-P02: the production preparation against a synthetic live inventory.
+
+    The identity matrix is evaluated by ansible-core itself, so the Jinja the
+    shared check uses (UUID lookup, case folding, regex escaping, precedence)
+    is proven here rather than by reading its text.
+    """
+    with tempfile.TemporaryDirectory(prefix="vs-create-prepare-") as raw:
+        work = Path(raw)
+        for name in ("createVMPrepare-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work, stored_uuid)
+        collection_root = write_stub_collection(work / "collections", inventory)
+        result_file = work / "prepare.json"
+        env = os.environ.copy()
+        installed = env.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections")
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
+        extra = {"vs_portal_vm_id": 1, "vs_result_file": str(result_file)}
+        completed = run(["ansible-playbook", "createVMPrepare-ESXi_playbook.yml", "-e", json.dumps(extra)], cwd=work, env=env)
+        if completed.returncode != 0:
+            raise AssertionError(f"{label}: production playbook failed\n{completed.stdout}\n{completed.stderr}")
+        emitted = run(["python3", "emit_create_result.py", str(result_file)], cwd=work, env=env)
+        if emitted.returncode != 0:
+            raise AssertionError(f"{label}: marker emission failed\n{emitted.stdout}\n{emitted.stderr}")
+        payload = decode_marker(emitted.stdout.strip())
+        for key, value in expected.items():
+            if payload.get(key, "<absent>") != value:
+                raise AssertionError(f"{label}: expected {key}={value!r}, got {payload!r}")
+
+
+def run_identity_read_case(repo: Path, label: str) -> None:
+    """The shared identity read lists every VM of the host and nothing more.
+
+    Every detail switch of the pinned module must arrive switched off; each
+    one costs extra ESXi requests per VM, three times per create unit. No name
+    or folder filter either: IDR-P02 looks the stored UUID up among all VMs of
+    the host, and a renamed bound VM is outside a name filter by definition.
+    """
+    with tempfile.TemporaryDirectory(prefix="vs-create-identity-read-") as raw:
+        work = Path(raw)
+        for name in ("createVMPrepare-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work)
+        collection_root = write_stub_collection(work / "collections")
+        calls_file = work / "vm-info-calls.jsonl"
+        env = os.environ.copy()
+        installed = env.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections")
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
+        env["VS_VM_INFO_CALLS"] = str(calls_file)
+        extra = {"vs_portal_vm_id": 1, "vs_result_file": str(work / "prepare.json")}
+        completed = run(["ansible-playbook", "createVMPrepare-ESXi_playbook.yml", "-e", json.dumps(extra)], cwd=work, env=env)
+        if completed.returncode != 0:
+            raise AssertionError(f"{label}: production playbook failed\n{completed.stdout}\n{completed.stderr}")
+        calls = [json.loads(line) for line in calls_file.read_text(encoding="utf-8").splitlines()] if calls_file.exists() else []
+        if len(calls) != 1:
+            raise AssertionError(f"{label}: expected exactly one inventory read, got {calls!r}")
+        switched_on = [name for name, _ in vm_info_detail_switches() if calls[0][name] is not False]
+        if switched_on:
+            raise AssertionError(f"{label}: detail switches of the pinned vmware_vm_info left on: {switched_on}")
+        filters = {key: calls[0][key] for key in ("vm_name", "folder") if calls[0][key] is not None}
+        if filters:
+            raise AssertionError(f"{label}: the identity read must see every VM of the host, got a filter {filters!r}")
+
+
+def run_prepare_read_retry_case(repo: Path, label: str, read_failure: str) -> None:
+    """K4a (W1): Prepare repeats a failed inventory read, with a RETRY line.
+
+    `identity-first`: the host fails once and then answers; the unit is
+    prepared as usual after two reads. `identity`: the host keeps failing;
+    after four reads the call ends WITHOUT a marker, as before K4a, so the
+    worker still stores `protocol_error` with the host's message as cause.
+    """
+    with tempfile.TemporaryDirectory(prefix="vs-create-prepare-retry-") as raw:
+        work = Path(raw)
+        for name in ("createVMPrepare-ESXi_playbook.yml", *IDENTITY_FILES, "emit_create_result.py"):
+            shutil.copy2(repo / "Ansible" / name, work / name)
+        write_vars(work)
+        collection_root = write_stub_collection(work / "collections", [], read_failure=read_failure)
+        calls_file = work / "vm-info-calls.jsonl"
+        result_file = work / "prepare.json"
+        env = os.environ.copy()
+        installed = env.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections")
+        env["ANSIBLE_COLLECTIONS_PATH"] = f"{collection_root}:{installed}"
+        env["VS_VM_INFO_CALLS"] = str(calls_file)
+        env["VS_VM_INFO_COUNTER"] = str(work / "vm-info-counter")
+        extra = {"vs_portal_vm_id": 1, "vs_result_file": str(result_file)}
+        completed = run(["ansible-playbook", "createVMPrepare-ESXi_playbook.yml", "-e", json.dumps(extra)], cwd=work, env=env)
+        calls = calls_file.read_text(encoding="utf-8").splitlines() if calls_file.exists() else []
+        if "RETRY Create identity read fixture-vm" not in completed.stdout:
+            raise AssertionError(f"{label}: the repeated read must announce itself\n{completed.stdout}")
+        if read_failure == "identity-first":
+            if completed.returncode != 0 or len(calls) != 2:
+                raise AssertionError(f"{label}: expected a prepared unit after two reads, got {len(calls)}\n{completed.stdout}\n{completed.stderr}")
+            emitted = run(["python3", "emit_create_result.py", str(result_file)], cwd=work, env=env)
+            payload = decode_marker(emitted.stdout.strip())
+            if payload.get("event") != "prepared" or payload.get("existed_before") is not False:
+                raise AssertionError(f"{label}: unexpected marker {payload!r}")
+            return
+        if completed.returncode == 0 or result_file.exists() or len(calls) != 4:
+            raise AssertionError(f"{label}: a persistent failure must end without a marker after four reads, got {len(calls)}\n{completed.stdout}")
+        if "vmware_vm_info failed after 4 attempt(s)" not in completed.stdout or "synthetic identity read failure" not in completed.stdout:
+            raise AssertionError(f"{label}: the abort must name the attempts and the host message\n{completed.stdout}")
+
+
+def run_vm_info_fields_case(label: str) -> None:
+    """The pinned vmware_vm_info answers the identity read from the list alone.
+
+    With every detail switch off, the real module must return name, MOID,
+    instance UUID and power state of each VM without touching anything else
+    of the VM object. It runs against stand-in objects that raise on every
+    attribute they were not given, so a lookup a switch would add fails here
+    instead of costing ESXi requests. Run B, with the real defaults, has to
+    hit such a lookup; otherwise the stand-ins prove nothing.
+    """
+    collections_root = os.environ.get("ANSIBLE_COLLECTIONS_PATH", "/usr/share/ansible/collections").split(os.pathsep)[0]
+    if collections_root not in sys.path:
+        sys.path.insert(0, collections_root)
+    module = importlib.import_module("ansible_collections.community.vmware.plugins.modules.vmware_vm_info")
+    switches = vm_info_detail_switches()
+    accessed: list[tuple[str, str]] = []
+
+    class Strict:
+        def __init__(self, owner: str, **attributes: object) -> None:
+            object.__setattr__(self, "_label", owner)
+            object.__setattr__(self, "_attributes", attributes)
+
+        def __getattr__(self, attribute: str) -> object:
+            accessed.append((self._label, attribute))
+            if attribute in self._attributes:
+                return self._attributes[attribute]
+            raise AssertionError(f"detail lookup {self._label}.{attribute}")
+
+    def stand_in_vm() -> object:
+        summary = Strict(
+            "summary",
+            guest=None,
+            config=Strict("summary.config", name="vm-a", guestFullName="fixture guest", uuid="fixture-bios-uuid", instanceUuid="iu-a"),
+            runtime=Strict("summary.runtime", powerState="poweredOff"),
+        )
+        return Strict("vm", summary=summary, config=Strict("vm.config", template=False), _moId="vm-1")
+
+    def read_inventory(switch_values: dict[str, object]) -> list[dict[str, object]]:
+        vm_object = stand_in_vm()
+
+        def fail_json(**kwargs: object) -> None:
+            raise AssertionError(f"module failed: {kwargs}")
+
+        params: dict[str, object] = dict(switch_values, vm_type="all", folder=None, vm_name=None)
+        instance = module.VmwareVmInfo.__new__(module.VmwareVmInfo)
+        instance.module = types.SimpleNamespace(params=params, fail_json=fail_json)
+        instance.params = params
+        instance.content = object()
+        module.get_all_objs = lambda content, vimtype, folder=None: {vm_object: "vm-a"}
+        accessed.clear()
+        return instance.get_virtual_machines()
+
+    original_get_all_objs = module.get_all_objs
+    try:
+        found = read_inventory({name: False for name, _ in switches})
+        if len(found) != 1:
+            raise AssertionError(f"{label}: expected exactly one VM, got {found!r}")
+        expected = {"guest_name": "vm-a", "moid": "vm-1", "instance_uuid": "iu-a", "power_state": "poweredOff"}
+        actual = {key: found[0].get(key) for key in expected}
+        if actual != expected:
+            raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
+        vm_attributes = {attribute for owner, attribute in accessed if owner == "vm"}
+        if not vm_attributes <= {"summary", "config", "_moId"}:
+            raise AssertionError(f"{label}: the identity read touched further VM attributes {sorted(vm_attributes)}")
+
+        try:
+            read_inventory({name: default for name, default in switches})
+        except Exception as exc:
+            if not (isinstance(exc, AssertionError) and str(exc).startswith("detail lookup")):
+                raise AssertionError(f"{label}: control run with the real defaults failed for another reason: {exc!r}") from exc
+        else:
+            raise AssertionError(f"{label}: control run with the real defaults made no detail lookup, the stand-in objects prove nothing")
+    finally:
+        module.get_all_objs = original_get_all_objs
+
+
+def vm(name: str, moid: str, uuid: str) -> dict[str, str]:
+    return {"guest_name": name, "moid": moid, "instance_uuid": uuid}
+
+
+PREPARE_CASES = [
+    ("prepare-first-create", "", [], {"event": "prepared", "existed_before": False, "replaced_instance_uuid": None, "precheck_power_state": None}),
+    ("prepare-bound-present", "uuid-a", [vm("fixture-vm", "vm-42", "uuid-a")],
+     {"event": "prepared", "existed_before": True, "precheck_instance_uuid": "uuid-a", "replaced_instance_uuid": None, "precheck_power_state": None}),
+    ("prepare-bound-powered-on", "uuid-a", [dict(vm("fixture-vm", "vm-42", "uuid-a"), power_state="poweredOn")],
+     {"event": "prepared", "precheck_power_state": "poweredOn"}),
+    ("prepare-bound-absent", "uuid-a", [vm("other-vm", "vm-7", "uuid-b")],
+     {"event": "prepared", "existed_before": False, "replaced_instance_uuid": "uuid-a"}),
+    ("prepare-bound-renamed", "uuid-a", [vm("renamed-vm", "vm-42", "uuid-a")],
+     {"event": "rejected", "error_code": "identity_bound_vm_renamed"}),
+    ("prepare-renamed-uuid-case", "UUID-A", [vm("renamed-vm", "vm-42", "uuid-a")],
+     {"event": "rejected", "error_code": "identity_bound_vm_renamed"}),
+    ("prepare-foreign-namesake", "uuid-a", [vm("fixture-vm", "vm-9", "uuid-z")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("prepare-renamed-beside-foreign-namesake", "uuid-a", [vm("fixture-vm", "vm-9", "uuid-z"), vm("renamed-vm", "vm-42", "uuid-a")],
+     {"event": "rejected", "error_code": "identity_bound_vm_renamed"}),
+    ("prepare-duplicate-names", "uuid-a", [vm("fixture-vm", "vm-8", "uuid-a"), vm("fixture-vm", "vm-9", "uuid-z")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("prepare-unbound-foreign-namesake", "", [vm("fixture-vm", "vm-9", "uuid-z")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("prepare-uuid-regex-escaped", "uuid.a", [vm("other-vm", "vm-1", "uuidXa")],
+     {"event": "prepared", "existed_before": False, "replaced_instance_uuid": "uuid.a"}),
+    # In-job retry (prod job 1527): the first attempt's vmware_guest failed
+    # after it had already registered the VM. The second attempt's Prepare
+    # meets that VM under the portal's name, while the portal stored no UUID
+    # (a first create) or the UUID of an instance that is gone (a replacement).
+    # Either way it must refuse, so no second VM is built next to the first.
+    ("retry-leftover-unbound", "", [vm("fixture-vm", "vm-77", "uuid-left")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+    ("retry-leftover-replacement", "uuid-gone", [vm("fixture-vm", "vm-77", "uuid-left")],
+     {"event": "rejected", "error_code": "identity_conflict"}),
+]
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: create-async-contract.py <repo-root>", file=sys.stderr)
+        return 2
+    repo = Path(argv[1]).resolve()
+    cases = [
+        ("async-core-seam", None),
+        ("changed-success", ('{"failed":false,"changed":true}', {"event": "succeeded", "changed": True}, False)),
+        ("unchanged-success", ('{"failed":false,"changed":false}', {"event": "succeeded", "changed": False}, False)),
+        ("terminal-module-failure", ('{"failed":true,"changed":false,"msg":"synthetic module failure"}', {"event": "failed", "error": "synthetic module failure", "error_from_host": True}, False)),
+        # Without any host text the inspector writes its fallback and says so in
+        # the marker; the portal never shows that sentence as the host message.
+        ("terminal-module-failure-without-text", ('{"failed":true,"changed":false}', {"event": "failed", "error": "the create module reported a failure", "error_from_host": False}, False)),
+        # ansible-core 2.19 writes an exception that escapes the module without
+        # `msg`; the cause chain must reach the marker as Ansible prints it.
+        ("terminal-module-exception", ('{"failed":true,"exception":{"event":{"msg":"503 Service Unavailable","chain":{"msg_reason":"<<< caused by >>>","traceback_reason":"The above exception was the direct cause of the following exception:","event":{"msg":"[Errno 104] Connection reset by peer","__ansible_type":"Event"},"follow":true,"__ansible_type":"EventChain"},"__ansible_type":"Event"},"__ansible_type":"ErrorSummary"}}',
+                                       {"event": "failed", "error": "503 Service Unavailable: [Errno 104] Connection reset by peer", "error_from_host": True}, False)),
+        ("running", ('{"started":true,"finished":false,"ansible_job_id":"1234567890.42"}', {"event": "running"}, False)),
+        ("missing", (None, {"event": "rejected", "error_code": "async_state_missing"}, False)),
+        ("empty", ("", {"event": "rejected", "error_code": "protocol_error"}, False)),
+        ("corrupt", ("{not-json", {"event": "rejected", "error_code": "protocol_error"}, False)),
+        ("removed-during-query", ('{"failed":false,"changed":true}', {"event": "rejected", "error_code": "async_state_missing"}, True)),
+    ]
+    cases += [(label, ("prepare", stored, inventory, expected)) for label, stored, inventory, expected in PREPARE_CASES]
+    cases += [("identity-read-narrow", ("identity-read",)), ("identity-fields-without-details", ("vm-info-fields",))]
+    cases += [("launch-powered-on", ("launch", "poweredOn")),
+              ("launch-power-unknown", ("launch", None)),
+              ("launch-suspended", ("launch", "suspended")),
+              ("launch-powered-off", ("launch", "poweredOff")),
+              ("status-power-read-failure", ("read-failure", "power")),
+              ("status-identity-read-failure", ("read-failure", "identity")),
+              ("prepare-identity-read-transient", ("prepare-read-retry", "identity-first")),
+              ("prepare-identity-read-persistent", ("prepare-read-retry", "identity"))]
+
+    for index, (label, case) in enumerate(cases, start=1):
+        print(f"[{index}/{len(cases)}] RUN {label}", flush=True)
+        try:
+            if case is not None and case[0] == "prepare":
+                _, stored, inventory, expected = case
+                run_prepare_case(repo, label, stored, inventory, expected)
+            elif case is not None and case[0] == "launch":
+                run_launch_case(repo, label, case[1])
+            elif case is not None and case[0] == "identity-read":
+                run_identity_read_case(repo, label)
+            elif case is not None and case[0] == "prepare-read-retry":
+                run_prepare_read_retry_case(repo, label, case[1])
+            elif case is not None and case[0] == "vm-info-fields":
+                run_vm_info_fields_case(label)
+            elif case is not None and case[0] == "read-failure":
+                run_status_case(repo, label, '{"failed":false,"changed":true}',
+                                {"event": "succeeded", "changed": True, "power_state": "unknown"}, read_failure=case[1])
+            elif case is None:
+                completed = subprocess.run(
+                    ["ansible-playbook", str(repo / "Docker" / "qa-ansible" / "create-async-fixtures.yml")],
+                    cwd=repo,
+                    text=True,
+                    capture_output=True,
+                )
+                if completed.returncode != 0:
+                    raise AssertionError(completed.stdout + completed.stderr)
+            else:
+                source, expected, remove_after_snapshot = case
+                run_status_case(repo, label, source, expected, remove_after_snapshot)
+        except Exception as exc:
+            print(f"[{index}/{len(cases)}] FAIL {label}: {exc}", flush=True)
+            return 1
+        print(f"[{index}/{len(cases)}] PASS {label}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

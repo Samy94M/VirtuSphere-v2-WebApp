@@ -1,0 +1,42 @@
+# CVE-Ausnahme-Vertrag fuer das image-cve-Gate (AP8, scripts/check.ps1) und
+# das Offline-Bundle (scripts/build-offline-bundle.sh).
+#
+# Politik: Das Gate blockiert fixbare Critical/High-CVEs (--ignore-unfixed);
+# Funde ohne verfuegbaren Fix stehen im vollstaendigen Bericht (cve-*.txt),
+# blockieren aber nicht, weil es fuer sie keine Handlungsoption gibt.
+# Eine Ausnahme hier braucht alle vier Angaben und ist immer befristet:
+#   - id:         die CVE-/Advisory-ID
+#   - statement:  Begruendung UND Owner ("warum vertretbar; Owner: <wer>")
+#   - expired_at: Ablaufdatum (YYYY-MM-DD). Nach Ablauf meldet trivy den
+#                 Eintrag automatisch wieder - eine abgelaufene Ausnahme
+#                 bricht also den Build, genau wie eine fehlende.
+# Eine Ausnahme ohne Ablaufdatum ist keine Ausnahme, sondern ein Ignorieren;
+# solche Eintraege sind in Reviews abzulehnen.
+#
+# Ein Eintrag hier ist immer die ZWEITE Wahl. Gibt es eine gefixte Version, ist
+# sie in das Image zu ziehen, so wie es Docker/nginx/Dockerfile, Docker/mysql/
+# Dockerfile und Docker/phpmyadmin/Dockerfile jeweils in einer eigenen Zeile
+# tun. Ein Digest-Bump des Basisimages ist die dritte Moeglichkeit und hilft oft
+# gerade nicht: pruefen, nicht annehmen.
+#
+# Stand 2026-10-14: weiterhin KEINE aktive Ausnahme. Das Release vom 14.10.
+# fand fixbare Funde in allen vier Images; alle sind im Image beantwortet
+# (allgemeines Paket-Upgrade, neue php- und golang-Digests), der Rest hat
+# keinen Fix (Nachweis qa-artifacts/cve-2026-10-14/, lokal).
+#
+# Stand 2026-09-07: KEINE aktive Ausnahme. Gemessen ueber alle sechs Image-
+# Referenzen aus `docker compose --profile "*" config --images` meldet trivy
+# ohne diese Datei null fixbare Critical/High.
+#
+# Die Liste war bis hierher 38 Eintraege lang, alle mit expired_at 2026-09-30.
+# Beim Aufraeumen vor diesem Ablauf zeigte die Messung, dass keiner davon
+# vertragsgemaess war: 32 trugen aktiv, aber trivy meldete fuer jeden eine
+# gefixte Version (Status "fixed") - es waren also Fixfaelle, keine Ausnahme-
+# faelle. Die restlichen 6 (die vier mysqlsh-Bundle-Eintraege und die zwei
+# linux-libc-dev-Eintraege) kamen in keinem Image mehr vor. Beide Gruppen sind
+# in den Dockerfiles beantwortet, nicht hier.
+#
+# Diese Datei bleibt bestehen, auch wenn sie leer ist: das Gate wertet ihr
+# Fehlen als Infrastrukturfehler, weil ein verschwundener Vertrag sonst wie
+# eine bestandene Pruefung aussaehe.
+vulnerabilities: []

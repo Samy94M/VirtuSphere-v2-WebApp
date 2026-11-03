@@ -1,0 +1,50 @@
+---
+# Identitaetsabfrage einer VM vor Start oder Autostart (K4a).
+#
+# Eingebunden je VM aus startVMs-ESXi_playbook.yml und
+# autostartVMs-ESXi_playbook.yml. Schreibt die Fortschrittszeilen des
+# Vertrags aus AGENTS.md (`[n/total] RUN <unit>` davor, `[n/total] pass|fail
+# <unit>` danach), liest ueber esxi_vm_read_tasks.yml mit Wiederholung und
+# haengt das Ergebnis in der Form eines Loop-Ergebnisses an
+# vs_identity_results an, damit die Identitaetspruefung im Playbook
+# unveraendert ueber `results` laufen kann.
+#
+# Erwartet:
+#   vs_identity_vm        der Eintrag aus vm_configurations
+#   vs_identity_index     Position (ab 0), vs_identity_total die Anzahl
+#   vs_identity_step      "Start" oder "Autostart"
+#   vs_identity_datacenter  Datacenter oder leer
+#
+# Scheitert auch der letzte Versuch, endet der Lauf hier, bevor eine VM
+# geaendert wird: ohne gelesene Identitaet darf keine VM dieses Auftrags
+# eingeschaltet oder umgestellt werden.
+- name: Beginn der Identitaetsabfrage melden
+  ansible.builtin.debug:
+    msg: "[{{ vs_identity_index + 1 }}/{{ vs_identity_total }}] RUN {{ vs_identity_step }} info {{ vs_identity_vm['vm_name'] }}"
+
+- name: Ziel-VM per Instance-UUID lesen
+  ansible.builtin.include_tasks: ./esxi_vm_read_tasks.yml
+  vars:
+    vs_read_uuid: "{{ vs_identity_vm['vm_instance_uuid'] }}"
+    vs_read_datacenter: "{{ vs_identity_datacenter | default('') }}"
+    vs_read_position: "[{{ vs_identity_index + 1 }}/{{ vs_identity_total }}]"
+    vs_read_unit: "{{ vs_identity_step }} info {{ vs_identity_vm['vm_name'] }}"
+
+- name: Ergebnis der Identitaetsabfrage anhaengen
+  ansible.builtin.set_fact:
+    vs_identity_results: "{{ vs_identity_results + [vs_vm_read | combine({'item': vs_identity_vm})] }}"
+
+- name: Ergebnis der Identitaetsabfrage melden
+  ansible.builtin.debug:
+    msg: "[{{ vs_identity_index + 1 }}/{{ vs_identity_total }}]
+      {{ 'fail' if vs_vm_read['failed'] | default(false) | bool else 'pass' }}
+      {{ vs_identity_step }} info {{ vs_identity_vm['vm_name'] }}"
+
+- name: Fehlgeschlagene Identitaetsabfrage vor jeder Aenderung abbrechen
+  ansible.builtin.fail:
+    msg: >-
+      vmware_guest_info failed for {{ vs_identity_vm['vm_name'] }}
+      after {{ vs_read_attempt }} attempt(s):
+      {{ vs_vm_read['msg'] | default('no module message') }}.
+      No VM of this job was changed.
+  when: vs_vm_read['failed'] | default(false) | bool

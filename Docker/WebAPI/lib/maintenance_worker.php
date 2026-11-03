@@ -1,0 +1,114 @@
+<?php
+
+declare(strict_types=1);
+
+// Maintenance worker (ADR-0018): second loop container next to deploy_worker.
+// This file is only the CLI shell (option parsing, DB reconnect loop); the
+// interval jobs themselves live in lib/maintenance_tasks.php so the tests can
+// require and drive them without starting a loop (AP6, same split as
+// deploy_worker_outcome.php).
+
+require_once __DIR__ . '/errors.php';
+
+virtusphere_install_error_handlers();
+
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/maintenance_tasks.php';
+require_once __DIR__ . '/worker_heartbeat.php';
+require_once __DIR__ . '/worker_database_connect.php';
+require_once __DIR__ . '/worker_stop_signal.php';
+
+function maintenance_worker_options(array $argv): array
+{
+    $options = [
+        'loop' => in_array('--loop', $argv, true),
+        'once' => in_array('--once', $argv, true),
+        'sleep' => VIRTUSPHERE_MAINTENANCE_WORKER_SLEEP_SECONDS,
+    ];
+
+    foreach ($argv as $arg) {
+        if (str_starts_with($arg, '--sleep=')) {
+            $options['sleep'] = max(1, min(60, (int) substr($arg, 8)));
+        }
+    }
+
+    if (!$options['loop']) {
+        $options['once'] = true;
+    }
+
+    return $options;
+}
+
+function maintenance_worker_main(array $argv): int
+{
+    $options = maintenance_worker_options($argv);
+    // Same measured defect as in the deploy worker (Etappe 14C): PID 1 ignores
+    // every signal it has no handler for, and this image's inherited
+    // `STOPSIGNAL SIGQUIT` is the one that arrives. Without this the container
+    // sat out its whole stop grace and ended in a SIGKILL on every restart.
+    worker_install_stop_handler(VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE);
+    $db = maintenance_worker_connect_db($options);
+    if ($db === null) {
+        fwrite(STDERR, "[maintenance-worker] stopping before database use\n");
+
+        return 0;
+    }
+    $state = ['last_run' => [], 'states' => []];
+
+    do {
+        if (!$options['once'] && worker_stop_requested()) {
+            fwrite(STDERR, "[maintenance-worker] stopping between passes\n");
+
+            return 0;
+        }
+        worker_heartbeat_touch();
+        try {
+            maintenance_worker_run_once($db, $state, $options['once']);
+        } catch (mysqli_sql_exception $exception) {
+            if ($options['once']) {
+                throw $exception;
+            }
+            fwrite(STDERR, '[maintenance-worker] Database error, reconnecting: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
+            $db = maintenance_worker_connect_db($options);
+            if ($db === null) {
+                fwrite(STDERR, "[maintenance-worker] stopping during database reconnect\n");
+
+                return 0;
+            }
+            // Sleep before retrying: `continue` skipped it, so a PERMANENT SQL
+            // error turned this loop into a hot spin that reconnected and failed
+            // thousands of times a second while the portal said nothing. Same
+            // defect as in the deploy worker's loop.
+            worker_idle_wait((int) $options['sleep']);
+            if (worker_stop_requested()) {
+                return 0;
+            }
+            continue;
+        }
+        if ($options['once']) {
+            return 0;
+        }
+        worker_idle_wait((int) $options['sleep']);
+    } while (true);
+}
+
+function maintenance_worker_connect_db(array $options): ?mysqli
+{
+    return worker_database_connect(
+        $options,
+        'maintenance-worker',
+        static function (mysqli $db): void {
+            // Same reason as in the deploy worker: this process could not
+            // observe anything before this moment, and the reaper it runs on
+            // its interval must not read that blind spot as a dead worker.
+            deploy_reap_observer_since(time());
+        }
+    );
+}
+
+exit(maintenance_worker_main($argv));

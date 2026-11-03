@@ -1,0 +1,1535 @@
+# MECM-Integration: Betriebshandbuch
+
+> **Client-Cutover gesperrt (MC01-Zwischenstand, 27.09.2026).** Die folgenden
+> historischen Schritte zum Anlegen/Aktualisieren der vier Client-Anwendungen
+> dürfen nicht ausgeführt werden: Der Clientinstaller blockiert vor jedem
+> Content-/MECM-Write und akzeptiert keine `-WebApi`-/`-ContentShare`-Overrides
+> mehr. Common verwendet keinen DNS-/IP-Fallback. Der lesende MC02-Preflight
+> prüft seit 15.10.2026 auch RBAC-Sicht, Quellzuordnung, Rückwärtsreferenzen
+> und Deployment-Policy (am Standort noch nicht gelaufen); erst MC03 liefert den
+> geordneten Cutover. Bestehende MECM-Objekte bleiben unberührt.
+> Auch `install-VirtuSphere-MECM.ps1` ist vor allen Writes gesperrt, weil sein
+> Reporter-Bundle sonst Common V2 ohne den passenden Core veröffentlichen würde.
+> Die Server-Installationsbefehle weiter unten sind bis zur gemeinsamen
+> Freigabe ebenfalls historisch und nicht ausführbar. Einzige Ausnahme seit
+> 15.10.2026 ist das reine Serverupdate `-Upgrade -ServerOnly` (Abschnitt 4b):
+> Es tauscht Serverskripte und Aufgaben und lässt die Paketvorlage unverändert.
+
+Dieses Dokument beschreibt die Integration zwischen der VirtuSphere-WebApp, dem
+MECM-Server und den per PXE ausgerollten Windows-Clients. Zielgruppe sind
+Administratoren ohne tiefes MECM- oder Docker-Vorwissen.
+
+## Überblick: die Pipeline
+
+```
+Paket-Autor                MECM-Server                          VirtuSphere-WebApp            Windows-Client (PXE)
+-----------                -----------                          ------------------            --------------------
+config.json-Ordner  --->   mecm_autoimporter.ps1                deploy_packages/deploy_os
+(D:\VirtuSphere\           (erstellt MECM-Application +   <---  (Katalog, read-only im
+ Packages\files)            Collection "Name-Version")          Portal)
+                           mecm_Packages-TaskSeq-sync.ps1 --->  mecm_packages.php
+                           (meldet Collections/TaskSeqs)
+Portal: Mission/VM  --->   mecm_new-device-sync.ps1       <---  mecm-api.php?action=getDeviceList
+anlegen, Pakete            (importiert Devices unter dem
+verknüpfen                  Rolloutnamen, weist
+                            Collections zu)               --->  mecm_updateid.php (ResourceID)
+                                                                                        getInfos (Registry füllen)
+                                                          <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
+                                                                getDeviceInfos        VMDisksOnline (Platten online)
+                                                                                        staticip (Netz konfigurieren)
+                                                          <---  mecm_client_ack.php (Client bereit, 5/5)
+                     Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php
+```
+
+- Heute ausgerollt ist der alte Graph `getinfo → hostname → staticip → disks`.
+  Die Zielreihenfolge des MC01-Graphen über MECM-Anwendungsabhängigkeiten ist
+  `getInfos → hostname → VMDisksOnline → staticip`. Der neue Dependency-Graph
+  ist noch nicht freigegeben.
+- Zeitstempel der WebApp sind maßgeblich; Client-Uhren werden nicht vertraut.
+- **Was MECM als Gerätenamen bekommt, ist der Windows-Hostname, nicht der
+  ESXi-Name** (Etappe 14D, ADR-0043). Genauer: der für diesen Rollout
+  eingefrorene Snapshot `mecm_rollout_hostname`, den `getDeviceList` unter dem
+  unveränderten Wire-Key `vm_hostname` liefert. `vm_name` bleibt die
+  ESXi-Identität und wandert nicht nach MECM.
+
+## Admin-Runbook: MECM erstmals anbinden
+
+Dieser Abschnitt beschreibt den früheren Installationsablauf und ist im
+MC01-Zwischenstand nicht ausführbar. Die späteren Abschnitte erklären
+Architektur, Fehlerbilder und Sonderfälle. Vor einem neuen Server- oder
+Client-Apply sind der gemeinsame Core-/Reporter-Cutover und seine Prüfungen
+abzuschließen.
+
+### 1. Werte vor Beginn festhalten
+
+| Wert | Beispiel | Bedeutung |
+|---|---|---|
+| Ubuntu-Host | `192.0.2.10` | Host mit dem produktiven Repo und der WebApp |
+| WebAPI | `virtusphere.lan:8021` oder `192.0.2.10:8021` | Ohne `http://` oder `https://` an den Installer übergeben |
+| Schema | `http` | `http` oder `https`; HTTP braucht weder CA noch Zertifikat noch Thumbprint, HTTPS braucht eingerichtetes Vertrauen |
+| MECM-Server | `MECM-01` | Server, auf dem die MECM-Konsole und die Installer laufen |
+| `PackagesRoot` | `D:\VirtuSphere\Packages` | Lokale Paketablage für den Autoimporter |
+| `PackagesShare` | `\\MECM-01\VirtuSphere\Packages\files` | UNC-Pfad, der exakt auf `PackagesRoot\files` zeigt |
+| `PackagesBase` | `D:\VirtuSphere\Base\Packages` | Lokale Ablage der vier Client-Anwendungen |
+| `ContentShare` | `\\MECM-01\VirtuSphere\Base\Packages` | UNC-Pfad, der exakt auf `PackagesBase` zeigt |
+| DP-Gruppe | `DP Group - VirtuSphere-Applications` | Bestehende Distribution-Point-Gruppe für beide Installer |
+| SMS Provider | leer oder `MECM-PROVIDER-01` | Leer lassen, wenn er lokal auf dem MECM-Server liegt |
+
+`PackagesShare` und `ContentShare` sind zwei verschiedene Quellen. Eine Freigabe
+kann beide Pfade unterhalb ihres Freigabestamms abbilden; entscheidend ist, dass
+der jeweilige UNC-Pfad auf genau den angegebenen lokalen Ordner zeigt. Normale
+Benutzer dürfen dort nicht schreiben, weil der Inhalt später als SYSTEM läuft.
+
+### 2. WebAPI-Adresse festlegen: DNS oder vorläufige IP
+
+**Empfohlen: DNS.** Im DNS des Deploy-Netzes einen A-Record wie
+`virtusphere.lan` auf die feste LAN-IP des Ubuntu-Hosts anlegen. Der Name muss
+sowohl vom MECM-Server als auch von einem PXE-Client über den per DHCP gelieferten
+DNS-Server auflösbar sein.
+
+**Ohne aktuellen DNS-Zugriff:** Für den Server-Installer kann eine feste
+Ubuntu-IP als `-WebApi '<UBUNTU-IP>:8021'` vorgesehen werden. Der Client-Cutover
+ist derzeit gesperrt; die spätere geschützte Standortkonfiguration muss
+dieselbe ausdrücklich gewählte Adresse in den Bootstrap tragen. Es gibt keinen
+zweiten DNS-/IP-Kandidaten. Die IP muss fest oder reserviert und aus allen
+Deploy-VLANs erreichbar sein. Bei HTTPS funktioniert die IP nur, wenn das
+Zertifikat diese IP als Subject Alternative Name enthält; andernfalls zuerst
+einen passenden DNS-Namen und ein entsprechendes Zertifikat bereitstellen.
+
+Verbindung vom MECM-Server prüfen:
+
+```powershell
+Test-NetConnection <WEBAPI-HOST-ODER-IP> -Port 8021
+Invoke-RestMethod -Uri 'http://<WEBAPI-HOST-ODER-IP>:8021/portal/health.php' -TimeoutSec 5
+```
+
+Bei HTTPS `https://` und den tatsächlich veröffentlichten Port verwenden.
+
+### 3. Portal und MECM vorbereiten
+
+Im Portal unter *Einstellungen → Machine-API → Zugriff auf das Portal (eingehend)* mindestens die IP des
+MECM-Servers eintragen. Die IP des Ansible-Hosts ebenfalls freischalten, weil er
+die ermittelten MAC-Adressen über `db_importMAC.php` meldet. Optional unter
+*Einstellungen → Rückkanal-Token* einen Token erzeugen und sicher bereithalten.
+Den Token nie in ein Ticket, diese Dokumentation oder einen Kommandozeilenparameter
+kopieren; der Installer fragt ihn verdeckt ab.
+
+Der MAC-Rückkanal ist jobgebunden. Für einen neuen Resultat-V2-Callback müssen
+Mission, aktiver `running`/`cancelling`-Job, exportfähiger Modus, Attempt,
+Runtime-Generation und beim Remotevertrag das aktuelle Exporthandle
+zusammenpassen. Unter der Lockreihenfolge Mission, Job, Runtime, Remotehandle,
+VM, Interfaces wird der VM-Name exakt aufgelöst und ausschließlich die eine
+Netzwerkkarte akzeptiert, deren Portgruppe exakt dem Missionswert
+**WDS-Portgruppe (PXE)** entspricht. Eine beliebige DHCP-Karte ist kein
+Identitätsbeweis.
+
+Resultat V2 speichert für jede erwartete VM den WDS-Verdict und einen
+semantischen Callback-Fingerprint aus den sortierten erwarteten VM-IDs und den
+normalisierten semantischen Ergebniszeilen einschließlich ihrer Multiplizität.
+Reine Zeilen-/Keyreihenfolge, Modulmetadaten und Fehlerfreitext ändern ihn
+nicht. Derselbe Callback ist nur für dieselbe noch
+aktive Ausführung idempotent 200 ohne Domainwrite; ein abweichender,
+unlesbarer oder terminal wiederholter Callback ist 409. Nur eine erfolgreiche
+WDS-MAC aktualisiert Interface, VM-Identität und `deployed/pending`; alle
+anderen NICs und VMs bleiben atomar unverändert. Historische Resultate V1
+bleiben eingeschränkt lesbar. Request, persistiertes Resultat und Antwort sind
+begrenzt; Body, Token und Provider-Rohantworten werden nicht protokolliert.
+
+Die Registry-ACL und der geplante SYSTEM-Task verwenden intern die
+sprachunabhängigen Well-Known-SIDs `S-1-5-18` (SYSTEM) und `S-1-5-32-544`
+(lokale Administratoren). Dadurch funktioniert derselbe Installer auf deutschen
+und englischen Windows-Servern; lokalisierte Anzeigenamen gehören nicht in die
+Konfiguration.
+
+Auf dem MECM-Server die Voraussetzungen und vorhandenen Namen read-only prüfen:
+
+```powershell
+$env:SMS_ADMIN_UI_PATH
+Get-CimInstance -Namespace 'root\SMS' -ClassName '__NAMESPACE' |
+    Where-Object Name -Like 'site_*' |
+    Select-Object Name
+
+Import-Module $($env:SMS_ADMIN_UI_PATH)\..\ConfigurationManager.psd1
+$VsCmDrive = Get-PSDrive -PSProvider CMSite | Select-Object -First 1
+if (-not $VsCmDrive) { throw 'Kein MECM-CMSite-Laufwerk gefunden.' }
+Push-Location ($VsCmDrive.Name + ':\')
+try {
+    Get-CMDistributionPointGroup | Select-Object Name
+} finally {
+    Pop-Location
+}
+
+Get-SmbShare | Where-Object { -not $_.Special } | Select-Object Name, Path
+```
+
+Fehlt `SMS_ADMIN_UI_PATH`, ist die MECM-Konsole nicht korrekt installiert oder
+die Sitzung wurde vor deren Installation geöffnet. MECM-Cmdlets wie
+`Get-CMDistributionPointGroup` funktionieren nur, während der aktuelle Pfad auf
+dem `CMSite`-Laufwerk liegt; `Push-Location`/`Pop-Location` stellen den vorherigen
+Dateisystempfad danach wieder her. Gibt es noch keine passende Freigabe oder
+DP-Gruppe, diese nach den lokalen MECM-Betriebsstandards anlegen. Keine
+pauschalen Schreibrechte für `Everyone`, `Users` oder `Authenticated Users`
+vergeben. Vor der Installation muss eine Datei aus dem lokalen Quellordner über
+den vorgesehenen UNC-Pfad sichtbar sein.
+
+### 4. Vier MECM-Server-Aufgaben installieren
+
+Beispiel mit DNS:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 `
+    -WebApi 'virtusphere.lan:8021' `
+    -Scheme 'http' `
+    -PackagesRoot 'D:\VirtuSphere\Packages' `
+    -PackagesShare '\\MECM-01\VirtuSphere\Packages\files' `
+    -DpGroupName 'DP Group - VirtuSphere-Applications'
+```
+
+Beispiel ohne DNS:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 `
+    -WebApi '<UBUNTU-IP>:8021' `
+    -Scheme 'http' `
+    -PackagesRoot 'D:\VirtuSphere\Packages' `
+    -PackagesShare '\\MECM-01\VirtuSphere\Packages\files' `
+    -DpGroupName 'DP Group - VirtuSphere-Applications'
+```
+
+Die geplanten Aufgaben arbeiten über den SMS Provider auf dem Site-Server selbst
+(gemessen: lokaler Provider). `-ProviderMachine '<PROVIDER-HOST>'` wird nur für
+die Site-Health-Abfrage und die Prüfung der Verteilungskopien verwendet; liegt der
+Provider auf einem anderen Rechner, dafür angeben. Den Installer ohne
+`-ReportToken` starten und den vorbereiteten Token ausschließlich in der
+verdeckten Eingabe einfügen. Ein leerer Wert ist erlaubt. Der Installer ist
+idempotent und darf nach Korrekturen erneut ausgeführt werden; ein vorhandener
+Token und ein vorhandener Provider-Wert bleiben bei einem erneuten Lauf ohne
+entsprechenden Parameter erhalten.
+Ein interaktiv neu eingegebener Token ersetzt den alten Wert; eine leere
+interaktive Eingabe behaelt ihn. Nur ein ausdrueckliches `-ReportToken ''`
+löscht ihn. Für den Provider gilt dieselbe Herkunftsregel: ohne Parameter
+behalten, mit ausdruecklichem `-ProviderMachine ''` den Override entfernen und
+wieder die Laufzeiterkennung verwenden. Der Installer loest diese Werte vor
+seiner ersten Konfigurationsschreiboperation genau einmal auf.
+
+### 4a. Künftige Updates mit vorhandener Konfiguration
+
+Den neuen, zusammengehörigen `Powershell-MECM`-Baum in ein frisches
+Stagingverzeichnis entpacken. Aus dessen Wurzel genügt in einer administrativen
+PowerShell:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 -Upgrade
+```
+
+`-Upgrade` übernimmt WebAPI, Schema, Zertifikatfingerabdruck, Paketpfade,
+DP-Gruppe, Provider, Rückkanal-Token und Intervalle vollständig aus
+`HKLM:\SOFTWARE\VirtuSphere\MECM`. Es gibt keine Tokenabfrage und keine lange
+Parameterkette. Der getrennte Parametersatz verhindert, dass ein vermeintlich
+reines Update nebenbei Konfigurationswerte überschreibt. Ohne vorhandene
+Registry-Konfiguration oder ohne `VirtuSphere_WebAPI` beziehungsweise
+`PackagesShare` bricht der Lauf vor seiner Transaktion ab.
+
+Die Quelle nicht über einen alten entpackten Baum kopieren. Commitgebundene ZIP
+oder verifiziertes Offline-Bundle in ein neues Verzeichnis entpacken, danach den
+Installer direkt aus diesem Verzeichnis starten. Der bestehende transaktionale
+Pfad staged und hasht den vollständigen Serverdateisatz und die Paketvorlage,
+stoppt die vier Aufgaben, aktiviert den neuen Stand und rollt bei einem Fehler
+auf Registry, Dateien, Vorlage und Aufgaben zurück. Exit-Code 0 plus laufende
+Aufgaben und frische Tageslogs bilden den Abschlussnachweis.
+
+`VirtuSphere-Common.ps1` und der Autoimporter deklarieren denselben
+MECM-Serververtrag. Der Installer prüft ihn vor und nach der Aktivierung. Meldet
+der Portalstatus stattdessen eine unbekannte Funktion wie
+`Get-VsPackageRetainedNames`, ist ein alter Common-Stand mit einem neueren
+Autoimporter aktiv. Das ist kein Verteilungsfehler. Keine Einzeldatei ersetzen,
+sondern den vollständigen neuen Baum erneut mit `-Upgrade` installieren; ein
+inkompatibler Satz bricht danach schon beim Prozessstart eindeutig ab.
+
+### 4b. Reines Serverupdate mit eingefrorener Paketvorlage
+
+Bis zum gemeinsamen Core- und Reporter-Cutover (MC-R4, verengt am 15.10.2026)
+ist das der einzige freigegebene Installeraufruf:
+
+```powershell
+.\install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly
+```
+
+`-ServerOnly` gibt es nur zusammen mit `-Upgrade` und übernimmt dessen
+Registryregel. Es tauscht den vollständigen Serverdateisatz unter
+`%ProgramFiles%\VirtuSphere\mecm` und registriert die vier Aufgaben neu.
+`<PackagesRoot>\Package_Vorlage` bleibt byte-genau stehen, damit die
+Reporter-Generation in den Paketen die bisherige bleibt und kein Common V2 ohne
+passenden Core zu den Clients kommt. Die Client-Anwendungen in MECM berührt der
+Aufruf nicht.
+
+Vor Mutex, Registry, Aufgaben oder Dateien prüft der Installer die vorhandene
+Vorlage mit derselben Prüfung, die der Autoimporter bei jedem Scan anwendet.
+Zulässig sind zwei Formen:
+
+- ein vollständiger, gültiger `reporting\current.json`-Satz: der Autoimporter
+  gleicht Wrapper und Reporter-Generation wie gewohnt ab;
+- eine **Altvorlage** ganz ohne `reporting`-Ordner, also eine Vorlage aus einem
+  Stand vor dem Paketreporter (22.09.2026): Bis zum Cutover gleicht der
+  Autoimporter wie damals nur `install.ps1` ab (Übergangsmodus). Pakete,
+  Wrapper und Clients bleiben unverändert, es gibt keine Neuverteilung. Das
+  Tageslog des Autoimporters nennt den Modus beim Start.
+
+Ein vorhandener, aber unvollständiger oder beschädigter `reporting`-Satz ist
+keine Altvorlage. Dann bricht der Lauf ohne Änderung ab, weil der Autoimporter
+jedes Paket mit `package_template_failed` blockieren würde. Erstinstallation und
+volles `-Upgrade` bleiben gesperrt. Der volle Installer legt `reporting` immer
+an; der Übergangsmodus endet also mit dem Cutover von selbst.
+
+### 4c. Build-Kennung und Installationsmanifest
+
+Jedes per `git archive` gebaute Paket (Updatepaket, Offline-Bundle) trägt in
+`Powershell-MECM\BUILD.json` Commit und Commitdatum; Git setzt sie beim Packen
+ein (`.gitattributes`, `export-subst`). Ein Git-Checkout behält die Platzhalter,
+der Build heißt dann „unbekannt“. Daneben liegt `Powershell-MECM\VERSION` mit der
+Release-Nummer (`JJJJ.MM.N`, dieselbe wie im Portal); sie steht in jedem Paket und
+auch im Checkout. Updatepakete werden wie das Prod-Bundle nur aus einem
+Release-Commit gebaut: Die Kennung trägt keinen Commit, ein Paket von einem
+Zwischenstand sähe also aus wie das Release.
+
+Der Installer schreibt beim Aktivieren
+`%ProgramFiles%\VirtuSphere\mecm\manifest.json` mit Release-Nummer, Commit,
+Commitdatum, Installationszeit, Modus (`install`, `upgrade`, `server-only`) und
+SHA-256 jeder Serverdatei. Das Manifest wird als letzte Datei aktiviert und beim
+Rollback mit zurückgenommen. Denselben Build schreibt er nach
+`HKLM:\SOFTWARE\VirtuSphere\MECM` (`InstalledBuild`, `InstalledBuildDate`) und
+in die Beschreibung der vier Aufgaben.
+
+Jede Aufgabe vergleicht beim Start ihre Dateien mit dem Manifest, schreibt eine
+Zeile ins Tageslog und hängt das Ergebnis an ihre Kennung im Laufbericht. Die
+Systemstatusseite zeigt sie unter „Skript“, der Einstellungen-Tab „Version“
+vergleicht die Release-Nummer mit der des Portals:
+
+| Kennung | Bedeutung |
+|---|---|
+| `device-sync/2.1+2026.10.1` | installiert aus Release `2026.10.1`, alle Dateien wie installiert |
+| `…+2026.10.1-abw` | mindestens eine Datei weicht vom Manifest ab, etwa nach einer Handkopie; das Tageslog nennt sie. Den vollständigen Satz mit dem Installer neu installieren |
+| `device-sync/2.1+53ba24a` | Altstand: installiert aus Commit `53ba24a`, bevor das Paket eine Release-Nummer trug |
+| `…+unbekannt` | Altstand aus einem Git-Checkout ohne Release-Nummer |
+| `…+ohne-manifest` | nicht über diesen Installer installiert (Altstand oder Handkopie) |
+
+Der Commit steht seit der Release-Nummer nicht mehr in der Kennung: Das Feld ist
+auf 32 Zeichen begrenzt, und Nummer, Commit und `-abw` zusammen passen nicht
+hinein. Er bleibt im Manifest und in der Registry.
+
+Den installierten Stand direkt auf dem MECM-Server lesen:
+
+```powershell
+Get-Content -LiteralPath 'C:\Program Files\VirtuSphere\mecm\manifest.json'
+Get-ScheduledTask -TaskPath '\' | Where-Object TaskName -Match 'VirtuSphere MECM' | Format-Table TaskName, Description
+```
+
+Transaktion, Hashprüfung, Aufgabenstopp und Rollback sind dieselben wie in 4a.
+Vor dem Lauf den alten Ordner `mecm` und die vier Aufgaben zusätzlich sichern;
+damit ist ein Rückweg auch nach einem erfolgreichen Lauf möglich (Aufgaben
+deaktivieren, Ordner zurückkopieren, Aufgaben aktivieren). Die Paketvorlage
+braucht keinen Rückweg, weil sie unverändert bleibt.
+
+Anschließend prüfen:
+
+```powershell
+Get-ScheduledTask -TaskName 'VirtuSphere MECM *' |
+    Select-Object TaskName, State
+
+Get-ItemProperty 'HKLM:\SOFTWARE\VirtuSphere\MECM' |
+    Select-Object VirtuSphere_WebAPI, Scheme, PackagesRoot, PackagesShare,
+                  DpGroupName, MECM_SiteCode, MECM_ProviderMachine,
+                  SetupCompleted
+
+Get-ChildItem $env:ProgramFiles\VirtuSphere\Logs -Filter '*.log'
+```
+
+Alle vier Aufgaben sollen `Running` melden und alle vier Tageslogs sollen neue
+Einträge erhalten. Im Portal auf *Systemstatus* müssen Devices Sync, Packages
+Sync, Package Import und Site Health nach ihren jeweiligen Intervallen sichtbar
+werden. Ein 403 bedeutet fast immer, dass die MECM-Server-IP noch nicht in der
+Machine-API-Freigabe steht.
+
+Jede Zeile der vier Dateien hat sechs Felder:
+`ISO-8601 | LEVEL | Komponente | Kontext | Nachricht | Korrelations-ID`. Fehlt
+`VirtuSphere-Logging.ps1` im Installationsverzeichnis oder passt seine
+Vertragsversion nicht zu `VirtuSphere-Common.ps1`, ist das kein stiller
+Loggingausfall: Installer beziehungsweise Aufgabe brechen mit einem konkreten
+Paketfehler ab. Der fachliche Lauf bleibt dagegen aktiv, wenn ausschließlich das
+Zielverzeichnis vorübergehend nicht schreibbar ist.
+
+**Das muss man nicht mehr erraten.** Jede abgewiesene Maschinenanfrage schreibt
+eine Zeile in die Logkategorie `machine_api` (Protokolle → Sicherheit), gedrosselt
+pro IP, mit der abgewiesenen IP und dem Endpunkt. Steht dort etwas, während die
+Systemstatus-Zeilen grau bleiben, ist die Antwort eindeutig: die Aufgaben laufen,
+ihre IP fehlt in der Freigabe. Der Systemstatus sagt das dann auch selbst, statt
+„vermutlich noch nicht eingerichtet" zu behaupten. Vorher war das die schlimmste
+Stille im Produkt: `machine_api_forbidden()` schrieb weder Audit noch error_log
+noch Zähler, sechs Endpunkte hingen daran, und der häufigste Einrichtungsfehler
+überhaupt sah im Portal genau wie ein Server aus, auf dem MECM nie installiert
+wurde. Der Fehlerbericht konnte es auch nicht melden, weil `reportRun` hinter
+derselben Sperre sitzt.
+
+### 5. Vier Client-Anwendungen erstellen
+
+Dieser historische Schritt ist bis zum geordneten Cutover (MC03) ausgesetzt.
+Der Clientinstaller nimmt keine Einzelparameter mehr an und beendet den Lauf vor
+Content-/MECM-Writes. Keine vier Applications oder Dependencies manuell aus dem
+Zielgraphen anlegen; den Cutover abwarten.
+
+Die früheren V22/V23-Re-Run- und Legacy-Übernahmeschritte sind keine Anleitung
+für den neuen Graphen. Der Preflight (MC02, Abschnitt „Client-Preflight“ unter
+„Client-Anwendungen“) inventarisiert bestehende Applications, Deployment Types,
+Dependencies, Rückwärtsreferenzen, RBAC-Sicht, Content und Deployment-Policy
+read-only. Erst ein freigegebener Cutover darf die vier Ziel-Applications
+`client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`
+gemeinsam mit dem dazu passenden Reporter verteilen. Der bisherige Installer
+prüft diese Reihenfolge noch nicht und führt deshalb keine Content-/MECM-Writes
+aus. Ein manuelles Required Deployment oder eine manuelle Reparatur des
+Dependency-Graphen ist in diesem Zwischenstand nicht freigegeben.
+
+### 6. Später von der festen IP auf DNS wechseln
+
+Dieser Ablauf ist für den MC01-Zwischenstand gesperrt. Die neue Clientkonfiguration
+wird als geprüfter, unveränderlicher Satz veröffentlicht; ein einzelner
+Registry-Override oder ein Re-Run mit `-WebApi` ist kein zulässiger Wechsel.
+Zuerst DNS-Auflösung aus MECM- und Deploy-VLAN prüfen. Danach den neuen
+Standortwert in der geschützten Packaging-Konfiguration vorbereiten, den
+MC02-Preflight lesen und den noch ausstehenden geordneten Core-/Reporter-Cutover
+(MC03) durchführen. Bereits veröffentlichte Clients brauchen einen ausdrücklich
+geplanten Migrations-/Repairpfad; sie übernehmen den neuen Wert nicht
+automatisch aus aktualisiertem Content.
+
+### 7. Übergabe- und Abnahmecheckliste
+
+- [ ] Bereitgestellte Skriptversion dokumentiert
+- [ ] WebAPI vom MECM-Server und aus dem Deploy-VLAN erreichbar
+- [ ] DNS-Name oder befristeter IP-Fallback dokumentiert
+- [ ] MECM- und Ansible-IP im Portal freigeschaltet
+- [ ] Lokale Paketpfade und ihre exakten UNC-Gegenstücke dokumentiert
+- [ ] DP-Gruppe und optionaler Remote-SMS-Provider dokumentiert
+- [ ] Vier Server-Aufgaben laufen und schreiben Tageslogs
+- [ ] Vier Quellen erscheinen im Portal-Systemstatus
+- [ ] Vier Client-Anwendungen, Detection Rules und Abhängigkeiten geprüft
+- [ ] Content auf der DP-Gruppe erfolgreich
+- [ ] Required Deployment nur auf einer Test-Collection abgenommen
+- [ ] Verantwortlicher und Termin für einen späteren DNS-Wechsel festgehalten
+
+## Single Points of Truth (SSoT)
+
+| Domäne | SSoT |
+|---|---|
+| Gewünschter VM-/Missions-Zustand | WebApp-DB (`deploy_vms`, `deploy_missions`) |
+| Geräte-Lebensende / Cleanup | **MECM** (händisch, siehe unten) |
+| Paket-Definitionen | `config.json`-Ordner auf dem MECM-Server (`D:\VirtuSphere\Packages\files`) |
+| Paket-Katalog (was existiert) | MECM → gespiegelt in `deploy_packages` (Portal read-only) |
+| MECM-Server-Konfiguration | Registry `HKLM:\SOFTWARE\VirtuSphere\MECM` (vom Installer geschrieben) |
+| Client-Laufzeitdaten | Registry `HKLM:\SOFTWARE\VirtuSphere` (von `client_getinfo` geschrieben) |
+| Deploy-Fortschritt (Ist-Zustand) | WebApp: `deploy_client_events` + Heartbeats (ab Etappe 1) |
+| Ersteller einer Mission / VM | WebApp-Session beim Anlegen; danach unveränderlich (`mission_creator`, `vm_creator`) |
+
+> **Wire-Hinweis (ADR-0019/E3):** Nur `getDeviceList` bettet für den MECM-Server
+> die Missionszeile ein und führt dort auch `mission_creator`. Das clientseitige
+> `getDeviceInfos` ist ein exakter Minimalvertrag: fünf Basisfelder plus neun
+> Interface-Felder, ohne Notizen, Ersteller, Pakete oder Lifecycle-Zustand.
+> `getMissionName` ist entfernt; das ausgelieferte Device-Sync-Skript verwendete
+> schon vorher ausschließlich die eingebettete Mission.
+>
+> **Etappe 14D (ADR-0043, ADR-0019-Amendment 3):** `getDeviceList` hat sein
+> `SELECT *` verloren; die gelieferten Spalten stehen als
+> `VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS` fest und werden von
+> `MachineApiWireTest` in beide Richtungen gegen die echte Antwort geprüft.
+> Zwei bewusste Aliasse und ein additives Feld: `vm_hostname` trägt den
+> eingefrorenen Rolloutnamen (nie den aktuellen Portal-Sollwert),
+> `previous_resource_id` ist der Lösch-Tombstone unter einem Wire-Namen, und
+> `rollout_revision` ist der Fence. `getDeviceInfos` bleibt schlank: Neben den
+> Basisfeldern liefert es `rollout_revision` sowie die beiden Generationen
+> `device_generation` und `acceptance_generation` (ADR-0044); sein `vm_hostname` ist ebenfalls der
+> Snapshot, weil der Client Windows nach dem benennt, was er dort liest.
+>
+> **MX0 (Migration 0070, ADR-0019-Amendment 5):** Der Wert, den ein gescheiterter
+> Auftrag auf die MECM-Achse schreibt, heißt gespeichert `deploy_failed`; auf der
+> Leitung bleibt er `failed` (`virtusphere_mecm_sync_wire_value()`).
+
+## VM außer Betrieb nehmen
+
+MECM ist der Single Point of Truth für das Lebensende eines Geräts. Die WebApp
+räumt in MECM **nicht** automatisch auf (bewusste Entscheidung, keine
+Verwaltungssuite). Vorgehen:
+
+1. VM im Portal löschen (entfernt DB-Eintrag, Interfaces, Paket-Verknüpfungen
+   und Status-Historie automatisch).
+2. In der MECM-Konsole das Device-Objekt löschen
+   (`Assets and Compliance → Devices`).
+3. Falls die Mission komplett aufgelöst wird: zugehörige Device Collection im
+   Ordner `VirtuSphere_Missions` löschen.
+
+Wird Schritt 2 vergessen, entsteht beim Neuanlegen einer VM mit gleichem Namen
+und neuer MAC ein MAC-Konflikt, den der Device-Sync im Log meldet.
+
+<!-- Die folgenden Abschnitte werden je Umsetzungs-Etappe gefüllt. -->
+
+## Rückkanal & Heartbeats (Etappe 1)
+
+Der Endpoint `mecm_report.php` nimmt POST-Meldungen entgegen (JSON). Der optionale
+Header `X-VirtuSphere-Token` gilt für die Server-Aufgaben (`action=heartbeat` und
+`action=reportRun`) und wird nur geprüft, wenn im Portal unter Einstellungen ein
+Token generiert wurde. `action=reportPhase` (Clients) authentifiziert ausschließlich
+über IP-Allowlist bzw. bekannte MAC und braucht nie einen Token.
+
+### Heartbeat (MECM-Server, IP muss freigeschaltet sein)
+
+```powershell
+try {
+  Invoke-RestMethod -Method Post `
+    -Uri "http://<webapp>:8021/mecm_report.php?action=heartbeat" `
+    -ContentType 'application/json' `
+    -Body '{"source":"device-sync","interval_seconds":10,"detail":"synced 4 devices"}' `
+    -TimeoutSec 5 | Out-Null
+} catch {}
+```
+
+Gültige `source`-Werte: `device-sync`, `packages-sync`, `autoimporter`.
+Antworten: `200 {"success":true,...}`, `400` bei ungültiger Quelle/Intervall,
+`403` wenn die Absender-IP nicht freigeschaltet ist (Portal → Einstellungen →
+Machine-API → Zugriff auf das Portal (eingehend)), `401` bei falschem Token.
+
+Die aktuellen Skripte senden statt eines Heartbeats einen **Ergebnisbericht**
+(`action=reportRun`, additiv; siehe „MECM-Server: Installation & Aufgabenplanung").
+Die Common-Funktion `Send-VsHeartbeat` ist entfernt, weil kein Skript sie mehr
+aufruft; es gibt keinen Heartbeat je Scan mehr, nur noch den Ergebnisbericht.
+`heartbeat` bleibt für Alt-Skripte kompatibel, erscheint im Portal dann aber gelb
+als „Legacy: Ergebnis nicht bestätigt".
+
+### Client-Phase (Windows-Client, authentifiziert per bekannter MAC)
+
+```powershell
+$body = '{"mac":"00:50:56:AB:CD:EF","phase":"hostname","event":"started","detail":"renaming to WS-042"}'
+Invoke-RestMethod -Method Post -Uri "http://<webapp>:8021/mecm_report.php?action=reportPhase" `
+  -ContentType 'application/json' -Body $body -TimeoutSec 5
+```
+
+Phasen: `getinfo`, `hostname`, `staticip`, `disks`; Events: `started`,
+`finished`, `failed`. Empfehlung: `started` **vor** riskanten Aktionen senden
+(z. B. vor der IP-Umstellung), `finished` danach best effort; bleibt es aus,
+zeigt das Portal nach 15 Minuten „ausgeführt, Bestätigung ausstehend" (kein
+Erfolgs- oder Fehlernachweis). Schutzmechanismen: 8-KB-Body-Limit (413), Dedupe identischer
+Meldungen < 60 s, 300 Events/Tag pro VM (429), Aufbewahrung 30 Tage.
+
+### Client-Ready-ACK (Windows-Client, verbindlich und idempotent)
+
+Nach dem vollständigen Schreiben der Registry-Nutzdaten sendet V23
+`POST /mecm_client_ack.php` mit
+`{"mac":"00:50:56:AB:CD:EF","rollout_revision":7}` aus derselben gelesenen
+Rolloutantwort. Nur dieser Endpoint setzt 5/5; `getDeviceInfos` verändert keinen
+Zustand mehr. Der ACK setzt nur den Lebenszyklus und lässt den MECM-Zustand,
+wie er ist (ADR-0019 Nachtrag 4): `registered` schreibt allein `updateDevice`
+aus dem Devices Sync. Kommt der ACK vor der Bindung, steht die VM bei 5/5 mit
+MECM „wartet“, bis der nächste Sync-Lauf sie bindet; die Überwachung von
+`pending` läuft dabei weiter. Scheitert der POST oder seine Antwort, liefert `client_getinfo`
+Exitcode 1, damit MECM den Lauf wiederholt. Erst nach der positiven ACK-Antwort
+setzt der Client `SetupState=complete`. Der Server kann 5/5 bereits gespeichert
+haben, obwohl nur seine HTTP-Antwort verloren ging; dann antwortet er beim Retry
+mit `deduplicated:true` und erzeugt keine zweite Statuszeile. Dieser ACK ist
+absichtlich nicht Teil von `mecm_report.php`, dessen Phasenmeldungen weiterhin
+rein anzeigend und best effort bleiben.
+
+### Anzeige im Portal
+
+- **Systemstatus** (alle angemeldeten Nutzer, URL weiterhin
+  `portal/system_status.php`): getrennte Gruppen für MECM, Ansible, ESXi und
+  interne Dienste mit letzter Meldung, letztem Ergebnis und
+  Klartext-Handlungsanweisung. Der MECM-Bereich ist in zwei sichtbare Untergruppen
+  geteilt: „VirtuSphere-MECM-Integration" (die drei Ergebnisreporter der
+  Sync-Aufgaben) und „MECM-Site-Status" (der offizielle Site-Zustand aus
+  `SMS_SummarizerSiteStatus`). Es wird kein gemeinsamer Worst-Status gebildet: ein
+  kritischer Site-Zustand stellt den erfolgreichen Datenfluss nicht als
+  ausgefallen dar, ein ausgefallener Sync behauptet nicht, MECM selbst sei
+  kritisch. Das Dashboard liest denselben Health-Snapshot und zeigt in der
+  „System status"-Kachel zwei beschriftete Zeilen: „Integration" und „MECM-Site".
+  Eine alte oder zeitlich ungültige Meldung bestätigt keinen aktuellen Erfolg.
+  Ein veralteter ehemals kritischer Sitewert bleibt als historischer Befund mit
+  Zeitpunkt sichtbar, färbt die Gegenwart aber nicht rot; Rot bleibt einem
+  frischen MECM-bestätigten Status 2 vorbehalten. Ein Providerfehler bleibt
+  unabhängig vom Alter unbekannt. Ein gestarteter Sync zeigt den aktuellen
+  Start getrennt vom letzten abgeschlossenen Ergebnis.
+- Abgewiesene Machine-API-Zugriffe erscheinen als historische Ereignisse im
+  benannten Zeitfenster. Die Anzeige nennt die vollständige Zahl verschiedener
+  IPs, eine begrenzte Liste und ausgelassene Einträge. Sie ordnet eine IP ohne
+  weitere positive Evidenz weder MECM noch Ansible zu und behauptet nach einer
+  späteren Erholung keine aktuelle Blockade.
+- **VM bearbeiten**: Abschnitt „Client-Phasen" mit den vier Phasen und den
+  letzten 20 Roh-Ereignissen.
+- MECM-relevante Audit-Einträge stehen im Log unter der Kategorie
+  „MECM-Integration" (nur Admins); Heartbeats und Phase-Events werden dort
+  bewusst nicht dupliziert.
+
+### Registry-Konvention (MECM-Server, ab Etappe 4 vom Installer geschrieben)
+
+| Registry-Wert (`HKLM:\SOFTWARE\VirtuSphere\MECM`) | Bedeutung |
+|---|---|
+| `VirtuSphere_WebAPI` | Adresse der WebApp, z. B. `virtusphere.lan:8021`; bewusst HTTP, siehe Hinweis unter der Tabelle |
+| `PackagesRoot` | Wurzel der Paketablage, Standard `D:\VirtuSphere\Packages` |
+| `PackagesShare` | UNC auf den `files`-Ordner (ContentLocation der Applications) |
+| `ReportToken` | optionaler Token für `X-VirtuSphere-Token` |
+| `DpGroupName` | Distribution-Point-Gruppe für die Content-Verteilung |
+| `LogRoot` | Log-Verzeichnis der Server-Skripte |
+| `DeviceSyncIntervalSeconds` | Intervall Device-Sync (DWord, Standard 10, erlaubt 5–3600) |
+| `PackagesSyncIntervalSeconds` | Intervall Packages-Sync (DWord, Standard 60, erlaubt 10–3600) |
+| `ImporterIntervalSeconds` | Intervall Autoimporter (DWord, Standard 60, erlaubt 30–3600) |
+| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health und die Prüfung der Verteilungskopien (neu; leer = lokale Ermittlung) |
+| `SiteHealthIntervalSeconds` | Intervall Site Health (DWord, neu, Standard 300, erlaubt 60–3600) |
+| `MECM_SiteCode` | erkannter Site-Code (nur wenn automatisch ermittelbar) |
+| `SetupCompleted` | Zeitstempel der erfolgreichen Erstinstallation |
+
+Hinweis Intervalle: Der Installer lehnt einen Wert außerhalb der Spanne ab
+(`ValidateRange`); ein von Hand in die Registry geschriebener Wert wird beim
+Start der Aufgabe geklemmt und die Korrektur ins Tageslog geschrieben. Der Takt,
+in dem die Aufgabe läuft, ist damit immer derselbe wie der, den sie meldet und
+den der Systemstatus in der Zeile zeigt. Ein Re-Run des Installers ohne den
+jeweiligen Parameter behält den eingestellten Wert; ein Skript-Update setzt
+einen getunten Takt also nicht zurück. SSoT der Spannen ist
+`$script:VsIntervalBounds` in `mecm\VirtuSphere-Common.ps1`.
+
+Hinweis HTTP/HTTPS: Die API-Aufrufe der Skripte laufen standardmäßig über HTTP,
+und das Portal-HTTPS leitet sie nie um (ADR-0027). Das gilt auch für den neuen
+Client-Ready-ACK. Im HTTP-Modus sind **keine** CA, kein Zertifikat und kein
+Thumbprint zu konfigurieren. HTTPS ist für die
+Maschinenkette aber nicht mehr Ausblick, sondern eingebaut: `-Scheme https` am
+Installer schreibt das Schema in die Registry, `Initialize-VsTls` setzt TLS 1.2 in
+**jeder** der vier Aufgaben (nicht nur im Installerprozess, der in seinem eigenen
+läuft), und einem selbstsignierten Zertifikat wird über den hinterlegten
+Fingerabdruck `-CertThumbprint` vertraut statt über abgeschaltete Prüfung. Ein
+Zertifikat pro Client ist nicht nötig: domänengebundene Maschinen vertrauen der
+Domänen-CA automatisch. Details in `docs/operations/https.md`.
+
+#### Absicherung des ReportToken
+
+Der Installer legt den Schlüssel `HKLM:\SOFTWARE\VirtuSphere\MECM` gehärtet an:
+Vererbung aus, Vollzugriff nur für `SYSTEM` und `Administratoren`. Der `ReportToken`
+liegt dort im Klartext (die SYSTEM-Tasks brauchen ihn zur Laufzeit), ist durch die
+ACL aber nicht mehr für normale Benutzer lesbar. Serverseitig speichert die WebApp
+nur den SHA-256-Hash. Den Token nicht als `-ReportToken`-Kommandozeilenargument
+übergeben (in History und Prozessliste sichtbar): den Installer ohne dieses Argument
+starten, dann fragt er ihn verdeckt ab. Der Token betrifft nur die Server-Heartbeats;
+die Client-Phasen-Skripte senden keinen Token (Auth per bekannter MAC), daher muss auf
+den ausgerollten VMs kein `ReportToken` provisioniert werden.
+
+#### Paket-Ordner (ContentLocation)
+
+Die paketeigene `install.ps1` wird als `SYSTEM` mit `ExecutionPolicy Bypass` aus der
+ContentLocation ausgeführt. Der `files`-Ordner (`<PackagesRoot>\files`) und die
+zugehörige Freigabe müssen daher schreibgeschützt für normale Benutzer sein
+(nur `SYSTEM`/`Administratoren` schreibend), sonst ist beliebige Codeausführung als
+`SYSTEM` möglich. Der Installer warnt, falls der Ordner für Benutzer beschreibbar ist.
+
+## Überwachung & Wartungs-Worker (Etappe 1b)
+
+Der Datenfluss läuft ausschließlich in einer Richtung: **MECM → Portal**. Die vier
+SYSTEM-Aufgaben auf dem MECM-Server melden ihren Zustand per HTTP-POST an
+`mecm_report.php`; das Portal selbst baut **keine** ausgehende Verbindung zum
+MECM-Server auf. Der frühere 5-Minuten-TCP-Check auf Port 445 im Wartungsdienst
+ist entfernt (ADR-0018, Amendment 2026-07-23): Eine offene TCP-Verbindung bewies
+keine MECM-Anmeldung, WMI, Aufgabenplanung oder Katalog-Synchronisation. An seine
+Stelle tritt die vierte Aufgabe „VirtuSphere MECM Site Health", die den offiziellen
+Site-Zustand aus `SMS_SummarizerSiteStatus` meldet.
+
+Der Compose-Service `maintenance-worker` (Container
+`virtusphere-v2-webapp-maintenance-worker-1`) läuft dauerhaft neben dem
+Deploy-Worker und erledigt:
+
+1. **Eigen-Heartbeat** (alle 60 s): erscheint im Systemstatus unter
+   „Interne Dienste" als „Wartungsdienst (Portal)". Fehlt er, läuft der
+   Container nicht. Sein Zustand verändert den MECM-Gesamtzustand nicht.
+2. **Aufräumjobs** (stündlich): Client-Events älter als 30 Tage,
+   Sicherheits-Protokolle (Anmeldung, Benutzer, Zugangsdaten) älter als 365 Tage,
+   übrige Portal-Logs älter als 90 Tage, Anmeldeversuchs-Zähler älter als 7 Tage
+   (gestaffelt nach Kategorie, siehe ADR-0026). (Früher lief die Log-Bereinigung
+   huckepack bei API-Requests; jetzt läuft sie auch ohne Traffic.)
+3. **Zustandswechsel-Audits**: die MECM-Quellen schreiben nur Übergänge von/nach
+   problematisch in „MECM-Integration" (OK → Warnung/Fehler/Fehlt und zurück,
+   Site healthy → warning/critical/unknown und zurück, sowie einmalig der Wechsel
+   eines Reporters von Legacy auf V2). Der Maintenance-Worker schreibt seine
+   eigenen Übergänge unter „System". Einzelne Läufe, Heartbeats und vollständige
+   SMS-Provider-Antworten werden bewusst nicht protokolliert.
+
+Der Wartungsdienst führt keine MECM-Erreichbarkeitsprobe mehr aus und hat kein
+MECM-Ziel und keinen Port mehr in den Einstellungen.
+
+**Diagnose-Kombination auf der Statusseite:** die Integration (Ergebnisberichte
+der Sync-Aufgaben) und der MECM-Site-Status sind getrennt zu lesen.
+
+| Beobachtung | Bedeutung | Maßnahme |
+|---|---|---|
+| Integration rot/stale, Site-Status grün | MECM läuft, aber die Meldung eines Sync-Reporters ist stark überfällig oder wurde abgelehnt; daraus folgt allein kein Prozesszustand | Lokales Tageslog lesen; fehlen neue Einträge, Aufgabenplanung prüfen und die benannte Aufgabe starten |
+| Integration grün, Site-Status gelb | Datenfluss ok, MECM meldet eine Warnung (Status 1) | MECM-Konsole → Monitoring → System Status |
+| Integration grün, Site-Status rot | Datenfluss ok, MECM meldet Status 2 (kritisch) | MECM-Konsole → Monitoring → System Status; das ist ein MECM-Problem, kein VirtuSphere-Problem |
+| Site-Status grau (unbekannt) | Providerfehler (nicht erreichbar oder Zugriff verweigert), **nicht** „MECM kritisch" | Providername und SYSTEM-Berechtigung prüfen (Remote-Provider siehe unten); ein „nicht erreichbar" nach MECM-Reboot löst sich von selbst |
+| Sync-Zeile gelb „Ergebnis: Warnung" | Lauf mit partiellem Fehler (ungültige MAC, fehlende Collection, 409-Schutzschwelle) | Detailtext der Zeile und MECM-Log lesen |
+| Sync-Zeile gelb „Legacy: Ergebnis nicht bestätigt" | Alt-Skript sendet nur Heartbeats, kein Ergebnis | Installer/Skripte aktualisieren |
+| Wartungsdienst rot | interner Dienst steht | `docker compose ps` auf dem Ubuntu-Host, dann `docker compose up -d maintenance-worker` |
+
+**Dienst neustarten** (Ubuntu-Host, Repo-Verzeichnis):
+
+```bash
+docker compose up -d maintenance-worker    # startet/erneuert den Dienst
+docker compose logs -f maintenance-worker  # Live-Log
+```
+
+## Rolloutname, Reset und Tombstone (Etappe 14D, ADR-0043)
+
+`vm_hostname` ist der Sollwert und das einzige editierbare Feld. Was MECM
+bekommt, ist `mecm_rollout_hostname`: der für den laufenden Rollout eingefrorene
+Snapshot. Solange `mecm_id IS NULL` folgt er dem Sollwert; mit der ersten
+Bindung friert er ein.
+
+Die SSoT-Kette, je Station ein Besitzer:
+
+```
+Portal-Sollwert (vm_hostname)
+  --> Rollout-Snapshot (mecm_rollout_hostname, eingefroren bei der Bindung)
+  --> MECM-Import (Import-CMComputerInformation -ComputerName <Snapshot>)
+  --> Windows (client_hostname.ps1, idempotent)
+  --> DDR-Anzeigename in MECM (Windows/Discovery, ab hier fremdes Eigentum)
+```
+
+**Neuer Rollout, der einzige unterstützte Weg:**
+
+1. `vm_hostname` im Portal korrigieren.
+2. Altes Gerät in der MECM-Konsole löschen (VirtuSphere löscht dort nie).
+3. Bei neu erzeugter VM zuerst die neue PXE-MAC jobgebunden importieren lassen.
+4. „MECM-ID zurücksetzen" ausführen.
+
+Der Reset ist der **einzige** Aktivierungspunkt. Kein Bereitstellungsmodus,
+auch nicht „Full pipeline", setzt einen Hostnamen.
+
+Was der Reset in einer Transaktion tut: Snapshot auf den Sollwert, alte
+ResourceID wird `mecm_previous_id` (Tombstone), `mecm_rollout_revision + 1`,
+Hostname-Claim vom alten auf den neuen Namen. Ein zweiter Klick mit demselben
+Namen ist ein idempotenter No-op; ein zweiter Klick nach einer Namenskorrektur
+zieht den Snapshot nach und **behält** den Tombstone, damit eine Tippfehler-
+korrektur nach dem Reset nicht bis zum Abschluss des Rollouts gesperrt ist. Der
+Tombstone verschwindet ausschließlich mit einer erfolgreichen neuen Bindung.
+
+Der Tombstone blockiert nicht den Reset, sondern die **Übergabe**: Solange das
+Vorgängergerät in MECM existiert, importiert der Device-Sync nicht und meldet
+`previous_resource_present`. Der VM-Editor zeigt denselben Sachverhalt als
+offenen Punkt mit der ResourceID.
+
+Vorlagen haben weder Snapshot noch Revision noch Tombstone. Ein Klon aus einer
+Vorlage initialisiert beides frisch aus seinem gewünschten `vm_hostname`;
+JSON-Export und -Import übertragen ausschließlich den Sollwert.
+
+Der wirksame Rolloutname ist portalweit eindeutig, erzwungen in
+`deploy_vm_hostname_claims` (case-insensitiver Primärschlüssel, Cascade auf die
+VM). Eine VM darf gleichzeitig ihren eingefrorenen und ihren neuen Namen halten;
+eine andere VM bekommt den alten erst im Reset-Commit.
+
+## Namensregeln für VMs und Hostnamen (Etappe 2)
+
+Was im Portal angelegt wird, muss später in MECM/Windows 1:1 funktionieren:
+
+- **Hostname (`vm_hostname`)**: Windows-Computername: höchstens 15 Zeichen,
+  nur Buchstaben/Zahlen/Bindestriche im Inneren, keine Punkte. Grund: Der
+  Client kürzt und bereinigt beim Deploy stillschweigend; alles Laxere würde
+  vom eingegebenen Namen abweichen. Bestands-VMs mit Alt-Hostnamen bleiben
+  editierbar (Warnhinweis am Feld zeigt den Namen, den der Client erzeugen
+  würde); erst eine Änderung muss die Regel erfüllen.
+- **VM-Name (`vm_name`)**: der VM-Name in ESXi, global eindeutig über alle
+  normalen Missionen hinweg. Das ist eine Portal-/ESXi-Namenspolitik und
+  **nicht** der MECM-Gerätename: MECM importiert seit Etappe 14D den
+  Rollout-Snapshot des Windows-Hostnamens. Templates dürfen Namen doppeln;
+  beim Klonen eines Templates werden Kollisionen vorab als Liste gemeldet.
+- **Missionsname**: ist gleichzeitig der MECM-Collection-Name. Sobald VMs der
+  Mission in MECM übermittelt/registriert sind, ist der Name gesperrt.
+- **MAC-Adressen**: kanonisches Format `AA:BB:CC:DD:EE:FF` (Großbuchstaben,
+  Doppelpunkte). Lookups akzeptieren alle üblichen Schreibweisen; der
+  Ansible-Import lehnt Dubletten (gleiche MAC an anderer VM) und mehrdeutige
+  Ziele (zwei NICs derselben VM mit demselben exakten Portgruppennamen) mit
+  klarer Fehlermeldung ab. Portgruppennamen sind case-sensitive; die PXE-MAC
+  stammt nur von der exakt passenden WDS-Portgruppe der Mission.
+  Eine fehlerhafte NIC verwirft alle MAC-Schreibplaene dieser VM, nicht aber
+  vollstaendig valide VMs desselben Callbacks. Die alten Diagnosefelder
+  `duplicate_macs`/`unmatched_interfaces` bleiben erhalten; Resultat V2 nennt
+  pro erwarteter VM Outcome, Updatezahl, WDS-Evidenz, feste Fehlercodes und den
+  semantischen Callback-Fingerprint.
+
+## Paket-Lebenszyklus (Etappe 3)
+
+**Konvention:** Paket-Collections heißen `Name-Version`; die **Version darf
+keinen Bindestrich enthalten** (der Katalog splittet am letzten Bindestrich).
+
+Lebenszyklus eines Katalogeintrags:
+
+1. **Aktiv**: vom Paket-Sync gemeldet. Name/Version werden getrennt
+   gespeichert und im Portal angezeigt.
+2. **Zurückgezogen (Retired)**: fehlt ein Eintrag im Sync-Payload (z. B.
+   Versionswechsel mit `removeOldVersion`), wird er markiert statt gelöscht.
+   VM-Zuweisungen bleiben erhalten. **VirtuSphere hängt eine VM nie selbst auf
+   eine neue Version um** (AV-R08, seit 15.10.2026): Die neue Version würde ihr
+   `install.ps1` auf einem eingerichteten System erneut ausführen und
+   überschreiben, was danach von Hand eingestellt wurde. Der Rückzug einer
+   Version, die noch VMs zugewiesen ist, steht im Log (Kategorie
+   „MECM-Integration“, „Zurückgezogene Paketversion weiter zugewiesen“) mit der
+   Anzahl der VMs und Vorlagen-VMs und der höheren aktiven Version. Taucht der
+   Name wieder auf, wird er automatisch reaktiviert.
+3. **Endgültig gelöscht**: erst nach 30 Tagen im Zustand „Zurückgezogen"
+   **und** ohne verbleibende VM-Verknüpfung (Wartungsdienst). Verknüpfte
+   zurückgezogene Pakete bleiben dauerhaft erhalten, ebenso Pakete, deren
+   Zuweisungen einmal automatisch umgehängt wurden (heute nur bei Vorlagen,
+   früher auch bei VMs).
+
+**Neue Version für eine VM:** Der VM-Editor zeigt „Update verfügbar“, sobald
+eine echt höhere Version desselben Pakets aktiv ist, auch solange die alte noch
+aktiv ist. Der Admin setzt den Haken auf die neue Version, entfernt den alten
+und speichert. Eine bereits registrierte VM geht beim Speichern automatisch an
+MECM (AV-R12), auch mit Änderungen, die MECM aus früheren Bearbeitungen noch
+fehlen. Weicht ihr Betriebssystem von dem ab, das MECM hält, fragt der
+Editor vorher und überträgt erst mit „Speichern und an MECM übertragen“. Ein
+Haken auf einer zurückgezogenen Version zeigt eine Warnung:
+Eine Übertragung damit bleibt mit `collection_missing` in der Warteschlange.
+
+**Vorlagen-VMs** (Missionen mit Vorlagen-Präfix, nie an MECM übertragen) folgen
+einer höheren Version genau einmal, wenn sie zum ersten Mal im Katalog
+erscheint. Nur niedrigere Versionen rücken nach; der Eintrag „Pakete neu
+verknüpft“ nennt sie. Wird eine Vorlage danach von Hand auf eine ältere Version
+gesetzt, bleibt sie dort. Neue Missionen aus einer Vorlage übernehmen deren
+Paketauswahl beim Klonen.
+
+**Bis das Portal mit AV-R08 auf Prod läuft:** In `config.json` kein
+`removeOldVersion` setzen. Ältere Portalstände hängen VMs sonst um, wenn das
+Löschen der alten und das Erscheinen der neuen Version in denselben Paket-Sync
+fallen.
+
+**Schutzschwelle:** Würde ein einzelner Sync mehr als X % (Standard 30 %,
+Portal → Einstellungen → Tab „Kataloge und Inventar") der aktiven Pakete zurückziehen (typisch bei
+WMI-Lesefehlern oder falschem Collections-Ordner), wird er mit HTTP 409
+abgelehnt und im Log vermerkt. Der Sync wiederholt sich dann sichtbar, statt
+still den Katalog zu leeren. Ein Versionswechsel zählt nicht mit (AV-R14):
+Verschwindet eine Paketversion, weil derselbe Sync eine höhere Version desselben
+Basisnamens meldet, ist das kein Katalogausfall. Task Sequences (`deploy_os`)
+haben denselben Schutz, aber ohne diese Ausnahme. Der Betriebssystem-Katalog wird wie die Paketliste ausschließlich aus
+MECM gespeist; die Portalseite „Betriebssysteme" bietet nur Anzeige und ein
+Admin-Löschen als self-healende Aufräum-Aktion (existiert die Task Sequence noch
+in MECM, legt der nächste Sync den Eintrag wieder an), aber kein Anlegen oder
+Bearbeiten mehr (ADR-0020).
+
+Im Portal: Paketliste mit Status-Filter (Aktiv/Zurückgezogen/Alle); die
+VM-Bearbeitung blendet zurückgezogene Pakete aus (außer bereits verknüpfte,
+mit Kennzeichnung) und zeigt „Update verfügbar"-Hinweise.
+
+### Altversionen und automatische sichere Bereinigung
+
+`removeOldVersion=true` in einer `config.json` ist die maßgebliche Anforderung,
+ersetzte Altversionen automatisch aus MECM zu entfernen. Der Autoimporter liest
+zuerst alle `config.json`-Quellen und bestimmt je ordinalem Produktnamen einen
+Zielstand. Für eine automatische Ordnung sind nur kanonische, punktgetrennte
+Dezimalversionen zulässig; `1.10` ist neuer als `1.9`, `10` neuer als `2`.
+Freie oder doppelte Versionen blockieren, und eine weiterhin in der Quelle
+liegende Version bleibt immer erhalten. Diese enge Löschsemantik ist bewusst
+nicht die breitere Anzeigeordnung des Portal-Katalogs.
+
+Der automatisch auszuführende Plan muss stabile Deployment-/Application-/Collection-IDs, die exakten
+versionierten Ownership-Marker, keine Referenzen und einen ausreichend bereiten
+Ersatz belegen. Bereit bedeutet: genau ein Deployment Type, ein bestätigter und
+an die exakte Content-ID gebundener Auftrag, eine bekannte sichere
+DP-Zielprojektion und ein geprüftes Deployment. `failed` oder `in_progress` auf
+einzelnen oder allen DPs sperrt den Plan nicht; 100 Prozent Verteilerfolg und
+mindestens ein erfolgreicher DP sind keine Voraussetzung. Ungebundene Intents,
+unbekannte Evidenz, Zielverlust, Löschzustände sowie unklare oder fremde Objekte
+bleiben gesperrt. Der Plan wird direkt vor einer Ausführung neu erhoben; nur ein
+identischer SHA-256-Fingerabdruck des aktuellen Schemas 3 ist gültig. Der
+Autoimporter liest den Plan unmittelbar zweimal und entfernt danach zuerst alte
+Application-Deployments, anschließend Applications und zuletzt Collections.
+Ein Einzelfehler stoppt die restlichen Einheiten und meldet
+`package_cleanup_failed`; der nächste Scan plant aus dem aktuellen Bestand neu.
+
+### Transport, TLS, ACL und Site-Health seit 07.09.2026
+
+Server- und Client-POSTs senden JSON als explizites UTF-8-`byte[]` mit Charset.
+Beide ausgelieferten `ConvertTo-VsUtf8JsonBytes`-Helper emittieren dieses Array
+als ein Funktionsobjekt; andernfalls enumeriert PowerShell die Bytes zu
+`object[]`, und der HTTP-Cmdlet-Binder behandelt den Body nicht mehr als
+Binärdaten. Die Regression prüft Objekt, Ein-/Mehrarray und Unicode direkt am
+Helper sowie den untypisierten HTTP-Parameter. Für die Laufzeitabnahme liest die
+Loopback-Fixture in `VirtuSphere.JsonTransport.Tests.ps1` die tatsächlich
+übertragenen Bytes unter Windows PowerShell 5.1 und PowerShell 7 direkt hinter
+dem HTTP-Header. Fehlerdiagnosen verwenden zuerst den bereits in
+`ErrorRecord.ErrorDetails.Message` vorhandenen Antworttext und lesen den Stream
+nur als Rückfall; extrahierter Text ist begrenzt und wird anschließend vom
+Logger redigiert.
+
+Bei HTTPS bleibt ein leerer Fingerabdruck normale PKI-Prüfung. Ein gesetzter
+Fingerabdruck erlaubt genau das passende Zertifikat trotz Kettenfehler, ist aber
+kein erzwungenes Pinning eines ohnehin gültigen PKI-Zertifikats. Es gibt keinen
+Accept-all-Callback. Die Client-Adresswahl verlangt zusätzlich die Felder des
+VirtuSphere-Health-Dokuments. Paketpfade werden sprachunabhängig über die SIDs
+für Everyone, Authenticated Users und Builtin Users auf breite Allow-
+Schreibrechte geprüft. Fremde Shares werden nur diagnostiziert; der vollständig
+eigene Secret-Registry-Key wird dagegen ausschließlich aus SYSTEM- und
+Administratoren-Rechten neu aufgebaut.
+
+Site-Health verwendet nur den in `MECM_SiteCode` gespeicherten Code. Fehlt er,
+ist der exakte Treffer nicht eindeutig oder ist der Rohstatus unlesbar, bleibt
+die Anzeige grau. Rot entsteht ausschließlich aus Rohstatus 2. Laufzeiten der
+vier Aufgaben werden vor dem Integercast auf den Reportvertrag begrenzt; das
+Intervall bezeichnet den Schlafabstand zusätzlich zur Laufzeit und keine exakte
+Wanduhrkadenz.
+
+## MECM-Server: Installation & Aufgabenplanung (Etappe 4)
+
+Die vier Server-Skripte liegen versioniert unter `Powershell-MECM/mecm/` und
+teilen sich `VirtuSphere-Common.ps1` (Konfiguration, Logging, Ergebnisberichte,
+MAC-Normalisierung, Site-Code- und SMS-Provider-Ermittlung, Site-Health-Abbildung).
+Installation und Registrierung der geplanten Aufgaben erledigt
+`Powershell-MECM/install-VirtuSphere-MECM.ps1` (idempotent, siehe
+`Powershell-MECM/README.md`). Die vier registrierten Aufgaben laufen alle als
+`NT AUTHORITY\SYSTEM`, mit höchsten Rechten, ohne Profil (`-NoProfile`), mit
+zwei Triggern (`AtStartup` **und** stündliche Wiederholung),
+`MultipleInstances IgnoreNew` und ohne Laufzeitlimit (`ExecutionTimeLimit=PT0S`):
+
+| Aufgabe | Skript | Meldet an `reportRun` |
+|---|---|---|
+| VirtuSphere MECM Devices Sync | `mecm_new-device-sync.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
+| VirtuSphere MECM Packages Sync | `mecm_Packages-TaskSeq-sync.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
+| VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
+| VirtuSphere MECM Site Health | `mecm_site-health.ps1` | nur `completed`: Site-Code, Provider, Rohstatus 0/1/2 |
+
+Die Abläufe der vier Aufgaben zeigen die Diagramme in [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md).
+
+Wichtige Härtungen gegenüber den Altskripten:
+
+- **Konfiguration nur aus der Registry** `HKLM:\SOFTWARE\VirtuSphere\MECM` –
+  keine IPs, DNS-Namen, UNC-Pfade oder Site-Codes im Code.
+- **Kein Laufzeitlimit** für die Aufgaben (`ExecutionTimeLimit=PT0S`) plus
+  Auto-Neustart – das Standard-72h-Limit hätte die Endlosschleifen sonst
+  regelmäßig beendet.
+- **Zwei Trigger statt einem.** Mit `AtStartup` allein war eine Aufgabe nach
+  ihren drei Neustartversuchen bis zum nächsten Reboot tot, und ein MECM-Server
+  bootet selten: der Ausfall sah aus wie eine stille Integration. Der stündliche
+  Trigger holt sie zurück; `IgnoreNew` sorgt dafür, dass er nichts tut, solange
+  die Aufgabe läuft.
+- **`-NoProfile`.** Die Aufgaben laufen als SYSTEM, und ein Profilskript unter
+  SYSTEM ist Fremdcode im Sync-Prozess (Kodierung, `PSModulePath`,
+  `$ErrorActionPreference`).
+- **Der Installer deaktiviert Trigger und beendet laufende Aufgaben, bevor er
+  die Skripte ersetzt.**
+  Sonst lief die alte Instanz mit dem beim Start dot-gesourcten Common weiter,
+  während die neue Registry-Konfiguration schon da war. Das Disable schließt
+  zusätzlich einen neuen Stundenlauf im Stop/Move-Fenster aus; ein Fehler
+  bricht den Austausch fail-closed ab.
+- **Serverpaket als geprüfter Satz.** Der Installer staged alle `.ps1`-Dateien,
+  vergleicht ihre SHA-256-Hashes und liest die deklarierten Vertragsversionen
+  von Common und `VirtuSphere-Logging.ps1` per AST, ohne die Stagingdateien
+  auszuführen. Erst danach deaktiviert und stoppt er Aufgaben und ersetzt das
+  Loggingmodul vor der Common-Fassade. Fehlende oder versionsfalsche Module
+  werden dadurch vor dem nächsten Sync sichtbar.
+- **Paketvorlage gehört zum selben Austausch.** `install.ps1`, `config.json`
+  und der ausgelieferte Vorlagenbaum werden vor dem Taskstopp gestaged und
+  gehasht. Das Vorlagen-Staging liegt unter `PackagesRoot`, damit die
+  Verzeichniswechsel auch bei einem anderen Paketlaufwerk auf demselben
+  Dateisystem bleiben. Der bisherige Vorlagenbaum wird gesichert, der neue
+  live gegen das Manifest geprüft und bei einem späteren Installationsfehler
+  zusammen mit Serverdateien und Registry zurückgerollt. Ein unvollständig
+  bestätigter Rollback lässt die Aufgaben deaktiviert.
+- **Upgrade und Re-Run als gemeinsame Transaktion.** Ein globaler Mutex schließt
+  parallele Installer aus; nur das exakte, reparse-freie lokale Verzeichnis
+  `%ProgramFiles%\VirtuSphere\mecm` darf ersetzt werden. Vor dem ersten
+  Registry-Write sichert der Installer alle Werte samt Typ und ACL sowie XML
+  und Laufzustand der vier eigenen Aufgaben. Der vollständige Altdateisatz
+  bleibt bis nach Start, Verifikation und Abschlussmarker erhalten. Scheitert
+  ein Schritt, werden zuerst alle neuen Aufgabenprozesse stillgelegt, danach
+  Dateien und Registry und zuletzt die alten Taskdefinitionen restauriert.
+  Zuvor laufende Aufgaben starten nur erneut, wenn dieser Rollback vollständig
+  nachgewiesen ist; sonst bleiben sie deaktiviert.
+- **Sende-Guard im Paket-Sync:** Fehlt der Applications-Ordner oder liefert
+  WMI nichts, wird **nichts** gesendet (ein leerer Payload würde serverseitig
+  den Katalog zurückziehen). Zusätzlich Change-Detection per Payload-Hash.
+- **Alt-Versionen im Autoimporter:** Der normale Importlauf erkennt bei
+  `removeOldVersion` nur exakte `^Name-<Version>$`-Kandidaten und entfernt sie
+  nach belegtem, unmittelbar revalidiertem Ersatz automatisch.
+  Name und Ordner sind kein Eigentums-, Referenz- oder Ersatznachweis. Eine
+  spätere Löschung braucht einen separat geprüften Plan; bis dahin bleibt der
+  Stamp offen und der Bereinigungsbedarf sichtbar. `config.json` ohne
+  `ProjectName`/`version` wird übersprungen. `LogonRequirementType` verwendet
+  den offiziellen Enum-Wert `WhetherOrNotUserLoggedOn`.
+- **Device-Sync:** Leerlauf-Abkürzung bei 0 Devices, Collection-Cache je Scan,
+  Task-Sequence-Collections einmal statt pro Device, normalisierter
+  MAC-Vergleich (keine falschen Konfliktwarnungen), nutzt das eingebettete
+  `mission`-Objekt aus `getDeviceList` statt N+1 `getMissionName`.
+- Die drei Sync-Aufgaben senden je Lauf einen **Ergebnisbericht** (`started`
+  vor der Arbeit, `completed` mit `ok`/`warning`/`fail`/`unknown` im `finally`);
+  die Site-Health-Aufgabe meldet nur `completed`. Eine stark überfällige Meldung
+  wird im *Systemstatus* stale/rot, beweist aber allein keinen gestoppten Prozess.
+  Das lokale Tageslog zeigt den Fortschritt. Ein Alt-Skript, das nur Heartbeats
+  sendet, erscheint gelb als „Legacy: Ergebnis nicht bestätigt".
+
+**Task neu starten** (MECM-Server): Zuerst den Task beenden, dann starten. Ein
+Neustart ohne vorheriges Beenden funktioniert bei einem hängenden Task nicht:
+Die Einstellung `IgnoreNew` verwirft den Start, solange die Instanz noch läuft.
+In der Aufgabenplanung den Task unter `\` auswählen, *Beenden* wählen und danach
+*Ausführen*. Oder per PowerShell:
+`Stop-ScheduledTask -TaskName 'VirtuSphere MECM Devices Sync'`, danach
+`Start-ScheduledTask -TaskName 'VirtuSphere MECM Devices Sync'`.
+
+Vor einem manuellen Start zuerst das Setup-Tageslog unter
+`%ProgramFiles%\VirtuSphere\Logs` prüfen. Meldet es einen unvollständigen
+Installer-Rollback, keine Aufgabe manuell starten: zuerst die genannte Prozess-,
+Datei-, Registry- oder Taskabweichung beheben und den Installer erneut ausführen.
+
+### Site Health und SMS-Provider
+
+Die vierte Aufgabe „VirtuSphere MECM Site Health" fragt über den SMS Provider
+`SMS_SummarizerSiteStatus` für exakt den konfigurierten Site-Code ab. Fehlt
+dieser Eintrag, kommt er mehrfach vor oder ist sein Rohstatus nicht lesbar,
+bleibt das Ergebnis `unknown`; eine andere Site wird nie ersatzweise verwendet.
+Bei eindeutigem Eintrag meldet sie den
+offiziellen MECM-Site-Zustand: `0` = OK (grün), `1` = Warnung (gelb),
+`2` = kritisch (rot), jeder andere Rohwert = unbekannt (grau). Providerfehler
+(nicht erreichbar, Zugriff verweigert, Abfrage fehlgeschlagen) werden als
+`unknown` (grau) gemeldet; Rot ist exklusiv dem MECM-bestätigten Status 2
+vorbehalten. „Nicht erreichbar" wird erst nach zwei aufeinanderfolgenden
+Fehlversuchen gemeldet, damit ein MECM-Reboot nicht sofort einen Fehler ins Portal
+schreibt.
+
+Provider und Intervall sind Registry-owned (`HKLM:\SOFTWARE\VirtuSphere\MECM`),
+keine Portal-Settings:
+
+- `MECM_ProviderMachine`: SMS-Provider-Rechner. Leer lassen, wenn der Provider
+  lokal auf dem Site-Server liegt (der Normalfall); die Aufgabe ermittelt ihn dann
+  selbst. Die geplanten Aufgaben arbeiten über den Provider auf dem Site-Server;
+  dieser Wert wird nur für die Site-Health-Abfrage und die Prüfung der
+  Verteilungskopien gelesen.
+- `SiteHealthIntervalSeconds`: Berichtsintervall, Standard 300, erlaubt 60–3600.
+  Wie die drei Sync-Intervalle: außerhalb der Spanne lehnt der Installer ab, ein
+  Registry-Wert von Hand wird beim Start geklemmt und protokolliert.
+
+**Remote-Provider.** Die Aufgaben sprechen den Provider auf dem Site-Server an.
+Nur wenn `MECM_ProviderMachine` auf einen anderen Rechner zeigt, gilt das Folgende
+für die Site-Health-Abfrage und die Prüfung der Verteilungskopien. Das
+Computerkonto des Site-Servers ist standardmäßig Mitglied der SMS-Admins-Gruppe auf
+jedem Provider; liegt der Provider lokal und läuft die Aufgabe als SYSTEM, ist keine
+Zusatzkonfiguration nötig. Liegt der Provider auf
+einem anderen Rechner, braucht dieses Computerkonto die Provider-Berechtigung, und
+der Transport muss erreichbar sein: `Get-CimInstance -ComputerName` nutzt
+WinRM/WSMan; klassisches WMI braucht DCOM mit RPC 135 plus dynamischen Ports und
+Remote Activation. Ein fehlendes Recht meldet das Portal als
+`provider_access_denied` (grau), nicht als „MECM kritisch".
+
+Lokale Tageslogs aller vier Aufgaben liegen unter
+`%ProgramFiles%\VirtuSphere\Logs\yyyy-MM-dd_<Komponente>.log` (Site Health:
+`yyyy-MM-dd_site-health.log`). Server und Clients verwenden denselben
+versionierten Vertrag mit den Leveln `DEBUG`, `INFO`, `WARN`, `ERROR`, sechs
+durch ` | ` getrennten Feldern, UTF-8-sicherer Begrenzung, Redigierung benannter
+Secrets und 30 Tagen Aufbewahrung. ANSI-/OSC-Terminalsequenzen werden vor der
+Redigierung normalisiert, damit sie bekannte Secret-Schlüssel nicht aufteilen.
+Die Redigierung deckt dokumentierte benannte Header-, Parameter- und
+Schlüsselformen ab; unbeschriftete Geheimnisse in beliebigem Freitext bleiben
+ausserhalb dieser Zusage. Logger halten den Success-Stream frei, damit ein
+Resolver oder anderer datengebender Helfer genau seinen Fachwert liefert. Die
+tägliche Bereinigung verwendet einen gemeinsamen Marker und einen exklusiven Lock, damit parallele Aufgaben nicht
+gegeneinander löschen. Die Korrelations-ID entsteht einmal pro Prozess und wird
+als Diagnoseheader mitgesendet; sie ist kein Authentisierungsmerkmal.
+
+## Client-Anwendungen (Etappe 5)
+
+> MC01-Zwischenstand (27.09.2026): Im lokalen Quellstand ist der Zielgraph
+> `client_getInfos → client_hostname → client_VMDisksOnline → client_staticip`
+> als Vertrag definiert; die Einstiegsskripte wurden entsprechend umbenannt.
+> Der mutierende Clientinstaller stoppt vor Content- und MECM-Änderungen, bis
+> der geordnete Cutover (MC03) umgesetzt ist; der Read-only-Preflight (MC02)
+> liefert seit 15.10.2026 für alle vier Prüfungen echte Befunde. Die nachfolgende
+> Beschreibung dokumentiert den bisherigen Betrieb, nicht eine Freigabe zur
+> Anwendung des neuen Graphen. `client_getinfo`/`client_getinfo_2.1` werden
+> niemals stillschweigend übernommen.
+
+Die überarbeiteten Client-Skripte liegen unter `Powershell-MECM/clients/` und
+teilen sich `VirtuSphere-Client-Common.ps1`. Reihenfolge über
+MECM-Anwendungsabhängigkeiten im Zielgraphen: `client_getInfos` →
+`client_hostname` → `client_VMDisksOnline` → `client_staticip`. Vollständige App-Definitionen,
+Erkennungsregeln und Exit-Codes stehen in `Powershell-MECM/clients/README.md`.
+
+Kernpunkte:
+
+- **Geschlossene Adresse:** `client_getInfos` prüft den vollständigen Bootstrap
+  und übernimmt ihn nur bei leerem nativem Satz. Folgephasen und Reporter
+  lesen ausschließlich die gemeinsam veröffentlichte, hashgebundene
+  Registry-/Snapshot-Konfiguration. DNS-/IP-Fallback und Feldmischung entfallen.
+- **Rückkanal:** Phasenevents sind einzelne best-effort-Sendeversuche und keine
+  garantierte `started`-zu-Terminal-Sequenz. `staticip` versucht `started` vor
+  der Änderung der Windows-IP-/Subnetzkonfiguration; das Skript ändert keine
+  ESXi-Portgruppe. Bei einer echten Umbenennung meldet `hostname` `finished`
+  vor dem Reboot. Skip-, Frühabbruch- und Zustellpfade können Events auslassen;
+  „Bestätigung ausstehend" belegt weder Erfolg noch Fehler.
+- **Snapshot (getinfo):** Ein neuer versionierter Stand wird vorbereitet,
+  nachgelesen und erst über `ActiveSnapshot` veröffentlicht. Danach läuft der verbindliche Client-Ready-ACK, und erst seine
+  Bestätigung setzt `SetupState=complete`; der idempotente Server-POST darf
+  wiederholt werden.
+- **Netzvertrag (staticip):** Vor dem ersten Write müssen alle Snapshot-MACs
+  genau einen aktiven Adapter treffen; ungültige Werte, Namenskonflikte,
+  fehlende/mehrdeutige/Down-Adapter und mehrere Default-Gateways blockieren den
+  Lauf vollständig. Das Skript erhält IPv6 und unbekannte manuelle IPv4-Werte.
+  Es entfernt nur die IPv4-Adresse und Route, die ein vorheriger erfolgreicher
+  Lauf für dieselbe MAC dokumentiert hat. Leeres DNS im statischen Soll erhält
+  den aktuellen DNS-Stand; DHCP setzt DNS auf automatische Ermittlung zurück.
+  `Tentative` wird begrenzt abgewartet, `Duplicate` und `Invalid` scheitern.
+  Eine lokal bestätigte IP-Konfiguration behauptet nicht, dass das Portal aus
+  dem neuen Netz erreichbar ist; die terminale Phasenmeldung bleibt best effort.
+- **Diskvertrag (disks):** Neue Offline-RAW-Platten erhalten vor dem ersten
+  Storage-Write ein versioniertes Eigentumsjournal unter
+  `HKLM:\SOFTWARE\VirtuSphere\VMDiskManagement\Operations`. Die stabile
+  Identität ist `UniqueId`, ersatzweise nur Seriennummer plus LocationPath plus
+  Größe; die Disknummer ist kein Eigentumsbeweis. Ein Retry löst jede offene
+  Operation vor allen Writes eindeutig gegen das vollständige Inventar auf und
+  setzt sie auch nach Online/Initialize/Partition/Format oder einer geänderten
+  Disknummer fort. Tatsächliche Disk-, Partition- und Volumezustände werden
+  jeweils nachgelesen. Unbekannte online-RAW-Platten, fremde Partitionen,
+  Identitäts-/Größenkonflikte, Boot/System, Read-only, Cluster und Größe 0 sind
+  manuelle Blocker und werden nicht formatiert. Vorhandene GPT-/MBR-Datenplatten
+  werden nur online geschaltet. `optional: no disk work required` bedeutet
+  ausschließlich, dass keine Zusatzplatte und keine offene eigene Operation
+  vorhanden ist.
+- Einheitliches Datei-Logging unter `C:\Program Files\VirtuSphere\Logs` (30
+  Tage). Jede Application enthält Phase, `VirtuSphere-Client-Common.ps1`,
+  `VirtuSphere-Client-Logging.ps1` und `bootstrap.json`; Packaging staged und hashprüft die Skriptdateien als
+  Geschwisterverzeichnis und aktiviert sie mit einem atomaren Verzeichnis-Swap.
+  Scheitert die Aktivierung, wird der vollständige Altstand zurückgerollt. Fehlt
+  das Loggingmodul oder ist seine Vertragsversion falsch, beginnt die
+  Clientphase nicht mit einem halben Paket.
+
+**Disk-Recovery:** Bei einer fehlgeschlagenen `disks`-Phase zuerst die
+Tageslogzeile und anschließend die Unterschlüssel unter
+`VMDiskManagement\Operations` lesen. `State` zeigt den zuletzt dauerhaft
+bestätigten Schritt; maßgeblich bleibt die vom Skript nachgelesene reale
+Disk-/Partitions-/Volumeansicht. Ist genau dieselbe stabile Identität mit
+unveränderter Größe vorhanden, darf derselbe MECM-Anwendungslauf die Operation
+wiederaufnehmen. Fehlt sie, ist sie mehrfach vorhanden, enthält die Platte
+fremde Partitionen oder ist nur eine unbekannte online-RAW-Platte sichtbar,
+bleibt der Lauf rot und erfordert eine menschliche Storageentscheidung. Journal-
+Unterschlüssel nicht löschen, um eine Formatierung zu erzwingen.
+
+### Altanwendungen `client_getinfo` und `client_getinfo_2.1` zurückbauen
+
+Behalten wird ausschließlich die verwaltete Anwendung `client_getInfos`. Die
+beiden manuell angelegten Altanwendungen werden nie übernommen und auch nicht
+als zweite Version parallel betrieben: Sie schreiben wie `client_getInfos` den
+Erkennungswert `SetupState=complete`, aber keinen Config-Commit. Läuft auf einer
+neuen VM eine Altanwendung, gilt `client_getInfos` dort als installiert, und die
+Folgephasen finden keine gültige Konfiguration.
+
+Rückgebaut wird bis Retire mit `retire-VirtuSphere-LegacyGetInfo.ps1` auf dem
+MECM-Server (als Administrator). Gelöscht wird nichts; Löschen bleibt ein
+eigener, später freizugebender Auftrag.
+
+1. **Bericht:** `.\retire-VirtuSphere-LegacyGetInfo.ps1` ohne Parameter ändert
+   nichts. Er zeigt je Altanwendung Retired-Status, Deployments (davon aktiv),
+   abhängige Deployment Types und Tasksequenzen, Supersedence,
+   Application-Group-Mitgliedschaft, Geräte mit installierter Anwendung,
+   verteilte Dateien, Skriptversion und ob die Detection `SetupState` liest.
+   Dazu kommen der Nachweis der neuen Kette und die Plan-ID.
+2. **Stufe `DisableDeployments`:** nur nötig, wenn eine Altanwendung ein aktives
+   Deployment hat. Bereit erst, wenn die neue Kette nachweislich läuft:
+   `client_getInfos` und `client_staticip` tragen den Projektmarker,
+   `client_staticip` hat ein aktives Required-Deployment, und dessen
+   Zusammenfassung zeigt mindestens einen erfolgreichen Client (vorher in der
+   Konsole die Zusammenfassung aktualisieren). Aufruf mit
+   `-Stage DisableDeployments -Apply -PlanId <Plan-ID>`. Danach auf der
+   Zielcollection **Clientbenachrichtigung → Computerrichtlinie herunterladen**
+   auslösen und auf repräsentativen Clients in `PolicyAgent.log` und
+   `AppDiscovery.log` prüfen, dass die alte Zuweisung weg ist. Eine Wartezeit
+   allein ist kein Nachweis.
+3. **Stufe `Retire`:** neuen Bericht erstellen (die Plan-ID ändert sich nach
+   jeder Änderung) und `-Stage Retire -Apply -PlanId <Plan-ID>` ausführen; hatte
+   die Anwendung Deployments, zusätzlich `-ConfirmPolicyConvergence`. Retire
+   bleibt blockiert, solange ein aktives Deployment, eine abhängige Anwendung
+   (zum Beispiel `client_hostname` im alten Graphen), eine Tasksequenz, eine
+   Supersedence oder eine Application Group auf die Altanwendung zeigt. Eine
+   ungenutzte Altanwendung ist sofort bereit, auch vor dem Cutover.
+
+Jede Änderung wird einzeln bestätigt (`-WhatIf` zeigt sie nur an,
+`-Confirm:$false` für unbeaufsichtigte Läufe), unmittelbar vorher neu gelesen,
+im Journal `%ProgramData%\VirtuSphere\MECM\LegacyRetirement\<Plan-ID>.jsonl`
+vor und nach dem Schreiben festgehalten und danach zurückgelesen. Weicht der
+Stand vom Bericht ab, bricht der Lauf ohne Änderung ab; dann einen neuen Bericht
+erstellen. Ein zweiter gleichzeitiger Lauf wird abgewiesen. Exit-Code 0
+bedeutet: Bericht erstellt beziehungsweise jeder Schritt der Stufe erledigt oder
+schon erledigt. Exit-Code 1 bedeutet: mindestens ein Schritt blockiert oder
+fehlgeschlagen, oder der Plan war veraltet.
+
+**Zurücknehmen:** `Resume-CMApplication -Id <CI_ID>` hebt Retire auf; ein
+deaktiviertes Deployment wird in der Konsole über **Aktivieren** wieder
+eingeschaltet. Retire deinstalliert nichts und ändert bereits ausgerollte VMs
+nicht. Laut Microsoft löscht MECM die Revisionen einer Anwendung, die 60 Tage
+retired ist; eine Rücknahme ist deshalb nur in diesem Zeitraum verlustfrei.
+
+### Standort-Erhebung (nur lesend, Grundlage für MC02 und MC03)
+
+`survey-VirtuSphere-MecmSite.ps1` liest einmal, wie die eigene Site tatsächlich
+aussieht: Feldformen des SMS-Providers, die Client-Anwendungen samt Deployment
+Types, ihre Deployments, Abhängigkeiten, Sicherheitsbereiche und die eigene
+RBAC-Sicht, Sammlungen mit Limiting-Kette und Wartungsfenstern,
+Content-Verteilung, Konsolenordner, Content-Orte mit lokaler Zuordnung und
+ähnlich benannte Altanwendungen. Das Skript ändert nichts in MECM, WMI, Registry
+oder an einer Freigabe; geschrieben wird nur das Tageslog (Komponente
+`site-survey`).
+
+Es läuft auf jeder Site, auch ohne VirtuSphere-Installation. Dann ist der
+Bericht die Ausgangslage: leere Listen und der Registryteil `absent`. Nötig ist
+ein Rechner mit MECM-Konsole und erreichbarem SMS-Provider, also der lokale
+Namespace `root\SMS` oder ein bereits vorhandenes CMSite-Laufwerk. Das Skript
+legt kein Laufwerk an.
+
+1. **Bereitstellen:** den Ordner `Powershell-MECM` aus einem `git archive` des
+   Commits, der das Skript enthält, nach `C:\Temp\VirtuSphere-<commit>\`
+   kopieren. Nichts installieren; ältere Offline-Bundles enthalten das Skript
+   nicht.
+2. **Ausführen** in einer Windows PowerShell als Administrator aus diesem
+   Ordner, in derselben Sitzung:
+   `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force`, danach
+   `.\survey-VirtuSphere-MecmSite.ps1 | Out-File -Encoding utf8 C:\Temp\vs-site-survey.json`
+   und `"Exit-Code: $LASTEXITCODE"`. Die Richtlinie gilt nur für dieses Fenster.
+   Nicht über ein zweites `powershell.exe -File` starten: Ein eigener Prozess
+   schreibt Fortschritt und Warnungen ebenfalls auf seine Standardausgabe, und
+   sie landen vor und nach dem JSON in der Datei. Die Konsole zählt die
+   Abschnitte von `[1/11]` bis `[11/11]` hoch und nennt je Abschnitt `ok`,
+   `partial`, `failed` oder `absent`.
+3. **Prüfen:** Exit-Code 0 heißt, der Bericht ist vollständig geschrieben.
+   Einzelne Abschnitte können trotzdem `partial` oder `failed` sein; den Grund
+   nennt `error` im jeweiligen Abschnitt. Exit-Code 2 heißt, es war kein
+   Site-Code ermittelbar und nichts wurde abgefragt. Exit-Code 1 ist ein
+   unerwarteter Fehler; die Ursache steht in der Konsole und im Tageslog.
+4. **Mitnehmen:** Die JSON-Datei enthält Namen von Sammlungen, Anwendungen und
+   Administratoren, SIDs und UNC-Pfade, aber keine Kennwörter: Felder, deren
+   Name `password`, `secret` oder `credential` enthält, stehen als `[redacted]`
+   im Bericht. Vor der Weitergabe ansehen und wie eine interne Konfiguration
+   behandeln.
+
+### Client-Preflight (MC02, nur lesend)
+
+`install-VirtuSphere-Clients.ps1` beginnt jeden Lauf mit dem Preflight aus
+`mecm\VirtuSphere-ClientPreflight.ps1`; mit `-ValidateOnly` endet er danach.
+Der Bericht erscheint als JSON auf der Konsole (Schemaversion 2). Seit dem
+15.10.2026 beantwortet er vier Fragen mit Standortdaten statt mit pauschalen
+Sperren. Grundlage sind die Feldformen, die zwei Läufe der Standort-Erhebung auf
+dem echten SMS-Provider geliefert haben.
+
+Jede Antwort steht als Zeile in `Checks` mit `Check`, `Target`, `Status`
+(`pass`, `fail`, `warn` oder `unknown`), `Code`, `Reason` und `Blocking`. Jede
+Zeile, die nicht `pass` ist, steht mit demselben Code und Grund zusätzlich in
+`Findings`. `fail` und `unknown` blockieren, `warn` nicht. Nur zwei Punkte sind
+`unknown`, ohne zu blockieren: Für sie hat der Provider kein Feld (siehe
+Deployment-Policy).
+
+| Prüfung | Was sie liest | Bewertung |
+|---|---|---|
+| `source_mapping` | `ContentShare` muss diesen Rechner nennen (NetBIOS- oder FQDN-Name, Groß-/Kleinschreibung egal). Die Freigabe aus `Get-SmbShare` ergibt mit dem Restpfad den lokalen Pfad, der genau `PackagesBase` sein muss. Dazu der Quellmarker, auf beiden Wegen gleich zurückgelesen. | `pass` nur mit allen drei Belegen. Freigabe fehlt oder führt woandershin: `fail`. Fremder Host, nicht lesbare Freigaben oder unbestätigter Marker: `unknown`. |
+| `rbac_scope` | Die `SMS_Admin`-Zeilen des Aufrufers über die eigene SID und alle Gruppen-SIDs. `Categories` und `Permissions` sind Lazy-Felder und werden je Zeile nachgeladen. Bereiche der Zielanwendungen aus `SMS_SecuredCategoryMembership`, die Limiting-Kette jeder Zielsammlung aus `SMS_Collection`. | Eine Anwendung ist abgedeckt, wenn der Aufrufer den Bereich `All` oder einen ihrer Bereiche hält. Eine Sammlung ist abgedeckt, wenn er sie oder eine Sammlung ihrer Limiting-Kette hält. Bereiche der Site außerhalb seiner Sicht: `warn`. Nur wenn er jeden Bereich sieht, belegt eine nicht sichtbare verwaltete Anwendung ihr Fehlen (`application_absent`); sonst bleibt es `application_absence_unverified`. |
+| `references` | Siteweit `SMS_AppDependenceRelation` über alle Revisionen der Zielanwendungen, auch abgelaufene, dazu `SMS_TaskSequenceAppReferencesInfo`, die Definitionen aller Application Groups und `SMS_CIRelation` auf Anwendungen und Deployment Types der Zielanwendungen (nach Schlüssel abgefragt, nicht die ganze Klasse). Die Gegenseite löst `SMS_Application`, `SMS_DeploymentType` oder `SMS_ApplicationGroup` per CI_ID auf. | Kante innerhalb der Clientkette: `pass`. Abgelaufene Revision, die noch verweist: `warn`. Aktuelle fremde Anwendung, Tasksequenz oder Application Group: `fail`. Nicht auflösbares CI: `unknown`. Der Relationstyp aus `SMS_CIRelation` steht als Zahl im Grund und wird nicht gedeutet. |
+| `deployment_policy` | `SMS_ApplicationAssignment` der Phasen, auch versionierter Kopien einer Phase auf denselben Sammlungen, die Wartungsfenster aus `SMS_CollectionSettings.ServiceWindows` (Lazy-Feld) und die Maximum Runtime aus dem Deployment-Type-Manifest. | Siehe nächster Absatz. |
+
+**Deployment-Policy nach Q1, Variante A (Entscheidung vom 15.10.2026).** Das vom
+Installer verwaltete Core-Deployment ist ein Deployment der Einstiegsanwendung
+`client_staticip`, wenn diese den Projektmarker trägt. Es muss eine aktivierte
+Required-Installation mit Stichtag sein, ohne Soft Deadline und ohne
+Genehmigung, und Installation sowie Neustart außerhalb von Wartungsfenstern
+erlauben (`OverrideServiceWindows`, `RebootOutsideOfServiceWindows`); sonst
+`fail`. Ein bestehendes manuelles Deployment einer Phase meldet dieselben zwei
+Flags nur als `warn`. Ist die Einstiegsanwendung nicht sichtbar, bleibt offen,
+welche Regel gilt (`unknown`). Zwei verschiedene Anwendungen derselben Phase, die
+gleichzeitig Required auf derselben Sammlung liegen, etwa eine alte und eine
+versionierte getInfos, sind `fail` (`parallel_required_deployment`). Als Phase
+zählen der Spec-Name, bei der ersten Phase auch die Altnamen, jeweils allein
+oder mit einem Suffix nach `_`, `-`, `.` oder Leerzeichen.
+
+Wartungsfenster: keine auf der Sammlung ergibt `pass`. Gibt es welche und darf
+dort ein Deployment nicht außerhalb installieren, ist das `warn`; der Grund nennt
+das längste Fenster und ob es die Maximum Runtime fasst. Die Maximum Runtime
+kommt nur aus der Installationsaktion des Manifests; die Reparaturaktion trägt
+einen eigenen Wert (auf der erhobenen Site beide 120 Minuten). Weicht sie vom
+Vertrag (15 Minuten) ab, ist das `fail`. Implizite Deinstallation und Simulation
+haben in `SMS_ApplicationAssignment` kein eigenes Feld. Sie bleiben deshalb
+`unknown`, ohne zu blockieren, und der Grund nennt die Rohwerte `OfferFlags` und
+`DesiredConfigType` des verwalteten Core-Deployments. Beides vor dem Cutover in
+der Konsole am Deployment prüfen.
+
+`CanApply` bleibt `false`: MC02 liest nur. Wann ein sauberer Bericht Apply
+freigeben darf, entscheidet der geordnete Cutover (MC03). Die übrigen Befunde
+des Berichts (Ownership, Deployment-Type-Vertrag, Content-Manifest,
+Altanwendungen, DP-Gruppe) bleiben unverändert eigene Findings.
+
+## Edge Cases der Server-Skripte (Referenz)
+
+Den regulären Ablauf jeder Aufgabe zeigt [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md); die Tabellen hier listen die Sonderfälle.
+
+Alle Fälle schreiben ins Tageslog (`%ProgramFiles%\VirtuSphere\Logs\<datum>_<komponente>.log`),
+sofern nicht anders vermerkt. „Still" heißt: bewusst ohne Log-Eintrag, um Spam
+im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Portal).
+
+**Alle drei Skripte gemeinsam**
+
+| Fall | Verhalten | Log |
+|---|---|---|
+| Registry-Konfiguration fehlt komplett | wartet in 60-s-Schleife auf den Installer (Selbstheilung, kein Exit) | ERROR einmalig (Default-LogRoot) |
+| WebApp/MECM-Fehler im Durchlauf | Devices und Packages Sync: Backoff 30 s, ab 3 Fehlern in Folge 60 s + Site-Drive-Neuinitialisierung. Autoimporter: immer 60 s und sofortige Neuinitialisierung, der nächste Lauf scannt voll | ERROR je Versuch |
+| Berichts-Zustellung scheitert | Lauf läuft weiter (der Bericht bricht ihn nie ab); lokal gedrosselt protokolliert | gedrosselt (WARN); Portal-Ampel wird stale/rot |
+| Registry-Änderung zur Laufzeit | greift erst nach Task-Neustart (Konfig wird beim Start gelesen; Installer-Re-Run startet die Tasks neu) | — |
+| Dateilog selbst nicht schreibbar | Sync läuft weiter (Logging stoppt nie den Prozess); derselbe Fehler warnt pro Prozess und Störung höchstens einmal, eine Erholung genau einmal | lokale PowerShell-Warnung `Log-Sink gestört` / `Log-Sink wieder verfügbar`; kein zusätzlicher Heartbeat, `reportRun` oder Auditeintrag |
+
+**Device-Sync**
+
+| Fall | Verhalten | Log |
+|---|---|---|
+| 0 Devices von der WebApp | Leerlauf-Abkürzung, keine MECM-Abfragen | still |
+| Gesperrte VM (dauerhafte Ursache: Mission, MAC, Identität, Collection, Provenienz) | bleibt in der Warteschlange; neu geprüft nur bei geänderter Portalzeile oder alle 5 Minuten, ist keine VM fällig, unterbleibt die MECM-Inventur. Die Ursache bleibt im Lauf-Report | ERROR nur beim Wechsel des Sperrgrunds; unverändert INFO „Weiterhin gesperrt" im 5-Minuten-Takt |
+| VM ohne Mission / ohne PXE-MAC (keine Karte mit MAC auf der WDS-Portgruppe der Mission) | übersprungen, nächste VM; Ursache `mac_missing` | WARN |
+| Rolloutname ungültig (`device_name_invalid`) | kein Import; im VM-Editor korrigieren | ERROR |
+| Name mit fremder MAC oder MAC mit fremdem Namen (`mac_conflict`) | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „Identitaet nicht aufloesbar" |
+| Gebundene ResourceID fehlt in MECM (`resource_id_missing`) | blockiert; kein Ersatzdatensatz wird adoptiert. „MECM-ID zurücksetzen" | ERROR |
+| Gebundene ResourceID mit fremder MAC (`resource_mac_conflict`) | blockiert; Handentscheidung. Fremd heißt ab `device-sync/2.1` (MECM-ID1, 15.10.2026): keine der MACs, die das Portal für diese VM kennt; vorher zählte nur die DHCP-Karte. Meldet dieselbe VM in MECM nur noch ihre statische Karte, weil die DHCP-Karte nach dem Betanken abgeschaltet wurde, läuft sie damit durch. Bleibt der Konflikt, ist das MECM-Gerät meist die alte Maschine einer neu erstellten VM: altes Gerät in MECM löschen, dann im Portal „MECM-ID zurücksetzen“. Vorher in der MECM-Konsole die MAC des Geräts mit allen Karten der VM im Portal vergleichen; das Log nennt die Portal-MACs. Die VM bleibt in der Warteschlange, die übrigen VMs laufen weiter | ERROR |
+| Mehrere Treffer nach Name, MAC oder ResourceID (`device_identity_ambiguous`) | blockiert; das Skript wählt bewusst keinen aus | ERROR |
+| Vorgängergerät noch vorhanden (`previous_resource_present`) | blockiert bis zum Löschen in der MECM-Konsole | ERROR |
+| Abweichender **Anzeigename** bei gültiger ResourceID und MAC | **kein Befund**: Windows/Discovery darf umbenennen; kein Reimport, kein Rename, keine Warnung | DEBUG |
+| Rückmeldung mit veralteter Rolloutrevision (`stale_rollout_revision`, HTTP 409) | Portal weist ab; der nächste Scan läuft mit der aktuellen Revision durch | WARN |
+| Import-Race (paralleler Scan) | toleriert; nach dem Import werden Name UND MAC erneut eindeutig gelesen, kein Fehlertext-Parsing und kein `-MergeIfExist` | still |
+| Mehrere Netzwerkkarten auf der WDS-Portgruppe einer VM (`pxe_nic_ambiguous`) | übersprungen; genau eine Karte muss der Portgruppe zugeordnet sein (Portalregel) | WARN |
+| ResourceID fehlt noch (Import noch nicht sichtbar) | Retry im nächsten Scan | WARN |
+| Ziel-Collection existiert nicht | Zuweisung übersprungen; VM **bleibt in der Warteschlange** | WARN + ERROR-Zusammenfassung |
+| Zuweisung zu einer Collection scheitert | dito: VM bleibt in der Warteschlange | ERROR |
+| Eigene Regel nicht mehr zugewiesen (Provenienz, ADR-0034) | wird nur bei erfolgreich gelesenem Live-Bestand entfernt und mit ID, autoritativem Namen und Typ an `reportMembership` gemeldet; Hand-Regeln in MECM sind ohne Provenienzzeile unantastbar | INFO |
+| Entfernen der eigenen Regel scheitert | VM bleibt in der Warteschlange; nächster Lauf konvergiert | ERROR |
+| Eigene Regel wurde in MECM von Hand entfernt | Bleibt sie im Portal ausdrücklich gewünscht, stellt der Sync sie unter aktueller Revision wieder her. Bestätigtes Add unter derselben exakten CollectionID erhält die Provenienz; eine ersetzte CollectionID zieht nur den alten Nachweis zurück. Ohne bestätigtes Add bleibt der alte Nachweis zur Klärung erhalten. Ein nicht mehr gewünschtes Ziel wird als `removed` gemeldet. Fremde/manuelle Regeln bleiben unberührt (ADR-0034 Amendment 4, D-01). | INFO/WARN |
+| Membership-Abfrage fehlschlägt oder ein Collectionname ist mehrdeutig | VM bleibt in der Warteschlange; keine Membership-Mutation und kein Provenienzrückzug | ERROR |
+| Provenienz-Meldung (`reportMembership`) scheitert | Ein `remote_confirmed`-Journaleintrag bleibt erhalten und wird mit derselben VM-, Revisions-, Resource- und Collectionidentität idempotent wiederholt; die VM bleibt bis zum erfolgreichen Replay in der Warteschlange. | WARN |
+| Altes Journal enthält Add und Remove für dieselbe VM, Revision, ResourceID und CollectionID | Das bestätigte Add erhält die Provenienz; sein ACK entfernt das zusammengehörige Paar atomar aus dem Journal. Ein einzelner Remove braucht vor dem Replay eine erfolgreich gelesene aktuelle Abwesenheit. Bei vorhandener Regel oder unbekanntem Live-Bestand bleibt er `uncertain` zur manuellen Klärung, ohne Adoption oder Provenienzlöschung. | WARN/ERROR |
+| Journal enthält nur `intent`, passt nicht mehr zu Revision/ResourceID oder erhält beim Replay 404/409 | Ownership ist ungeklärt: kein erneuter MECM-Write, keine Adoption und keine ResourceID-Meldung. `membership-journal.json` samt lokalem Log sichern und Bestand/Operation manuell belegen; niemals nur wegen des Alters löschen. | ERROR |
+| Journal ist voll, nicht schreibbar oder beschädigt | Mutierender Device-Sync blockiert vor dem nächsten MECM-Write. Beschädigte Evidenz bleibt als `membership-journal.json.quarantine.*.json` erhalten und sperrt auch spätere Starts sowie ein ersetztes Hauptjournal. Speicher/ACL reparieren, Evidenz und Logs sichern; Operationen gegen aktuelle Rolloutrevision, ResourceID und exakte CollectionID in MECM und Portal klären. Quarantäne erst nach dokumentierter Ownership-Entscheidung entfernen, niemals lediglich als Neustartmaßnahme. | ERROR |
+| Client-Snapshot nicht veröffentlicht oder ACK ausstehend | `client_getinfo` entfernt zuerst `SetupState`, schreibt einen neuen versionierten Snapshot, liest Identität und Interfaceanzahl nach und veröffentlicht ihn über `ActiveSnapshot`. Folgephasen lesen nur diesen vollständigen Stand. Erst ein bestätigter Client-Ready-ACK setzt `SetupState=complete`; ein Retry erzeugt einen neuen Snapshot und der ACK bleibt idempotent. | ERROR/Phase `failed` |
+| Client-Application vorhanden, Deployment Type oder Abhängigkeit fehlt | Im MC01-Zwischenstand keine automatische Reparatur: Client- und Serverinstaller sind vor Writes gesperrt. Den Bestand im MC02-Preflight read-only erfassen; jede Änderung wartet auf den geordneten Cutover. | Blocker vor Mutation |
+| Collection angelegt, Ordner-Verschub/Ordner-Anlage scheitert | Collection bleibt im Wurzelordner, funktional ok; der Lauf meldet trotzdem „warning“ mit Ursache `collection_folder_failed` | WARN |
+| Collection-Update nicht anstoßbar | Mitgliedschaft greift erst beim nächsten MECM-Zyklus | WARN |
+| ResourceID-Rückmeldung an WebApp scheitert | Sync läuft weiter, VM bleibt in der Warteschlange | WARN |
+| MECM-Vollabfrage (Devices/Task Sequences/Collections) scheitert | Lauf bricht ab und meldet `mecm_unavailable`; **kein** Weiterlaufen mit leeren Caches | ERROR |
+
+**Die ResourceID ist die Tür aus der Warteschlange.** `mecm_updateid.php` setzt die VM auf `registered`, und `getDeviceList` liefert sie danach nicht mehr; nichts schiebt sie erneut ein. Deshalb meldet der Device-Sync die ResourceID nur, wenn **jede** Zuweisung dieser VM gesessen hat, also OS-, Paket- und Mission-Collection. Vorher lief die Meldung unbedingt: eine VM mit fehlender Paket-Collection fiel dauerhaft aus der Warteschlange, bootete per PXE ohne Task Sequence oder installierte ohne ihre Pakete, und im Portal stand sie als fertig registriert. Ein unvollständiger Lauf zählt jetzt `item_failures`, meldet `warning`/`partial_failure` und nennt im `detail` VM und Collection.
+
+**Packages-Sync**
+
+| Fall | Verhalten | Log |
+|---|---|---|
+| Applications-Ordner fehlt / Katalog leer | Sende-Guard: nichts senden | WARN |
+| Katalog unverändert (Hash) | kein Sync; Voll-Sync spätestens stündlich | still (Konsole) |
+| WebApp lehnt mit 409 ab (Schutzschwelle) | Hash nicht gemerkt → nächster Durchlauf versucht erneut | WARN |
+
+**Autoimporter**
+
+Ein offener Punkt hält den Manifest-Stamp zurück: der nächste Durchlauf scannt
+denselben Baum erneut, und der Lauf meldet `warning` mit `partial_failure` samt
+Ursachencodes im Detail (`package_content_failed target=…`), statt `ok`. Nur ein
+Durchlauf ohne offene Punkte merkt den Stamp.
+
+Für jeden Paketordner wird ein eigener SHA-256-Manifeststand unter
+`HKLM:\SOFTWARE\VirtuSphere\MECM\ContentTracking` verfolgt. Vor
+`Start-CMContentDistribution` oder `Update-CMDistributionPoint` schreibt der
+Autoimporter `intent` samt Application-/Deployment-Type-Identität, bisheriger
+Content-ID und Kopierstand der konkreten Verteilungspunkte. Nur ein erfolgreich
+zurückgekehrter Aufruf wird als bestätigt gespeichert. Ein Crash oder Fehler
+in diesem Fenster löst keine blinde zweite Verteilung aus. Der bestätigte
+Auftrag wird an seine DT-Content-ID gebunden; bei einem Update muss sie sich
+gegenüber der Baseline ändern. Die Application-Packageversion darf dabei
+gleich bleiben. `complete` verlangt zusätzlich zum erfolgreichen Aggregat
+einen neueren erfolgreichen `LastCopied`-Nachweis für die bisherigen DP-Ziele;
+fehlende, ersetzte oder unbekannte Ziele erlauben keinen Abschluss.
+Ein Erstauftrag benötigt mindestens einen bestätigten Kopierstand. Dies ist
+kein separater Nachweis der konfigurierten DP-Gruppenmitgliedschaft.
+Unbestätigte oder beschädigte Trackingdaten brauchen manuelle Klärung. Diese
+Contentpflege läuft unabhängig von `generateOwnDeviceColletion`; eine eigene
+Collection ist keine Voraussetzung für eine aktuelle Paketquelle.
+
+**Offline-DPs und neue Quellstände.** Auftragsannahme und vollständiger
+Verteilnachweis sind ab `autoimporter/2.1` getrennt. Die Skriptversion in der
+Portalzeile bestätigt nach dem Upgrade, dass die neue Generation meldet.
+Vier erfolgreiche und zwei fehlerhafte DPs
+verhindern keinen neuen Updateaufruf für ein geändertes Manifest. Die zwei DPs
+bleiben Ziele; der Importer entfernt sie nicht und meldet nicht alle sechs als
+erfolgreich. Bei unverändertem Manifest wird der bestätigte Auftrag nur
+beobachtet, nicht jede Minute neu gestartet. Ein weiterer Quellstand darf
+einen an seine Content-ID gebundenen offenen Auftrag ersetzen. Unbestätigte
+Intents, fremde Identitätswechsel, fehlende oder ersetzte Ziele,
+widersprüchliche Zielzahlen und DP-Löschzustände bleiben gesperrt.
+Nach einem abgeschlossenen Auftrag werden zusätzliche aktuelle Ziele in die
+Baseline des nächsten Auftrags aufgenommen; der Verlust eines bisherigen Ziels
+bleibt gesperrt.
+Ab `autoimporter/2.2` sind auch Deploymentfreigabe und vollständiger
+Verteilnachweis getrennt: Nach einem von MECM bestätigten Erst- oder
+Updateauftrag zieht der Autoimporter die
+Collection sowie Required- und Available-Deployments idempotent nach, selbst
+wenn aktuell kein DP eine erfolgreiche Kopie meldet. Die Zuweisung bleibt
+bestehen; ein Gerät kann das Paket anwenden, sobald sein zugeordneter DP den
+Inhalt anbietet. `package_content_failed` beziehungsweise
+`package_content_in_progress` bleiben trotzdem sichtbare offene Punkte und
+verhindern weiterhin den vollständigen Manifest- und Ersatznachweis. Eine
+fehlende DP-Gruppe, unbekannte Evidenz, Zielverlust, Löschzustände oder ein
+unbestätigter MECM-Aufruf geben den Deploymentabgleich nicht frei.
+Die Anforderungskriterien gehören zu `Test-VsDistributionCopyBaselineReady`,
+die gemeinsame Zielprüfung zu `Test-VsDistributionCopyEvidence`; der
+Controller in `mecm_autoimporter.ps1` entscheidet einmal pro Manifest.
+Der Abschluss bleibt an vollständig erfolgreiche Aggregatzähler und neuere
+Kopien aller bisherigen Ziele gebunden. MECM verwaltet die ausstehenden
+Kopien; falls seine Wiederholungen erschöpft sind, ist der konkrete
+Verteilfehler nach Wiederkehr des DPs in der MECM-Konsole zu prüfen.
+Der grobe Wire-Code `package_content_failed` beweist dabei nicht zwingend einen
+DP-Fehler: Ohne konfigurierte DP-Gruppe bezeichnet er eine fehlende
+Voraussetzung. Eine unvollständige oder unbekannte Zielprojektion meldet dagegen
+`package_content_unknown` und bleibt vor Content- und Deploymentmutationen
+gesperrt. Die Anzeige bleibt bei der jeweils belegten Aussage und erfindet keine
+DP-Diagnose.
+
+**Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise beziehen sich auf den angezeigten letzten Abschluss, nicht auf den offenen Lauf. Der bestehende Bericht liefert keine vollständigen DP-Zahlen je Paket. Fehlende oder gekürzte Ursachen sind kein Erfolgsnachweis; offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben.
+
+**Status lesen.** „Abschluss offen“ zeigt eine Startmeldung ohne Abschluss.
+Der Laufzustand bleibt neutral und beschreibt nur die empfangene Meldung; er beweist keinen laufenden oder gestoppten Prozess. Dauer, Zähler und
+Fehlerdetails gehören währenddessen zum letzten abgeschlossenen Lauf.
+Ein langer SHA-256-Dateiscan kann die Meldefrist überschreiten.
+„Synchronisationslauf fehlgeschlagen“ kann auch einen abgebrochenen
+Dateiscan bezeichnen; der historische Wire-Code `mecm_unavailable` bleibt
+kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die bestehenden
+Ampellabels „Ausgefallen“ und „Verzögert“ bleiben aus Kompatibilitätsgründen
+erhalten; die Legende grenzt ihre Aussage auf Bericht und Laufergebnis ein.
+Ein nachfolgender Legacy-Heartbeat verwirft die Herkunftszuordnung eines
+früheren Scanabschlusses. Er darf dessen Ergebnis, Zeit, Zähler oder Details
+nicht zu einer neuen Beobachtung zusammensetzen.
+
+**Versionen und erhaltene Altobjekte.** Namen und Versionen sind
+JSON-Zeichenketten; Bindestriche gehören nur in `ProjectName`.
+Eine Versionsänderung erzeugt einen anderen Anwendungsnamen und wird nie
+automatisch vorgenommen. Buchstabenversionen ohne Bindestrich bleiben
+importierbar, die Bereinigungsplanung verlangt kanonische Zahlen mit Punkten.
+`1` und `1.0` sind numerisch gleich und kein eindeutiger Zielstand.
+Weiterhin gelieferte Quellversionen und höhere vorhandene Versionen werden
+nicht als Altobjekt zur Bereinigung gemeldet. Tatsächliche Altobjekte bleiben
+bis zum geprüften Eigentums-, Referenz- und Ersatznachweis erhalten. Ein
+bestätigter, an die exakte Content-ID gebundener Ersatzauftrag mit sicherer
+Zielprojektion und geprüftem Deployment genügt auch bei null erfolgreichen DPs;
+unbekannte Evidenz, Zielverlust und Löschzustände bleiben gesperrt. Fordert
+mindestens eine Quelle des Produkts `removeOldVersion=true`, entfernt der
+Importlauf ausschließlich die durch den unmittelbar revalidierten Plan belegten
+Altobjekte in der Reihenfolge Deployment, Application, Collection.
+
+**Teilwissen zu Altobjekten.** Die optionale Collection-/Application-Suche kann
+unvollständig sein. Ihr Fehler liefert keine Cleanupentscheidung und beendet
+nicht den ganzen Scan: Content und weitere Pakete werden weiter geprüft, soweit
+ihre eigene Identitäts- und Providerevidenz trägt. Bei gesperrter, mehrdeutiger
+oder nicht numerisch ordnungsfähiger Auswahl werden nur strikt belegbar ältere
+Bestände als erhaltene Altobjekte gemeldet; gleiche oder höhere Bestände erhalten
+keine Altklassifikation. Aus diesem Teilwissen folgt in keinem Fall eine Löschung.
+
+**Abnahme im MECM-Labor:** Bei sechs bestehenden Zielen zwei DPs offline
+lassen, eine Datei ändern und genau einen Updateaufruf nachweisen.
+Unverändert erneut scannen: kein weiterer Aufruf. Vor vollständiger
+Verteilung erneut ändern: neuer bestätigter Auftrag mit neuer Content-ID,
+kein falscher Abschluss des alten. Beide DPs zurückbringen und die
+Verteilung sowie die neueren Kopierzeiten aller sechs Ziele kontrollieren.
+Ein verschwundenes Ziel, eine externe Content-ID oder ein unbestätigter
+Aufruf muss weiterhin blockieren. Lokale Fixtures ersetzen diese Abnahme
+der realen Provider- und DP-Wirkung nicht.
+
+Alte Trackingdatensätze ohne den neuen Identitäts- und Kopiervertrag bleiben
+auch mit dem früheren Zustand `complete` zur manuellen Prüfung gesperrt. Sie
+belegen keine historische Content-ID und werden nicht automatisch auf das
+aktuell gleichnamige Objekt übertragen. Vor einer Freigabe den betreffenden
+Registrydatensatz und die Tageslogs sichern, Application-/DT-Identität,
+lokales Manifest und tatsächlichen DP-Inhalt abgleichen und ausschließen,
+dass noch eine alte Verteilung läuft. Die Entscheidung über den Altstand ist
+zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
+
+| Fall | Verhalten | Log |
+|---|---|---|
+| `config.json` fehlt im Ordner | Ordner ignoriert | still |
+| `config.json` ungültig / ohne ProjectName+version / ohne gültiges ErrorAction (`Stop` oder `Continue`) | übersprungen, **offener Punkt** (`package_config_invalid`). Ohne gültiges `ErrorAction` wird das Paket nicht importiert, weil der Paketwrapper sonst auf jedem Client mit Exit-Code 1 abbricht | WARN |
+| `PackagesShare` fehlt in Registry | wartet in 60-s-Schleife auf den Installer | ERROR einmalig |
+| files-Baum unverändert (SHA-256-Manifest) | kein Scan | still |
+| files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
+| Alt-Version erkannt und `removeOldVersion=true` | automatische Entfernung von altem Deployment, Application und Collection nach Eigentums-, vollständigem Referenz- und Ersatznachweis. Bestätigter gebundener Ersatzauftrag, sichere Zielevidenz und neues Deployment genügen; vollständiger DP-Erfolg ist nicht nötig. Eine gesperrte oder fehlgeschlagene Einheit meldet `package_cleanup_failed` | INFO je entfernter Einheit, WARN bei Sperre/Fehler |
+| Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
+| Vorlagen-install.ps1 nicht kopierbar oder beide install.ps1-Dateien fehlen | Keine Application-/DT-/Contentmutation für dieses Paket; Kopie muss den SHA-256-Vergleich bestehen. Ein vorhandenes lesbares Paketskript bleibt auch ohne Vorlage zulässig. Retry im nächsten Durchlauf (`package_template_failed`). | WARN |
+| Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
+| DP-Gruppe der Erstverteilung hat keine Mitglieder | Keine Erstanforderung, solange die Gruppe leer ist; ein bereits bestätigter Erstauftrag wartet auf ein Ziel. Sobald ein Verteilungspunkt in der Gruppe ist, setzt der nächste Durchlauf die Verteilung fort (`package_content_group_empty`). | WARN |
+| Neue Application lässt sich nicht in `VirtuSphere_Applications` verschieben | Die Application bleibt im Wurzelordner und funktioniert. Der Verschub wird im nächsten Durchlauf wiederholt (`package_folder_failed`); der Paket-Sync liest nur den Collection-Ordner. | WARN |
+| Content-Verteilung bleibt offen oder einzelne/alle DPs melden Fehler | Nach einem bestätigten Contentauftrag werden Collection und Deployments auch bei null erfolgreichen DPs nachgezogen; Geräte können das Paket verwenden, sobald ihr DP den Inhalt anbietet. Neue Manifeste dürfen einmal angefordert werden, gleiche Manifeste werden nur beobachtet. Vollständiger Abschluss verlangt Application-/DT-Contentidentität, erfolgreiche Aggregatzähler und neuere Kopien aller bisherigen DP-Ziele. Die Package-`SourceVersion` bleibt Diagnose. Unbekannte Identität/Projektion, Zielverlust, Löschzustände und unbestätigte Aufrufe blockieren. | INFO bei neuem Auftrag und weiterlaufendem Deploymentabgleich, WARN mit Paket/Ursachencode beim offenen Nachweis |
+| Tracking enthält einen unbestätigten `intent`, ist unvollständig oder stammt aus dem alten Schema | Keine automatische zweite Contentmutation; Tageslog, Trackingidentitäten und MECM-Verteilung manuell klären. Alte Trackingstände ohne Content-ID werden auch bei früherem `complete` nicht durch Vermutung übernommen. | WARN `package_content_unknown` |
+| `DeployTo`-Ziel-Collection fehlt | Offener Punkt mit Collection-Name; der Dateistand wird nicht gemerkt, der nächste Lauf versucht das Available-Deployment erneut, bis die Collection existiert | WARN `package_deploy_failed` |
+| Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |
+
+## Troubleshooting
+
+Erste Anlaufstelle ist immer der **Systemstatus** (Klartext-Ampel
+je Quelle mit Handlungsanweisung). Die Handlungsanweisung ist eine
+Reparaturanweisung und steht deshalb nur an einer Zeile, die nicht `ok` ist;
+verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. Hat sich
+noch nie eine Sync-Quelle gemeldet (Gruppe steht komplett auf „Noch keine
+Daten"), entfallen die Zeilenhinweise ganz: es gibt keine Aufgabe, die man neu
+starten könnte. Der Abschnitt nennt dann einmal den Einrichtungsweg (Skripte auf
+dem MECM-Server, IP-Freigabe im Portal, dieses Dokument). Der MECM-Site-Status
+wird davon getrennt geführt: solange die Site-Health-Aufgabe nichts gemeldet hat,
+bleibt er grau (unbekannt), statt „kritisch" zu behaupten. Der
+Zustand „Erwartet, nie gemeldet" (gelb) unterscheidet sich von „Noch keine
+Daten" (grau): gelb heißt, andere MECM-Quellen melden sich bereits, diese eine
+also nie eingerichtet oder nie gestartet; grau heißt, die Integration ist
+insgesamt noch nicht angebunden. Die Legende der Seite erklärt alle drei Ampeln
+(Quellen, ESXi, Ansible) aus denselben Konstanten wie die Hilfe. An welchem
+Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
+[MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md). Häufige Fälle:
+
+**VM taucht nicht in MECM auf**
+1. *Systemstatus* prüfen: läuft „MECM Device-Sync"? Wenn rot → Aufgabenplanung
+   auf dem MECM-Server, Task „VirtuSphere MECM Devices Sync" starten.
+2. Hat die VM eine MAC? Im Portal an der VM prüfen; ohne DHCP-MAC überspringt
+   der Sync sie (der Ansible-MAC-Import muss vorher gelaufen sein). Maßgeblich
+   ist die Netzwerkkarte auf der WDS-Portgruppe der Mission, nicht die DHCP-Karte.
+3. Gehört die VM zu einer Mission (nicht Template)? Templates werden bewusst
+   nicht synchronisiert.
+4. Log auf dem MECM-Server: `%ProgramFiles%\VirtuSphere\Logs\<datum>_device-sync.log`.
+
+**Deployment hängt auf dem Client**
+1. VM bearbeiten im Portal → Abschnitt „Client-Phasen": Wo steht die Kette
+   (getinfo/hostname/staticip/disks)?
+2. Phasenmeldungen sind best effort. „Ausgeführt, Bestätigung ausstehend"
+   bedeutet nur, dass `started` ankam und kein terminales Event gespeichert ist;
+   auch eine vollständig fehlende Phase beweist weder Erfolg noch PXE-Fehler.
+   Bei einer echten Umbenennung sendet `hostname` den Abschluss vor dem Reboot.
+   `staticip` kann durch die neue Windows-IP-/Subnetzkonfiguration die
+   Portalverbindung verlieren, verschiebt aber keine ESXi-Portgruppe. Deshalb
+   MECM-Application-Detection, Erreichbarkeit und Client-Log unter
+   `C:\Program Files\VirtuSphere\Logs` gemeinsam prüfen.
+
+**Pakete verschwinden / Sync abgelehnt (409)**
+1. Im Log (Kategorie „MECM-Integration") nach „Katalogabgleich abgewiesen" suchen:
+   Der Paket-Sync hätte mehr als die Schutzschwelle zurückgezogen, meist ein
+   WMI-Aussetzer oder falscher Collections-Ordner auf dem MECM-Server.
+2. Katalogquelle prüfen; notfalls Schwelle temporär anheben (Portal →
+   Einstellungen → Tab „Kataloge und Inventar" → Paket-Sync-Schutzschwelle).
+
+**MECM-Server offline oder Site kritisch**
+- Es gibt keine Portal-Probe mehr; das Portal spricht MECM nicht aktiv an. Fällt
+  der MECM-Server aus, bleiben zuerst die Ergebnisberichte der Sync-Aufgaben aus
+  (Integration wird stale/rot), und die Site-Health-Aufgabe kann den Provider nicht
+  mehr abfragen (MECM-Site wird grau/unbekannt, nicht rot). Ein rotes MECM-Site
+  bedeutet ausschließlich den von MECM selbst bestätigten kritischen Status 2:
+  dann MECM-Konsole → Monitoring → System Status. Ein falsch konfigurierter
+  Provider oder eine fehlende Berechtigung zeigt sich als grau (Providerfehler),
+  nicht als „kritisch".
+
+**Wartungsdienst rot**
+- Auf dem Ubuntu-Host: `docker compose ps`, dann
+  `docker compose up -d maintenance-worker`.
+
+## Zurückgestellte Prüfpunkte (sobald Systemzugriff besteht)
+
+1. **Ubuntu-Produktionsparität** (bei Abnahme Etappe 1): auf dem Ubuntu-Host
+   prüfen: `docker compose ps` (Container-Namen `virtusphere-v2-webapp-*-1`),
+   `.env` (`WEB_HTTP_PORT=8021`), Migrationsstand
+   `docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --status`.
+2. **DNS-Name für die API** (vor Etappe 5): Eintrag wie `virtusphere.lan`
+   → IP des Ubuntu-Hosts im Deploy-Netz anlegen.
+3. **Schwellwert der Paket-Bremse** (bei Abnahme Etappe 3): Default 30 % gegen
+   die reale Kataloggröße prüfen (Portal → Einstellungen).

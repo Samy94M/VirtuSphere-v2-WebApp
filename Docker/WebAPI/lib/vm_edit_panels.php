@@ -1,0 +1,382 @@
+<?php
+
+declare(strict_types=1);
+
+/** VM editor page renderer. The request and layout shell live in portal/vm_edit.php. */
+
+/** @var mysqli $connection Request connection from the portal shell. */
+/** @var array<string, mixed> $user Authenticated portal user. */
+/** @var int $missionId */
+/** @var int $vmId */
+/** @var bool $canWrite */
+/** @var bool $isTemplate */
+/** @var array<string, mixed> $mission */
+/** @var array<string, mixed> $vm */
+/** @var string $error */
+/** @var array<string, string> $fieldErrors */
+/** @var array{mode:string, version:string, rows:list<array{label:string, submitted:string, current:string, rows:bool}>}|null $editConflict */
+/** @var array<string, array<string, mixed>|null> $clientPhaseSummary */
+/** @var string $vmPhase */
+/** @var list<array<string, mixed>> $vmFindings */
+/** @var array<string, mixed>|null $vmInventory */
+/** @var array{entries:list<array<string,mixed>>,truncated:bool} $timeline */
+/** @var array<int, array<string, mixed>> $packageRuns */
+/** @var array<int, array<string, mixed>> $oses */
+/** @var array<int, array<string, mixed>> $vlans */
+/** @var array<int, array<string, mixed>> $packages */
+/** @var array<string, string> $packageUpgradeHints */
+/** @var list<int> $selectedPackages */
+/** @var array{credential_count:int, eligible_count:int, exact:bool, buckets:array<int,array<string,mixed>>, groups:array<int,array<string,mixed>>, names:array<int,string>, name_set:array<string,true>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>} $vmDatacenterOptions */
+/** @var array{credential_count:int, eligible_count:int, exact:bool, buckets:array<int,array<string,mixed>>, groups:array<int,array<string,mixed>>, names:array<int,string>, name_set:array<string,true>, free_by_key:array<string,?int>, unusable_by_key:array<string,bool>} $vmDatastoreOptions */
+/** @var string $vmDatacenterValue */
+/** @var string $vmDatastoreValue */
+/** @var string $missionDatastore */
+/** @var string $missionDatacenter */
+/** @var string $datastoreInheritLabel */
+/** @var string $datacenterInheritLabel */
+/** @var bool $hideVmDatacenter */
+/** @var list<'host_choice'|'buckets'|'never_pulled'> $vmLocationNotes */
+/** @var array<string, array{value:string,source:string,parent:string}> $effectiveValues */
+/** @var array<int, array<string, mixed>> $interfaces */
+/** @var array<int, array<string, mixed>> $disks */
+/** @var string|null $progressWatchKind */
+/** @var array{kind:string,since:string,age_seconds:int,threshold_seconds:int}|null $progressAttention */
+/** @var string $progressWatchSince */
+/** @var bool $showProgressWatch */
+/** @var array<string, string> $workContext */
+/** @var string $vmListUrl */
+/** @var string $backUrl */
+/** @var string $backLabel */
+/** @var string $missionDetailsUrl */
+/** @var string $vmEditorUrl */
+/** @var array{split: bool, mecm_os: string, deviates: bool} $mecmView AV-R12 save state (vm_mecm_save.php). */
+?>
+<div class="stack">
+    <section class="panel">
+        <div class="actions">
+            <a class="button button-secondary" href="<?php echo h($backUrl); ?>"><?php echo h($backLabel); ?></a>
+            <a class="button button-secondary" href="<?php echo h($missionDetailsUrl); ?>"><?php echo h(__t('vm_edit.mission_details')); ?></a>
+            <?php if ($canWrite && $vmId > 0 && !$isTemplate) { ?>
+                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_editor_action_url($missionId, $workContext)); ?>">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="reset_mecm_id">
+                    <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
+                    <input type="hidden" name="return_to" value="editor">
+                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm_editing', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
+                </form>
+            <?php } ?>
+        </div>
+        <p class="muted"><?php echo h(__t('vm_edit.context_mission', ['name' => (string) ($mission['mission_name'] ?? '')])); ?></p>
+    </section>
+
+    <?php if ($showProgressWatch) { ?>
+        <section class="panel stack" id="vm-progress-watch" aria-labelledby="vm-progress-watch-heading">
+            <div class="actions">
+                <h2 id="vm-progress-watch-heading"><?php echo h(__t('vm_edit.progress_heading')); ?></h2>
+                <?php echo portal_badge($progressAttention !== null ? 'warning' : 'info', $progressAttention !== null
+                    ? __t('vm_edit.progress_overdue_badge')
+                    : __t('vm_edit.progress_observation_badge')); ?>
+            </div>
+            <?php if ($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING) { ?>
+                <p><?php echo h(__t('vm_edit.progress_pending_overdue', [
+                    'since' => portal_format_timestamp($progressWatchSince),
+                    'hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
+                ])); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></p>
+            <?php } elseif ($progressWatchSince === '') { ?>
+                <p><?php echo h(__t('vm_edit.progress_install_unwatched')); ?></p>
+            <?php } elseif ($progressAttention !== null) { ?>
+                <p><?php echo h(__t('vm_edit.progress_install_overdue', [
+                    'since' => portal_format_timestamp($progressWatchSince),
+                    'hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
+                ])); ?></p>
+            <?php } else { ?>
+                <p><?php echo h(__t('vm_edit.progress_install_watched', [
+                    'since' => portal_format_timestamp($progressWatchSince),
+                    'hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
+                ])); ?></p>
+            <?php } ?>
+            <p class="muted"><?php echo h(__t('vm_edit.progress_no_auto_failure')); ?></p>
+            <?php if ($canWrite) { ?>
+                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_editor_action_url($missionId, $workContext)); ?>">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="restart_progress_watch">
+                    <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
+                    <input type="hidden" name="return_to" value="editor">
+                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
+                        ? 'vm_edit.progress_confirm_start'
+                        : 'vm_edit.progress_confirm_restart')); ?>"><?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
+                        ? 'vm_edit.progress_start_button'
+                        : 'vm_edit.progress_restart_button')); ?></button>
+                </form>
+            <?php } ?>
+        </section>
+    <?php } ?>
+
+    <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_status_panel($vm, $vmPhase, $vmFindings, $clientPhaseSummary, $vmInventory, $missionId, $workContext); } ?>
+    <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_package_reports($packageRuns, $missionId, $vmId, $workContext); } ?>
+
+    <?php if ($error !== '') { ?>
+        <?php
+        // Errors for the fields below render inline next to their input; anything
+        // else (interface/disk rows) has no inline anchor and is listed here.
+        $inlineVmFields = ['vm_name', 'vm_hostname', 'vm_domain', 'vm_os', 'vm_ram', 'vm_cpu', 'vm_guest_id'];
+        // A single-issue failure passes the same sentence as the field error and
+        // as the exception message; listing it under itself reads as two faults.
+        $extraErrors = array_filter(
+            array_diff_key($fieldErrors, array_flip($inlineVmFields)),
+            static fn (string $message): bool => $message !== $error
+        );
+        ?>
+        <div class="alert alert-error">
+            <?php echo h($error); ?>
+            <?php if ($extraErrors !== []) { ?>
+                <ul>
+                    <?php foreach ($extraErrors as $field => $message) {
+                        $targetId = '';
+                        if (preg_match('/^interfaces\.(\d+)\.vlan$/', (string) $field, $match) === 1) {
+                            $targetId = form_element_id('vm_edit', 'interface_vlan', (int) $match[1]);
+                        }
+                        ?><li><?php if ($targetId !== '') { ?><a href="#<?php echo h($targetId); ?>"><?php echo h($message); ?></a><?php } else { echo h($message); } ?></li><?php } ?>
+                </ul>
+            <?php } ?>
+        </div>
+    <?php } ?>
+
+    <?php if ($editConflict !== null) { edit_conflict_render($editConflict, 'vm-editor-form'); } ?>
+
+    <form class="stack" id="vm-editor-form" method="post" action="<?php echo h($vmEditorUrl); ?>"<?php echo $canWrite ? form_unsaved_attrs('vm-editor', $error !== '' || $editConflict !== null) . vm_mecm_save_form_attrs($mecmView) : ''; ?>>
+        <?php echo csrf_field(); ?>
+        <input type="hidden" name="mission_id" value="<?php echo h((string) $missionId); ?>">
+        <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
+        <input type="hidden" name="edit_version" value="<?php echo h($vm['edit_version'] ?? ''); ?>">
+        <input type="hidden" name="vm_disk" value="<?php echo h($vm['vm_disk'] ?? ''); ?>">
+
+        <section class="panel">
+            <h2><?php echo h(__t('vm_edit.heading_vm')); ?></h2>
+            <div class="form-grid vm-form-grid">
+                <?php // Die drei Identitaetsfelder (MECM-ID, ESXi-Name, Windows-Hostname)
+                      // liegen in lib/vm_edit_names.php: sie beantworten EINE Frage
+                      // gemeinsam, und sie tragen mit der Altwertwarnung und der
+                      // Rollout-Gegenueberstellung genau das, was nur neben ihnen Sinn
+                      // ergibt. Geladen ueber die vm_edit_form.php-Fassade. ?>
+                <?php vm_edit_identity_fields($vm, $vmId, $isTemplate, $canWrite, $fieldErrors); ?>
+                <label><?php echo h(__t('vm_edit.label_domain')); ?><input name="vm_domain"<?php echo form_control_attrs('vm_edit', 'vm_domain', null, false, (string) ($fieldErrors['vm_domain'] ?? '')); ?> value="<?php echo h($vm['vm_domain'] ?? ($mission['domain'] ?? '')); ?>" pattern="<?php echo h(VIRTUSPHERE_FQDN_INPUT_PATTERN); ?>" title="<?php echo h(__t('vm_edit.domain_title')); ?>" autocomplete="off" spellcheck="false" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_domain'); ?></label>
+                <label><?php echo h(__t('vm_edit.label_os')); ?><select name="vm_os"<?php echo form_control_attrs('vm_edit', 'vm_os', null, $mecmView['deviates'] ? [form_hint_id('vm_edit', 'mecm_os')] : false, (string) ($fieldErrors['vm_os'] ?? '')); ?> required <?php echo $canWrite ? '' : 'disabled'; ?>>
+                    <option value=""><?php echo h(__t('vm_edit.select_os')); ?></option>
+                    <?php foreach ($oses as $os) { ?>
+                        <option value="<?php echo h($os['os_name'] ?? ''); ?>" <?php echo (string) ($vm['vm_os'] ?? '') === (string) ($os['os_name'] ?? '') ? 'selected' : ''; ?>><?php echo h($os['os_name'] ?? ''); ?></option>
+                    <?php } ?>
+                </select><?php echo vm_field_error($fieldErrors, 'vm_os'); ?></label>
+                <?php render_vm_ram_field($vm, $canWrite, $fieldErrors); ?>
+                <label><?php echo h(__t('vm_edit.label_cpu')); ?><input name="vm_cpu" type="number"<?php echo form_control_attrs('vm_edit', 'vm_cpu', null, false, (string) ($fieldErrors['vm_cpu'] ?? '')); ?> min="<?php echo h((string) VIRTUSPHERE_VM_LIMITS['cpu_count_min']); ?>" max="<?php echo h((string) VIRTUSPHERE_VM_LIMITS['cpu_count_max']); ?>" value="<?php echo h($vm['vm_cpu'] ?? (string) VIRTUSPHERE_VM_DEFAULTS['cpu_count']); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo vm_field_error($fieldErrors, 'vm_cpu'); ?></label>
+                <?php
+                    // Fields and hint form one group spanning two grid tracks, so the prose
+                    // stays under the controls it explains. Its column cannot be pinned in
+                    // CSS: a hidden MECM id or datacenter shifts the pair by a track.
+                    $locationHintSubject = [__t('vm_edit.label_datastore')];
+                    if (!$hideVmDatacenter) {
+                        $locationHintSubject[] = __t('vm_edit.label_datacenter');
+                    }
+                    $locationHintId = form_hint_id('vm_edit', 'location');
+                ?>
+                <div class="field-group" role="group"<?php echo form_control_attrs('vm_edit', 'location', null, [$locationHintId], ''); ?>>
+                    <label><?php echo h(__t('vm_edit.label_datastore')); ?><?php inventory_select_field($vmDatastoreOptions, [
+                        'name' => 'vm_datastore',
+                        'value' => $vmDatastoreValue,
+                        'empty_label' => $datastoreInheritLabel,
+                        'unknown_suffix' => __t('vm_edit.location_not_in_inventory'),
+                        'input_placeholder' => $missionDatastore,
+                        'disabled' => !$canWrite,
+                        'attributes' => form_control_attrs('vm_edit', 'vm_datastore', null, false, ''),
+                    ]); ?></label>
+                    <?php if ($hideVmDatacenter) { ?>
+                        <input type="hidden" name="vm_datacenter" value="<?php echo h($vmDatacenterValue); ?>">
+                    <?php } else { ?>
+                        <label><?php echo h(__t('vm_edit.label_datacenter')); ?><?php inventory_select_field($vmDatacenterOptions, [
+                            'name' => 'vm_datacenter',
+                            'value' => $vmDatacenterValue,
+                            'empty_label' => $datacenterInheritLabel,
+                            'unknown_suffix' => __t('vm_edit.location_not_in_inventory'),
+                            'input_placeholder' => $missionDatacenter,
+                            'disabled' => !$canWrite,
+                            'attributes' => form_control_attrs('vm_edit', 'vm_datacenter', null, false, ''),
+                        ]); ?></label>
+                    <?php } ?>
+                    <div class="form-grid-full" id="<?php echo h($locationHintId); ?>">
+                        <p class="hint"><span class="hint-subject"><?php echo h(implode(' / ', $locationHintSubject)); ?>:</span> <?php echo h(__t('vm_edit.location_hint')); ?></p>
+                        <?php if ($vmLocationNotes !== []) { ?>
+                            <?php // Exhaustive match, no default: a new note token has to be
+                                  // given a sentence rather than disappearing silently. ?>
+                            <p class="hint"><?php echo h(implode(' ', array_map(static fn (string $note): string => match ($note) {
+                                'host_choice' => __t('vm_edit.location_host_choice_hint'),
+                                'buckets' => __t('vm_edit.location_bucket_hint'),
+                                'never_pulled' => __t('vm_edit.location_never_pulled_hint'),
+                            }, $vmLocationNotes))); ?></p>
+                        <?php } ?>
+                        <?php if (in_array('never_pulled', $vmLocationNotes, true)) { ?>
+                            <p class="hint"><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('vm_edit.location_status_link')); ?></a></p>
+                        <?php } ?>
+                    </div>
+                </div>
+                <label><?php echo h(__t('portal.vm_guest_os_label')); ?><select name="vm_guest_id"<?php echo form_control_attrs('vm_edit', 'vm_guest_id', null, false, (string) ($fieldErrors['vm_guest_id'] ?? '')); ?> <?php echo $canWrite ? '' : 'disabled'; ?>>
+                    <?php $guestIdValue = (string) ($vm['vm_guest_id'] ?? VIRTUSPHERE_VM_DEFAULTS['guest_id']); ?>
+                    <?php foreach (vm_guest_os_options_for_value($guestIdValue) as $guestOsOption) { ?>
+                        <option value="<?php echo h((string) $guestOsOption['guest_id']); ?>" <?php echo $guestIdValue === (string) $guestOsOption['guest_id'] ? 'selected' : ''; ?>><?php echo h(vm_guest_os_option_label($guestOsOption)); ?></option>
+                    <?php } ?>
+                </select><?php echo vm_field_error($fieldErrors, 'vm_guest_id'); ?></label>
+                <?php $cpuHotplugOn = !isset($vm['cpu_hotplug']) || (string) $vm['cpu_hotplug'] !== '0'; ?>
+                <?php $ramHotplugOn = !isset($vm['ram_hotplug']) || (string) $vm['ram_hotplug'] !== '0'; ?>
+                <?php $hotplugHintId = form_hint_id('vm_edit', 'hotplug'); ?>
+                <div class="form-grid-full" role="group"<?php echo form_control_attrs('vm_edit', 'hotplug', null, [$hotplugHintId], ''); ?>>
+                    <span class="field-label"><?php echo h(__t('vm_edit.hotplug_heading')); ?></span>
+                    <div class="checkbox-grid checkbox-grid-aligned">
+                        <label class="checkbox-item">
+                            <input type="hidden" name="cpu_hotplug" value="0">
+                            <input type="checkbox" name="cpu_hotplug" value="1" <?php echo $cpuHotplugOn ? 'checked' : ''; ?> <?php echo $canWrite ? '' : 'disabled'; ?>>
+                            <?php echo h(__t('vm_edit.cpu_hotplug')); ?>
+                        </label>
+                        <label class="checkbox-item">
+                            <input type="hidden" name="ram_hotplug" value="0">
+                            <input type="checkbox" name="ram_hotplug" value="1" <?php echo $ramHotplugOn ? 'checked' : ''; ?> <?php echo $canWrite ? '' : 'disabled'; ?>>
+                            <?php echo h(__t('vm_edit.ram_hotplug')); ?>
+                        </label>
+                    </div>
+                    <p class="hint" id="<?php echo h($hotplugHintId); ?>"><?php echo h(__t('vm_edit.hotplug_hint')); ?></p>
+                </div>
+
+                <?php
+                // Autostart override (ADR-0025). An empty delay field means "inherit
+                // the mission default", which is what ESXi itself calls "use
+                // defaults"; the placeholder names the value that would apply.
+                //
+                // repo_vm_delay_value() is the same normalizer the save path uses,
+                // so a sticky re-render after a validation error cannot turn a blank
+                // (inherit) field into a 0 (start immediately).
+                $autostartOn = repo_vm_autostart_flag($vm, 'autostart_enabled') === 1;
+                $missionAutostartOn = (int) ($mission['autostart_enabled'] ?? 0) === 1;
+                $missionStartDelay = (int) ($mission['autostart_start_delay'] ?? VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT);
+                $missionStopDelay = (int) ($mission['autostart_stop_delay'] ?? VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT);
+                $vmStartDelay = repo_vm_delay_value($vm, 'autostart_start_delay');
+                $vmStopDelay = repo_vm_delay_value($vm, 'autostart_stop_delay');
+                // A VM cannot opt into an autostart its mission has switched off:
+                // the mission switch is what turns the host's autostart manager on,
+                // so the control is inert and says so, rather than accepting a
+                // setting that would quietly do nothing.
+                $autostartLocked = !$canWrite || !$missionAutostartOn;
+                $autostartHintId = form_hint_id('vm_edit', 'autostart');
+                ?>
+                <div class="form-grid-full" role="group"<?php echo form_control_attrs('vm_edit', 'autostart', null, [$autostartHintId], ''); ?>>
+                    <span class="field-label"><?php echo h(__t('vm_edit.autostart_heading')); ?></span>
+                    <div class="checkbox-grid checkbox-grid-aligned">
+                        <label class="checkbox-item">
+                            <?php if ($autostartLocked) { ?>
+                                <?php // A disabled input posts nothing, so the stored value travels in
+                                      // a hidden field. Without it, saving the VM while the mission has
+                                      // autostart off would silently clear the VM's own setting - the
+                                      // same trap the adaptively hidden datacenter field avoids. ?>
+                                <input type="hidden" name="autostart_enabled" value="<?php echo $autostartOn ? '1' : '0'; ?>">
+                                <input type="checkbox" <?php echo $autostartOn ? 'checked' : ''; ?> disabled>
+                            <?php } else { ?>
+                                <input type="hidden" name="autostart_enabled" value="0">
+                                <input type="checkbox" name="autostart_enabled" value="1" <?php echo $autostartOn ? 'checked' : ''; ?>>
+                            <?php } ?>
+                            <?php echo h(__t('vm_edit.autostart_enabled')); ?>
+                        </label>
+                    </div>
+                    <?php if (!$missionAutostartOn) { ?>
+                        <p class="hint" id="<?php echo h($autostartHintId); ?>"><span class="hint-subject"><?php echo h(__t('vm_edit.autostart_mission_off_subject')); ?>:</span> <?php echo h(__t('vm_edit.autostart_mission_off')); ?>
+                            <a href="<?php echo h($missionDetailsUrl); ?>"><?php echo h(__t('vm_edit.autostart_mission_link')); ?></a>
+                        </p>
+                    <?php } else { ?>
+                        <p class="hint" id="<?php echo h($autostartHintId); ?>"><?php echo h(__t('vm_edit.autostart_hint')); ?></p>
+                    <?php } ?>
+                </div>
+                <?php // readonly, not disabled: a readonly number input still posts, so a
+                      // blank field keeps meaning "inherit" and a set one keeps its value. ?>
+                <label><?php echo h(__t('vm_edit.autostart_start_delay')); ?><input type="number" name="autostart_start_delay"<?php echo form_control_attrs('vm_edit', 'autostart_start_delay', null, [$autostartHintId], (string) ($fieldErrors['autostart_start_delay'] ?? '')); ?> min="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MAX); ?>" value="<?php echo $vmStartDelay >= 0 ? h((string) $vmStartDelay) : ''; ?>" placeholder="<?php echo h(__t('vm_edit.autostart_inherit_placeholder', ['seconds' => $missionStartDelay])); ?>" <?php echo $autostartLocked ? 'readonly' : ''; ?>><?php echo vm_field_error($fieldErrors, 'autostart_start_delay'); ?></label>
+                <label><?php echo h(__t('vm_edit.autostart_stop_delay')); ?><input type="number" name="autostart_stop_delay"<?php echo form_control_attrs('vm_edit', 'autostart_stop_delay', null, [$autostartHintId], (string) ($fieldErrors['autostart_stop_delay'] ?? '')); ?> min="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MAX); ?>" value="<?php echo $vmStopDelay >= 0 ? h((string) $vmStopDelay) : ''; ?>" placeholder="<?php echo h(__t('vm_edit.autostart_inherit_placeholder', ['seconds' => $missionStopDelay])); ?>" <?php echo $autostartLocked ? 'readonly' : ''; ?>><?php echo vm_field_error($fieldErrors, 'autostart_stop_delay'); ?></label>
+
+                <?php $creatorValue = $vmId > 0 ? (string) ($vm['vm_creator'] ?? '') : (string) $user['name']; ?>
+                <label><?php echo h(__t('vm_edit.label_creator')); ?><input value="<?php echo h($creatorValue); ?>" placeholder="<?php echo h(__t('common.creator_unknown')); ?>" readonly></label>
+            </div>
+
+            <?php portal_render_vm_effective_values($effectiveValues, $mission, $canWrite, $missionDetailsUrl); ?>
+
+            <label><?php echo h(__t('vm_edit.label_notes')); ?><textarea name="vm_notes" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo h($vm['vm_notes'] ?? ''); ?></textarea></label>
+        </section>
+
+        <section class="panel stack" id="interfaces" data-vm-network-editor data-row-label="<?php echo h(__t('vm_edit.interface_legend', ['number' => ':number'])); ?>" data-required-message="<?php echo h(__t('validate.interface_vlan_required')); ?>" data-duplicate-message="<?php echo h(__t('validate.interface_vlan_unique', ['vlan' => ':vlan'])); ?>" data-case-message="<?php echo h(__t('vm_edit.interface_case_hint')); ?>" data-added-message="<?php echo h(__t('vm_edit.interface_added')); ?>" data-removed-message="<?php echo h(__t('vm_edit.interface_removed')); ?>" data-restored-message="<?php echo h(__t('vm_edit.interface_restored')); ?>">
+            <div class="stack" role="group"<?php echo form_control_attrs('vm_edit', 'interfaces', null, true, ''); ?>>
+            <div class="actions"><h2><?php echo h(__t('vm_edit.heading_interfaces')); ?></h2><?php if ($canWrite) { ?><button class="button button-secondary" type="button" data-add-row="interfaces"><?php echo h(__t('vm_edit.add_interface')); ?></button><?php } ?></div>
+            <div class="stack" data-repeat-target="interfaces">
+                <?php foreach (array_values($interfaces) as $index => $interface) { render_interface_row($interface, $index, $vlans, $canWrite, false, $fieldErrors); } ?>
+            </div>
+            <template data-template="interfaces"><?php render_interface_row(vm_default_interfaces($mission)[0], '__INDEX__', $vlans, true, true); ?></template>
+            <div class="actions"><p class="muted" role="status" data-vm-network-status></p><button class="button button-secondary" type="button" data-vm-network-undo hidden><?php echo h(__t('vm_edit.interface_undo')); ?></button></div>
+            <?php render_interface_gateway_hint(); ?>
+            </div>
+        </section>
+
+        <section class="panel stack" role="group"<?php echo form_control_attrs('vm_edit', 'disks', null, true, ''); ?>>
+            <div class="actions"><h2><?php echo h(__t('vm_edit.heading_disks')); ?></h2><?php if ($canWrite) { ?><button class="button button-secondary" type="button" data-add-row="disks"><?php echo h(__t('vm_edit.add_disk')); ?></button><?php } ?></div>
+            <div class="stack" data-repeat-target="disks">
+                <?php foreach (array_values($disks) as $index => $disk) { render_disk_row($disk, $index, $canWrite); } ?>
+            </div>
+            <template data-template="disks"><?php render_disk_row(vm_default_disks()[0], '__INDEX__', true, true); ?></template>
+            <?php render_disk_type_hint(); ?>
+        </section>
+
+        <section class="panel">
+            <h2><?php echo h(__t('vm_edit.heading_packages')); ?></h2>
+            <?php foreach ($packageUpgradeHints as $oldName => $newName) { ?>
+                <p class="muted"><?php echo h(__t('vm_edit.package_update_available', ['old' => (string) $oldName, 'new' => (string) $newName])); ?></p>
+            <?php } ?>
+            <?php
+            // AV-R08: a ticked version that left MECM is no longer moved for the
+            // administrator. Say what a transfer with it does before it happens.
+            foreach ($packages as $package) {
+                if ((string) ($package['package_status'] ?? '') === VIRTUSPHERE_CATALOG_STATUS_RETIRED
+                    && in_array((int) $package['id'], $selectedPackages, true)) { ?>
+                <p class="alert alert-warning"><?php echo h(__t('vm_edit.package_retired_selected', ['name' => (string) ($package['package_name'] ?? '')])); ?></p>
+            <?php }
+            } ?>
+            <?php
+            // AV-R10: two versions of one package may be ticked. MECM installs each
+            // ticked one, so the editor says it before a transfer.
+            foreach (catalog_selected_version_groups($packages, $selectedPackages) as $basename => $names) { ?>
+                <p class="alert alert-warning"><?php echo h(__t('vm_edit.package_versions_duplicate', ['basename' => (string) $basename, 'names' => implode(', ', $names)])); ?></p>
+            <?php } ?>
+            <div class="checkbox-grid">
+                <?php foreach ($packages as $package) {
+                    $packageId = (int) $package['id'];
+                    $isRetired = (string) ($package['package_status'] ?? '') === VIRTUSPHERE_CATALOG_STATUS_RETIRED;
+                    $label = trim(($package['package_name'] ?? '') . ' ' . ($package['package_version'] ?? ''));
+                    if ($isRetired) {
+                        $label .= ' ' . __t('vm_edit.package_retired_suffix');
+                    }
+                    ?>
+                    <label class="checkbox-item<?php echo $isRetired ? ' muted' : ''; ?>"><input type="checkbox" name="packages[]" value="<?php echo h((string) $packageId); ?>" <?php echo in_array($packageId, $selectedPackages, true) ? 'checked' : ''; ?> <?php echo $canWrite ? '' : 'disabled'; ?>> <?php echo h($label); ?></label>
+                <?php } ?>
+                <?php if ($packages === []) { ?><p><?php echo h(__t('vm_edit.no_packages')); ?></p><?php } ?>
+            </div>
+        </section>
+
+        <?php if ($canWrite) { ?><?php echo form_unsaved_status_html(); ?>
+            <?php // AV-R12 (lib/vm_mecm_save.php): a registered VM gets the hint and two buttons while
+                  // its OS deviates from MECM, the single button otherwise. Both are rendered from the
+                  // stored state; forms.js follows the OS field. The server decides the transfer alone. ?>
+            <?php if ($mecmView['split']) { ?>
+                <p class="hint" id="<?php echo h(form_hint_id('vm_edit', 'mecm_os')); ?>" data-mecm-os-hint<?php echo $mecmView['deviates'] ? '' : ' hidden'; ?>><?php echo vm_mecm_os_hint_html($mecmView['mecm_os'], (string) ($vm['vm_os'] ?? '')); ?></p>
+            <?php } ?>
+            <div class="actions">
+                <?php if ($mecmView['split']) { ?>
+                    <button class="button button-secondary" type="submit" name="mecm_save" value="<?php echo h(VIRTUSPHERE_VM_MECM_SAVE_PORTAL_ONLY); ?>" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>" data-mecm-save-portal<?php echo $mecmView['deviates'] ? '' : ' hidden'; ?>><?php echo h(__t('vm_edit.save_portal_only')); ?></button>
+                    <button class="button button-danger" type="submit" data-confirm="<?php echo h(__t('vm_edit.mecm_transfer_confirm')); ?>" name="mecm_save" value="<?php echo h(VIRTUSPHERE_VM_MECM_SAVE_TRANSFER); ?>" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>" data-mecm-save-transfer<?php echo $mecmView['deviates'] ? '' : ' hidden'; ?>><?php echo h(__t('vm_edit.save_and_transfer')); ?></button>
+                <?php } ?>
+                <button class="button" type="submit" data-busy-label="<?php echo h(__t('vm_edit.save_vm_busy')); ?>" data-mecm-save-single<?php echo $mecmView['deviates'] ? ' hidden' : ''; ?>><?php echo h(__t('vm_edit.save_vm')); ?></button>
+            </div>
+        <?php } ?>
+    </form>
+
+    <?php render_vm_status_history($timeline, $missionId, $vmId, $workContext); ?>
+</div>

@@ -1,0 +1,153 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../lib/bootstrap.php';
+require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/integration_health.php';
+require_once __DIR__ . '/../lib/system_status_page.php';
+require_once __DIR__ . '/../lib/system_status_service_panel.php';
+require_once __DIR__ . '/../lib/system_status_shared_panels.php';
+require_once __DIR__ . '/../lib/system_status_panels.php';
+require_once __DIR__ . '/../lib/system_status_esxi_panels.php';
+require_once __DIR__ . '/../lib/system_status_deviation_view.php';
+require_once __DIR__ . '/../lib/system_status_directory_panels.php';
+require_once __DIR__ . '/../lib/repo/catalog.php';
+require_once __DIR__ . '/../lib/backup_encryption.php';
+require_once __DIR__ . '/../lib/repo/api_access.php';
+require_once __DIR__ . '/../lib/system_status_remote_secret_notice.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
+
+$user = portal_require_user($connection);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    portal_guard_post($connection, $user);
+    system_status_handle_post($connection, $user);
+}
+
+$snapshot = integration_health_snapshot($connection);
+// One snapshot, four surfaces (Etappe 13R). This page reads the same function
+// the dashboard, the deploy page and the anonymous health endpoint read.
+$serviceSnapshot = null;
+try {
+    $serviceSnapshot = deploy_service_health_snapshot($connection, (int) $snapshot['now']);
+} catch (Throwable $exception) {
+    error_log('[system-status] deploy service snapshot unavailable: ' . virtusphere_redact_log_text($exception->getMessage()));
+}
+if ($serviceSnapshot !== null) {
+    $snapshot['esxi']['claim_state'] = $serviceSnapshot['claim_state'];
+}
+$directoryData = system_status_directory_panel_data($connection, $user);
+
+// A detail query is accepted only for an ESXi credential already present in
+// the snapshot. Invalid, deleted and type-confused IDs collapse to no selection
+// without revealing whether another credential exists under that number.
+$selectedInventoryId = request_int($_GET, 'inventory');
+$validEsxiIds = array_map(
+    static fn (array $entry): int => (int) $entry['credential']['id'],
+    $snapshot['esxi']['rows']
+);
+if (!in_array($selectedInventoryId, $validEsxiIds, true)) {
+    $selectedInventoryId = 0;
+}
+$selectedInventory = $selectedInventoryId > 0
+    ? esxi_inventory_detail($connection, $selectedInventoryId)
+    : null;
+
+// Without an inventory there is nothing to compare against, so the scan is
+// skipped and the panel says so; an empty result would otherwise be rendered as
+// a clean bill of health nobody checked.
+//
+// Templates included (ADR-0023 amendment): they cannot deploy, so the mission
+// list badge and the deploy hint leave them out, but a stale VLAN or datastore
+// that lives only in a template propagates into every mission cloned from it.
+// This report is the one place that has to show it, flagged as a template.
+$deviationReport = esxi_inventory_deviation_report(
+    $connection,
+    $snapshot['esxi']['rows'],
+    (int) $snapshot['esxi']['interval_hours'],
+    (int) $snapshot['now'],
+    true
+);
+$hasInventory = (bool) $deviationReport['has_evidence'];
+$deviations = $deviationReport['deviations'];
+$activeVlanNames = array_map(
+    static fn (array $vlan): string => (string) $vlan['vlan_name'],
+    repo_active_vlans($connection)
+);
+// Computed once here, read by the overview card and by the section below it.
+$deviationCount = system_status_deviation_count($deviations, $hasInventory);
+$deviationView = system_status_deviation_view(
+    $deviations,
+    request_string($_GET, 'deviation_kind', 'all'),
+    request_string($_GET, 'deviation_q'),
+    max(1, request_int($_GET, 'deviation_page'))
+);
+$reassignFrom = mb_substr(request_string($_GET, 'reassign_from'), 0, 255);
+// The selection the page is currently rendering, so the overview cards stay
+// same-document links and a chosen credential survives a jump to another card.
+$anchorQuery = $selectedInventoryId > 0 ? ['inventory' => $selectedInventoryId] : [];
+if ($deviationView['filter'] !== 'all') {
+    $anchorQuery['deviation_kind'] = $deviationView['filter'];
+}
+if ($deviationView['query'] !== '') {
+    $anchorQuery['deviation_q'] = $deviationView['query'];
+}
+$refreshUrl = $selectedInventoryId > 0
+    ? system_status_url('credential-' . $selectedInventoryId, ['inventory' => $selectedInventoryId])
+    : 'system_status.php';
+
+layout_header(__t('system_status.title'), $user, 'system-status', 'system-status');
+?>
+<div class="stack">
+    <?php if (!virtusphere_is_request_secure()) { ?>
+        <div class="alert alert-warning"><?php echo h(__t('system_status.http_plaintext')); ?>
+            <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_HTTPS)); ?>"><?php echo h(__t('settings.https_title')); ?></a><?php } ?>
+        </div>
+    <?php } ?>
+    <?php // K20 (VT-01): legacy allowlist entries still open every machine endpoint. ?>
+    <?php $allowlistWithoutRole = repo_api_access_without_role_count($connection); ?>
+    <?php if ($allowlistWithoutRole > 0) { ?>
+        <div class="alert alert-warning" data-allowlist-without-role><?php echo h(__t('settings.allowlist_without_role_warning', ['count' => $allowlistWithoutRole])); ?>
+            <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('settings.allowlist_title')); ?></a><?php } ?>
+        </div>
+    <?php } ?>
+    <?php // K19 (VT-E2): the same derivation as the settings backup card. ?>
+    <?php $backupEncryptionFinding = backup_encryption_finding(backup_encryption_certificate($connection), backup_status_read()); ?>
+    <?php if ($backupEncryptionFinding !== null) { ?>
+        <div class="alert alert-warning" data-backup-encryption-finding><?php echo h(backup_encryption_finding_message($backupEncryptionFinding)); ?>
+            <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url('backup')); ?>"><?php echo h(__t('settings.backup_title')); ?></a><?php } ?>
+        </div>
+    <?php } ?>
+    <?php // K21-F: ESXi access files still open on an Ansible host. Silent without a group. ?>
+    <?php system_status_render_remote_secret_notice(repo_remote_secret_notice_groups($connection), $user); ?>
+    <?php // The topbar (lib/layout.php) already renders the page title and the
+          // help link for this page. A second <h1> here made the page's own title
+          // larger than the one in the chrome above it and gave the document two
+          // top-level headings; a second help button pointed at the same anchor.
+          // What is left is the one line the chrome cannot know. ?>
+    <section class="page-intro">
+        <?php // Every timestamp on this page is rendered in the configured
+              // display timezone while the database holds UTC (ADR-0022), so
+              // the zone is named once here rather than left to be guessed from
+              // a row that may be hours off the reader's own clock. ?>
+        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('system_status.timezone_note', ['tz' => portal_timezone()])); ?> &middot; <?php echo h(__t('system_status.hint')); ?></p>
+        <div class="actions">
+            <a class="button" href="<?php echo h($refreshUrl); ?>"><?php echo h(__t('system_status.refresh_status')); ?></a>
+        </div>
+    </section>
+
+    <?php system_status_render_overview($snapshot, $deviationCount, $anchorQuery, $serviceSnapshot, $directoryData); ?>
+    <?php // Directly under the overview: this is the card an operator opens the
+          // page for while a deploy is in flight, and it is the only one that
+          // carries an action changing what the installation does next. ?>
+    <?php system_status_render_deploy_service($serviceSnapshot, $user); ?>
+    <?php system_status_render_directory($connection, $user, $directoryData); ?>
+    <?php system_status_render_mecm($snapshot, $user); ?>
+    <?php system_status_render_ansible($snapshot, $user); ?>
+    <?php system_status_render_esxi($snapshot, $user, $selectedInventoryId, $selectedInventory); ?>
+    <?php system_status_render_deviations($deviationView, $activeVlanNames, $user, $reassignFrom, $deviationCount, $deviationReport, $anchorQuery); ?>
+    <?php system_status_render_internal($snapshot, $user); ?>
+</div>
+<?php layout_footer(); ?>

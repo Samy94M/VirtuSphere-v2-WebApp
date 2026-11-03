@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'c:\\projekte\\VirtuSphere-v2-WebApp\\.codex\\hooks\\lint-csp-patterns.sh'"
+          },
+          {
+            "type": "command",
+            "command": "'c:\\projekte\\VirtuSphere-v2-WebApp\\.codex\\hooks\\php-lint.sh'"
+          },
+          {
+            "type": "command",
+            "command": "'c:\\projekte\\VirtuSphere-v2-WebApp\\.codex\\hooks\\lang-parity.sh'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'c:\\projekte\\VirtuSphere-v2-WebApp\\.codex\\hooks\\session-start.sh'"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,396 @@
+<?php
+
+declare(strict_types=1);
+
+// The write half of portal/credentials.php: the two ESXi side effects a save
+// carries and the POST dispatch behind them. The page keeps auth, RBAC and
+// portal_guard_post(); everything a request CHANGES lives here, so the page
+// stays a shell and the renderers next door stay read-only (ADR-0006).
+require_once __DIR__ . '/repo/credentials.php';
+require_once __DIR__ . '/repo/log.php';
+require_once __DIR__ . '/repo/esxi_inventory.php';
+require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/esxi_capabilities.php';
+require_once __DIR__ . '/repo/ansible_preflight.php';
+require_once __DIR__ . '/ansible_full_test.php';
+require_once __DIR__ . '/credentials_status.php';
+require_once __DIR__ . '/credentials_test_message.php';
+require_once __DIR__ . '/log_redaction.php';
+require_once __DIR__ . '/settings_page.php';
+require_once __DIR__ . '/ssh.php';
+require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/repo/credential_host_identity.php';
+require_once __DIR__ . '/repo/deploy_remote_secret_fence.php';
+
+
+/**
+ * Testing an ESXi credential means pulling its inventory over the Ansible host:
+ * the one path a deploy actually uses. The result is not a flash but the traffic
+ * light on the System status page, which survives the redirect and every reload.
+ *
+ * Same call chain as saving the credential, so the deliberate single retry of an
+ * auth-paused credential stays possible without weakening the lockout guard.
+ *
+ * @return array{0: string, 1: string, 2: array<string,mixed>} flash type, message and enqueue result
+ */
+function credentials_test_esxi(mysqli $db, int $credentialId, int $userId): array
+{
+    $credential = repo_credential($db, $credentialId);
+    if ($credential === null || (string) ($credential['type'] ?? '') !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+        throw new RuntimeException(__t('credentials.err_not_found'));
+    }
+    $strictProbe = credential_esxi_strict_probe_ready($credential);
+    repo_esxi_inventory_clear_pause($db, $credentialId);
+    $result = esxi_inventory_enqueue_for_credential($db, $credentialId, $userId, $strictProbe);
+    $result['strict_trust_probe'] = $strictProbe;
+
+    if (!empty($result['enqueued'])) {
+        return ['success', __t($strictProbe ? 'credentials.test_esxi_strict_queued' : 'credentials.test_esxi_queued'), $result];
+    }
+    if (($result['reason'] ?? '') === 'no_ansible_credential') {
+        return ['warning', __t('credentials.test_esxi_no_ansible'), $result];
+    }
+    if (($result['reason'] ?? '') === 'ambiguous_ansible_credential') {
+        return ['warning', __t('credentials.test_esxi_ambiguous_ansible'), $result];
+    }
+    if (($result['reason'] ?? '') === 'invalid_ansible_credential') {
+        return ['warning', __t('credentials.test_esxi_invalid_ansible'), $result];
+    }
+    if (($result['reason'] ?? '') === 'already_pending') {
+        return ['warning', __t('credentials.test_esxi_already_pending'), $result];
+    }
+
+    return ['error', __t('credentials.test_esxi_failed'), $result];
+}
+
+/**
+ * Completes one manual Ansible test after its external work returned.
+ *
+ * Persistence, audit and the one-shot operator result deliberately share this
+ * owner. A concurrent credential edit or newer test makes the completion stale:
+ * it may be audited as discarded, but it must not replace current evidence or
+ * expose technical detail from a configuration that is no longer current.
+ *
+ * @param array{ok: bool, code: string, detail: string, context: array<string, string|int>} $result
+ */
+function credentials_complete_ansible_test(
+    mysqli $connection,
+    int $credentialId,
+    int $userId,
+    array $result,
+    int $configRevision,
+    int $testGeneration,
+    bool $returnToAnsibleStatus = false
+): void {
+    $isAllowlistWarning = credentials_test_is_allowlist_warning($result);
+    $evidenceStored = ansible_full_test_store_result(
+        $connection, $credentialId, $userId, $result, $configRevision, $testGeneration
+    );
+    if (!$evidenceStored) {
+        flash_set('warning', __t('credentials.test_result_discarded'));
+        return;
+    }
+
+    $flashType = $result['ok']
+        ? ($isAllowlistWarning ? 'warning' : 'success')
+        : 'error';
+    $flashAction = credentials_test_action($result, $credentialId);
+    if ($returnToAnsibleStatus && $flashAction === null) {
+        $flashAction = [
+            'url' => system_status_url('credential-' . $credentialId),
+            'label' => __t('credentials.test_action_system_status'),
+        ];
+    }
+    flash_set(
+        $flashType,
+        credentials_test_message($result),
+        $result['ok'] ? '' : (string) $result['detail'],
+        $flashAction
+    );
+    // Follow-up sentences of this stored result, for example the ESXi access files it left on
+    // the host. Only a stored result reaches this point: a discarded one returned above.
+    foreach (credentials_test_followup_notices($result) as $notice) {
+        flash_set('info', $notice);
+    }
+}
+
+/**
+ * The page an acknowledgement returns to. The token is closed: only a value the
+ * two forms send can name a page; anything else returns to the credentials page.
+ */
+function credentials_remote_secret_return_page(string $returnTo): string
+{
+    return $returnTo === 'system_status' ? 'system_status.php' : 'credentials.php';
+}
+
+// After saving an ESXi credential: clear any auth pause and trigger an immediate
+// inventory pull (fail-soft; a scheduling hiccup must not fail the save).
+function credentials_after_esxi_save(mysqli $db, string $type, int $credentialId, int $userId): void
+{
+    if ($type !== VIRTUSPHERE_CREDENTIAL_TYPE_ESXI || $credentialId <= 0) {
+        return;
+    }
+    try {
+        $state = repo_esxi_inventory_state($db, $credentialId);
+        $wasPaused = $state !== null && (int) $state['paused_until_credential_change'] === 1;
+        repo_esxi_inventory_clear_pause($db, $credentialId);
+        if ($wasPaused) {
+            // The pause is what stopped every future pull; its end deserves the
+            // same line in the log its start got.
+            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_RECOVERED, [
+                'action' => 'resumed',
+                'reason' => VIRTUSPHERE_AUDIT_INVENTORY_AUTOMATION_REASON_CREDENTIAL_SAVED,
+            ], $userId);
+        }
+        // A legacy row with a stored certificate gets the strict probe: the one pull
+        // that tells whether that certificate verifies. Every other save is a plain pull.
+        $credential = repo_credential($db, $credentialId) ?? [];
+        esxi_inventory_enqueue_for_credential($db, $credentialId, $userId, credential_esxi_strict_probe_ready($credential));
+    } catch (Throwable $exception) {
+        error_log('[credentials] ESXi inventory pull enqueue failed: ' . virtusphere_redact_log_text($exception->getMessage()));
+    }
+}
+
+/**
+ * The POST dispatch of the credentials page.
+ *
+ * It returns the page to redirect to instead of redirecting itself: the CSRF
+ * guard and the redirect stay visible in the page, so a reader of the entry
+ * point still sees the whole request shape, and a test can drive the dispatch
+ * without a terminating call.
+ *
+ * @param array<string,mixed> $user
+ * @return string the portal page this request redirects to
+ */
+function credentials_handle_post(mysqli $connection, array $user): string
+{
+    $redirect = 'credentials.php';
+
+    try {
+        $action = request_string($_POST, 'action');
+        if (!in_array($action, ['create', 'update', 'delete', 'test', 'activate_strict', 'confirm_host_identity', 'remote_secret_acknowledge'], true)) {
+            http_response_code(400);
+            echo h(__t('common.unknown_action'));
+            exit;
+        }
+        $id = request_int($_POST, 'credential_id');
+        $payload = [
+            'type' => $_POST['type'] ?? '',
+            'name' => $_POST['name'] ?? '',
+            'host' => $_POST['host'] ?? '',
+            'port' => $_POST['port'] ?? null,
+            'username' => $_POST['username'] ?? '',
+            'esxi_cert_kind' => $_POST['esxi_cert_kind'] ?? '',
+            'esxi_certificate_pem' => $_POST['esxi_certificate_pem'] ?? '',
+        ];
+        $secret = request_string($_POST, 'secret');
+
+        // AL-1 (R19): each write below and its audit row commit or roll back together; the
+        // flash and the fail-soft inventory pull of credentials_after_esxi_save() follow the commit.
+        if ($action === 'create') {
+            $createdId = repo_transaction($connection, static function () use ($connection, $payload, $secret, $user): int {
+                $createdId = repo_create_credential($connection, $payload, $secret, (int) $user['id']);
+                // The stored mode, read back: a verifying choice and 'none' end up in different modes.
+                $createdRow = repo_credential($connection, $createdId) ?? [];
+                // HA-24: the name and the host, so the row says which credential it is (never a secret).
+                $createdContext = array_filter(
+                    ['action' => 'created', 'name' => (string) ($createdRow['name'] ?? ''), 'host' => (string) ($createdRow['host'] ?? '')],
+                    static fn (string $value): bool => $value !== ''
+                );
+                if ((string) ($createdRow['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+                    $createdContext['trust_mode'] = credential_esxi_trust_mode($createdRow);
+                }
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $createdContext, (int) $user['id']);
+                return $createdId;
+            });
+            flash_set('success', __t('credentials.flash_created'));
+            credentials_after_esxi_save($connection, (string) $payload['type'], $createdId, (int) $user['id']);
+        } elseif ($action === 'update') {
+            $verificationDisabled = repo_transaction($connection, static function () use ($connection, $id, $payload, $secret, $user): bool {
+                // Pre-update row for the diff; the secret is never read back here and a
+                // rotation is reported as "secret: changed", not with its value.
+                $before = repo_credential($connection, $id, true) ?? [];
+                $preflightCleared = false;
+                $trustChange = ['before' => null, 'after' => null];
+                repo_update_credential($connection, $id, $payload, $secret !== '' ? $secret : null, $preflightCleared, $trustChange);
+                // Verification switched off on a strict ESXi row: the downgrade gets its own audit row and warning.
+                $verificationDisabled = ($trustChange['before'] ?? null) === VIRTUSPHERE_ESXI_TRUST_STRICT
+                    && ($trustChange['after'] ?? null) === VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE;
+                // Certificate material is public, not a secret, but a PEM block is
+                // still bulk configuration data that must not flood the audit log.
+                $credentialDiff = audit_change_summary($before, $payload, ['esxi_certificate_pem']);
+                if ($secret !== '') {
+                    $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'credential material: changed']));
+                }
+                // The stored preflight result proved the OLD host/account; an edit invalidates it.
+                // ESXi gets a fresh pull after the commit, Ansible drops back to "not tested". The
+                // reset rides the update's own audit line, not a second entry for a consequence.
+                if ($preflightCleared) {
+                    $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'ansible preflight state: reset']));
+                }
+                if ((string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                    && (string) $payload['type'] !== VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                    && esxi_inventory_clear_ansible_selection_if_matches($connection, $id)
+                ) {
+                    $credentialDiff = audit_join_summary(array_filter([$credentialDiff, 'inventory ansible selection: cleared']));
+                }
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'changes' => $credentialDiff === '' ? 'no field changes' : $credentialDiff,
+                ], (int) $user['id']);
+                if ($verificationDisabled) {
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'trust_mode_changed',
+                        'trust_mode' => VIRTUSPHERE_ESXI_TRUST_LEGACY_INSECURE,
+                    ], (int) $user['id']);
+                }
+                return $verificationDisabled;
+            });
+            flash_set(
+                $verificationDisabled ? 'warning' : 'success',
+                __t($verificationDisabled ? 'credentials.flash_verification_disabled' : 'credentials.flash_updated')
+            );
+            credentials_after_esxi_save($connection, (string) $payload['type'], $id, (int) $user['id']);
+        } elseif ($action === 'confirm_host_identity') {
+            // replace_pin is only ever sent by the second step after a deviating value (UX-HK).
+            $replaced = repo_confirm_ansible_host_identity($connection, $id, request_int($_POST, 'config_revision'),
+                request_string($_POST, 'old_host_fingerprint'), request_string($_POST, 'host_fingerprint'),
+                request_string($_POST, 'host_key_type'), (int) $user['id'], request_string($_POST, 'replace_pin') === '1');
+            flash_set('success', __t($replaced ? 'credentials.host_identity_replaced' : 'credentials.host_identity_saved'));
+        } elseif ($action === 'remote_secret_acknowledge') {
+            // K21-F: the operator confirms, with a reason, that the ESXi access files on one
+            // Ansible target were removed by hand or the host is out of service. The repository
+            // closes every open row of that target (not leased, no active job, any age) in one
+            // transaction with its audit row. The page guard checks credentials.manage and CSRF,
+            // as for every other action of this page.
+            $redirect = credentials_remote_secret_return_page(request_string($_POST, 'return_to'));
+            $credentialId = request_int($_POST, 'credential_id');
+            $targetHost = request_string($_POST, 'target_host');
+            $targetPort = request_int($_POST, 'target_port');
+            try {
+                $closed = repo_remote_secret_acknowledge(
+                    $connection,
+                    $credentialId > 0 ? $credentialId : null,
+                    $targetHost,
+                    $targetPort,
+                    request_string($_POST, 'reason'),
+                    (int) $user['id']
+                );
+                $target = $targetHost . ':' . $targetPort;
+                if ($closed > 0) {
+                    flash_set('success', __t('credentials.remote_secret_acknowledged', ['target' => $target])
+                        . ' ' . __t('system_status.remote_secret_password_hint'));
+                } else {
+                    flash_set('warning', __t('credentials.remote_secret_nothing_open', ['target' => $target]));
+                }
+            } catch (ValidationException $exception) {
+                // The notice sits on the status page, which shows no field errors: the reason's own
+                // sentence goes to the flash, not the generic "Validation failed.".
+                flash_set('error', $exception->errors()['reason']
+                    ?? __t('credentials.remote_secret_reason_required', ['min' => VIRTUSPHERE_REMOTE_SECRET_REASON_MIN_CHARS]));
+            }
+        } elseif ($action === 'activate_strict') {
+            repo_transaction($connection, static function () use ($connection, $id, $user): void {
+                if (!repo_activate_esxi_strict_trust($connection, $id)) {
+                    // The row went away or stopped being ESXi between its read and the write.
+                    throw new RuntimeException(__t('credentials.err_not_found'));
+                }
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'trust_mode_changed',
+                    'trust_mode' => 'strict',
+                ], (int) $user['id']);
+            });
+            flash_set('success', __t('credentials.flash_strict_activated'));
+            // Same follow-up as a save: the pull that shows the activated mode on the status page.
+            credentials_after_esxi_save($connection, VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, $id, (int) $user['id']);
+        } elseif ($action === 'delete') {
+            repo_transaction($connection, static function () use ($connection, $id, $user): void {
+                $before = repo_credential($connection, $id) ?? [];
+                // A missing row is an error, not a "deleted" line for nothing.
+                if (!repo_delete_credential($connection, $id)) {
+                    throw new RuntimeException(__t('credentials.err_not_found'));
+                }
+                $selectionCleared = (string) ($before['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE
+                    && esxi_inventory_clear_ansible_selection_if_matches($connection, $id);
+                // HA-24: the name and the host of the deleted credential, read before the delete (never a secret).
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_CHANGED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, array_filter([
+                    'action' => 'deleted',
+                    'name' => (string) ($before['name'] ?? ''),
+                    'host' => (string) ($before['host'] ?? ''),
+                    'selection_cleared' => $selectionCleared,
+                ], static fn (mixed $value): bool => $value !== ''), (int) $user['id']);
+            });
+            flash_set('success', __t('credentials.flash_deleted'));
+        } elseif ($action === 'test') {
+            $credential = repo_credential($connection, $id, true);
+            if ($credential === null) {
+                throw new RuntimeException(__t('credentials.err_not_found'));
+            }
+            if ((string) ($credential['type'] ?? '') === VIRTUSPHERE_CREDENTIAL_TYPE_ESXI) {
+                // Asynchronous by nature: the pull is a queued job on the Ansible
+                // host, so the outcome lands in the traffic light, not in a flash.
+                [$flashType, $flashMessage, $enqueue] = credentials_test_esxi($connection, $id, (int) $user['id']);
+                $inventoryContext = ['reason' => (string) ($enqueue['reason'] ?? VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_QUEUED)];
+                if (isset($enqueue['job_id'])) {
+                    $inventoryContext['job_id'] = (int) $enqueue['job_id'];
+                }
+                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REQUESTED, 'credential', $id, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, $inventoryContext, (int) $user['id']);
+                $actionUrl = in_array(($enqueue['reason'] ?? ''), [VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_AMBIGUOUS_ANSIBLE, VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_INVALID_ANSIBLE, VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_NO_ANSIBLE], true)
+                    ? settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)
+                    : system_status_url('credential-' . $id, ['inventory' => $id]);
+                // The settings target is offered to readers of system.config only (R11):
+                // the sentence stays for everyone, and the link names the place the way
+                // the portal names it.
+                $settingsTarget = $actionUrl === settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG);
+                $flashAction = null;
+                if (!$settingsTarget) {
+                    $flashAction = ['url' => $actionUrl, 'label' => __t('credentials.test_esxi_action')];
+                } elseif (can('system.config')) {
+                    $flashAction = ['url' => $actionUrl, 'label' => __t('credentials.test_esxi_action_settings')];
+                }
+                flash_set($flashType, $flashMessage, '', $flashAction);
+            } else {
+                // The System-status card reuses this exact handler rather than
+                // growing a second preflight implementation. The return token is
+                // a closed value, never a caller-provided URL (open redirects are
+                // impossible), and only the Ansible branch accepts it. Resolve it
+                // before the checks so validation and runtime errors return to the
+                // page that initiated the test as well.
+                $returnToAnsibleStatus = request_string($_POST, 'return_to') === 'ansible_status';
+                if ($returnToAnsibleStatus) {
+                    // Land at the page top so the one-shot result/technical detail
+                    // is visible. The flash action below leads back to this row.
+                    $redirect = 'system_status.php';
+                }
+                // The immutable read used for the network test carries both the
+                // encrypted secret and the monotone configuration revision.
+                // The generation is allocated before external work and fenced
+                // again afterwards; no database lock is held during SSH/SFTP.
+                $configRevision = (int) ($credential['config_revision'] ?? 0);
+                $testGeneration = repo_ansible_preflight_begin($connection, $id, $configRevision);
+                $result = ansible_full_test_execute($connection, $credential);
+                credentials_complete_ansible_test(
+                    $connection,
+                    $id,
+                    (int) $user['id'],
+                    $result,
+                    $configRevision,
+                    $testGeneration,
+                    $returnToAnsibleStatus
+                );
+            }
+        }
+    } catch (ValidationException $exception) {
+        $formKey = match ($_POST['action'] ?? '') {
+            'create' => 'create',
+            'confirm_host_identity' => 'host-identity-' . request_int($_POST, 'credential_id'),
+            default => 'row-' . request_int($_POST, 'credential_id'),
+        };
+        form_remember($formKey, $_POST, $exception->errors());
+        flash_portal_error($exception, $user);
+    } catch (Throwable $exception) {
+        flash_portal_error($exception, $user);
+    }
+
+    return $redirect;
+}

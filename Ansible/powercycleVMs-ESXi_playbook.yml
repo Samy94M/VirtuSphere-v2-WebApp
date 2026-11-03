@@ -1,0 +1,118 @@
+---
+# Power-Cycle zur MAC-Erzeugung. ESXi vergibt einer NIC ihre MAC erst, wenn die
+# VM einmal eingeschaltet war; der Lauf schaltet deshalb ein, wartet, schaltet
+# hart aus (frisch erstellte VMs haben kein Guest-OS und keine VMware Tools,
+# ein Soft-Shutdown wuerde haengen). Angefasst wird ausschliesslich, was dieser
+# Lauf selbst von poweredOff nach poweredOn bewegt:
+#   - Ziel ist nur eine VM, die needs_mac ausdruecklich bejaht; ohne das Feld
+#     wird eine VM NICHT angefasst (kein default true mehr),
+#   - vor jeder Aenderung erfasst vmware_guest_info den Ausgangszustand,
+#   - eine bereits laufende oder suspendierte VM bleibt in ihrem Zustand: ihre
+#     MACs existieren laengst, der Export liest sie ohne Zyklus,
+#   - der always-Block schaltet die vom Lauf gestarteten VMs auch nach einem
+#     Teilfehler zwischen Ein- und Ausschalten wieder aus; ein Fehler dabei
+#     macht den Lauf fehlerhaft, nie zum Erfolg,
+#   - "vom Lauf gestartet" heisst auch: eine anfangs ausgeschaltete VM, die
+#     nach einem fehlgeschlagenen oder unklaren Einschalten eingeschaltet
+#     gelesen wird (W2, powercycle_power_on_tasks.yml). Das Einschalten wird
+#     nie blind wiederholt, nur nach einem gelesenen poweredOff.
+# Ein kurzer ESXi-Aussetzer beendet den Lauf nicht: Zustandsabfrage,
+# Einschalten (nach W2) und hartes Ausschalten bekommen bis zu drei weitere
+# Versuche mit den Pausen aus EsxiRetryPauseSeconds (W1), jede als RETRY-Zeile
+# mit der Meldung des Moduls im Protokoll.
+# Grenze: ein harter Prozessabbruch (Kill des ansible-Prozesses, SSH-Abriss)
+# fuehrt keinen always-Block mehr aus und kann gestartete VMs eingeschaltet
+# zuruecklassen; docs/DEPLOYMENT.md nennt das im Power-Cycle-Abschnitt.
+- name: Power-Cycle der VMs zur MAC-Erzeugung
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
+
+  tasks:
+    # Beide Auswahl-Ketten sind zeichengleich in
+    # Docker/qa-ansible/powercycle-selection-fixtures.yml gegen Fixtures
+    # bewiesen (Gate ansible-powercycle-selection);
+    # tests/Static/PowercyclePlaybookContractTest.php pinnt beide Dateien
+    # aufeinander.
+    - name: Ziele bestimmen (nur VMs, deren PXE-NIC laut Portal keine MAC hat)
+      ansible.builtin.set_fact:
+        powercycle_targets: "{{ vm_configurations | selectattr('needs_mac', 'defined') | selectattr('needs_mac') | list }}"
+
+    - name: Powercycle-Ergebnisse initialisieren
+      ansible.builtin.set_fact:
+        powercycle_initial:
+          results: []
+
+    - name: Marker und Ausgangszustand VM fuer VM erfassen
+      ansible.builtin.include_tasks: ./powercycle_vm_info.yml
+      loop: "{{ powercycle_targets }}"
+      loop_control:
+        loop_var: powercycle_target
+        index_var: powercycle_info_index
+        label: "{{ powercycle_target['vm_name'] }}"
+
+    - name: Name und Instance-UUID vor dem Power-Cycle validieren
+      ansible.builtin.assert:
+        that:
+          - ((item['instance'] | default({}))['instance_uuid'] | default('')) | trim | length > 0
+          - ((item['instance'] | default({}))['hw_name'] | default('')) == ((item['item'] | default({}))['vm_name'] | default(''))
+          - >-
+            (
+              ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
+              and
+              ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
+              == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
+            )
+        # AN-07: both UUIDs are named, identity fields only (no module argument).
+        fail_msg: >-
+          VirtuSphere VM identity mismatch before power-cycle for
+          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}:
+          stored instance UUID
+          {{ (item['item'] | default({}))['vm_instance_uuid'] | default('none', true) }},
+          live instance UUID
+          {{ (item['instance'] | default({}))['instance_uuid'] | default('none', true) }},
+          live VM name
+          {{ (item['instance'] | default({}))['hw_name'] | default('none', true) }}.
+      loop: "{{ powercycle_initial.results | default([]) }}"
+      loop_control:
+        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+
+    # Eine Antwort ohne Power-State darf nicht wie "nichts zu tun" aussehen:
+    # die Auswahl unten bliebe leer, der Export saehe VMs ohne MAC, und kein
+    # Fehler haette je einen Namen gehabt. Der Wachhund laeuft VOR der Auswahl
+    # und ist selbst wurf-frei (map mit default deckt fehlendes instance und
+    # fehlendes hw_power_status gleichermassen); die Auswahl-Kette darunter
+    # setzt damit geprueften Stoff voraus, denn ein dotted-Filter wuerde auf
+    # einer kaputten Antwortform werfen statt filtern (im Fixture-Playbook
+    # bewiesen).
+    - name: Jede Zustandsantwort muss den Power-State tragen
+      ansible.builtin.assert:
+        that:
+          - powercycle_initial.results | default([]) | map(attribute='instance.hw_power_status', default='') | select('equalto', '') | list | length == 0
+          - >-
+            powercycle_initial.results | default([]) | map(attribute='instance.hw_power_status', default='')
+            | difference(['poweredOff', 'poweredOn', 'suspended']) | length == 0
+        fail_msg: >-
+          vmware_guest_info hat fuer mindestens eine Ziel-VM keinen bekannten
+          instance.hw_power_status geliefert; die Modulantwort passt nicht mehr
+          zur Auswahl-Logik dieses Playbooks.
+      when: powercycle_targets | length > 0
+
+    - name: Nur initial ausgeschaltete Ziele werden geschaltet
+      ansible.builtin.set_fact:
+        powercycle_to_start: >-
+          {{ powercycle_initial.results | default([])
+             | selectattr('instance.hw_power_status', 'equalto', 'poweredOff') | list }}
+
+    - name: Jede VM vollstaendig vor der naechsten schalten
+      ansible.builtin.include_tasks: ./powercycle_vm_tasks.yml
+      loop: "{{ powercycle_to_start }}"
+      loop_control:
+        loop_var: powercycle_vm
+        index_var: powercycle_index
+        label: "{{ powercycle_vm['item']['vm_name'] }}"

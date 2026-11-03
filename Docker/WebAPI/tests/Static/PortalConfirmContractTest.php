@@ -1,0 +1,353 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+require_once __DIR__ . '/../Support/PortalActionInventory.php';
+
+/**
+ * The confirmation contract (ADR-0013) is an attribute agreement between portal
+ * markup, lib/layout_modals.php and assets/app.js, so php -l, node --check, the
+ * lang audit and the rest of the unit suite all stay green while it is broken.
+ *
+ * Two failures this pins down, both silent:
+ *  - A destructive action that simply forgets data-confirm. Nothing warns; the
+ *    row is gone on the first stray click.
+ *  - Replaying the confirmed submit with form.submit() instead of
+ *    requestSubmit(trigger). That drops the form's submitter, which strips a
+ *    name="action" button's value, and the handler falls through to its default
+ *    branch: the page redirects, the flash appears, nothing is deleted.
+ *
+ * The classification below is deliberately *closed*. An earlier version guessed
+ * which actions were dangerous from their name (delete, clear, reset, ...) and
+ * therefore never looked at `generate_token`, which silently invalidates the
+ * token deployed on the MECM server, nor at `set_role`, which lets an admin
+ * demote themselves. Guessing loses. Every action a portal form can POST must
+ * now be either confirmed in markup or listed in SAFE_ACTIONS with its reason,
+ * so a new action fails the build until somebody decides which it is.
+ */
+final class PortalConfirmContractTest extends TestCase
+{
+    private const LAYOUT = 'lib/layout.php';
+    private const MODALS = 'lib/layout_modals.php';
+
+    /**
+     * Actions that may POST without a confirmation, each with the reason.
+     * Keyed "page.php:action". Adding an entry is a decision, not a formality:
+     * write down why the action cannot lose anything the user wanted to keep.
+     *
+     * @var array<string, string>
+     */
+    private const SAFE_ACTIONS = [
+        // Pure creation: nothing existing is touched.
+        'credentials.php:create' => 'creates a new credential',
+        'missions.php:create' => 'creates a new mission',
+        'users.php:create' => 'creates a new user',
+        'users.php:directory_add_controller' => 'adds a controller in a disabled state',
+        'users.php:directory_import' => 'creates an imported account and leaves existing accounts untouched',
+        'settings.php:allow_create' => 'adds an allowlist entry',
+        'mission_details.php:clone_template' => 'creates a new mission from a template',
+        'mission_details.php:save_as_template' => 'creates a new template',
+        'missions.php:import_preview' => 'renders a preview, writes nothing',
+        'missions.php:import_confirm' => 'creates a mission; the preview step is the confirmation',
+
+        // Read-only or idempotent refreshes.
+        'credentials.php:test' => 'runs a diagnostic or queues a read-only inventory pull; no managed object is deleted',
+        'mission_details.php:export' => 'downloads JSON, writes nothing',
+        'system_status.php:refresh_inventory' => 're-reads the ESXi inventory into the cache',
+        'system_status.php:preview_vlan_reassign' => 'renders the exact write scope and writes nothing',
+        'deploy.php:check' => 're-renders the submitted queue form and its complete blockers; writes no job or audit event',
+        'deploy.php:open_remedy' => 'stores only the allowlisted queue draft and redirects to an action recomputed from the current blocker union',
+        // Resuming can only ever start work that was already queued and cannot
+        // lose anything; the pause in the other direction does carry a prompt.
+        'system_status.php:deploy_claim_resume' => 'resumes job intake; nothing is deleted and nothing already running is affected',
+        // Both per-job recovery actions are append-or-requeue: the cleanup
+        // retry re-enters a queue the worker drains and refuses outright if the
+        // evidence moved, and the documentation form only ever adds a row to an
+        // append-only evidence table.
+        // The forms of lib/deploy_log_recovery_panel.php post to deploy.php,
+        // so the inventory files them under deploy.php wherever they render.
+        'deploy.php:remote_cleanup_retry' => 'puts a failed cleanup back in the worker queue; it deletes nothing and is refused outright when the evidence changed',
+        'deploy.php:remote_review_document' => 'appends one evidence row; no earlier entry is replaced or removed',
+        'system_status.php:deploy_recovery_review' => 're-runs the recovery policy and sets the flag the worker reads; it performs no recovery and destroys nothing',
+        'users.php:directory_search' => 'performs a read-only directory search',
+        'users.php:directory_test_controller' => 'runs a read-only controller diagnostic',
+        'users.php:directory_sync_user' => 'refreshes the cached display attributes of one imported user',
+
+        // Edits of the record the user is already looking at, with its own form.
+        // The one destructive variant, switching verification off on a strict row, is
+        // asked for at runtime: forms.js puts data-confirm on the Save button while
+        // "No certificate verification" is chosen. The markup itself has no prompt.
+        'credentials.php:update' => 'edits the credential the form belongs to; the downgrade to no verification is confirmed by forms.js on the Save button',
+        'mission_details.php:update' => 'edits the mission the form belongs to',
+
+        // Settings writes: the previous value is visible in the field being replaced.
+        'settings.php:save_api' => 'overwrites a value shown in the same input',
+        'settings.php:save_https_hsts' => 'toggles a response header; state is visible on the same badge and reversible with the same button',
+        'settings.php:save_esxi_inventory' => 'overwrites a value shown in the same input',
+        'settings.php:save_ansible_test_interval' => 'overwrites the displayed reversible diagnostic interval; starts no deployment',
+        'settings.php:save_password_policy' => 'overwrites a value shown in the same input',
+        'settings.php:save_session' => 'overwrites a value shown in the same input',
+        'settings.php:save_retire_threshold' => 'overwrites a value shown in the same input',
+        'settings.php:save_timezone' => 'overwrites a value shown in the same select',
+        'users.php:directory_save_config' => 'replaces the configuration shown in the same form after validating its revision',
+        'users.php:set_email' => 'overwrites the address shown in the same input; it is a note that gates no login, role or deploy',
+        'users.php:directory_move_controller' => 'changes a visible, reversible priority ordering',
+
+        // Deliberate, documented exceptions.
+        'users.php:clear_lock' => 'unlocking a locked-out account is a reversible remediation, not a loss',
+        'deploy.php:start' => 'queueing a deploy is the purpose of the page; scheduled jobs get their own preview/confirm step (B3.3)',
+    ];
+
+    private function root(): string
+    {
+        return str_replace('\\', '/', dirname(__DIR__, 2));
+    }
+
+    private function read(string $relative): string
+    {
+        $path = $this->root() . '/' . $relative;
+        self::assertFileExists($path, $relative . ' must exist');
+
+        return (string) file_get_contents($path);
+    }
+
+    /**
+     * The portal client scripts, concatenated. app.js was split into
+     * the focused portal assets; the confirm logic lives in core.js, but
+     * scanning all of them keeps this contract insensitive to which file holds
+     * what.
+     */
+    private function appJs(): string
+    {
+        $files = glob($this->root() . '/portal/assets/*.js') ?: [];
+        self::assertNotSame([], $files, 'no portal assets/*.js scripts were found');
+
+        $source = '';
+        foreach ($files as $path) {
+            $source .= (string) file_get_contents($path) . "\n";
+        }
+
+        return $source;
+    }
+
+    /**
+     * Drop whole-line comments. The comments in app.js deliberately name the
+     * patterns these tests forbid, so scanning them raw finds the prose, not a
+     * regression.
+     */
+    private function stripComments(string $source): string
+    {
+        return preg_replace('#^\s*(//|\*|/\*).*$#m', '', $source) ?? $source;
+    }
+
+    /** @return array<string, string> relative path => contents */
+    private function portalPages(): array
+    {
+        $pages = PortalActionInventory::portalPages($this->root());
+        self::assertNotSame([], $pages, 'no portal pages were scanned');
+
+        return $pages;
+    }
+
+    /**
+     * The shared scan (tests/Support/PortalActionInventory.php): the E2E
+     * coverage contract consumes the same inventory, so the definition of
+     * "postable action" cannot drift between the two.
+     *
+     * @return array<string, bool> "page.php:action" => confirmed
+     */
+    private function postableActions(): array
+    {
+        $actions = PortalActionInventory::postableActions($this->portalPages());
+        self::assertNotSame([], $actions, 'the action scan matched nothing; the markup or the regex changed');
+
+        return $actions;
+    }
+
+    public function testEveryPostableActionIsEitherConfirmedOrDeclaredSafe(): void
+    {
+        $unclassified = [];
+        foreach ($this->postableActions() as $key => $confirmed) {
+            if (!$confirmed && !array_key_exists($key, self::SAFE_ACTIONS)) {
+                $unclassified[] = $key;
+            }
+        }
+
+        sort($unclassified);
+        self::assertSame(
+            [],
+            $unclassified,
+            "action without data-confirm and without a SAFE_ACTIONS entry.\n"
+            . "Add the prompt, or declare it safe with the reason it cannot lose anything."
+        );
+    }
+
+    public function testSafeActionsListHasNoStaleOrContradictoryEntries(): void
+    {
+        $actions = $this->postableActions();
+
+        $stale = array_diff(array_keys(self::SAFE_ACTIONS), array_keys($actions));
+        sort($stale);
+        self::assertSame([], $stale, 'SAFE_ACTIONS names an action no portal form posts any more; delete the entry');
+
+        $contradictory = [];
+        foreach (self::SAFE_ACTIONS as $key => $reason) {
+            self::assertNotSame('', trim($reason), $key . ' must carry the reason it is safe');
+            if (($actions[$key] ?? false) === true) {
+                $contradictory[] = $key;
+            }
+        }
+
+        sort($contradictory);
+        self::assertSame([], $contradictory, 'declared safe but the markup confirms it; drop the SAFE_ACTIONS entry');
+    }
+
+    public function testEveryDangerSubmitButtonCarriesAConfirm(): void
+    {
+        // The danger fill is reserved for destructive actions (ADR-0013), so a
+        // red submit button without a prompt is either a missing confirm or a
+        // misused colour. type="button" is exempt: it edits unsaved rows only.
+        $offenders = [];
+        foreach ($this->portalPages() as $page => $contents) {
+            preg_match_all('/<button\b[^>]*button-danger[^>]*>/', $contents, $matches);
+            foreach ($matches[0] as $tag) {
+                if (!str_contains($tag, 'type="submit"')) {
+                    continue;
+                }
+                if (!str_contains($tag, 'data-confirm=')) {
+                    $offenders[] = $page . ': ' . substr($tag, 0, 70);
+                }
+            }
+        }
+
+        self::assertSame([], $offenders, 'a .button-danger submit must ask before it destroys');
+    }
+
+    public function testConfirmPromptsAreLocalized(): void
+    {
+        // The dialog prints data-confirm verbatim, so a literal here would ship
+        // untranslated prose straight into the modal (ADR-0014). The prompt may
+        // reach the attribute through a local variable (missions.php picks one of
+        // three wordings), so resolve exactly that one indirection.
+        $offenders = [];
+        foreach ($this->portalPages() as $page => $contents) {
+            // The log detail imports the same translated retry prompt owner as
+            // deploy.php. Its name does not match the detail's renderer prefix.
+            if (str_contains($contents, "require_once __DIR__ . '/../lib/deploy_retry_confirmation.php';")) {
+                $contents .= "\n" . (string) file_get_contents($this->root() . '/lib/deploy_retry_confirmation.php');
+            }
+            preg_match_all('/data-confirm(?:-action)?="([^"]*)"/', $contents, $matches);
+            foreach ($matches[1] as $value) {
+                if (str_contains($value, '__t(')) {
+                    continue;
+                }
+                if (preg_match('/\$([a-zA-Z_][a-zA-Z0-9_]*)/', $value, $variable) === 1
+                    && preg_match('/\$' . preg_quote($variable[1], '/') . '\s*=[^;]*__t\(/', $contents) === 1) {
+                    continue;
+                }
+                $offenders[] = $page . ': ' . $value;
+            }
+        }
+
+        self::assertSame([], $offenders, 'data-confirm/-action must render a __t() key, not a literal string');
+    }
+
+    public function testTheConfirmDialogIsRenderedExactlyOnce(): void
+    {
+        // One dialog for the whole portal. A second one would fight for the top
+        // layer and only the first would be wired.
+        $modals = $this->read(self::MODALS);
+        self::assertSame(1, substr_count($modals, 'data-confirm-dialog'), 'layout_modals.php holds the one confirm dialog');
+
+        foreach ($this->portalPages() as $page => $contents) {
+            self::assertStringNotContainsString('data-confirm-dialog', $contents, $page . ' must not build its own confirm dialog');
+        }
+        self::assertStringNotContainsString('data-confirm-dialog', $this->read(self::LAYOUT), 'the dialog markup lives in layout_modals.php');
+    }
+
+    public function testLayoutFooterActuallyRendersBothModals(): void
+    {
+        // Extracting the markup into layout_modals.php introduced a new silent
+        // failure: a footer that stops calling the renderer ships a portal where
+        // every data-confirm button submits straight through, with no prompt and
+        // no error. Pin the calls, not just the markup.
+        $layout = $this->read(self::LAYOUT);
+
+        self::assertStringContainsString("require_once __DIR__ . '/layout_modals.php'", $layout, 'layout.php must load the modal module');
+        self::assertStringContainsString('layout_confirm_dialog();', $layout, 'layout_footer() must render the confirm dialog');
+        self::assertStringContainsString('layout_session_modal();', $layout, 'layout_footer() must render the session modal');
+
+        // Both calls belong to layout_footer(), not to some other function.
+        $footer = strstr($layout, 'function layout_footer(): void');
+        self::assertIsString($footer, 'layout_footer() must exist');
+        $footer = strstr($footer, 'function status_badge', true) ?: $footer;
+        self::assertStringContainsString('layout_confirm_dialog();', $footer, 'the confirm dialog is rendered by layout_footer()');
+        self::assertStringContainsString('layout_session_modal();', $footer, 'the session modal is rendered by layout_footer()');
+    }
+
+    public function testNoPageHandRollsABrowserPrompt(): void
+    {
+        $scan = $this->portalPages() + [
+            'portal/assets/*.js' => $this->appJs(),
+            self::MODALS => $this->read(self::MODALS),
+        ];
+
+        $offenders = [];
+        foreach ($scan as $file => $contents) {
+            $code = $this->stripComments($contents);
+            if (preg_match('/(?<![\w.])(?:window\.)?(?:confirm|alert)\s*\(/', $code) === 1) {
+                $offenders[] = $file;
+            }
+        }
+
+        self::assertSame([], $offenders, 'confirmations use the shared <dialog>, never window.confirm()/alert()');
+    }
+
+    public function testTheReplayPreservesTheFormSubmitter(): void
+    {
+        $code = $this->stripComments($this->appJs());
+
+        self::assertStringContainsString('form.requestSubmit(trigger)', $code, 'the accepted click must be replayed through requestSubmit()');
+        // logoutForm.submit() is a different form and stays legal; only the
+        // confirm replay's own `form` variable is forbidden from using it.
+        self::assertSame(0, preg_match('/(?<![\w$])form\s*\.\s*submit\s*\(/', $code), 'form.submit() drops the submitter and strips name="action"');
+    }
+
+    public function testAppJsReadsEveryConfirmAttributeTheMarkupRenders(): void
+    {
+        $appJs = $this->appJs();
+        $markup = $this->read(self::MODALS);
+        foreach ($this->portalPages() as $contents) {
+            $markup .= $contents;
+        }
+
+        $used = [];
+        foreach (['data-confirm', 'data-confirm-action', 'data-confirm-dialog', 'data-confirm-msg', 'data-confirm-accept'] as $attribute) {
+            if (str_contains($markup, $attribute)) {
+                $used[] = $attribute;
+            }
+        }
+
+        self::assertNotSame([], $used, 'the confirmation markup disappeared entirely');
+        foreach ($used as $attribute) {
+            self::assertStringContainsString($attribute, $appJs, $attribute . ' is rendered but never read');
+        }
+    }
+
+    public function testBothModalsShareTheOneBaseComponent(): void
+    {
+        // Session warning and confirm dialog are both <dialog class="modal">; a
+        // third hand-rolled modal would duplicate the focus trap and z-index.
+        // Comments stripped: the module's own docblock quotes the markup it documents.
+        $modals = $this->stripComments($this->read(self::MODALS));
+        self::assertSame(2, preg_match_all('/<dialog\b[^>]*class="modal/', $modals), 'both portal modals use the shared .modal base');
+        self::assertStringNotContainsString('class="session-modal"', $modals, 'the session modal was folded into .modal');
+
+        // The modal module is the only place that opens a <dialog> in markup.
+        foreach ($this->portalPages() as $page => $contents) {
+            self::assertStringNotContainsString('<dialog', $contents, $page . ' must not hand-roll a modal');
+        }
+    }
+}

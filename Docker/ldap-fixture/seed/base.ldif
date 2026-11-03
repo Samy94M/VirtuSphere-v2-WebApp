@@ -1,0 +1,47 @@
+# Hermetic LDAP fixture seed. Identical content on dc1 and dc2 (both
+# containers mount this same file): mirrors two AD replicas holding the same
+# object, so a failover test finds the same objectGUID on either controller.
+
+dn: dc=vs-ldap,dc=test
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: VirtuSphere LDAP Fixture
+dc: vs-ldap
+
+dn: cn=svc-bind,dc=vs-ldap,dc=test
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: svc-bind
+description: VirtuSphere hermetic fixture service account (test-only, not a real secret)
+userPassword: fixture-svc-Pass123!
+
+dn: ou=people,dc=vs-ldap,dc=test
+objectClass: organizationalUnit
+ou: people
+
+# Fixed 16-byte objectGUID (hex 000102030405060708090a0b0c0d0e0f), so
+# DirectoryLdapFixtureTest can assert the exact raw round trip.
+dn: cn=alice,ou=people,dc=vs-ldap,dc=test
+objectClass: user
+cn: alice
+sn: Example
+displayName: Alice Example
+userPrincipalName: alice@vs-ldap.test
+sAMAccountName: alice
+sAMAccountType: 805306368
+objectCategory: person
+userAccountControl: 512
+accountExpires: 0
+mail: alice@vs-ldap.test
+userPassword: fixture-alice-Pass123!
+objectGUID:: AAECAwQFBgcICQoLDA0ODw==
+
+# Subordinate referral inside the search subtree: proves LDAP_OPT_REFERRALS=0
+# stops the client from chasing an out-of-band host (referral-target.invalid
+# never resolves) instead of quietly hanging or erroring the whole search.
+dn: ou=elsewhere,ou=people,dc=vs-ldap,dc=test
+objectClass: referral
+objectClass: extensibleObject
+ou: elsewhere
+ref: ldap://referral-target.invalid/ou=elsewhere,ou=people,dc=vs-ldap,dc=test

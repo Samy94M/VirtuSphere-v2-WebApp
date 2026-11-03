@@ -1,0 +1,296 @@
+/* Tables and lists: the row-level rules the shared table skeleton in base.css
+   does not own. Row action cells, the opt-in pinned action column, the
+   collapsible row editor, deep-link row targets, pagination and the two log
+   line families.
+
+   One of the four domain sheets that replaced components.css in Etappe 16. */
+
+/* Log message column: audit rows quote user input and tokens, i.e. long
+   unbroken strings. `anywhere` also lowers min-content, so a floor keeps the
+   column from being squeezed by the near-nowrap columns beside it. */
+
+.log-message {
+    overflow-wrap: anywhere;
+    min-width: 320px;
+}
+
+/* An empty result row reads as a state, not as a data row. */
+
+.table-empty {
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--muted);
+}
+
+/* An empty-table sentence that names its fix links it inside the prose (R11),
+   and colour alone does not mark a link there (WCAG 1.4.1), as for `.alert a`. */
+.table-empty a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+td.actions {
+    /* Keep this a real table-cell, NOT display:flex. A flex <td> does not stretch
+       to the row height, so when the data cells are taller (wrapped OS names, a
+       two-line MECM cell) its bottom border floats up at the button height and the
+       row separator looks like detached line stubs under the actions column. As a
+       table-cell the border always sits at the row bottom. Row actions lay out
+       inline on one line; the user-admin cell opts into stacking via .actions-stack. */
+    display: table-cell;
+    vertical-align: middle;
+    /* Size to content instead of forcing a wide floor, so the table gives the
+       freed width back to the Name/Email columns. */
+    width: 1%;
+    white-space: nowrap;
+}
+
+td.actions > * {
+    vertical-align: middle;
+}
+
+td.actions > * + * {
+    margin-left: 8px;
+}
+
+/* The user-admin cell stacks its form controls (role select, password field)
+   vertically, one control group per line. */
+
+td.actions.actions-stack > * {
+    display: flex;
+    margin-left: 0;
+}
+
+td.actions.actions-stack > * + * {
+    margin-top: 6px;
+}
+
+td.actions .button,
+td.actions button.button,
+td.actions a.button {
+    min-height: 30px;
+    padding: 4px 9px;
+    font-size: 0.85rem;
+}
+
+td.actions .inline-form {
+    flex-wrap: nowrap;
+    gap: 6px;
+}
+
+td.actions .inline-form select,
+td.actions .inline-form input {
+    flex: 0 0 auto;
+    width: 130px;
+    min-width: 0;
+}
+
+td.actions .inline-form .button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* Opt-in pinned action column. The VM list is the only table that asks for it:
+   it carries up to fifteen columns, so the row actions leave the viewport at
+   exactly the width that makes the row hard to identify again, and the operator
+   scrolls right, loses the name, scrolls back to read it and right again to
+   click. Every other table either fits or has no per-row action worth chasing,
+   and users.php stays out on purpose: two data columns never push the actions
+   off screen, and pinning there would only take width from the e-mail column.
+
+   The background has to be opaque, not inherited: this cell slides over the
+   data cells beside it, and .table-wrap paints --surface while a hovered row
+   paints --surface-muted, so the hover state is repeated here instead of being
+   left to shine through. */
+
+.table-sticky-actions .table-action-cell {
+    position: sticky;
+    right: 0;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+}
+
+/* Stacking against the sticky header from base.css (th, z-index 1): the body's
+   pinned cell has to clear the data cells, and the header's pinned cell has to
+   clear both. The header rule also restores the header tone, which the
+   two-class selector above would otherwise overwrite with --surface. */
+
+.table-sticky-actions td.table-action-cell {
+    z-index: 2;
+}
+
+.table-sticky-actions th.table-action-cell {
+    z-index: 3;
+    background: var(--surface-muted);
+}
+
+.table-wrap .table-sticky-actions tbody tr:hover > td.table-action-cell {
+    background: var(--surface-muted);
+}
+
+/* Below the wrap breakpoint the table is read by scrolling, and a pinned column
+   of two buttons would hold a third of the viewport permanently. */
+
+@media (max-width: 720px) {
+    .table-sticky-actions .table-action-cell {
+        position: static;
+        border-left: 0;
+    }
+}
+
+/* Collapsible row editors (credentials): the editor row reads as a drawer of
+   the record above it, not as a separate record. The record row keeps its
+   bottom border only while the drawer is closed. */
+
+tr:has(+ tr.row-editor:not([hidden])) > td,
+tr:has(+ tr.row-editor[hidden]:last-child) > td {
+    border-bottom: 0;
+}
+
+tr.row-editor > td {
+    padding: 4px 12px 14px;
+    background: var(--surface-muted);
+}
+
+tr.row-editor .form-grid {
+    margin-top: 8px;
+}
+
+/* The drawer background is the same muted tone the fields normally use, so
+   inside it the field/background relationship inverts to keep the contrast. */
+
+tr.row-editor input,
+tr.row-editor select,
+tr.row-editor textarea {
+    background: var(--surface);
+}
+
+/* UX-HK: the host identity of an Ansible credential is a full-width row under
+   its record, reached through the anchor host-identity-<id>. It opens by itself
+   while someone has to act; the warning bar on the left marks that state. The
+   record above keeps no bottom border, so both read as one entry. */
+
+tr:has(+ tr.row-host-identity) > td {
+    border-bottom: 0;
+}
+
+tr.row-host-identity > td {
+    padding: 4px 12px 14px;
+    background: var(--surface-muted);
+}
+
+tr.row-host-identity[data-host-identity-attention] > td {
+    box-shadow: inset 3px 0 0 var(--warning);
+}
+
+tr.row-host-identity .host-identity-commands {
+    margin: 4px 0 0;
+    padding-left: 1.25em;
+}
+
+tr.row-host-identity input,
+tr.row-host-identity select {
+    background: var(--surface);
+}
+
+tr.row-host-identity .host-identity-replace {
+    margin-top: 8px;
+}
+
+/* F08 "Verwendet in": the usage section is a full-width row under the record it
+   explains (a credential's details row, or the catalog entry the page selected).
+   It reads as part of that record, like the host identity row above. */
+
+tr:has(+ tr.row-usage) > td {
+    border-bottom: 0;
+}
+
+tr.row-usage > td {
+    padding: 4px 12px 14px;
+    background: var(--surface-muted);
+}
+
+tr.row-usage details > summary {
+    margin-top: 4px;
+}
+
+.usage-evidence .usage-group {
+    margin-top: 10px;
+}
+
+.usage-evidence .usage-group ul {
+    margin: 4px 0 0;
+    padding-left: 1.25em;
+}
+
+/* The links of a usage line sit in prose, so colour alone does not mark them
+   (WCAG 1.4.1), as for `.table-empty a`. */
+.usage-evidence li a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.pagination {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    margin-top: 14px;
+}
+
+.pagination-info {
+    opacity: 0.8;
+}
+
+.log-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* The job log's wrap switch. Wrapping is the default, so the switch is on when
+   the page loads and turning it OFF is what changes something: a long Ansible
+   line then keeps its original structure and the table scrolls sideways, which
+   is what an operator comparing two runs needs. The container carries the class
+   so one toggle reaches every row without touching them individually. */
+
+.log-nowrap .log-line {
+    white-space: pre;
+    overflow-wrap: normal;
+}
+
+/* An error line of the job log (E1): a create FAIL or HOLD line or an Ansible
+   `fatal:` head, decided by deploy_log_line_severity(). The tint and the edge
+   are the accent; the word in .log-flag is the signal, so the row still reads
+   as an error without colour, in print and under forced colours. */
+.log-row-error > td {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.log-row-error > td:first-child {
+    box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.log-flag {
+    color: var(--danger);
+    white-space: nowrap;
+}
+
+/* The phase column of the mission list (SP4 R1): one badge per reached phase,
+   all in one link to the VM list sorted by phase. The badges wrap inside the
+   cell instead of widening the table; the phase word carries the meaning, so
+   forced colours lose nothing but the tint. */
+.mission-phases {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    color: inherit;
+}
+
+.mission-phases:hover,
+.mission-phases:focus-visible {
+    text-decoration: none;
+}
+
+.mission-phases:hover .badge {
+    border-color: var(--accent);
+}

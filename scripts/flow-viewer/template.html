@@ -1,0 +1,375 @@
+<title>VirtuSphere-Abläufe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: Dokument-Tabs oben, Abschnitts-Tabs als Leiste links, ein Ablauf je Ansicht, Blättern über alle Dokumente. */
+:root {
+  --bg: #eef2f1;
+  --surface: #ffffff;
+  --rail: #e4eae8;
+  --ink: #152120;
+  --muted: #566866;
+  --rule: #cfd9d7;
+  --accent: #0d6a64;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefec;
+  --code-bg: #e7eeec;
+  --focus: #0d6a64;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1514;
+    --surface: #152020;
+    --rail: #111b1a;
+    --ink: #e1eae8;
+    --muted: #93a6a3;
+    --rule: #263635;
+    --accent: #5ec3b7;
+    --accent-ink: #0b1716;
+    --accent-soft: #163330;
+    --code-bg: #1d2b2a;
+    --focus: #5ec3b7;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1514;
+  --surface: #152020;
+  --rail: #111b1a;
+  --ink: #e1eae8;
+  --muted: #93a6a3;
+  --rule: #263635;
+  --accent: #5ec3b7;
+  --accent-ink: #0b1716;
+  --accent-soft: #163330;
+  --code-bg: #1d2b2a;
+  --focus: #5ec3b7;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  padding-inline: 16px;
+  padding-block: 0 40px;
+}
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+code { font-family: var(--mono); font-size: 0.87em; background: var(--code-bg); padding: 0.05em 0.35em; border-radius: 3px; overflow-wrap: anywhere; }
+.shell { max-width: 1360px; margin-inline: auto; display: grid; gap: 18px; }
+.masthead { display: grid; gap: 8px; padding-block: 28px 4px; }
+.masthead h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: clamp(1.7rem, 3.4vw, 2.4rem); line-height: 1.1; letter-spacing: -0.005em; text-wrap: balance; }
+.masthead p { margin: 0; max-width: 72ch; color: var(--muted); }
+.stamps { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.stamps li { font-family: var(--mono); font-size: 12px; padding: 2px 9px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface); color: var(--muted); font-variant-numeric: tabular-nums; }
+.stamps li strong { color: var(--ink); font-weight: 500; }
+.doc-tabs { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--rule); padding-bottom: 10px; }
+.doc-tab { font: 500 14px/1.2 var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 9px 14px; cursor: pointer; display: inline-flex; align-items: baseline; gap: 8px; }
+.doc-tab .count { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.doc-tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.doc-tab[aria-selected="true"] .count { color: var(--accent-ink); }
+.layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { background: var(--rail); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 8px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 24px); overflow-y: auto; }
+.rail-title { margin: 2px 8px 8px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; color: var(--muted); overflow-wrap: anywhere; }
+.sec-tabs { display: grid; gap: 2px; }
+.sec-tab { text-align: left; font: 400 14px/1.35 var(--sans); color: var(--ink); background: transparent; border: 0; border-radius: 5px; padding: 6px 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; width: 100%; }
+.sec-tab.child { padding-left: 24px; font-size: 13.5px; }
+.sec-tab.child::before { content: ""; }
+.sec-tab .n { font-family: var(--mono); font-size: 11px; color: var(--muted); flex: none; }
+.sec-tab:hover { background: var(--accent-soft); }
+.sec-tab[aria-selected="true"] { background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
+.stage { position: relative; overflow: hidden; min-width: 0; }
+.panel { display: grid; gap: 16px; min-width: 0; }
+.panel.is-parked { position: absolute; top: 0; left: 0; right: 0; visibility: hidden; pointer-events: none; }
+.panel-head { display: grid; gap: 4px; }
+.eyebrow { margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.03em; color: var(--accent); overflow-wrap: anywhere; }
+.panel-head h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 1.6rem; line-height: 1.15; text-wrap: balance; }
+.panel-head .src { font-size: 13px; }
+.md { display: grid; gap: 12px; max-width: 80ch; min-width: 0; }
+.md > * { margin: 0; }
+.md ul, .md ol { padding-left: 1.3em; display: grid; gap: 4px; }
+.md pre { margin: 0; overflow-x: auto; background: var(--code-bg); border-radius: 6px; padding: 12px 14px; font-family: var(--mono); font-size: 12.5px; }
+.md pre code { background: none; padding: 0; }
+.md pre.raw { white-space: pre-wrap; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); max-width: none; }
+.md:has(.table-wrap) { max-width: none; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 7px 11px; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; font-size: 12.5px; color: var(--muted); background: var(--bg); letter-spacing: 0.02em; }
+tr:last-child td { border-bottom: 0; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px; }
+.diagram pre.mermaid { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre; color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--rule); padding-top: 14px; }
+.pager button { font: 500 14px/1.3 var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; cursor: pointer; max-width: 46%; text-align: left; display: grid; gap: 1px; }
+.pager button[disabled] { opacity: 0.45; cursor: default; }
+.pager button .dir { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+.pager button.next { text-align: right; margin-left: auto; }
+.pos { font-family: var(--mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hint { margin: 0; font-size: 12.5px; color: var(--muted); }
+kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .rail { position: static; max-height: none; overflow-x: auto; }
+  .sec-tabs { display: flex; gap: 4px; }
+  .sec-tab, .sec-tab.child { width: auto; flex: none; padding-left: 10px; white-space: nowrap; }
+  .pager button { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="shell">
+  <header class="masthead">
+    <h1>VirtuSphere-Abläufe</h1>
+    <p>Alle Ablaufdiagramme aus <code>docs/operations</code> an einem Ort. Die Doku im Repository ist die Quelle; diese Seite wird daraus erzeugt und zeigt den ausgelieferten Stand. Beschlossene, noch nicht gelieferte Änderungen stehen in den Plänen unter <code>docs/audits</code>.</p>
+    <ul class="stamps">
+      <li>Stand <strong>{{COMMIT}}</strong>{{DIRTY}}</li>
+      <li>erzeugt <strong>{{GENERATED}}</strong></li>
+      <li><strong>{{DOC_COUNT}}</strong> Dokumente · <strong>{{DIAGRAM_COUNT}}</strong> Diagramme</li>
+    </ul>
+  </header>
+  <div class="doc-tabs" role="tablist" aria-label="Dokumente" id="doc-tabs"></div>
+  <div class="layout">
+    <nav class="rail" aria-label="Abschnitte" id="rail"></nav>
+    <main class="stage" id="stage">
+{{PANELS}}
+    </main>
+  </div>
+  <div class="pager" id="pager">
+    <button type="button" class="prev" id="prev"><span class="dir">Zurück</span><span id="prev-label"></span></button>
+    <span class="pos" id="pos"></span>
+    <button type="button" class="next" id="next"><span class="dir">Weiter</span><span id="next-label"></span></button>
+  </div>
+  <p class="hint">Blättern: <kbd>←</kbd> <kbd>→</kbd> außerhalb der Tab-Leisten, in den Leisten die Pfeiltasten, <kbd>Pos1</kbd> und <kbd>Ende</kbd>.</p>
+</div>
+
+<script type="application/json" id="flow-data">{{DATA_JSON}}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  var data = JSON.parse(document.getElementById("flow-data").textContent);
+  var docsByFile = {};
+  var flat = [];
+  data.docs.forEach(function (doc) {
+    docsByFile[doc.file] = doc;
+    doc.sections.forEach(function (sec) { flat.push({ doc: doc, sec: sec }); });
+  });
+
+  function plain(text) { return String(text).replace(/`/g, "").trim(); }
+  function ghSlug(text) {
+    return plain(text).toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s/g, "-");
+  }
+  function indexOfSection(doc, anchor) {
+    for (var i = 0; i < flat.length; i++) {
+      if (flat[i].doc !== doc) { continue; }
+      if (!anchor || ghSlug(flat[i].sec.label) === anchor) { return i; }
+    }
+    return -1;
+  }
+  function resolvePath(baseFile, relative) {
+    var parts = baseFile.split("/");
+    parts.pop();
+    relative.split("/").forEach(function (seg) {
+      if (seg === "..") { parts.pop(); } else if (seg !== "." && seg !== "") { parts.push(seg); }
+    });
+    return parts.join("/");
+  }
+
+  // Prose: Markdown aus der Doku, gerendert und bereinigt.
+  var canRender = typeof window.marked !== "undefined" && typeof window.marked.parse === "function";
+  document.querySelectorAll(".md[data-md]").forEach(function (el) {
+    var source = data.md[Number(el.getAttribute("data-md"))];
+    var doc = docsByFile[el.getAttribute("data-file")];
+    if (canRender) {
+      var html = window.marked.parse(source, { gfm: true });
+      el.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
+    } else {
+      var pre = document.createElement("pre");
+      pre.className = "raw";
+      pre.textContent = source;
+      el.appendChild(pre);
+    }
+    el.querySelectorAll("table").forEach(function (table) {
+      var wrap = document.createElement("div");
+      wrap.className = "table-wrap";
+      table.parentNode.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
+    el.querySelectorAll("a[href]").forEach(function (a) { rewriteLink(a, doc); });
+  });
+
+  function rewriteLink(a, doc) {
+    var href = a.getAttribute("href");
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+      a.target = "_blank";
+      a.rel = "noopener";
+      return;
+    }
+    var hashAt = href.indexOf("#");
+    var pathPart = hashAt >= 0 ? href.slice(0, hashAt) : href;
+    var anchor = hashAt >= 0 ? href.slice(hashAt + 1) : "";
+    var target = pathPart === "" ? doc.file : resolvePath(doc.file, pathPart);
+    var targetDoc = docsByFile[target];
+    if (targetDoc) {
+      var idx = indexOfSection(targetDoc, anchor);
+      if (idx < 0) { idx = indexOfSection(targetDoc, ""); }
+      a.setAttribute("href", "#" + flat[idx].sec.id);
+      a.addEventListener("click", function (event) { event.preventDefault(); activate(idx, true); });
+      return;
+    }
+    a.setAttribute("href", data.blob + target + (anchor ? "#" + anchor : ""));
+    a.target = "_blank";
+    a.rel = "noopener";
+  }
+
+  // Tabs: Dokumente oben, Abschnitte in der Leiste.
+  var docTabs = document.getElementById("doc-tabs");
+  var rail = document.getElementById("rail");
+  var railLists = {};
+  data.docs.forEach(function (doc, d) {
+    var tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "doc-tab";
+    tab.id = "doc-tab-" + doc.key;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", "rail-" + doc.key);
+    tab.innerHTML = "<span></span><span class=\"count\"></span>";
+    tab.firstChild.textContent = doc.title;
+    tab.lastChild.textContent = doc.diagrams + (doc.diagrams === 1 ? " Diagramm" : " Diagramme");
+    tab.addEventListener("click", function () { activate(indexOfSection(doc, ""), false); });
+    tab.addEventListener("keydown", function (event) { tablistKeys(event, d, data.docs.length, function (n) { activate(indexOfSection(data.docs[n], ""), false); document.getElementById("doc-tab-" + data.docs[n].key).focus(); }); });
+    docTabs.appendChild(tab);
+
+    var group = document.createElement("div");
+    group.id = "rail-" + doc.key;
+    group.setAttribute("role", "tabpanel");
+    group.setAttribute("aria-labelledby", tab.id);
+    group.hidden = true;
+    var title = document.createElement("p");
+    title.className = "rail-title";
+    title.textContent = doc.file;
+    group.appendChild(title);
+    var list = document.createElement("div");
+    list.className = "sec-tabs";
+    list.setAttribute("role", "tablist");
+    list.setAttribute("aria-orientation", "vertical");
+    list.setAttribute("aria-label", doc.title);
+    group.appendChild(list);
+    rail.appendChild(group);
+    railLists[doc.key] = { group: group, tabs: [] };
+
+    doc.sections.forEach(function (sec) {
+      var i = flat.findIndex(function (f) { return f.sec === sec; });
+      var st = document.createElement("button");
+      st.type = "button";
+      st.className = "sec-tab" + (sec.child ? " child" : "");
+      st.id = "tab-" + sec.id;
+      st.setAttribute("role", "tab");
+      st.setAttribute("aria-controls", "p-" + sec.id);
+      if (sec.child && sec.group) { st.setAttribute("aria-label", plain(sec.group) + ": " + plain(sec.label)); }
+      var label = document.createElement("span");
+      label.textContent = plain(sec.label);
+      st.appendChild(label);
+      if (sec.diagrams > 0) {
+        var n = document.createElement("span");
+        n.className = "n";
+        n.textContent = String(sec.diagrams);
+        n.title = sec.diagrams === 1 ? "1 Diagramm" : sec.diagrams + " Diagramme";
+        st.appendChild(n);
+      }
+      st.addEventListener("click", function () { activate(i, false); });
+      var position = railLists[doc.key].tabs.length;
+      st.addEventListener("keydown", function (event) {
+        var tabs = railLists[doc.key].tabs;
+        tablistKeys(event, position, tabs.length, function (m) { activate(tabs[m].index, false); tabs[m].el.focus(); });
+      });
+      list.appendChild(st);
+      railLists[doc.key].tabs.push({ el: st, index: i });
+    });
+  });
+
+  function tablistKeys(event, current, count, go) {
+    var next = null;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") { next = (current + 1) % count; }
+    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") { next = (current - 1 + count) % count; }
+    else if (event.key === "Home") { next = 0; }
+    else if (event.key === "End") { next = count - 1; }
+    if (next === null) { return; }
+    event.preventDefault();
+    event.stopPropagation();
+    go(next);
+  }
+
+  var panels = flat.map(function (f) { return document.getElementById("p-" + f.sec.id); });
+  var active = -1;
+  function activate(i, focusPanel) {
+    if (i < 0 || i >= flat.length) { return; }
+    active = i;
+    var cur = flat[i];
+    data.docs.forEach(function (doc) {
+      var on = doc === cur.doc;
+      var tab = document.getElementById("doc-tab-" + doc.key);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      railLists[doc.key].group.hidden = !on;
+    });
+    railLists[cur.doc.key].tabs.forEach(function (t) {
+      var on = t.index === i;
+      t.el.setAttribute("aria-selected", on ? "true" : "false");
+      t.el.tabIndex = on ? 0 : -1;
+      if (on && typeof t.el.scrollIntoView === "function") { t.el.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+    });
+    panels.forEach(function (p, k) {
+      var on = k === i;
+      p.classList.toggle("is-parked", !on);
+      p.setAttribute("aria-hidden", on ? "false" : "true");
+      if (on) { p.removeAttribute("inert"); } else { p.setAttribute("inert", ""); }
+    });
+    var prev = flat[i - 1];
+    var next = flat[i + 1];
+    document.getElementById("prev").disabled = !prev;
+    document.getElementById("next").disabled = !next;
+    document.getElementById("prev-label").textContent = prev ? plain(prev.sec.label) : "Anfang";
+    document.getElementById("next-label").textContent = next ? plain(next.sec.label) : "Ende";
+    document.getElementById("pos").textContent = (i + 1) + " / " + flat.length;
+    try { history.replaceState(null, "", "#" + cur.sec.id); } catch (e) { /* Vorschau ohne History */ }
+    try { localStorage.setItem("vs-flow-last", cur.sec.id); } catch (e) { /* kein Speicher */ }
+    if (focusPanel) { panels[i].focus({ preventScroll: true }); }
+    var top = document.getElementById("doc-tabs").getBoundingClientRect().top;
+    if (top < 0) { window.scrollBy(0, top - 8); }
+  }
+
+  document.getElementById("prev").addEventListener("click", function () { activate(active - 1, false); });
+  document.getElementById("next").addEventListener("click", function () { activate(active + 1, false); });
+  document.addEventListener("keydown", function (event) {
+    if (event.altKey || event.ctrlKey || event.metaKey) { return; }
+    // Nur blättern, wenn der Fokus auf der Seite, einem Panel oder der
+    // Blätterleiste liegt: in Tab-Leisten gelten deren Pfeiltasten, und in
+    // breiten Tabellen oder Diagrammen scrollen die Pfeiltasten seitlich.
+    var t = event.target;
+    var onPage = t === document.body || t === document.documentElement ||
+      (t.classList && t.classList.contains("panel")) || (t.closest && t.closest("#pager"));
+    if (!onPage) { return; }
+    if (event.key === "ArrowRight") { event.preventDefault(); activate(active + 1, false); }
+    if (event.key === "ArrowLeft") { event.preventDefault(); activate(active - 1, false); }
+  });
+
+  function indexOfId(id) {
+    for (var i = 0; i < flat.length; i++) { if (flat[i].sec.id === id) { return i; } }
+    return -1;
+  }
+  var start = indexOfId((location.hash || "").replace(/^#/, ""));
+  if (start < 0) {
+    try { start = indexOfId(localStorage.getItem("vs-flow-last") || ""); } catch (e) { start = -1; }
+  }
+  activate(start < 0 ? 0 : start, false);
+})();
+</script>

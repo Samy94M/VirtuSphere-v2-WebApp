@@ -1,0 +1,77 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../lib/bootstrap.php';
+require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/password_policy.php';
+
+$user = portal_require_user($connection, true);
+$passwordMinLength = password_policy_min_length($connection);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    portal_guard_post($connection, $user);
+
+    if ((string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) !== VIRTUSPHERE_AUTH_SOURCE_LOCAL) {
+        flash_set('error', __t('account.directory_password_external'));
+        redirect_to('account.php');
+    }
+
+    $currentPassword = request_string($_POST, 'current_password');
+    $newPassword = request_string($_POST, 'new_password');
+    $confirmPassword = request_string($_POST, 'confirm_password');
+
+    $policyError = password_policy_error($newPassword, $passwordMinLength, 'account.err_new_password_min');
+    if ($policyError !== null) {
+        flash_set('error', $policyError);
+    } elseif ($newPassword !== $confirmPassword) {
+        flash_set('error', __t('account.err_confirm_mismatch'));
+    } elseif (!change_own_password($connection, (int) $user['id'], $currentPassword, $newPassword)) {
+        // A wrong current password is a failed authentication, not a form typo.
+        audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+            'scope' => 'own',
+            'reason' => VIRTUSPHERE_AUDIT_PASSWORD_REASON_CURRENT_WRONG,
+        ], (int) $user['id']);
+        flash_set('error', __t('account.err_current_wrong'));
+    } else {
+        // Admin resets are already logged under `users`; this closes the other
+        // half, so "every account change is recorded" finally holds.
+        audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            'scope' => 'own',
+        ], (int) $user['id']);
+        $_SESSION['must_change_password'] = false;
+        flash_set('success', __t('account.flash_changed'));
+        redirect_to('dashboard.php');
+    }
+    redirect_to('account.php');
+}
+
+layout_header(__t('account.title'), $user, 'account', 'users');
+$roleLabel = role_label((string) ($user['role'] ?? VIRTUSPHERE_ROLE_USER));
+$summary = trim((string) ($user['email'] ?? '')) !== ''
+    ? (string) $user['email'] . ' / ' . $roleLabel
+    : $roleLabel;
+?>
+<div class="stack">
+    <section class="panel">
+        <h2><?php echo h((string) $user['name']); ?></h2>
+        <p class="muted"><?php echo h($summary); ?></p>
+        <p><?php echo portal_badge((string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY ? 'info' : 'neutral', (string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY ? __t('account.source_directory') : __t('account.source_local')); ?></p>
+        <?php if ((string) ($user['auth_source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL) === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY) { ?>
+        <p><?php echo h(__t('account.directory_upn', ['upn' => (string) ($user['ad_upn'] ?? '')])); ?></p>
+        <div class="alert alert-info"><?php echo h(__t('account.directory_password_external')); ?></div>
+        <?php } else { ?>
+        <?php if ((int) $user['must_change_password'] === 1) { ?><div class="alert alert-error"><?php echo h(__t('account.must_change')); ?></div><?php } ?>
+        <form class="stack narrow-form" method="post" action="account.php">
+            <?php echo csrf_field(); ?>
+            <label for="current_password"><?php echo h(__t('account.current_password')); ?><input id="current_password" name="current_password" type="password" autocomplete="current-password" required></label>
+            <?php $passwordHintId = form_hint_id('account', 'passwords'); ?>
+            <label><?php echo h(__t('account.new_password')); ?><input name="new_password" type="password"<?php echo form_control_attrs('account', 'new_password', null, [$passwordHintId], ''); ?> autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" required></label>
+            <label><?php echo h(__t('account.confirm_password')); ?><input name="confirm_password" type="password"<?php echo form_control_attrs('account', 'confirm_password', null, [$passwordHintId], ''); ?> autocomplete="new-password" minlength="<?php echo h((string) $passwordMinLength); ?>" required></label>
+            <p class="hint" id="<?php echo h($passwordHintId); ?>"><?php echo h(__t('account.password_hint', ['min' => $passwordMinLength])); ?></p>
+            <div class="actions"><button class="button" type="submit"><?php echo h(__t('account.change_password')); ?></button></div>
+        </form>
+        <?php } ?>
+    </section>
+</div>
+<?php layout_footer(); ?>

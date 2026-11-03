@@ -1,0 +1,27 @@
+# PHPStan-Baseline-Ratchet (ADR-0015). Level 5, Scope lib/portal/tests; die
+# Maschinen-API-Dateien im WebAPI-Root (mecm-*.php, db_importMAC.php,
+# function.php) bleiben draussen: eingefrorene Wire-Surface, deren dynamisches
+# mysqli nur Baseline-Ballast erzeugen wuerde. Neue Befunde in analysierten
+# Dateien: fixen statt re-baselinen.
+includes:
+    - phpstan-baseline.neon
+
+parameters:
+    level: 5
+    # Ohne Deckel startet PHPStan je CPU einen Worker (16 auf dem Dev-Host) und
+    # die Docker-VM (8 GiB, geteilt mit den Stacks) killt Worker per OOM
+    # (exit 137, "Result is incomplete because of severe errors"). Vier Prozesse
+    # bleiben unter dem Budget und aendern keine Befunde, nur die Laufzeit.
+    parallel:
+        maximumNumberOfProcesses: 4
+    paths:
+        - lib
+        - portal
+        - tests
+    excludePaths:
+        - vendor
+        # var und logs sind gitignorierte Laufzeitverzeichnisse: in einem
+        # frischen CI-Checkout existieren sie nicht, ohne (?) bricht PHPStan
+        # dort mit "Invalid entry in excludePaths" ab.
+        - var (?)
+        - logs (?)

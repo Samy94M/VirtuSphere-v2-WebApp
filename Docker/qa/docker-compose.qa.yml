@@ -1,0 +1,238 @@
+# QA-Wegwerf-Stack: Override ueber docker-compose.yml (Integration-Lane,
+# ADR-0015-Ergaenzung / ADR-0031). Gestartet von scripts/check.ps1 als eigenes
+# Compose-Projekt (-p virtusphere-qa), nie von Hand neben dem Dev-Stack unter
+# demselben Projektnamen.
+#
+# Isolationsentscheidungen:
+# - Die Datenbank liegt in einem projekt-eigenen Named Volume statt im
+#   Dev-Bind-Mount: jeder Lane-Lauf beginnt mit einem frischen struktur.sql
+#   und stirbt mit `--profile tools down -v`. Kein Test laeuft je auf der
+#   Dev-Datenbank.
+# - ssl/ und virtusphere-conf.d/ sind Named Volumes, die php und webserver
+#   teilen: ein HTTPS-Zertifikats-Test im QA-Stack darf niemals die
+#   nginx-Konfiguration des Dev-Stacks anfassen.
+# - Der Code-Mount (Docker/WebAPI, Ansible) bleibt der Arbeitsbaum, denn genau
+#   dieser Stand soll bewiesen werden.
+# - Ports/Namen und die gesamte App-Umgebung kommen ausschliesslich aus qa.env.
+# - Laufzeitdateien und App-Logs teilen keine Hostdaten mit dem Dev-Stack.
+# - restart "no": ein crashender Service soll im QA-Lauf sichtbar rot sein,
+#   nicht per Neustart kaschiert werden.
+
+x-qa-runtime: &qa-runtime
+  type: volume
+  source: qa-app-runtime
+  target: /var/www/html/var
+  volume:
+    nocopy: true
+x-qa-logs: &qa-logs
+  type: volume
+  source: qa-app-logs
+  target: /var/www/html/logs
+  volume:
+    nocopy: true
+services:
+  webserver:
+    # Kein env_file, wie im Hauptcompose: das nginx-Image liest keinen dieser
+    # Werte, und die Ports kommen aus der Host-seitigen Interpolation von qa.env
+    # (--env-file), nicht aus der Container-Umgebung.
+    volumes:
+      - qa-ssl:/etc/nginx/ssl
+      - qa-conf:/etc/nginx/virtusphere-conf.d
+      - *qa-runtime
+      - *qa-logs
+    restart: "no"
+
+  php:
+    volumes:
+      - qa-ssl:/etc/nginx/ssl
+      - qa-conf:/etc/nginx/virtusphere-conf.d
+      - *qa-runtime
+      - *qa-logs
+      - type: volume
+        source: qa-backup-status
+        target: /var/backups/virtusphere-status
+        read_only: true
+        volume:
+          nocopy: true
+    # directory_ca_file() requires the CA cache directory to belong to the
+    # calling uid with mode 0700. E2E portal requests run as www-data, while a
+    # diagnostic docker exec defaults to root; sharing one ordinary /tmp child
+    # made the suite order-dependent. A nested tmpfs pins the FPM ownership
+    # before either caller runs, and root cannot replace the mountpoint.
+    tmpfs:
+      - /tmp/virtusphere-directory:uid=33,gid=33,mode=0700
+    restart: "no"
+
+  deploy-worker:
+    volumes:
+      - *qa-runtime
+      - *qa-logs
+    restart: "no"
+
+  maintenance-worker:
+    volumes:
+      - *qa-runtime
+      - *qa-logs
+    restart: "no"
+
+  mysql:
+    volumes:
+      - qa-mysql-data:/var/lib/mysql
+    restart: "no"
+
+# Hermetic LDAP-Fixture (Plan-Abschnitt 18.3, Etappe 7): eine gepinnte
+# Test-LDAP-Gegenstelle fuer die Integrationslane, kein PHP-Mock. dc1/dc2
+# sind echte slapd-Instanzen (Dienstkonto-Bind, Suche, objectGUID-Rohwert,
+# Referral, Monitor-Bind-Zaehler); die badcert-*-Dienste und ldap-blackhole
+# sind ein schlanker socat-TLS-/TCP-Stub, weil ein Zertifikatsfehler den
+# Handshake beendet, bevor je ein LDAP-PDU gesendet wird. Zertifikate/CAs in
+# Docker/WebAPI/tests/fixtures/ldap/ (README dort), Rollenlogik in
+# Docker/ldap-fixture/entrypoint.sh. DirectoryLdapFixtureTest.php beweist
+# den nativen PHP/ext-ldap-Pfad dagegen; ausserhalb der Integrationslane
+# (keine dieser Hostnamen aufloesbar) skippt die Suite dynamisch.
+  ldap-dc1:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: dc
+      CERT_NAME: root-a
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc1.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://127.0.0.1", "-b", "", "-s", "base"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-dc2:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: dc
+      CERT_NAME: dc2
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc2.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://127.0.0.1", "-b", "", "-s", "base"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-badcert-unknown-ca:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-stub
+      CERT_NAME: root-b
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc-unknown-ca.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-badcert-expired:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-stub
+      CERT_NAME: expired
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - expired.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-badcert-wrongname:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-stub
+      CERT_NAME: wrongname
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc-wrongname.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-dc-rotated:
+    # Real slapd, not a tls-stub: the CA-rotation scenario proves a genuine
+    # successful bind once the new CA is trusted, not just a TLS handshake.
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: dc
+      CERT_NAME: root-c
+    volumes:
+      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+    networks:
+      default:
+        aliases:
+          - dc-rotated.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://127.0.0.1", "-b", "", "-s", "base"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  ldap-blackhole:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: blackhole
+    networks:
+      default:
+        aliases:
+          - dc-blackhole.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+volumes:
+  qa-mysql-data:
+  qa-ssl:
+  qa-conf:
+  qa-app-runtime:
+  qa-app-logs:
+  qa-backup-status:

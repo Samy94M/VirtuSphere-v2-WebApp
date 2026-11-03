@@ -1,0 +1,11 @@
+[WARNING]: No inventory was parsed, only implicit localhost is available
+[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+[ERROR]: couldn't resolve module/action 'community.vmware.vmware_does_not_exist'. This often indicates a misspelling, missing collection, or incorrect module path.
+Origin: /tmp/um.yml:4:7
+
+2   gather_facts: false
+3   tasks:
+4     - name: Unknown module
+        ^ column 7
+
+exit=4

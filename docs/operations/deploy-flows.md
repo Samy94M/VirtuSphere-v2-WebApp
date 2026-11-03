@@ -1,0 +1,581 @@
+# Bereitstellung: Abläufe
+
+Die Bereitstellungsmodi und alle Ansible-Playbooks unter `Ansible/` als Ablaufdiagramm: vom Formular über den Deploy-Worker bis zum einzelnen Playbook-Schritt. Übergaben und Rückkanäle der ganzen Kette stehen in der [Bereitstellungskette](deploy-chain.md), Voraussetzungen und Supportgrenzen in [DEPLOYMENT.md](../DEPLOYMENT.md).
+
+Die Diagramme beschreiben den ausgelieferten Code. Wer Reihenfolge, Verzweigung oder Meldung eines Modus, des Workers oder eines Playbooks ändert, zieht das zugehörige Diagramm im selben Commit nach. Beschlossene, noch nicht gelieferte Änderungen stehen in den Plänen unter `docs/audits/`, nicht hier.
+
+## Modi auf einen Blick
+
+| Modus | Playbooks in dieser Reihenfolge | Staffelung | Liest | MAC-Ergebnis nötig | Braucht Datacenter/Datastore |
+|---|---|---|---|---|---|
+| `full` (Vollständige Kette) | Create je VM, dann `powercycleVMs`, `exportVMs`, `startVMs`; `autostartVMs` nur bei Mission mit Autostart | ja | Power-Cycle- und Start-Wartezeit | ja | ja |
+| `create` (VMs anlegen) | Create je VM | nein | nichts | nein | ja |
+| `powercycle` (Ein- und ausschalten mit MAC-Export) | `powercycleVMs`, dann `exportVMs` | ja | Power-Cycle-Wartezeit | ja | ja |
+| `export` (MAC-Adressen exportieren) | `exportVMs` | nein | nichts | ja | ja |
+| `start` (VMs starten) | `startVMs` | ja | Start-Wartezeit | nein | ja |
+| `autostart` (ESXi-Autostart anwenden) | `autostartVMs` | nein | nichts | nein | nein |
+| `inventory` (Inventar abrufen) | `inventoryESXi` | nein | nichts | nein | nein |
+
+Die Namen in Klammern sind die deutschen Portalbezeichnungen; `DeployFlowsDocContractTest` leitet Modi, Bezeichnungen und Playbook-Reihenfolge aus dem Code ab. `inventory` ist der Systemmodus des Inventarabrufs: ohne Mission, nie über das Formular. Er entsteht durch den Zeitplan, durch **Alle aktualisieren** und den Einzelabruf im Systemstatus, beim Speichern und Testen eines ESXi-Zugangs und nach einem `create`- oder `full`-Auftrag, dessen Create-Einheit eine Ansible-Job-ID dauerhaft gespeichert hat, unabhängig vom Endstatus. Quelle der Reihenfolge der Missionsmodi ist `ansible_playbooks_for_mode()`; `inventory` hat dort keinen Zweig, der Worker verzweigt vorher und startet `inventoryESXi` aus `VIRTUSPHERE_SYSTEM_PLAYBOOKS`. MAC-Erwartung und Create-Zeilen werden aus den Playbooks abgeleitet; die Staffelung und die Inventaraktualisierung verwenden dagegen die festen Listen `VIRTUSPHERE_DEPLOY_STAGGER_MODES` und `VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES`. Auch der Worker erkennt die Create-Einheit an den Playbooks (`ansible_mode_creates_vms()`), nicht an einem Modusliteral. `create_identity_check_tasks.yml` und `powercycle_vm_tasks.yml` sind eingebundene Task-Dateien. `requirements.yml` ist die Versionssperre der Collections und hat keinen Ablauf.
+
+Für `start`, `export`, `powercycle` und `autostart` friert derselbe Resolver die Auswahl ein und nimmt VMs ohne gebundene Instance-UUID aus dem Arbeitsumfang. Eine leere Auswahl ohne Formularmarker (interne Aufrufer) gilt dabei vorher als ganze Mission; im Formular sperrt eine leere Auswahl. Die übersprungenen IDs bleiben als Auftragsdiagnose getrennt von den ausführbaren `vm_ids`. Vorschau und Staffelplan enthalten nur ausführbare VMs. Ein Auftrag, bei dem alle VMs übersprungen werden, behält einen ausdrücklich leeren Arbeitsumfang und endet als No-op ohne Remote-Schritt; er wird niemals auf die ganze Mission ausgeweitet. Die übersprungenen VMs bleiben ohne Journal-Capture, Markierung, Touch oder Zustandsänderung. Ergebnis, Protokoll und Vorschau melden „N VMs nicht angelegt, übersprungen“; der Link „VMs anlegen“ wird nur Lesern mit `deploy.run` gezeigt.
+
+## Einreihen
+
+Das Formular sammelt Mission, ESXi- und Ansible-Zugang, Modus, VM-Auswahl, Wartezeiten, Startzeitpunkt, Staffelung und die ausführliche Ausgabe. Die Sperren darunter prüft die Seite vor dem Absenden und das Repository im Einreihen erneut.
+
+```mermaid
+flowchart TD
+  F["Formular: Mission, Zugänge, Modus, VM-Auswahl, Wartezeiten, Start sofort oder geplant, Staffelung, ausführliche Ausgabe"]
+  F --> B{"Einreihsperren frei?"}
+  B -->|nein| BX["Sperre mit Verweis anzeigen, nichts eingereiht"]
+  B -->|ja| T{"Zeitplan gültig? (höchstens 5 Minuten in der Vergangenheit, im Planungshorizont; Staffelung nur bei full, powercycle, start und im erlaubten Bereich)"}
+  T -->|nein| TX["Feldfehler am Formular, nichts eingereiht"]
+  T -->|ja| R["Gemeinsame Scope-Auflösung: Auswahl einfrieren, für Start, Export, Power-Cycle und Autostart ungebundene VMs ausnehmen"]
+  R --> HM{"Create-fähiger Modus und gebundene VMs, deren Bindung auf einem anderen Host liegt?"}
+  HM -->|ja, noch nicht bestätigt| PV["Bestätigungsseite: Warnung mit bisherigem Host; bei Zeitplan oder Staffelung die Vorschau nur für ausführbare VMs, übersprungene Anzahl und Create-Link"]
+  HM -->|nein, mit Zeitplan oder Staffelung, noch nicht bestätigt| PV
+  HM -->|nein und sofort, oder bestätigt| S
+  PV -->|Einreihen bestätigt| S{"Staffelung gesetzt?"}
+  S -->|ja, ausführbare VMs vorhanden| G["Je ausführbarer VM ein eigener Auftrag mit gemeinsamer Gruppen-ID und versetzter Startzeit"]
+  S -->|nein| J["Ein Auftrag mit eingefrorenem Umfang"]
+  S -->|ja, alles übersprungen| N["Geplanter Diagnose-No-op mit explizit leerem Umfang; kein Remote-Schritt"]
+  G --> C{"Modus legt VMs an?"}
+  J --> C
+  C -->|ja| CR["Je VM eine Create-Ergebniszeile in fester Reihenfolge (Name, ID); die Auswahl ist damit eingefroren"]
+  C -->|nein| Q
+  CR --> Q["Auftrag steht als queued bereit, mit geplantem Zeitpunkt"]
+  G --> Q
+  N --> Q
+```
+
+Einreihsperren, jeweils mit Verweis auf die Stelle, die sie behebt:
+
+- Voraussetzungen: Mission vorhanden, ESXi- und Ansible-Zugang vorhanden und gewählt, API-Basis-URL auflösbar.
+- Mission: gewählt, keine Vorlage, mindestens eine VM, kein anderer aktiver Auftrag.
+- Ort: Datastore gesetzt und Datacenter auflösbar, außer für `autostart`.
+- Identität: Das Inventar des gewählten Hosts kennt eine namensgleiche VM, die nicht an die Portal-VM gebunden ist.
+- Auswahl: im Formular nicht leer, gehört zur Mission, bleibt unter der Obergrenze je Auftrag. Nie angelegte VMs werden bei `start`, `export`, `powercycle` und `autostart` mit Hinweis ausgenommen.
+- Netz: allgemeine Zuordnung und PXE-Karte laut Netzvertrag; welche Modi sperren und welche nur warnen, steht in [DEPLOYMENT.md](../DEPLOYMENT.md#deploy-modes-and-the-mac-generation-power-cycle).
+- Create-Historie: Eine frühere Create-Einheit derselben VM ist noch ungeklärt (`uncertain`).
+- Host-Fähigkeit: Ein aktueller Befund „freie Lizenz“ des gewählten Hosts sperrt jeden schreibenden Modus (`create`, `full`, `powercycle`, `start`, `autostart`); `export` bleibt erlaubt. Ein veralteter oder fehlender Befund warnt nur. Dieselbe Prüfung läuft für Einzelauftrag, Staffelung und Wiederholung und im Worker erneut.
+- Host-Version (`create`, `full`): Eine aktuell gemeldete ESXi-Version unter 7.0 sperrt. Ebenso eine VM, deren Guest OS diese Version noch nicht kennt (Windows Server 2022 ab 7.0 Update 1, Windows 11 und Windows Server 2025 ab 8.0); jede solche VM erscheint als eigene Sperre mit Link in ihren Editor. Aus derselben Version leitet der Worker die Hardwareversion neuer VMs ab. Ein veralteter oder fehlender Befund sperrt nicht; dann wählt ESXi die Version. Einzelauftrag, Staffelung, Wiederholung und Worker fragen denselben Owner (`deploy_esxi_create_compatibility()`, ADR-0023 Nachtrag 7).
+
+Keine Sperre, aber eine Bestätigung vor dem Einreihen: Würde `create` oder `full` gebundene VMs anlegen, deren Bindung über ein anderes Zugangsziel nachgewiesen wurde (`vm_bound_esxi_host`, Vergleich ohne Groß-/Kleinschreibung und abschließenden Punkt), zeigt die Seite die Warnung mit dem bisherigen Host live an, und das Absenden führt zuerst auf eine Bestätigungsseite, auch ohne JavaScript. Create fände dort weder UUID noch Namen und legte die VMs neu an; die alten VMs und ihre MECM-Geräte laufen weiter. Eine Wiederholung nennt dieselbe Warnung im Bestätigungsdialog und neben „Erneut ausführen“ im Auftragsprotokoll; die Jobliste verlinkt in diesem Fall dorthin. Eine Bindung ohne bekannten Host warnt nicht.
+
+## Worker: ein Auftrag
+
+Der Deploy-Worker bearbeitet immer genau einen Auftrag. Ein Abbruch greift an jeder Schrittgrenze: Der laufende Schritt endet auf ESXi vollständig, danach startet kein weiterer.
+
+Vor jeder SSH-/SFTP-Anmeldung prüft der gemeinsame [Hostidentitäts-Guard](trust-flows.md#ssh-und-sftp-zum-ubuntu-host) den Pin gegen den aktuellen Zugang. Fehlende Bestätigung bei neuen Zugängen, Schlüsselabweichung, nicht dauerhaft speicherbare Prüfung oder interne Wiederanmeldung auf demselben Objekt brechen vor Passwort-/Dateiübertragung ab. Die Fehlerwege dieses Workers bleiben maßgeblich für VM- und Auftragszustände; der Host-Preflight läuft vor der Markierung `deploying`: Scheitert der Auftrag davor, bleiben alle VM-Zustände unverändert.
+
+```mermaid
+flowchart TD
+  L["Worker-Schleife: veraltete Aufträge ernten (Abschnitt Aufsicht), nächsten fälligen Auftrag beanspruchen, solange die Annahme nicht pausiert ist; keine Verfallszeit, der erste Claim speichert den tatsächlichen Start und nennt einen verspäteten Termin"]
+  L --> I{"Systemmodus inventory?"}
+  I -->|ja| INV["Inventarpfad: Playbook inventoryESXi (Abschnitt Playbooks)"]
+  I -->|nein| J["Claim speichert den Vorzustand pro Auftrag und VM; keine Rückfüllung alter Jobs"] --> K["Collection-Sperre (requirements.yml) lokal lesen"]
+  K -->|fehlt oder ungültig| KX["Auftrag failed, noch ohne SSH; VM-Zustände unverändert"]
+  K --> P{"Netzvertrag nach dem Beanspruchen erneut erfüllt?"}
+  P -->|nein| PX["Auftrag failed (configuration_blocked); nichts hochgeladen, nichts auf ESXi geändert"]
+  P -->|ja| W{"Schreibender Modus und aktueller Befund „freie Lizenz“?"}
+  W -->|ja| WX["Auftrag failed (configuration_blocked); nichts hochgeladen, VM-Zustände unverändert"]
+  W -->|nein, veraltet oder unbekannt: Hinweis im Protokoll| CV{"Modus legt VMs an? Dann Create-Urteil aus der gemeldeten ESXi-Version"}
+  CV -->|aktuell bekannt, unter 7.0 oder Guest OS einer VM jünger als der Host| CVX["Auftrag failed (configuration_blocked) mit Version und betroffenen VMs; nichts hochgeladen, VM-Zustände unverändert"]
+  CV -->|aktuell bekannt| CVH["Hardwareversion für neue VMs aus der Tabelle: 7.0: 17, 7.0 U1: 18, 7.0 U2: 19, 8.0: 20, 8.0 U2: 21"]
+  CV -->|veraltet oder unbekannt: Hinweis im Protokoll| CVU["Keine Version: ESXi wählt seinen Standard"]
+  CV -->|kein Create-Modus| D["Zugangsdaten entschlüsseln, jede Logzeile gegen beide Geheimnisse schwärzen"]
+  CVH --> D
+  CVU --> D
+  D --> H["Ansible-Host-Preflight per SSH: ansible-playbook, python3, pyvmomi, requests, community.vmware (Modul vmware_guest), Laufzeitversionen, Async-Arbeitsbereich; bei Modi mit MAC-Export zusätzlich Portal-Erreichbarkeit und IP-Freigabe des Hosts"]
+  H -->|Komponente fehlt| HX["Auftrag failed mit Name der Komponente (terminal_reason timeout bei überschrittenem Transportbudget); VM-Zustände unverändert"]
+  H -->|MAC-Modus, IP nicht oder nicht als Ansible-Host freigegeben| HAX["Auftrag failed (configuration_blocked), Link auf die Freigabeliste; kein Upload, VM-Zustände unverändert"]
+  H -->|Hostidentität nicht freigegeben| HKX["Auftrag failed mit geschlossener Hostidentitätsursache, kein Login und kein Upload"]
+  H --> SW["Liegengebliebene accounts.yml früherer Aufträge desselben Zugangs auf diesem Ziel entfernen (nächster Kontakt, bricht den Auftrag nicht ab)"]
+  SW --> M["Nach dem Preflight markieren zustandsändernde Modi ihre VMs; start/autostart schreiben nie Lifecycle oder MECM"]
+  M --> A["Artefakte bauen: accounts.yml, serverlist.yml (mit create_hardware_version, leer wenn unbekannt), Vertrauensdatei, Upload-Skript mit Mission und Auftrag"]
+  A --> AS{"Schreibt der Auftrag Autostart?"}
+  AS -->|ja| AP{"Aktueller Befund des Hosts?"}
+  AP -->|freie Lizenz (nur theoretisch: W hat schon gesperrt)| APX["Auftrag failed, noch vor dem Upload; unberührte VM-Zustände bleiben erhalten"]
+  AP -->|HA-Cluster| APH["Modus autostart: failed ohne Lifecycle-/MECM-Schreibzugriff; Modus full: Autostart-Schritt entfällt"]
+  AP -->|unbekannt oder veraltet| APW["Hinweis im Protokoll, weiter"]
+  AP -->|keine Einschränkung| U
+  AS -->|nein| U["Arbeitsverzeichnis per SFTP auf den Ansible-Host laden"]
+  APH --> U
+  APW --> U
+  U --> C{"Modus legt VMs an?"}
+  C -->|ja| CS["Create je VM (Abschnitt unten)"]
+  CS --> CA{"Alle Create-Einheiten erfolgreich?"}
+  CA -->|nein| CAX["Kein weiteres Playbook; Create-Startbeleg entscheidet je VM: unberührt restore, bekannte Änderung failed, unbekannt bleibt offen"]
+  CA -->|ja| R{"Weitere Playbooks im Modus?"}
+  C -->|nein| R
+  R -->|ja, nach Create| RS["serverlist.yml mit den soeben gebundenen UUIDs neu schreiben und hochladen"]
+  RS --> ST
+  R -->|ja| ST["Nächstes Playbook: Schrittgrenze prüfen (eigener Auftrag, kein Abbruch), dann ansible-playbook ausführen"]
+  ST -->|Exitcode ungleich 0| STX["Auftrag failed (terminal_reason execution_failed); Journal stellt unberührte VMs wieder her und scheitert nur bestätigte angefasste VMs; MAC-Erfolge bleiben"]
+  ST -->|SSH-Verbindung zum Ansible-Host mitten im Schritt verloren| STU["Auftrag outcome_unknown (terminal_reason ansible_connection_lost); VMs wie bei failed, kein gespeicherter Fehlschritt; ein vorher angeforderter Abbruch gewinnt"]
+  ST -->|Abbruch angefordert| CX["Auftrag cancelled (terminal_reason operator_cancelled); dieselbe VM-Journalregel gilt"]
+  ST -->|nächster Schritt| ST
+  ST -->|letzter Schritt fertig| E
+  R -->|nein| E{"Modus erwartet MAC-Ergebnis?"}
+  E -->|nein| EO["VM-Zustand zurücksetzen, Auftrag succeeded (terminal_reason completed)"]
+  E -->|ja| EM{"MAC-Ergebnis des Rückrufs?"}
+  EM -->|fehlt oder alle VMs gescheitert| EMX["Auftrag failed; nur bestätigte angefasste VMs failed, unberührte VMs behalten beide Vorzustände"]
+  EM -->|teilweise| EMP["gescheiterte VMs failed, Auftrag partial (terminal_reason partial_result)"]
+  EM -->|vollständig| EMS["Auftrag succeeded; gebundene VMs behalten ihren Zustand ohne neuen MECM-Pickup, fehlende MACs werden nur übernommen"]
+  EO --> Z
+  EMP --> Z
+  EMS --> Z
+  CAX --> Z
+  Z["Nach jedem Endzustand von create/full: Inventarabruf für den Host einreihen, wenn eine Create-Einheit eine gespeicherte Ansible-Job-ID hat; fail-soft, dedupliziert"]
+  KX --> FIN
+  PX --> FIN
+  WX --> FIN
+  HX --> FIN
+  HAX --> FIN
+  HKX --> FIN
+  APX --> FIN
+  APH -->|autostart| FIN
+  STX --> Z
+  STU --> Z
+  CX --> Z
+  EMX --> Z
+  Z --> FIN["Ab den vorbereiteten Dateien, auf jedem Weg (finally): accounts.yml auf dem Ansible-Host entfernen; Arbeitsverzeichnisse dort und lokal löschen, außer ein Schritt läuft dort noch"]
+```
+
+## Auftragszustände
+
+Ein Auftrag hat genau einen Status. `queued`, `running` und `cancelling` sind aktiv: Der Auftrag besitzt seine Mission, sperrt Löschen und einen zweiten Missionsauftrag und behält Sperre und Herzschlag. Die übrigen fünf sind Endzustände; aus ihnen führt kein Übergang heraus, eine Wiederholung legt einen neuen Auftrag an. `DeployJobStatesDocContractTest` leitet die Status aus `VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES` und `VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES` ab, die Knotennamen aus `lang/de/status.php` und die Abschlussgründe aus `VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STATUSES`.
+
+```mermaid
+flowchart TD
+    queued["In Warteschlange"] -->|Worker beansprucht den fälligen Auftrag| running["Läuft"]
+    queued -->|Abbruch oder Gruppenabbruch durch den Bediener| cancelled["Abgebrochen"]
+    running -->|Bediener fordert den Abbruch an| cancelling["Abbruch angefordert"]
+    running -->|alle Schritte mit Exitcode 0, MAC-Ergebnis vollständig oder nicht verlangt| succeeded["Erfolgreich"]
+    running -->|MAC-Ergebnis teilweise| partial["Teilweise erfolgreich"]
+    running -->|Sperre, Schrittfehler, Zeitbudget, kein MAC-Ergebnis; veralteter Herzschlag nur beim Inventarabruf| failed["Fehlgeschlagen"]
+    running -->|veralteter Herzschlag (Aufsicht) oder SSH-Verbindung zum Ansible-Host mitten im Schritt verloren (Worker)| outcome_unknown["Ausgang unbekannt"]
+    cancelling -->|Worker bestätigt an der Schrittgrenze, oder die Aufsicht konvergiert| cancelled
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class queued,running,cancelling,succeeded,partial,cancelled step;
+    class failed,outcome_unknown blocked;
+```
+
+Beanspruchen (`repo_claim_next_deploy_job()`) nimmt nur einen fälligen, nicht abgebrochenen Auftrag, solange die Annahme nicht pausiert ist und die Mission keinen laufenden Auftrag hat; Systemaufträge ohne Mission folgen nach den Missionsaufträgen. Jeder Endzustand entsteht in einer Transaktion mit seinem Abschlussgrund und nur unter dem eigenen Besitz (`repo_finish_deploy_job()`, `repo_confirm_deploy_job_cancelled()`): Ein Worker, der seinen Besitz verloren hat, schreibt nichts mehr. `outcome_unknown` schreibt die [Aufsicht](#aufsicht-verwaiste-aufträge) für Stille und der Worker nur in einem Fall: Seine SSH-Verbindung zum Ansible-Host bricht ab, während ein Playbook-Schritt läuft (`SshTransportConnectionLost` aus der Leseschleife von `ssh_execute_command()`, Grund `ansible_connection_lost`, Migration 0071). Ob der Schritt auf dem Host fertig wurde, weiß er dann nicht. `repo_finish_deploy_job()` nimmt `outcome_unknown` nur mit diesem Grund an; jeder andere Weg eines lebenden Workers kennt das Ende seines Laufs. Ein abgelaufenes Zeitbudget, ein Kanalende ohne Exitstatus und ein Verbindungsverlust in der Host-Vorprüfung, beim Upload oder in einer Create-Einheit bleiben `failed` beziehungsweise die eigene Create-Entscheidung. Ein Abbruch, der während des letzten Schritts ankommt, gewinnt gegen den Erfolg; der Auftrag endet dann `cancelled`, und das Abschlussdetail sagt, ob der laufende Schritt noch zu Ende lief (`deploy_worker_finish_job()`, `deploy_worker_conclude_cancel_after_sequence()`). Derselbe Wechsel bestätigt eine angeforderte Pause der Auftragsannahme (`repo_deploy_confirm_claim_pause()`).
+
+| Abschlussgrund | Status | Geschrieben von |
+|---|---|---|
+| `completed` | `succeeded` | `repo_finish_deploy_job()`, Standard für einen Erfolg aus `deploy_worker_conclude_sequence()` |
+| `partial_result` | `partial` | `deploy_worker_conclude_sequence()` bei einem MAC-Teilergebnis; `deploy_worker_conclude_create_section()`, wenn nur ein Teil der Create-Einheiten gelang |
+| `execution_failed` | `failed` | `deploy_worker_handle_failure()`, Standard für einen Schritt- oder Ergebnisfehler |
+| `timeout` | `failed` | `deploy_terminal_reason_for_exception()` bei überschrittenem SSH-Transportbudget |
+| `stale_heartbeat` | `failed`, `outcome_unknown` | `repo_reap_stale_deploy_jobs()` (Abschnitt „Aufsicht: verwaiste Aufträge“): `outcome_unknown` für einen laufenden Auftrag; `failed` nur für einen Inventarabruf und für Zeilen, die vor Migration 0065 geerntet wurden |
+| `ownership_lost` | `failed` | im Produktionscode kein Schreiber |
+| `configuration_blocked` | `failed` | `deploy_worker_process_job()` für eine Sperre vor jeder Remote-Arbeit (`DeployWorkerConfigurationBlocked`: Netzvertrag, freie Lizenz, Host-Version, IP-Freigabe, unlesbarer Auftrag) |
+| `operator_cancelled` | `cancelled` | `repo_cancel_deploy_job()` und `repo_cancel_deploy_group()` für wartende Aufträge, `repo_confirm_deploy_job_cancelled()` für laufende |
+| `cancel_converged` | `cancelled` | `repo_reap_stale_deploy_jobs()` für einen abbrechenden Auftrag ohne Herzschlag |
+| `ansible_connection_lost` | `outcome_unknown` | `deploy_worker_handle_failure()`, wenn `deploy_terminal_reason_for_exception()` während eines laufenden Playbook-Schritts einen Verbindungsverlust zum Ansible-Host sieht (Migration 0071) |
+
+## Aufsicht: verwaiste Aufträge
+
+Ein Auftrag, dessen Worker sich nicht mehr meldet, darf nicht ewig `running` stehen: Er sperrt seine Mission. Dieselbe Funktion `deploy_worker_reap_stale_jobs()` läuft am Anfang jeder Schleife des Bereitstellungsdienstes und als Job `deploy-job-reap` im [Wartungsdienst](maintenance-flows.md); so bleibt sie wirksam, auch wenn der einzige Bereitstellungsdienst selbst hängt. Was das Abschlussdetail sagt und wie man es liest, steht in [„Ein Auftrag, den die Aufsicht beendet hat“](deploy-chain.md#ein-auftrag-den-die-aufsicht-beendet-hat). Das erste Diagramm zeigt, welche Aufträge die Aufsicht beurteilt, das zweite, wie sie einen davon beendet.
+
+```mermaid
+flowchart TD
+    call["Aufruf: Schleifenstart des Bereitstellungsdienstes oder Job deploy-job-reap"] --> blind{"Dieser Prozess erst seit weniger als VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS verbunden?"}
+    blind -->|ja| hold["Nicht urteilen; eine Zeile je Verbindung im Containerlog"]
+    blind -->|nein| scan["Aufträge in running oder cancelling ohne Herzschlag seit VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS"]
+    scan --> lock{"Mission und Auftrag sperrbar und unter Sperre noch veraltet?"}
+    lock -->|nein| skip["Überspringen; ein anderer Prozess hält die Zeile"]
+    lock -->|ja| units["Offene Create-Einheiten schließen: ohne Startabsicht failed, sonst uncertain, beide mit ownership_lost"]
+    units --> vms["VM-Journalentscheidung anwenden: unberührt zurück, angefasst fehlgeschlagen, ungeklärter Create-Ausgang bleibt offen"]
+    vms --> conclude["Auftrag beenden (nächstes Diagramm)"]
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class call,scan,units,vms,conclude step;
+    class blind,lock decision;
+    class hold,skip blocked;
+```
+
+```mermaid
+flowchart TD
+    decided["Verwaister Auftrag gesperrt, Create-Einheiten und VMs entschieden"] --> was{"Stand der Auftrag auf cancelling?"}
+    was -->|ja| converged["cancelled mit cancel_converged, ohne letzten Fehler"]
+    was -->|nein| readonly{"Systemauftrag ohne Mission mit lesendem Playbook (Inventarabruf)?"}
+    readonly -->|ja| reaped["failed mit stale_heartbeat; zählt als Fehlversuch des Zugangs"]
+    readonly -->|nein| unknown["outcome_unknown mit stale_heartbeat; das Detail nennt die Beobachtung und dass der Ausgang des Remote-Laufs unbekannt ist"]
+    converged --> after["In derselben Transaktion: Annahmepause bestätigen, Ergebnis-Audit"]
+    reaped --> after
+    unknown --> after
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class decided,converged,after step;
+    class was,readonly decision;
+    class reaped,unknown blocked;
+```
+
+Die Beobachtungsfrist schützt vor einem Fehlurteil nach einem Datenbankausfall: Während die Datenbank weg war, konnte niemand einen Herzschlag schreiben, und ein frisch verbundener Prozess sähe jeden laufenden Auftrag als verwaist (`deploy_reap_observer_is_blind()`). `deploy_worker.php --once` liegt deshalb immer in seiner eigenen Frist und beendet nie einen fremden Auftrag. Der Reaper sperrt in der Reihenfolge Mission, Auftrag, Laufzeit, Create-Ergebnisse, VM (`repo_reap_stale_deploy_jobs()`); jede Zeile, die ein anderer Prozess hält, überspringt er und prüft sie beim nächsten Aufruf. Offene Create-Einheiten schließt `repo_deploy_create_converge_reaped()`, bevor der Auftrag endet; eine `uncertain`-Einheit sperrt jede Wiederholung, bis ein Inventarabruf oder die Freigabe unten sie klärt.
+
+Die Aufsicht sieht nur die Stille, nie den Remote-Lauf: Ob die Schritte vor dem Verstummen mit Exitcode 0 endeten, weiß sie nicht. Ein laufender Auftrag endet deshalb `outcome_unknown`, nicht `failed`. Nur ein Inventarabruf ohne Mission endet `failed`, weil sein Playbook auf ESXi nichts ändert; er zählt als Fehlversuch des Zugangs, ein abgebrochener Inventarabruf nicht. Ein abbrechender Auftrag endet so, wie der Bediener es verlangt hat. Zeilen, die vor Migration 0065 geerntet wurden, behalten `failed`. VMs, die nach dem Ende ihres Auftrags noch `deploying` stehen, holt der [Konvergenzlauf des Wartungsdienstes](maintenance-flows.md#hängengebliebene-vms) ein.
+
+## Wiederholen und Freigeben
+
+„Erneut ausführen“ im Auftragsprotokoll legt einen neuen Auftrag an, nie einen zweiten Lauf desselben. Erlaubt ist es nur für beendete Missionsaufträge in `failed`, `cancelled`, `partial` oder `outcome_unknown` (`deploy_job_is_retryable()`); Inventarabrufe plant allein der Dienst. Seite, Bestätigungsdialog und Schreiben werten dieselbe Prüfung aus (`deploy_retry_blockers()`), das Schreiben unter Sperre noch einmal (`repo_retry_deploy_job()`).
+
+```mermaid
+flowchart TD
+    ask["Erneut ausführen im Auftragsprotokoll"] --> kind{"Beendeter Missionsauftrag in failed, cancelled, partial oder outcome_unknown?"}
+    kind -->|nein| no["Keine Wiederholung angeboten"]
+    kind -->|ja| block{"Sperrbefund: Remote-Lauf offen, Ergebnis unlesbar, Create-Einheit ungeklärt oder fehlend, Identitätskonflikt, MAC-Befund mit Sperre, Netzvertrag?"}
+    block -->|ja| refused["Abgelehnt mit Befund und Verweis auf die Stelle, die ihn behebt; nichts eingereiht"]
+    refused -.->|Create-Einheit uncertain| release["Freigabe durch einen Administrator nach geprüftem Inventar: Einheit failed mit operator_released; danach erneut fragen"]
+    block -->|nein; bei outcome_unknown nennt der Dialog zuerst, was auf ESXi zu prüfen ist| plan{"Was belegt der alte Auftrag?"}
+    plan -->|voller Ablauf failed beim Start oder Autostart laut failed_step, nach vollständig erfolgreichem MAC-Export| resume["am gescheiterten Schritt fortsetzen: start für die ursprüngliche Auswahl, danach autostart, wenn die Mission Autostart nutzt; oder nur autostart"]
+    plan -->|MAC-Teilergebnis, oder MAC-Ergebnis widerspricht dem Status| export["export: bei einem Teilergebnis mit Liste nur die gescheiterten VMs, sonst die ursprüngliche Auswahl"]
+    plan -->|Create-Einheiten vorhanden| create_retry["gleicher Modus; früher bestätigte VMs als verify_skip, übrige neu anlegen"]
+    plan -->|sonst| same["alter Auftrag mit unverändertem Umfang"]
+    export --> queued["Neuer Auftrag queued unter neuer Korrelations-ID; das Protokoll verweist auf den alten Auftrag; alle Einreihsperren gelten erneut"]
+    create_retry --> queued
+    resume --> queued
+    same --> queued
+    classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
+    classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
+    classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
+    class ask,resume,export,create_retry,same,queued,release step;
+    class kind,block,plan decision;
+    class no,refused blocked;
+```
+
+Die Reihenfolge der Befunde ist fest: zuerst der Remote-Lauf (eine offene Wiederherstellung oder eine fremde Laufzeitgeneration), dann die Lesbarkeit des Ergebnisses, die Create-Einheiten des alten Auftrags, die aktuelle Identität des Umfangs, MAC-Befunde, die nur ein Mensch klären kann, und der Netzvertrag. MAC-Befunde, die eine Prüfung außerhalb des Portals verlangen, sperren nicht; der Bestätigungsdialog nennt sie (`external_confirmation`). Ebenso sperrt ein Ausgangsauftrag in `outcome_unknown` nicht: Er trägt die Feststellung `retry_remote_outcome_unknown`, und der Bestätigungsdialog stellt voran, was auf ESXi zu prüfen ist (`deploy_retry_confirmation()`). Die gefährlichen Fälle (offener Remote-Lauf, ungeklärte Create-Einheit, Identität, Netz) sperren über ihre eigenen Befunde. Würde die Wiederholung gebundene VMs auf einem anderen Host neu anlegen, warnt sie wie das Formular, ohne zu sperren. `deploy_job_retry_plan()` legt den Exportumfang fest, `repo_deploy_create_materialize_retry()` die Create-Einheiten des neuen Auftrags.
+
+Scheitert ein voller Ablauf nach vollständig erfolgreichem MAC-Export beim Start oder Autostart, setzt die Wiederholung an diesem Schritt fort (`deploy_job_resume_plan()`, vor `deploy_job_retry_plan()` gefragt). Den Schritt liest sie aus `deploy_jobs.failed_step`, den der Worker im selben Abschluss wie `last_error` schreibt (`repo_finish_deploy_job()`), nie aus dem Fehlertext. Gescheitert beim Start, reiht sie `start` für die ursprüngliche Auswahl ein, mit `then_autostart` im Auftragsinhalt, wenn die Mission jetzt Autostart nutzt; dieser Start schreibt danach den Autostart, und scheitert erst der, setzt die nächste Wiederholung wieder dort fort. Gescheitert beim Autostart, reiht sie `autostart` ein. Anlegen, Powercycle und Export laufen nicht noch einmal, der Zustand der VMs bleibt, wie der MAC-Import ihn gesetzt hat, und alle Sperren oben gelten für den neuen Modus. Ohne vollständig erfolgreichen MAC-Export, ohne gespeicherten Schritt (auch bei Aufträgen von vor Migration 0068) oder bei einem anderen Schritt bleibt es beim Export wie oben. Ein Auftrag in `outcome_unknown` setzt nie am Schritt fort, auch nach einem Verbindungsverlust mitten im Schritt nicht: Ob dieser Schritt fertig wurde, ist offen, und gespeichert wird der Schritt nur mit `failed`. Bestätigungsdialog und erste Protokollzeile nennen den Schritt (`resumed at the start step`, `resumed at the autostart step`).
+
+Eine Create-Einheit im Zustand `uncertain` sperrt jede Wiederholung der Mission, weil die VM auf ESXi entstanden sein kann. Ein Administrator kann sie im Auftragsprotokoll freigeben (`create_unit_release`, `deploy_handle_create_unit_release()`): Er braucht `system.config`, `deploy.run` und `vms.write`, muss bestätigen, die „Recent Tasks“ des Hosts geprüft zu haben, und eine Begründung angeben. Unter Sperre entscheidet `deploy_create_release_blockers()` neu: Die Einheit muss noch `uncertain` sein, Auftrag und Mission dürfen nicht aktiv sein, und ein Inventarabruf nach dem Ergebnis der Einheit muss die VM-Liste vollständig beantwortet haben und weder den Namen noch die gespeicherte UUID kennen. Erst dann schreibt `repo_deploy_create_release_unit()` die Begründung als unveränderlichen Nachweis und setzt die Einheit auf `failed` mit `operator_released`. An der VM und am alten Auftragsprotokoll ändert die Freigabe nichts; sie beendet nur den Zustand, in dem eine Wiederholung verboten war. Die beiden übrigen Wiederherstellungsaktionen in `VIRTUSPHERE_DEPLOY_RECOVERY_ACTIONS` (`remote_cleanup_retry`, `remote_review_document`) zeigt das Protokoll nur zu einem Datensatz des vorbereiteten Remote-Vertrags (`deploy_log_render_recovery()`), den der aktive Worker nicht schreibt; auch sie schreiben nur in die Datenbank.
+
+## Create je VM
+
+`create` und `full` legen VMs einzeln an: je VM ein Prepare, ein Launch als Async-Job und Statusabfragen, bis der Job endet. Nach jeder Antwort `running` wartet der Worker `VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS` Sekunden; jede Abfrage ist selbst ein `ansible-playbook`-Lauf von einigen Sekunden, ohne Zugriff auf ESXi. Jede Einheit hat ein dauerhaftes Ergebnis, bevor die nächste beginnt.
+
+```mermaid
+flowchart TD
+  N["Nächste Einheit: erst eine laufende, sonst die nächste offene nach Position"]
+  N -->|keine mehr| RP{"Nachlauf, eine Runde je Versuch: Einheit, deren letzter Versuch mit module_failed endete, unter Versuch 4?"}
+  RP -->|nein| DONE["Zusammenfassung ins Protokoll, zurück zum Worker"]
+  RP -->|ja, aber das Budget trägt die Wartezeit nicht| DONE
+  RP -->|ja| RW["RETRY-Zeile: attempt n of 4; Wartezeit bis VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS nach Ende des vorigen Versuchs, 5, 15, 45 s"]
+  RW -->|Abbruch angefordert| RX["Abbruch an der Grenze bestätigt, kein weiterer Versuch"]
+  RW --> RQ["Einheit wieder pending als Versuch n: Code, Detail und Job-ID von Versuch 1 bleiben, Launch-Intent gelöscht, eigenes Verzeichnis create.vm.p.attemptn"]
+  RQ --> AC
+  N --> UN{"Einheit uncertain?"}
+  UN -->|ja| HOLD["HOLD: gesamte Create-Phase stoppt"]
+  UN -->|nein| AC{"Aktion der Einheit?"}
+  AC -->|verify_skip, nach Wiederholung| V["Prepare-Playbook als Prüfung der früher bestätigten VM"]
+  V -->|gebundene UUID live nicht mehr vorhanden: Ersatz anlegen| BG
+  V -->|dieselbe UUID live| SK["skipped (unverändert)"]
+  V -->|andere UUID, oder kein früherer Erfolg auffindbar| VF["failed (identity_conflict)"]
+  V -->|Transport abgerissen| VT["failed (transport_lost)"]
+  V -->|Hostidentität vor Anmeldung abgelehnt| HF["failed (host_identity_rejected), nichts gestartet"]
+  V -->|keine lesbare Antwort| PP["failed (protocol_error)"]
+  AC -->|create| B0{"Budget der Create-Phase noch übrig?"}
+  B0 -->|nein| BGX["failed (job_timeout), keine VM gestartet"]
+  B0 -->|ja| PR["createVMPrepare: Identität lesend prüfen"]
+  PR -->|rejected| PF["failed (Identitätsbefund)"]
+  PR -->|Transport abgerissen| VT
+  PR -->|Hostidentität vor Anmeldung abgelehnt| HF
+  PR -->|keine lesbare Antwort oder unerwartetes Ereignis| PP
+  PR -->|prepared| PW{"Eigene VM vorhanden und nicht nachweislich ausgeschaltet?"}
+  PW -->|ja, eingeschaltet, angehalten oder unbekannt| UV["succeeded (unchanged) ohne Launch, Bindung bestätigt; Protokoll nennt die nicht angeglichene VM"]
+  PW -->|nein: neue VM oder ausgeschaltet| BG{"Budget der Create-Phase noch übrig?"}
+  BG -->|nein| BGX
+  BGX --> HOLD
+  PP --> HOLD
+  BG -->|ja| LA["createVMLaunch: Identität erneut prüfen, mit Prepare vergleichen, vmware_guest als Async-Job starten"]
+  LA -->|rejected: vm_not_powered_off| UV
+  LA -->|rejected, anderer Code| LF["failed"]
+  LA -->|Hostidentität vor Anmeldung abgelehnt| HF
+  LA -->|keine lesbare Antwort, unerwartetes Ereignis oder ungültige Job-ID| LP["uncertain (protocol_error)"]
+  LA -->|Transport abgerissen| JD{"Job-ID im Async-Verzeichnis gefunden?"}
+  JD -->|mehr als eine| LP
+  JD -->|keine bis zur Frist| LU["uncertain (launch_unconfirmed)"]
+  JD -->|Hostidentität der Suchverbindung abgelehnt| HU["uncertain (host_identity_rejected), Ausgang bleibt unbekannt"]
+  JD -->|ja| PO
+  LA -->|launched| PO["createVMStatus; nach running VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS Pause"]
+  PO -->|running| PO
+  PO -->|Transport abgerissen| PO
+  PO -->|Hostidentität vor Anmeldung abgelehnt| HU
+  PO -->|Budget der Create-Phase erschöpft| TU["uncertain (job_timeout)"]
+  PO -->|Abbruch angefordert| PC["Diese VM bis zum Ende beobachten, danach keine weitere"]
+  PC --> PO
+  PO -->|failed| MF["failed (module_failed)"]
+  PO -->|rejected oder unlesbar| SU["uncertain"]
+  PO -->|succeeded| CM{"Identität binden: UUID und MOID mit Zugang und Host des Auftrags in einer Transaktion; ersetzte Instanz übernehmen"}
+  CM -->|gebunden| CL["createVMCleanup: Statusdatei genau dieser Job-ID löschen"]
+  CM -->|abgelehnt, etwa andere UUID schon gebunden| CMF["failed mit Code der Ablehnung; MOID und UUID der Live-VM in Detail und eigener Protokollzeile"]
+  CMF --> CL
+  MF --> CL
+  CL --> N
+  SK --> N
+  UV --> N
+  VF --> N
+  VT --> N
+  PF --> N
+  LF --> N
+  LU --> HOLD
+  LP --> HOLD
+  TU --> HOLD
+  SU --> HOLD
+  HF --> HOLD
+  HU --> HOLD
+```
+
+Trifft ein neuer Auftrag auf eine vorhandene eigene VM, wird sie nur ausgeschaltet angeglichen (DF-E1). Ist sie eingeschaltet, angehalten oder ihr Zustand unbekannt, endet die Einheit nach Prepare als `succeeded` mit `unchanged`, ohne Launch; das Protokoll nennt die nicht angeglichene VM. Launch prüft den Zustand erneut, weil die VM dazwischen eingeschaltet werden kann. Die Prüfung vor einer übersprungenen VM (`verify_skip`) nutzt dasselbe Prepare-Playbook, schreibt aber in eine eigene Ergebnisdatei. Ein gewöhnlicher Fehlschlag betrifft nur seine VM; die nächste Einheit beginnt trotzdem. Nach der letzten Einheit bekommt jede Einheit, deren Versuch mit `module_failed` endete, bis zu drei weitere Versuche (`deploy_worker_run_create_retry_pass()`), etwa nach einem kurzen `503 Service Unavailable` von ESXi. Der Nachlauf beginnt nur, wenn keine Einheit mehr `pending`, `prepared`, `running` oder `uncertain` ist, und läuft in Runden: jede Runde nimmt die Einheiten nacheinander, deren letzter Versuch wieder `module_failed` ergab. Vor Versuch 2, 3 und 4 liegen seit dem Ende des vorigen Versuchs mindestens 5, 15 und 45 Sekunden (`VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS`); kommt eine Einheit ohnehin später an die Reihe, wartet sie nicht zusätzlich. Abbruch, Besitz und Budget gehen an jeder Grenze vor. Jeder Versuch läuft über dasselbe Prepare, denselben Launch und dieselben Statusabfragen, in einem eigenen Verzeichnis `create.vm.<n>.attempt2` bis `.attempt4`. Prepare liest nur: Antwortet ESXi weiter nicht, bleibt die Einheit `failed`, auf dem Host ändert sich nichts, und für diese Einheit folgt kein weiterer Versuch. Fehlt dabei der Marker, nennt das gespeicherte Detail nach `Cause:` die Aufgabe und die Meldung des Hosts. Hat ein früherer Versuch die VM schon angelegt, meldet die Identitätsprüfung `identity_conflict`, und es entsteht keine zweite VM. Fehler, Detail und Job-ID des ersten Versuchs stehen weiter in der Zeile (`first_error_code`, `first_error_detail`, `first_async_jid`), die Versuche dazwischen im Auftragsprotokoll (`RETRY … attempt n of 4`, `RUN … attempt n of 4`). `uncertain`, `protocol_error`, `ownership_lost`, `job_timeout` und `host_identity_rejected` stoppen die ganze Create-Phase. Eine Hostablehnung vor Prepare, Launch oder `verify_skip` ergibt `failed`: Die gesperrte Verbindung hat nichts ausgeführt. Bei einer bereits gestarteten Einheit oder der Job-ID-Suche nach einem tatsächlich verlorenen Launch bleibt der Ausgang auf ESXi unbekannt; die Hostablehnung ergibt sofort `uncertain`, ohne weitere Statusversuche. Eine `uncertain`-Einheit wird nie aufgeräumt: Ihre Statusdatei ist der einzige Nachweis. Den Vertrauenscheck vor Anmeldung beschreibt [Verbindungen und Vertrauensanker](trust-flows.md#ssh-und-sftp-zum-ubuntu-host).
+
+## Diagrammausnahmen für geschlossene Werte
+
+Der Vokabular-Wächter leitet Werte aus den Code-Listen ab. Ein Wert ohne Knoten braucht hier eine begründete Ausnahme; ein neuer Wert kann nicht durch diese Liste stillschweigend passieren.
+
+| Vokabular | Wert | Ausnahmegrund |
+|---|---|---|
+| Terminalgrund | `ownership_lost` | Das Token steht im geschlossenen Terminalgrund-Array, hat im Produktionscode derzeit keinen Writer; ein neuer Writer muss den passenden Ablauf ergänzen. |
+
+## Playbooks
+
+Jedes Playbook läuft auf dem Ansible-Host gegen genau einen ESXi-Host, liest `accounts.yml` und meist `serverlist.yml` und setzt den Vertrauensanker über `SSL_CERT_FILE`.
+
+### createVMPrepare
+
+Liest nur. Beantwortet für genau eine Portal-VM, ob auf dem Host schon eine VM mit ihrem Namen existiert und ob sie der Portal-VM gehört.
+
+```mermaid
+flowchart TD
+  A["Ziel-VM über portal_vm_id aus serverlist.yml auflösen"] --> B{"Genau ein Treffer?"}
+  B -->|nein| BX["Abbruch: Protokollfehler"]
+  B -->|ja| C["Identitätsprüfung (create_identity_check_tasks.yml), Inventarabfrage mit bis zu drei Wiederholungen"]
+  C -->|Inventarabfrage scheitert auch beim letzten Versuch| CX["Abbruch ohne Ergebniszeile: protocol_error mit Ursache, auf dem Host hat sich nichts geändert"]
+  C --> D{"Identitätsbefund?"}
+  D -->|ja| DR["Ergebnis rejected mit Code, keine Änderung"]
+  D -->|nein| DP["Ergebnis prepared: existierte vorher, MOID, Instance-UUID, ersetzte UUID, Energiezustand der vorhandenen VM"]
+```
+
+### create_identity_check_tasks und create_identity_read_tasks
+
+Die eine Identitätsmatrix für Prepare, Launch und Status. Ein Befund bricht nie ab, sondern setzt einen geschlossenen Code. Scheitert dagegen das Lesen des Live-Inventars selbst (Anmeldung, Transport, Modul, etwa ein `503 Service Unavailable`), wiederholt Prepare die Abfrage bis zu dreimal nach den Pausen aus `VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS` (5, 15, 45 s), jede als Zeile `RETRY Create identity read <VM>: <Meldung>; attempt n of 4 in s s`. Launch und Status lesen einmal: Ihr Steueraufruf hat ein festes Budget, und Wartezeiten vor der einen Mutation des Launch würden einen klaren Fehler in einen unbekannten Ausgang verwandeln. Scheitert auch der letzte Versuch, endet der Lauf ohne Ergebniszeile; nach einem Prepare speichert der Worker `protocol_error` mit der Meldung nach `Cause:`. Marker, Codes und der Worker-Vertrag sind dieselben wie ohne Wiederholung.
+
+```mermaid
+flowchart TD
+  R["Live-Inventar lesen (create_identity_read_tasks.yml)"] -->|Fehler, im Prepare noch Versuche übrig| RW["RETRY-Zeile mit Meldung, Pause, erneut lesen"]
+  RW --> R
+  R -->|Fehler beim letzten Versuch, in Launch und Status beim ersten| RX["Abbruch ohne Ergebniszeile mit der Meldung des Moduls; der Worker wertet ihn wie jeden Steueraufruf ohne Marker, im Prepare als protocol_error"]
+  R -->|gelesen| A
+  A["Antwort: alle VMs des Hosts, nur Name, MOID, Instance-UUID und Energiezustand"] --> B["Namensgleiche VMs und VMs mit der gespeicherten Instance-UUID sammeln"]
+  B --> C{"Mehr als eine namensgleiche VM?"}
+  C -->|ja| C1["identity_conflict"]
+  C -->|nein| D{"Eine namensgleiche VM ohne MOID oder UUID?"}
+  D -->|ja| D1["identity_result_invalid"]
+  D -->|nein| E{"Gespeicherte UUID lebt unter anderem Namen?"}
+  E -->|ja| E1["identity_bound_vm_renamed"]
+  E -->|nein| F{"Namensgleiche VM trägt nicht die gespeicherte UUID?"}
+  F -->|ja| F1["identity_conflict"]
+  F -->|nein| G{"Gespeicherte UUID und Name live beide nicht vorhanden?"}
+  G -->|ja| G1["Kein Befund, ersetzte UUID merken: die gebundene VM ist nachweislich weg"]
+  G -->|nein| G2["Kein Befund"]
+```
+
+Nach einem erfolgreichen Async-Job ruft das Status-Playbook die Matrix ohne Abgleich gegen die gespeicherte UUID auf (`vs_identity_require_stored_match` aus), weil die VM gerade erst entstanden ist. Dann entfallen die Fragen E und F.
+
+Das Live-Inventar wird je VM dreimal gelesen (Prepare, Launch, nach dem Erfolg); der Aufruf schaltet deshalb alle `show_*`-Zusatzangaben des Moduls aus: Jede kostet je VM des Hosts eigene Abfragen an ESXi, acht sind standardmäßig an. Nach Namen oder Ordner gefiltert wird bewusst nicht, weil Frage E die gespeicherte UUID unter allen VMs des Hosts sucht.
+
+### createVMLaunch
+
+Mutiert genau eine VM. Alles, was sich seit Prepare geändert hat, führt vor dem Modulaufruf zur Ablehnung.
+
+```mermaid
+flowchart TD
+  A["Ziel-VM auflösen, genau ein Treffer"] --> B["Identitätsprüfung wiederholen"]
+  B --> C{"Identitätsbefund?"}
+  C -->|ja| CX["rejected, keine Änderung"]
+  C -->|nein| D{"Live-Identität gleich dem Prepare-Ergebnis?"}
+  D -->|nein| DX["rejected: live identity differs, keine Änderung"]
+  D -->|ja| W{"VM existierte vorher und ist nicht ausgeschaltet (auch unbekannt)?"}
+  W -->|ja| WX["rejected: vm_not_powered_off, keine Änderung; der Worker meldet die Einheit unverändert"]
+  W -->|nein| E{"VM existierte vorher?"}
+  E -->|nein| E1["vmware_guest per Name: neue VM anlegen, Hardwareversion aus create_hardware_version (leer: ESXi wählt)"]
+  E -->|ja, ausgeschaltet| E2["vmware_guest per gebundener Instance-UUID: Hardware angleichen, ohne Hardwareversion (nie anheben)"]
+  E1 --> F["Async-Job mit poll 0 starten: EFI, Secure Boot, CPU, RAM, Disks, Netze"]
+  E2 --> F
+  F --> G["Ergebnis launched mit Job-ID und Async-Verzeichnis"]
+```
+
+### createVMStatus
+
+Fragt eine gespeicherte Job-ID genau einmal ab; der Worker wiederholt die Abfrage.
+
+```mermaid
+flowchart TD
+  A["Ziel-VM auflösen"] --> B["Statusdatei der Job-ID gebunden lesen (inspect_create_async_state.py)"]
+  B -->|Leser scheitert| BX["rejected: protocol_error"]
+  B -->|fehlt, unlesbar, ungültig| BM["rejected: async_state_missing oder protocol_error"]
+  B --> C["async_status einmal abfragen (Fehler toleriert), Statusdatei erneut prüfen"]
+  C --> D{"Datei noch da?"}
+  D -->|nein| DM["rejected: async_state_missing"]
+  D -->|ja| D2{"Schnappschuss und Abfrage widerspruchsfrei?"}
+  D2 -->|nein| DX["rejected: protocol_error"]
+  D2 -->|ja| E{"Zustand laut Statusdatei?"}
+  E -->|läuft| E1["running"]
+  E -->|fehlgeschlagen| E2["failed mit einzeiliger Ursache"]
+  E -->|erfolgreich| F["Identität live prüfen, ohne Abgleich mit der gespeicherten UUID"]
+  F --> G{"Genau eine VM mit MOID und UUID?"}
+  G -->|nein| GX["rejected: identity_result_invalid"]
+  G -->|ja| H{"Energiezustand per MOID lesbar?"}
+  H -->|ja| H1["Ergebnis succeeded mit MOID, UUID, changed, Energiezustand"]
+  H -->|nein| HX["Ergebnis succeeded mit Energiezustand unknown (Lesefehler toleriert)"]
+```
+
+Den Zustand bestimmt die Statusdatei, die `inspect_create_async_state.py` gebunden liest; `async_status` muss ihr nur widerspruchsfrei zustimmen.
+
+### createVMCleanup
+
+```mermaid
+flowchart TD
+  A{"Job-ID gesetzt und Async-Verzeichnis absolut?"} -->|nein| AX["Abbruch: Protokollfehler"]
+  A -->|ja| B["async_status mode cleanup: nur die Statusdatei dieser Job-ID löschen"]
+```
+
+Der Worker ruft es erst, wenn das Ergebnis der Einheit gespeichert ist, und nie für eine `uncertain`-Einheit.
+
+### powercycleVMs und powercycle_vm_info und powercycle_vm_tasks und powercycle_power_on_tasks und powercycle_power_off_tasks
+
+Erzeugt MAC-Adressen: ESXi vergibt einer Netzwerkkarte ihre MAC erst beim ersten Einschalten. Der Lauf zählt zweimal mit: `[n/total] RUN|pass|fail Powercycle info <VM>` für jede Zielmaschine bei der Zustandsabfrage, danach `[n/total] RUN|pass|fail Powercycle <VM>` nur für die anfangs ausgeschalteten VMs, die er schaltet. Beide Zähler haben deshalb verschiedene Gesamtzahlen.
+
+```mermaid
+flowchart TD
+  A["Ziele: nur VMs mit needs_mac true (PXE-Karte im Portal ohne MAC; ohne erkennbare WDS-Karte gilt needs_mac als true)"] --> B["Genau diese VM mit report_vm_touch.py beim Portal zulassen"]
+  B -->|exakte Bestätigung| C["Erste Zustandsabfrage dieser VM (esxi_vm_read_tasks.yml), bis zu drei Wiederholungen"]
+  B -->|abgelehnt oder keine Bestätigung| BR["Globaler Abbruch vor der ESXi-Abfrage dieser VM"]
+  C -->|auch der letzte Versuch scheitert| CQ["fail Powercycle info, Abbruch vor der nächsten VM mit der Modulmeldung"]
+  C -->|Antwort erhalten| D{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  D -->|nein| CX["Abbruch: Identitätsabweichung"]
+  D -->|ja| E{"Jede Antwort trägt einen bekannten Energiezustand?"}
+  E -->|nein| DX["Abbruch: Modulantwort passt nicht"]
+  E -->|ja| F["Nur anfangs ausgeschaltete VMs schalten; laufende und angehaltene bleiben, wie sie sind"]
+  subgraph JE["Je VM nacheinander"]
+    G["Einschalten per UUID (powercycle_power_on_tasks.yml)"] -->|changed| GS["eigene Einschaltung"]
+    G -->|unverändert beim ersten Versuch| GE["jemand anderes hat sie eingeschaltet: bleibt an, nicht ausschalten"]
+    G -->|Fehler oder unklare Antwort| GR["Zustand lesen, nie blind wiederholen (W2)"]
+    GR -->|an| GS
+    GR -->|aus, noch Versuche übrig| GW["RETRY-Zeile, Pause, erneut einschalten; unverändert heißt dann: ein früherer Versuch hat sie eingeschaltet"]
+    GW --> GWS["eigene Einschaltung, wenn sie jetzt an ist"]
+    GWS --> GS
+    GR -->|aus nach dem letzten Versuch, unlesbar oder anderer Zustand| GF["kein weiterer Versuch, kein Ausschalten ohne Nachweis"]
+    GS --> I["PowerCycleWaitSeconds warten"]
+    I --> J["Immer: eigene Einschaltung hart ausschalten (powercycle_power_off_tasks.yml), bis zu drei Wiederholungen"]
+    J -->|auch der letzte Versuch scheitert, VM kann eingeschaltet bleiben| KX
+    J -->|ausgeschaltet| KP["pass Powercycle, nächste VM"]
+    GE --> KP
+    GF --> KX["fail Powercycle mit Meldung des Hosts, Abbruch vor der nächsten VM: Zustand der UUID im ESXi Host Client prüfen"]
+  end
+  F --> G
+```
+
+Die Regel „nur was der Lauf nachweislich bewegt hat“ gilt auch nach einem Fehler: Eine VM, die bei der Zustandsabfrage aus war und nach einem gescheiterten oder unklaren Einschalten an gelesen wird, hat dieser Lauf eingeschaltet. Sie kommt in die Ausschaltliste, und der Zyklus endet regulär, weil ihre MAC entstanden ist. Das Protokoll zeigt den Fall als `CHECK Powercycle <VM>: power-on failed …; power state afterwards poweredOn -> counts as started by this run`. Ein harter Prozessabbruch (SSH-Abriss, Kill) führt den Ausschaltblock nicht mehr aus und kann eine eingeschaltete VM zurücklassen.
+
+Endgültige Fehlschläge: Scheitert die Zustandsabfrage, bricht der Auftrag ab, bevor die nächste VM beim Portal zugelassen wird; nachfolgende Schritte (Export) entfallen. Scheitern Einschalten oder Ausschalten, bricht er vor der nächsten VM ab. „Erneut ausführen“ fasst nur VMs an, die dann ausgeschaltet sind; eine VM, die nach einem gescheiterten Ausschalten noch läuft, bleibt unberührt und muss im Host Client ausgeschaltet werden.
+
+### exportVMs-Informations und export_vm_info
+
+Liest die MACs und schickt sie an das Portal. Ein Abfragefehler oder eine Identitätsabweichung betrifft nur die einzelne VM; weist das Portal die Zugriffsbestätigung einer VM ab, bricht der ganze Lauf vor deren Abfrage ab.
+
+```mermaid
+flowchart TD
+  A["Für genau diese VM report_vm_touch.py beim Portal bestätigen lassen"] -->|exakte Antwort| B["Je VM Informationen per gebundener Instance-UUID lesen (esxi_vm_read_tasks.yml), bis zu drei Wiederholungen"]
+  A -->|Refusal oder fehlende Antwort| AX["Globaler Abbruch vor dieser VM-Abfrage"]
+  B -->|auch der letzte Versuch scheitert| QX["fail Export info VM: query_failed after n attempt(s) mit Meldung; nur den Fehlercode im Einzelergebnis sammeln"]
+  B -->|Abfrage erfolgreich| C{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  C -->|nein| BX["Einzelergebnis als fehlgeschlagen markieren (identity mismatch)"]
+  C -->|ja| BO["Einzelergebnis übernehmen"]
+  BX --> D
+  BO --> D
+  QX --> D
+  D["Alle Ergebnisse als vm_infos.json schreiben (Modus 0600)"] --> E["upload_mac_list.py: Rückruf an db_importMAC.php mit Mission und Auftrag; bei Zeitüberschreitung, abgewiesener oder abgebrochener Verbindung und 5xx bis zu drei Wiederholungen nach 5, 15 und 45 s"]
+  E --> F{"Exitcode?"}
+  F -->|0 vollständig| E0["Schritt erfolgreich"]
+  F -->|20 teilweise| E20["Schritt erfolgreich, Teilergebnis im Auftrag"]
+  F -->|sonst| EX["Schritt fehlgeschlagen"]
+```
+
+Je VM meldet das Playbook `[n/total] RUN Export info <VM>` und danach `pass` oder `fail …` mit Grund. Eine VM, deren Abfrage auch nach den Wiederholungen scheitert, wertet das Portal als `esxi_query_failed`. Das Ergebnis zeigt dazu einen festen Satz (ESXi hat keine verwertbare Antwort geliefert, die genaue Meldung steht im Protokoll); den Wortlaut des Moduls mit der Zahl der Versuche enthält nur die `fail`-Zeile im Auftragsprotokoll, das Ergebnis des Rückrufs speichert keinen freien Text (ADR-0030). Die übrigen VMs werden übernommen, der Auftrag endet `partial`, und „Erneut ausführen“ exportiert nur die gescheiterten VMs.
+
+### startVMs und start_vm_power_tasks und vm_identity_read_tasks
+
+```mermaid
+flowchart TD
+  A["Je VM Identität lesen (vm_identity_read_tasks.yml): RUN Start info, bis zu drei Wiederholungen"] -->|auch der letzte Versuch scheitert| AX["fail Start info, Abbruch: keine VM wird gestartet"]
+  A --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  B -->|nein, bei einer VM| BX["Abbruch: keine VM wird gestartet"]
+  B -->|ja, bei allen| C["StartWaitSeconds warten, damit MECM die Geräte übernimmt"]
+  C --> D["Je VM einschalten (start_vm_power_tasks.yml): RUN Start, per UUID ohne force, laufende bleiben unverändert"]
+  D -->|Fehler, noch Versuche übrig| DW["RETRY-Zeile mit Meldung, Pause, erneut einschalten"]
+  DW --> D
+  D -->|eingeschaltet| DP["pass Start, nächste VM"]
+  D -->|auch der letzte Versuch scheitert| DF["fail Start mit Meldung; die übrigen VMs werden trotzdem gestartet"]
+  DP --> E{"Alle VMs gestartet?"}
+  DF --> E
+  E -->|ja| E0["Schritt erfolgreich"]
+  E -->|nein| EX["Schritt fehlgeschlagen: n of m VMs did not start mit Namen und Meldungen; die übrigen laufen"]
+```
+
+`powered-on` ohne `force` ist idempotent: Eine VM, die ein früherer Versuch schon eingeschaltet hat, meldet nur „unverändert“. Deshalb darf das Einschalten im Start-Schritt wiederholt werden. Eigenständige Start-Aufträge lassen den Zustand der VMs im Portal unberührt; „Erneut ausführen“ startet die ganze Auswahl noch einmal, mit erneuter Wartezeit. Setzt ein Start-Auftrag einen gescheiterten vollen Ablauf fort, folgt ihm der Autostart-Schritt unter derselben Missionsbedingung wie im vollen Ablauf (`then_autostart`, siehe [Wiederholen und Freigeben](#wiederholen-und-freigeben)).
+
+### autostartVMs und autostart_write_tasks
+
+Schreibt die Autostart-Richtlinie des Hosts für die VMs einer Mission. Die Identitätsabfrage je VM läuft wie beim Start über `vm_identity_read_tasks.yml` (`[n/total] RUN|pass|fail Autostart info <VM>`).
+
+```mermaid
+flowchart TD
+  A["Je VM Identität lesen, bis zu drei Wiederholungen"] -->|auch der letzte Versuch scheitert| AX["fail Autostart info, Abbruch vor jeder Änderung am Host"]
+  A --> B{"Name gleich und Instance-UUID gleich der gebundenen?"}
+  B -->|nein| BX["Abbruch vor jeder Änderung am Host"]
+  B -->|ja| C{"Autostart der Mission aktiv?"}
+  C -->|ja| D["Host-Standardwerte setzen (Autostart defaults): Autostart ein, Verzögerungen, Stoppaktion, Heartbeat; bis zu drei Wiederholungen"]
+  D -->|auch der letzte Versuch scheitert| DX["Abbruch: kein VM-Eintrag wird geschrieben"]
+  C -->|nein| E
+  D --> E["Je VM per UUID schreiben (autostart_write_tasks.yml, RUN Autostart): powerOn oder none, Reihenfolge -1, Start- und Stoppverzögerung; Stoppaktion und Heartbeat bleiben beim Host-Standard (systemDefault); bis zu drei Wiederholungen"]
+  E -.->|Eintrag einzelner VMs scheitert auch beim letzten Versuch| EX["Teilerfolg: Die übrigen VMs werden trotzdem geschrieben, nur die gescheiterten behalten die alte Richtlinie. Die Markerzeile zählt die geschriebenen Einträge, der Auftrag endet failed; der Endgrund nennt, wie viele VMs ihren Eintrag erhalten haben, und die Namen mit Meldung"]
+```
+
+Beide Stufen schreiben einen Zielzustand, ein zweites Schreiben desselben Eintrags ändert nichts; deshalb dürfen sie wiederholt werden. Der Host-Autostart wird nie ausgeschaltet, weil ein Host VMs mehrerer Missionen tragen kann; eine Mission zieht ihre Richtlinie zurück, indem jede ihrer VMs `none` erhält.
+
+### esxi_vm_read_tasks und esxi_retry_wait_tasks
+
+Die gemeinsame Wiederholung bei einem kurzen ESXi-Aussetzer (W1). `esxi_vm_read_tasks.yml` ist die eine lesende Abfrage einer VM per gebundener Instance-UUID für Powercycle, Export, Start, Autostart und die Zustandsabfrage nach einem unklaren Einschalten. `esxi_retry_wait_tasks.yml` schreibt vor jedem weiteren Versuch, auch in den anderen wiederholenden Dateien, die Zeile `[n/total] RETRY <Einheit>: <Meldung>; attempt n of 4 in s s` und wartet. Die Pausen stehen als `EsxiRetryPauseSeconds` in `serverlist.yml` und kommen aus `VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS`, derselben Liste wie beim Anlegen und wie `RETRY_DELAYS_SECONDS` in `upload_mac_list.py`; `AnsiblePauseBudgetContractTest` hält alle drei gleich.
+
+```mermaid
+flowchart TD
+  A["ESXi-Aufruf, Fehler toleriert"] -->|Erfolg| OK["Ergebnis an den Aufrufer"]
+  A -->|Fehler, Versuch 1 bis 3| W["RETRY-Zeile mit Meldung des Moduls, Pause 5, 15 oder 45 s"]
+  W --> A
+  A -->|Fehler bei Versuch 4| F["Letztes Ergebnis an den Aufrufer: Export meldet es je VM, die anderen Schritte enden mit der Meldung"]
+```
+
+Wiederholt wird nur, was bei einer Wiederholung nichts ändert, was der erste Versuch nicht schon wollte: Abfragen, das harte Ausschalten, das Einschalten im Start-Schritt (ohne `force`) und das Schreiben eines Autostart-Eintrags. Das Einschalten im Powercycle wird nie blind wiederholt (W2, oben). Ein Fehler, der nicht vorübergehend ist, kostet so höchstens die Summe der Pausen, bevor der Schritt mit derselben Meldung endet wie ohne Wiederholung.
+
+### inventoryESXi
+
+Liest nur und läuft ohne Mission als Systemauftrag je ESXi-Zugang.
+
+```mermaid
+flowchart TD
+  A["Datacenter lesen (Verbindungstest, ohne Fehlertoleranz)"] -->|Fehler| AX["Abruf failed; der Worker ordnet die Ursache nur aus den Fehlerzeilen ein"]
+  A --> B["Datastores, Standard-Portgruppen, verteilte Portgruppen des ersten Datacenters, Hostdaten, VMs (nur Name, MOID, Instance-UUID, Energiezustand), Produkt und Lizenz, Wartungsmodus und HA-Zustand lesen; jede Abfrage darf einzeln scheitern"]
+  B --> C["Ergebnis und Zustand jeder Einzelabfrage als eine Base64-Markerzeile ausgeben"]
+  AX -->|host_error, erster Fehlschlag der Serie, Automatik an| F["Ein Nachlauf nach 5 bis 10 Minuten"]
+  AX -->|jede andere Kategorie oder Folgefehlschlag| G["Nächster Versuch nach dem Intervall; bei auth Pause bis zur Änderung des Zugangs"]
+```
+
+Im Worker folgt darauf: Ausgabe begrenzt einlesen, Markerzeile auswerten, Inventar-Cache und Host-Eigenschaften speichern, VLAN-Katalog abgleichen. Ein Fehlschlag erhöht die Fehlerserie des Zugangs; der vorige Cache bleibt erhalten.
+
+Die Kategorie eines Fehlschlags liest `ansible_categorize_inventory_error()` nur aus den Fehlerzeilen (`ansible_inventory_failure_lines()`): `[ERROR]:` und `ERROR!` mit ihren Folgezeilen bis `Origin:`, dazu `fatal:` und `failed:`. Nicht gelesen werden `PLAY RECAP` (dort steht in jedem Lauf `unreachable=0`), der `Origin:`-Ausschnitt mit Playbook-Quelltext und ein Fehler, den `...ignoring` abschließt. Antwortet der Host mit HTTP 5xx, heißt das `host_error`; so erscheint auch „is down or is not a VIM server“, denn pyVmomi meldet damit eine Fehlerantwort beim Lesen der API-Beschreibung, während ein abgelehnter Port als `Connection refused` kommt. Nach dem ersten `host_error` einer Fehlerserie plant `esxi_inventory_attempt_due()` genau einen Nachlauf nach `VIRTUSPHERE_ESXI_INVENTORY_HOST_ERROR_RETRY_SECONDS` (300 s, geprüft im 300-s-Takt des Wartungsdienstes); der Nachlauf erhöht die Serie auf 2, danach gilt wieder das Intervall. `auth` und `authz` bekommen nie einen Nachlauf.

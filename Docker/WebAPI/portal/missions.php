@@ -1,0 +1,390 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../lib/bootstrap.php';
+require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/client_phase_attention.php';
+require_once __DIR__ . '/../lib/repo/missions.php';
+require_once __DIR__ . '/../lib/repo/vms.php';
+require_once __DIR__ . '/../lib/repo/log.php';
+require_once __DIR__ . '/../lib/format.php';
+require_once __DIR__ . '/../lib/mission_transfer.php';
+require_once __DIR__ . '/../lib/mission_import_portal.php';
+require_once __DIR__ . '/../lib/missions_import_panel.php';
+require_once __DIR__ . '/../lib/portal_export.php';
+require_once __DIR__ . '/../lib/mission_nav.php';
+require_once __DIR__ . '/../lib/missions_page.php';
+require_once __DIR__ . '/../lib/esxi_inventory.php';
+require_once __DIR__ . '/../lib/system_status_urls.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
+
+$user = portal_require_user($connection);
+$type = request_string($_GET, 'type', 'missions');
+$type = $type === 'templates' ? 'templates' : 'missions';
+$isTemplateView = $type === 'templates';
+$active = $isTemplateView ? 'templates' : 'missions';
+$title = $isTemplateView ? __t('missions.title_templates') : __t('missions.title_missions');
+$requestedMissionSort = request_string($_GET, 'sort', 'name');
+if (!in_array($requestedMissionSort, ['name', 'vms', 'attention'], true)) {
+    $requestedMissionSort = 'name';
+}
+$requestedMissionDir = request_string($_GET, 'dir', 'asc') === 'desc' ? 'desc' : 'asc';
+$workContext = portal_work_context_from_mission_list($type, $requestedMissionSort, $requestedMissionDir);
+$missionListActionUrl = portal_work_context_mission_list_url($workContext);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    portal_guard_post($connection, $user);
+    if (!can('missions.write', $user)) {
+        portal_forbid($connection, $user, 'missions.write');
+    }
+
+    try {
+        $action = request_string($_POST, 'action');
+        if ($action === 'create') {
+            $name = request_trimmed($_POST, 'mission_name');
+            if ($type === 'templates') {
+                // An empty name carries no prefix, so the repo layer could not tell
+                // that this form creates a template. Say so here instead.
+                if ($name === '') {
+                    throw new ValidationException(['mission_name' => __t('validate.required', ['field' => __t('validate.field_template_name')])]);
+                }
+                if (!mission_name_is_template($name)) {
+                    $name = VIRTUSPHERE_TEMPLATE_PREFIX . $name;
+                }
+            }
+            if ($type === 'missions' && mission_name_is_template($name)) {
+                throw new ValidationException(['mission_name' => __t('missions.err_prefix_reserved')]);
+            }
+            // Creation and audit row commit together (MECM plan decision 32).
+            $newMissionId = repo_transaction($connection, static function () use ($connection, $name, $user): int {
+                $newMissionId = repo_create_mission($connection, ['mission_name' => $name], false, (int) $user['id']);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $newMissionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'created',
+                    'name' => $name,
+                ], (int) $user['id']);
+
+                return $newMissionId;
+            });
+            flash_set('success', $isTemplateView ? __t('missions.flash_created_template') : __t('missions.flash_created_mission'));
+            redirect_to(mission_details_url($newMissionId, $workContext));
+        } elseif ($action === 'delete') {
+            $missionId = request_int($_POST, 'mission_id');
+            if ($missionId <= 0) {
+                throw new RuntimeException(__t('missions.err_mission_id_required'));
+            }
+            // HA-24: the row names the mission, read before the delete removes it.
+            $missionName = (string) (repo_get_mission($connection, $missionId)['mission_name'] ?? '');
+            repo_transaction($connection, static function () use ($connection, $missionId, $missionName, $user): void {
+                deleteMission($missionId, $connection);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', $missionId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'deleted', 'name' => $missionName], (int) $user['id']);
+            });
+            flash_set('success', $isTemplateView ? __t('missions.flash_deleted_template') : __t('missions.flash_deleted_mission'));
+        } elseif ($action === 'import_preview') {
+            // Every expected outcome below answers with flash + redirect (both
+            // end the request), so whatever reaches this catch is a fault, not
+            // operator input: it gets a reference and exactly one server-log
+            // line, never a raw PHP sentence.
+            try {
+                $upload = mission_import_read_upload($_FILES['import_file'] ?? null);
+                if ($upload['rejection'] !== null) {
+                    flash_set('error', $upload['rejection']);
+                    redirect_to('missions.php?type=missions');
+                }
+                // The ORIGINAL decoded payload, never its canonical projection:
+                // the preview and the confirm re-derive the analysis from it, so
+                // the shape findings survive the round trip and the rule stays in
+                // one place. Exactly one active import per session by decision; a
+                // new upload replaces the previous one.
+                $token = bin2hex(random_bytes(16));
+                $_SESSION['mission_import'] = [
+                    'token' => $token,
+                    'created' => time(),
+                    'payload' => $upload['payload'],
+                    'suggested_name' => $upload['suggested_name'],
+                ];
+                redirect_to('missions.php?type=missions&import=' . $token);
+            } catch (Throwable $uploadFault) {
+                flash_set('error', __t('missions.import_err_unexpected', [
+                    'reference' => mission_import_diagnose('upload', $uploadFault),
+                ]));
+            }
+        } elseif ($action === 'import_confirm') {
+            $token = request_string($_POST, 'import_token');
+            $state = $_SESSION['mission_import'] ?? null;
+            $status = mission_import_handoff_status($state, $token, time());
+            if ($status !== 'valid') {
+                // Same rule as the GET preview: only a hand-off this link OWNS
+                // may be removed. A mismatch is about a different upload, and
+                // deleting it here destroyed the newer preview of the same
+                // session.
+                if ($status === 'expired' || $status === 'invalid') {
+                    unset($_SESSION['mission_import']);
+                }
+                flash_set('error', match ($status) {
+                    'expired' => __t('missions.import_err_expired'),
+                    'invalid' => __t('missions.import_err_state_invalid'),
+                    default => __t('missions.import_err_gone'),
+                });
+                redirect_to('missions.php?type=missions');
+            }
+            $name = request_trimmed($_POST, 'mission_name');
+            // Before the import, so every failing redirect carries the name the
+            // operator just typed instead of resetting the field to the file's
+            // suggestion together with a finding about a name they no longer see.
+            $_SESSION['mission_import']['suggested_name'] = $name;
+            try {
+                // The cast narrows a type, it decides no shape: the status above
+                // already established that the stored payload is an array, and
+                // everything inside it is canonicalized by the analysis.
+                // Import and its audit row commit together (MECM plan decision 32);
+                // the refusals below keep their meaning because a rolled-back
+                // import throws the same exception out of the transaction.
+                $report = repo_transaction($connection, static function () use ($connection, $state, $name, $user): array {
+                    $report = mission_import($connection, (array) $state['payload'], $name, false, (int) $user['id']);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_MISSION_CHANGED, 'mission', (int) $report['mission_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'imported',
+                        'name' => $name,
+                        'vm_count' => (int) $report['counts']['vms'],
+                    ], (int) $user['id']);
+
+                    return $report;
+                });
+            } catch (MissionTransferDocumentException $documentError) {
+                // The stored document cannot be read at all any more; there is
+                // nothing left to retry against.
+                unset($_SESSION['mission_import']);
+                flash_portal_error($documentError, $user);
+                redirect_to('missions.php?type=missions');
+            } catch (MissionTransferBlockedException|ValidationException $expectedError) {
+                // Expected refusals (a blocked report, a value a validator
+                // rejects). The hand-off stays alive so the admin can correct the
+                // name and retry without re-uploading.
+                flash_portal_error($expectedError, $user);
+                redirect_to('missions.php?type=missions&import=' . rawurlencode($token));
+            } catch (Throwable $importFault) {
+                // The unique index is the last race guard behind the live
+                // re-check: a name taken between preview and confirm is a plain
+                // conflict, not a fault worth an error reference.
+                $isNameRace = $importFault instanceof mysqli_sql_exception && (int) $importFault->getCode() === 1062;
+                flash_set('error', $isNameRace ? __t('missions.import_name_conflict') : __t('missions.import_err_unexpected', [
+                    'reference' => mission_import_diagnose('confirm', $importFault),
+                ]));
+                redirect_to('missions.php?type=missions&import=' . rawurlencode($token));
+            }
+            unset($_SESSION['mission_import']);
+            flash_set('success', __t('missions.import_flash_done', ['count' => (int) $report['counts']['vms']]));
+            redirect_to('mission_details.php?id=' . (int) $report['mission_id']);
+        }
+    } catch (ValidationException $exception) {
+        form_remember('create', $_POST, $exception->errors());
+        flash_portal_error($exception, $user);
+    } catch (Throwable $exception) {
+        flash_portal_error($exception, $user);
+    }
+    redirect_to($missionListActionUrl);
+}
+
+$rows = array_values(array_filter(getMissions($connection), static function (array $mission) use ($type): bool {
+    $isTemplate = mission_name_is_template((string) ($mission['mission_name'] ?? ''));
+    return $type === 'templates' ? $isTemplate : !$isTemplate;
+}));
+// NL1 (user decision 01.11.2026): no attention-only filter; the dashboard tile
+// "VM check due" with its four groups replaces it. An old attention parameter is ignored.
+$rows = missions_with_vm_counts($connection, $rows, $isTemplateView);
+
+// Column sorting (Name, VMs): whitelisted keys keep GET input safe and let the
+// CSV export and the rendered table share the same order.
+[$sort, $dir] = portal_sort_apply($rows, [
+    'name' => portal_sort_text('mission_name'),
+    'vms' => portal_sort_number('vm_count'),
+    'attention' => portal_sort_number('progress_attention_count'),
+], 'name');
+$workContext = portal_work_context_from_mission_list($type, $sort, $dir);
+
+missions_export_csv_if_requested($connection, $user, $rows, $isTemplateView);
+
+// Missions with waiting scheduled jobs get a stronger delete confirmation, since
+// the deploy_jobs FK cascade would silently drop those scheduled jobs (B4.5).
+$missionsWithScheduled = [];
+$scheduledResult = $connection->query("SELECT DISTINCT mission_id FROM deploy_jobs WHERE status = 'queued' AND cancelled_at IS NULL AND scheduled_at IS NOT NULL AND scheduled_at > UTC_TIMESTAMP()");
+if ($scheduledResult !== false) {
+    foreach ($scheduledResult->fetch_all(MYSQLI_ASSOC) as $scheduledRow) {
+        $missionsWithScheduled[(int) $scheduledRow['mission_id']] = true;
+    }
+}
+
+// Inventory-deviation badge: current, evidence-qualified comparisons only.
+// Templates carry no badge, so their view builds no report.
+$deviatingMissions = $isTemplateView ? [] : esxi_inventory_current_deviation_mission_ids(
+    esxi_inventory_deviation_report($connection, esxi_inventory_summaries($connection), esxi_inventory_interval_hours($connection), time())
+);
+
+// Import dry-run preview (A2/A4): if a valid, non-expired hand-off exists in the
+// session, recompute the report against the live DB and render the confirm step.
+$importPreview = null;
+$importToken = request_string($_GET, 'import');
+// A hand-off that is provably dead (expired, or structurally unusable) is swept
+// on any render of this page, with or without a token: an operator who keeps
+// working should not carry a dead payload around until the session GC runs.
+if ($importToken === '' && mission_import_handoff_is_disposable($_SESSION['mission_import'] ?? null, time())) {
+    unset($_SESSION['mission_import']);
+}
+if ($importToken !== '' && !$isTemplateView && can('missions.write', $user)) {
+    $state = $_SESSION['mission_import'] ?? null;
+    // One closed status, shared with the confirm POST. The condition used to be
+    // spelled out twice, and this copy answered a token MISMATCH by deleting the
+    // session state, so opening the stale link of upload A destroyed the still
+    // valid preview of the newer upload B.
+    $status = mission_import_handoff_status($state, $importToken, time());
+    if ($status === 'valid') {
+        $suggestedName = (string) ($state['suggested_name'] ?? '');
+        try {
+            // Type narrowing only; the status above established the array shape.
+            $report = mission_import($connection, (array) $state['payload'], $suggestedName, true);
+            $importPreview = [
+                'token' => $importToken,
+                'suggested_name' => $suggestedName,
+                // From the analysis, not from the raw file: an unparseable value
+                // would otherwise be rendered back as a timestamp.
+                'exported_at' => (string) $report['exported_at'],
+                'report' => $report,
+            ];
+        } catch (MissionTransferDocumentException $documentError) {
+            // The stored document cannot be read at all. Its own hand-off goes,
+            // and the localized reason is said: this catch used to be the unset
+            // alone, so the page fell back to the empty upload form with no flash
+            // and no log entry, which is exactly the "nothing happens on Preview"
+            // the operator reported.
+            unset($_SESSION['mission_import']);
+            flash_portal_error($documentError, $user);
+        } catch (Throwable $previewFault) {
+            // Unexpected (a database failure, a coding error). Only this link's
+            // own broken hand-off is dropped, the fault is recorded once, safely,
+            // and the operator gets a reference rather than PHP prose.
+            unset($_SESSION['mission_import']);
+            flash_set('error', __t('missions.import_err_unexpected', [
+                'reference' => mission_import_diagnose('preview', $previewFault),
+            ]));
+        }
+    } elseif ($status === 'expired') {
+        // This link's own hand-off is still in the session and only its TTL has
+        // run out: "expired" is an established fact here, so it may be said.
+        unset($_SESSION['mission_import']);
+        flash_set('error', __t('missions.import_err_expired'));
+    } elseif ($status === 'invalid') {
+        // A structurally unusable state; nothing can be reported about the file,
+        // so the message says only that this preview has to be redone.
+        unset($_SESSION['mission_import']);
+        flash_set('error', __t('missions.import_err_state_invalid'));
+    } else {
+        // missing or mismatch. Reached after Cancel, after a SUCCESSFUL import
+        // followed by the Back button, from a stale link out of another session,
+        // and from the older link of a session that has since uploaded again.
+        // Which of those it was is not knowable here, so the message states only
+        // what is established: there is no preview behind THIS link any more.
+        // Claiming "expired" would assert a cause this path never checked, and
+        // nothing is deleted, because whatever is in the session belongs to a
+        // different upload.
+        flash_set('error', __t('missions.import_err_gone'));
+    }
+}
+
+layout_header($title, $user, $active, 'missions');
+?>
+<div class="stack">
+    <?php if (!$isTemplateView) { client_phase_attention_render(repo_client_phase_failures($connection)); } ?>
+    <?php if (can('missions.write', $user)) { ?>
+        <section class="panel" id="mission-create">
+            <h2><?php echo h($isTemplateView ? __t('missions.create_heading_template') : __t('missions.create_heading_mission')); ?></h2>
+            <form class="form-grid" method="post" action="<?php echo h($missionListActionUrl); ?>">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="create">
+                <label><?php echo h(__t('common.name')); ?><input name="mission_name" maxlength="255" pattern="\S+" title="<?php echo h(__t('missions.name_no_spaces_title')); ?>" value="<?php echo h(form_old('create', 'mission_name')); ?>"<?php echo form_control_attrs('create', 'mission_name'); ?> required><?php echo form_error_html('create', 'mission_name'); ?></label>
+                <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.create')); ?></button></div>
+            </form>
+        </section>
+    <?php } ?>
+
+    <?php if (!$isTemplateView && can('missions.write', $user)) { ?>
+        <?php if ($importPreview !== null) {
+            missions_render_import_preview($importPreview, $user);
+        } else {
+            missions_render_import_upload();
+        } ?>
+    <?php } ?>
+
+    <section class="panel">
+        <?php // Two lists, two addresses: page navigation (lib/mission_nav.php).
+              // The export acts on the list and stays in the action row, which is
+              // rendered only when it holds something: an empty one still occupies
+              // its gap above the table. ?>
+        <?php echo mission_list_nav($type); ?>
+        <?php if ($rows !== []) { ?>
+        <div class="actions">
+            <a class="button button-secondary" href="missions.php?type=<?php echo h($type); ?>&sort=<?php echo h($sort); ?>&dir=<?php echo h($dir); ?>&export=csv"><?php echo h(__t('common.export_csv')); ?></a>
+        </div>
+        <?php } ?>
+        <div class="table-wrap" tabindex="0">
+            <table>
+                <thead><tr><?php
+                    $missionSortParams = ['type' => $type];
+                    echo portal_sort_header('missions.php', 'name', __t('common.name'), $sort, $dir, $missionSortParams);
+                    echo portal_sort_header('missions.php', 'vms', __t('common.vms'), $sort, $dir, $missionSortParams);
+                    if (!$isTemplateView) { echo '<th>' . h(__t('missions.th_phases')) . '</th>'; }
+                    echo portal_sort_header('missions.php', 'attention', __t('missions.th_attention'), $sort, $dir, $missionSortParams);
+                ?><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
+                <tbody>
+                <?php foreach ($rows as $mission) { ?>
+                    <tr id="mission-<?php echo h((string) $mission['id']); ?>">
+                        <td><?php echo h($mission['mission_name'] ?? ''); ?>
+                            <?php if (isset($deviatingMissions[(int) $mission['id']])) { ?>
+                                <?php if (can('system.config', $user)) { ?><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS)); ?>" aria-label="<?php echo h(__t('missions.deviation_title')); ?>"><?php echo portal_badge('warning', __t('missions.deviation_badge')); ?></a><?php } else { echo portal_badge('warning', __t('missions.deviation_badge')); } ?>
+                            <?php } ?>
+                        </td>
+                        <td><?php echo h((string) ($mission['vm_count'] ?? 0)); ?></td>
+                        <?php if (!$isTemplateView) { ?><td><?php echo missions_phase_cell($mission, $workContext); ?></td><?php } ?>
+                        <td><?php $attentionCount = (int) ($mission['progress_attention_count'] ?? 0); echo $attentionCount > 0
+                            ? portal_badge('warning', __t($attentionCount === 1 ? 'missions.attention_badge_one' : 'missions.attention_badge_many', ['count' => $attentionCount]))
+                            : '&mdash;'; ?></td>
+                        <td><?php echo h(portal_format_timestamp($mission['updated_at'] ?? '')); ?></td>
+                        <td class="actions">
+                            <a class="button button-secondary" href="<?php echo h(mission_details_url((int) $mission['id'], $workContext)); ?>"><?php echo h(__t('common.details')); ?></a>
+                            <a class="button button-secondary" href="<?php echo h(portal_work_context_vm_list_url((int) $mission['id'], $workContext)); ?>"><?php echo h(__t('common.vms')); ?></a>
+                            <?php if (can('missions.write', $user)) { ?>
+                                <form class="inline-form" method="post" action="<?php echo h($missionListActionUrl); ?>">
+                                    <?php echo csrf_field(); ?>
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="mission_id" value="<?php echo h((string) $mission['id']); ?>">
+                                    <?php
+                                    // A template has no VMs to take down with it and cannot carry
+                                    // scheduled jobs, so it gets its own prompt rather than the
+                                    // mission wording. The scheduled warning outranks the empty
+                                    // one: waiting jobs matter more than an absent VM count.
+                                    // Name the row so the dialog cannot be confirmed for the
+                                    // wrong mission when several read alike.
+                                    $confirmName = ['name' => (string) ($mission['mission_name'] ?? '')];
+                                    if ($isTemplateView) {
+                                        $confirmDelete = __t('missions.confirm_delete_template', $confirmName);
+                                    } elseif (isset($missionsWithScheduled[(int) $mission['id']])) {
+                                        $confirmDelete = __t('missions.confirm_delete_scheduled', $confirmName);
+                                    } elseif ((int) ($mission['vm_count'] ?? 0) === 0) {
+                                        $confirmDelete = __t('missions.confirm_delete_empty', $confirmName);
+                                    } else {
+                                        $confirmDelete = __t('missions.confirm_delete', $confirmName);
+                                    }
+                                    ?>
+                                    <button class="button button-danger" type="submit" data-confirm="<?php echo h($confirmDelete); ?>"><?php echo h(__t('common.delete')); ?></button>
+                                </form>
+                            <?php } ?>
+                        </td>
+                    </tr>
+                <?php } ?>
+                <?php if ($rows === []) { ?><tr><td colspan="<?php echo $isTemplateView ? '5' : '6'; ?>"><?php echo missions_empty_list_html($isTemplateView, can('missions.write', $user)); ?></td></tr><?php } ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+<?php layout_footer(); ?>

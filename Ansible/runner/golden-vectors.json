@@ -1,0 +1,33 @@
+{
+  "schema": "virtusphere.remote.golden-vectors/v1",
+  "valid": {
+    "schema": "virtusphere.remote.manifest/v1",
+    "protocol": 1,
+    "instance_id": "11111111111111111111111111111111",
+    "generation_id": "22222222222222222222222222222222",
+    "run_token": "33333333333333333333333333333333",
+    "job_id": 17,
+    "attempt": 2,
+    "step": "inventory",
+    "unit_name": "virtusphere-j17-a2-inventory-333333333333.service",
+    "remote_dir": "/home/ansible/.local/state/virtusphere/11111111111111111111111111111111/22222222222222222222222222222222/jobs/17/2/inventory/33333333333333333333333333333333",
+    "runtime_max_seconds": 3600,
+    "heartbeat_interval_seconds": 15,
+    "output_max_bytes": 1048576,
+    "playbook": "inventoryESXi_playbook.yml",
+    "playbook_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "artifacts": [
+      {"path": "inventoryESXi_playbook.yml", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 42, "kind": "playbook"},
+      {"path": "secrets/redactions.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "size": 16, "kind": "redaction"}
+    ],
+    "redaction_file": "secrets/redactions.json",
+    "correlation_id": "vs-offline-vector-0001"
+  },
+  "invalid": [
+    {"case": "unknown-field", "set": {"surprise": true}},
+    {"case": "create-forbidden", "set": {"step": "create"}},
+    {"case": "traversal", "set": {"redaction_file": "../redactions.json"}},
+    {"case": "unbounded-runtime", "set": {"runtime_max_seconds": 0}},
+    {"case": "weak-token", "set": {"run_token": "1234"}}
+  ]
+}

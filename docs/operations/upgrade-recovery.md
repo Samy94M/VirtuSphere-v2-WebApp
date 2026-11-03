@@ -1,0 +1,171 @@
+# Upgrade- und Recovery-Kompatibilität
+
+Dieses Runbook ist die ausführbare X01-Matrix für Portalquellen, Schema,
+Worker, PowerShell-Paket, Images, Konfiguration und Browserzustand. Es ergänzt
+`offline-install.md`, `go-live.md` und `backup.md`. Ein Image-Digest allein ist
+keine Releaseidentität, weil Anwendungscode und Konfiguration in Bind-Mounts
+liegen.
+
+## Releaseidentität
+
+Vor einem Wartungsfenster werden gemeinsam festgehalten:
+
+1. Release-Nummer (`Docker/WebAPI/lib/VERSION`, Einstellungen > Version),
+   Git-Commit und SHA-256 des verifizierten `source.tar.gz`;
+2. angewandte und ausstehende Einträge aus `deploy_migrations` beziehungsweise
+   `migrate.php --check`;
+3. aufgelöste Compose-Dateien einschließlich Host-Override, Image-IDs und die
+   Digests/Pins aus dem Liefermanifest;
+4. Hashmanifest und Provenienz des Kernbundles sowie, falls installiert, des
+   getrennten Tools-Bundles;
+5. Version/Manifest des MECM-PowerShell-Pakets und des Durable Runners;
+6. Sicherungszeitpunkt, Hashmanifest und bestandener Restore-Drill des zur
+   Rückkehr vorgesehenen Daten-/Konfigurationsstands.
+
+Fehlt eines dieser Teile, ist der Stand nicht als wiederherstellbares Release
+identifiziert. Eine unveränderte Image-ID gleicht keinen geänderten Bind-Mount
+aus.
+
+## Zulässige Kombinationen
+
+| Portal/Quellen | Schema | Worker/Prozessform | Integration/Assets | Entscheidung |
+|---|---|---|---|---|
+| dieselbe Releaseidentität | zugehöriger, vollständig migrierter Stand | zugehöriger Worker und gespeicherter Prozessvertrag | zugehörige PowerShell-/Runnergeneration und Assets | unterstützt |
+| neue Quellen | altes Schema mit ausstehenden Migrationen | beliebig | beliebig | nur `migrate.php --check`; Portal und Worker noch nicht freigeben |
+| neue Quellen | neues Schema | alter, bereits laufender Workerprozess | alt oder neu | Übergangszustand, nicht freigeben; Claims vorher pausieren, laufende Einheit geordnet beenden, Prozess neu starten |
+| alte Quellen | neueres Schema | alter Worker | neue Vertragsdaten möglich | nicht als Rollback verwenden; konsistenten alten Daten-/Konfigurationsstand restoren |
+| neues Portal | neues Schema | neuer Worker | altes PowerShell-Paket | nur für weiterhin explizit kompatible alte Meldungen lesbar; neue Integrationsfunktion gesperrt, bis das Paket kontrolliert aktualisiert ist |
+| altes Portal | beliebiges Schema | beliebig | neues PowerShell-Paket oder neuer Callback | unzulässig; neue Felder/Aktionen dürfen nicht gegen einen alten Endpoint gesendet werden |
+| neue Quellen | neues Schema | passend | alte Browserseite | nur lesend; vor jedem Schreiben neu laden. Writer mit `edit_version` lehnen veraltete Formulare ab, diese Sicherung darf nicht für ungeschützte Altformulare behauptet werden |
+| beliebige Quellen | beliebiges Schema | nicht zum gespeicherten `supervisor_contract` passend | beliebig | absichtlich degraded; Prozessform und gespeicherten Vertrag im Wartungsfenster wieder zusammenführen |
+
+Die Machine-API bleibt additiv kompatibel, soweit ihr jeweiliger Wirevertrag das
+ausdrücklich festlegt. Alte Callbacks werden trotzdem an Job, Attempt,
+Runtimegeneration, Handle, VM und Revision geprüft; ein Restore oder Update
+macht daraus keinen erlaubten Replay. `uncertain` bleibt ungelöst und löst nie
+automatisch eine zweite Create-Ausführung aus.
+
+## Migrationsklassen des geprüften Stands
+
+Die Klasse beschreibt die Rückkehrgrenze, nicht nur die SQL-Syntax. Ein exakter
+Datenbank-Downgrade wird von keiner Migration angeboten; dafür wird der zuvor
+bewiesene konsistente Restorestand verwendet.
+
+| Klasse | Migrationen | Rückkehrvertrag |
+|---|---|---|
+| A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052, 0054, 0055, 0061, 0062, 0069, 0071 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
+| N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
+| C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060, 0063, 0064, 0065, 0066, 0067, 0068, 0070 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
+
+Migration 0034 entfernt das Legacy-Tokenschema ausdrücklich. Die Migrationen
+0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049 und 0050 führen
+Runtimegeneration, Remoteausführung, Claim-/Supervisorzustand,
+Create-Einheiten, Callbackfences und Rolloutnamen zusammen. 0053 macht
+`edit_version` zum Schreibzaun. Diese Grenzen dürfen bei einem Rückbau weder
+gelöscht noch durch Defaultwerte simuliert werden.
+
+Migration 0059 führt die Prüfung der SSH-Hostidentität vor jeder Anmeldung ein. Alter Code würde ohne Host-Schlüsselprüfung anmelden; ein gemischter Betrieb ist unsicher. Rückkehr ist nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore zulässig.
+
+Migration 0060 ergänzt das unveränderliche Vorzustands- und Berührungsjournal je Auftrag und VM, ohne historische Zeilen anzulegen. Die Worker-Konvergenz nach 0060 liest dieses Journal und die aktuelle Ausführungsgeneration; alter Worker-Code ignoriert diesen Beweis und darf nicht mit neuem Schema gemischt laufen. Rückkehr auf alten Code erfolgt nur mit dem dazugehörigen konsistenten Schema- und Konfigurationsrestore.
+
+Migration 0061 ergänzt an der VM-Bindung den ESXi-Zugang und dessen Host zum Bindungszeitpunkt; 0062 den Startzeitpunkt eines Auftrags. Beide Spalten sind nullbar, alter Code liest und schreibt sie nicht. Bindet alter Code eine VM, bleibt der Host-Schnappschuss der vorherigen Bindung stehen, bis der nächste erfolgreiche Create ihn neu schreibt; bis dahin kann die Warnung bei Create auf anderem Host fehlen oder einen alten Host nennen. Sie sperrt nichts. Aufträge, die alter Code startet, zeigen keinen Startzeitpunkt, wie historische Aufträge.
+
+Migration 0063 gibt jedem Eintrag der Machine-API-Freigabeliste eine optionale Rolle, die die erreichbaren Endpunkte begrenzt. Alter Code kennt die Rolle nicht und öffnet jedem freigegebenen Eintrag wieder jeden Endpunkt; eine Rückkehr hebt also die vom Administrator gesetzten Grenzen still auf.
+
+Migration 0064 führt den dauerhaften Merker für ESXi-Zugangsdateien auf dem Ansible-Host ein (`deploy_remote_secret_files`) und die Sperre, das Ziel eines Ansible-Zugangs bei offenem Merker zu ändern. Alter Code lädt die Datei ohne Merker hoch und kennt die Sperre nicht: Eine in seiner Laufzeit liegengebliebene Datei sieht weder der Systemstatus noch das Aufräumen beim nächsten Kontakt. Für 0063 und 0064 gilt deshalb dieselbe Grenze wie für 0059: kein gemischter Betrieb, Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore.
+
+Migration 0065 ergänzt den Auftragsstatus `outcome_unknown` („Ausgang unbekannt“), den der Reaper für einen laufenden Auftrag einer Mission ohne Herzschlag schreibt, und erlaubt den Abschlussgrund `stale_heartbeat` auch dafür. Alte Zeilen werden nicht umgeschrieben. Alter Code kennt den Wert nicht: Seine Anzeige fiele auf „Unbekannter Status“ zurück, seine Wiederholung und Bereinigung behandelten den Auftrag nicht als beendet, und sein Reaper schriebe wieder `failed`. Sobald eine Zeile den Wert trägt, bricht der Status-Preflight jedes älteren Migrationslaufs vor jeder DDL ab. Das ist gewollt; Rückkehr deshalb nur als zusammengehöriger Source- und Schemarestore wie bei 0059.
+
+Migration 0066 gibt jeder Create-Einheit ihren Versuch (`attempt`) und den Nachweis des ersten Versuchs (`first_error_code`, `first_error_detail`, `first_async_jid`); der Worker wiederholt damit eine Einheit mit `module_failed` bis zu dreimal im selben Auftrag. Bestehende Zeilen bleiben Versuch 1. Alter Code kennt die Spalten nicht: Er suchte einen laufenden späteren Versuch im Verzeichnis des ersten (`create.vm.<n>` statt `create.vm.<n>.attempt2` bis `.attempt4`) und fände ihn nicht, und seine Konvergenz übersähe, dass der erste Versuch ESXi schon erreicht hat. Deshalb Klasse C wie 0059: kein gemischter Betrieb, Rückkehr nur als zusammengehöriger Source- und Schemarestore.
+
+Migration 0067 merkt sich zu jedem gespeicherten Create-Fehlertext, ob er vom Host stammt (`error_detail_from_host`); ein CHECK erlaubt den Wert nur neben einem Text. Bestehende Zeilen bleiben ohne Angabe, das Portal nennt ihren Text dann „Gespeicherter Text“. Alter Code kennt die Spalte nicht: Seine Wiederholung leert `error_detail`, ließe die Herkunft aber stehen, und der CHECK wiese das Zurücksetzen der Einheit ab. Deshalb Klasse C: kein gemischter Betrieb, Rückkehr nur als zusammengehöriger Source- und Schemarestore.
+
+Migration 0068 merkt sich zu jedem fehlgeschlagenen Auftrag den Schritt, an dem er scheiterte (`failed_step`: `powercycle`, `export`, `start` oder `autostart`); der Worker schreibt ihn im selben Abschluss wie `last_error`. „Erneut ausführen“ setzt eine volle Pipeline, die nach vollständig erfolgreichem MAC-Export beim Start oder Autostart scheiterte, an diesem Schritt fort. Bestehende Zeilen bleiben ohne Angabe und werden wiederholt wie bisher. Alter Code kennt die Spalte nicht und auch nicht das Feld `then_autostart` im Auftragsinhalt: Einen eingereihten Start mit anschließendem Autostart führte er ohne Autostart aus und meldete ihn als erfolgreich. Deshalb Klasse C: kein gemischter Betrieb, vor dem Upgrade ein Datenbank-Backup, Rückkehr nur als zusammengehöriger Source- und Schemarestore.
+
+Migration 0069 legt `deploy_log_vm_refs` an: je Protokollzeile die VMs, die ihr Kontext unter `vm_ids` nennt (Sammeländerung, Konvergenz-Sweep). Die Migration füllt den Index einmalig aus den gespeicherten Zeilen; danach schreibt `audit_event()` ihn mit der Zeile. Der Fremdschlüssel auf `deploy_logs` löscht die Verweise mit der Aufbewahrung des Protokolls. Alter Code liest und schreibt die Tabelle nicht: Sammeländerungen, die er schreibt, fehlen in der VM-Chronik, bis ein Restore oder eine erneute Rückfüllung sie nachträgt. Daher Klasse A; das Protokoll selbst bleibt vollständig.
+
+Migration 0070 benennt den MECM-Wert eines gescheiterten Auftrags von `failed` in `deploy_failed` um und zieht `failed` zurück (MX0): in `deploy_vms`, in den Statusereignissen und im Vorzustand `deploy_job_vm_states.mecm_before`, ohne `updated_at` zu bewegen. `failed` hatte nie einen anderen Schreiber als den Deploy-Fehlerpfad; die Umbenennung ändert keine Aussage. Die Maschinen-API liefert den Wert unter dem alten Namen weiter, der MECM-Server braucht kein Update. Alter Code schriebe bei einem Deploy-Fehler `failed` und würde vom ENUM abgewiesen; sein Rückschreiben eines Vorzustands fände `deploy_failed` nicht. Deshalb Klasse C: kein gemischter Betrieb, vor dem Upgrade ein Datenbank-Backup, Rückkehr nur als zusammengehöriger Source- und Schemarestore.
+
+Migration 0071 erweitert nur die CHECK-Bedingung der Abschlussgründe: `outcome_unknown` ist jetzt auch mit `ansible_connection_lost` gültig (U-01, Worker verlor die SSH-Verbindung zum Ansible-Host mitten im Schritt). Kein neuer Status, keine Spalte, keine Rückfüllung. Alter Code schreibt den Grund nie und zeigt ihn bei vorhandenen Zeilen als älteren Abschlussgrund ohne Klartext; sein Worker endet bei einem Verbindungsverlust weiter `failed`. Deshalb Klasse A. Eine Rückkehr unter 0065 sperrt weiterhin die Statusvorprüfung von 0065; eine exakte Rückkehr bleibt der Restore.
+
+## Upgradefolge
+
+Die ausführbaren Befehle zu dieser Folge, mit den Varianten für Git und Archiv,
+Laden und Bauen der Images, stehen im [Update-Runbook](update.md). Die Liste hier
+ist der Vertrag, den dieses Runbook erfüllt.
+
+1. Zielrelease und Bundle offline verifizieren; obige Releaseidentität sichern.
+2. Aktuellen Health-/Systemstatus sowie offene, laufende, cancelling und
+   `uncertain` Jobs erfassen. Neue Claims im vorhandenen Adminpfad pausieren.
+3. Laufende externe Einheiten geordnet bis zu ihrer beobachtbaren Grenze
+   auslaufen lassen. Ein unbekannter Create-Ausgang wird nicht durch Abbruch und
+   Neueinreihung „bereinigt“.
+4. `scripts/backup.sh` ausführen und genau dieses Tripel mit
+   `scripts/restore_test.sh` beweisen. Ohne grünen Drill kein Schemaübergang.
+5. Die Images der laufenden Container unter eigenem Namen sichern, bevor neue
+   Images geladen oder gebaut werden: Beides hängt den bisherigen Namen auf das
+   neue Image um, und der Rückweg vor der Migration fände sonst nicht mehr das
+   alte. Dann Worker **und Webserver** stoppen; das Portal bleibt bis nach der
+   Migration geschlossen. Erst jetzt verifizierte Quellen/Assets und
+   erforderliche Images bereitstellen. `.env`, Host-Override, Schlüssel und
+   Laufzeitdaten nicht aus einem Quellarchiv überschreiben. Danach muss
+   `docker compose config --quiet` ohne Warnung durchlaufen; eine nicht gesetzte
+   Variable wäre sonst still leer. Wer dabei die `.env` ändert: Compose
+   übernimmt sie nur beim Erzeugen eines Containers; in Schritt 7 deshalb neu
+   erstellen, nicht nur neu starten.
+6. Datenbank und PHP mit den neuen Images erzeugen, die übrigen Dienste noch
+   nicht. `migrate.php --check` ausführen. Bei roten Daten-Preflights abbrechen.
+   Danach Migration genau einmal starten und anschließend `pending=0` sowie
+   Schemakonvergenz prüfen.
+7. PHP, beide Worker und Webserver mit der zusammengehörigen Compose-/Imageform
+   neu erstellen beziehungsweise starten; Health und gespeicherten
+   `supervisor_contract` prüfen. Claims erst danach wieder öffnen.
+8. Portal-Login, Health, betroffene Machine-API-Negativprobe und einen
+   ungefährlichen lesenden Integrationsweg prüfen. Alte Browserseiten neu laden.
+9. PowerShell-/Runnerpaket erst nach Portal/Schema aktualisieren und seine
+   eigene Version/Generation prüfen. Standortfunktionen bleiben bis zu ihren
+   Laborproben gesperrt. Ist der MECM-Installer eines Stands gesperrt (er bricht
+   dann vor jeder Änderung ab, siehe [MECM-Integration](mecm-integration.md)),
+   bleibt das vorhandene MECM-Paket in Betrieb; das ist die Zeile „neues Portal,
+   altes PowerShell-Paket“ der obigen Matrix. Ein Kopieren der neuen Skripte von
+   Hand umgeht diese Sperre und ist kein zulässiger Weg. Bietet die Sperre das
+   reine Serverupdate `-Upgrade -ServerOnly` an, ist es der zulässige Weg für
+   Serverskripte und Aufgaben; die Paketvorlage bleibt dabei unverändert.
+
+## Unterbrechung und Rückkehr
+
+- Vor der Migration kann der verifizierte alte Quell-/Imagestand wieder
+  gestartet werden, sofern kein neuer externer Vorgang begonnen hat. Die alten
+  Images kommen dabei aus der Sicherung von Schritt 5, nicht über ihren Namen,
+  denn den trägt nach dem Laden oder Bauen bereits das neue Image.
+- Bei unklar unterbrochener Migration nicht blind erneut ausführen. Den Eintrag
+  in `deploy_migrations`, die konkrete Tabellenform und das Migrationsprotokoll
+  prüfen. Ist atomarer Abschluss nicht belegbar, den bewiesenen Vorabstand
+  restoren.
+- Ein Abbruch beim Quellen-/Assetwechsel bleibt gesperrt, bis ein vollständiges
+  Manifest genau eines Releases vorliegt. Keine Mischung aus zwei Archiven
+  vervollständigen.
+- Ein Worker-/Runtimewechsel erhält Jobbesitz, Attempt, Generation und Remote-
+  Handle. Erst der bestehende Recoveryvertrag darf eine Einheit freigeben.
+- Ein Restore verwendet Datenbank, `.env`, Host-Override, APP_KEY und
+  Quellrelease desselben Sicherungsstands und folgt dem Backup-Runbook dieses
+  Quellrelease, nicht dem des neueren Stands. Eine Ausnahme gilt für das
+  Starten der Datenbank vor dem Import: auch nach einem älteren Runbook
+  `docker compose up -d --wait mysql` verwenden und erst nach fehlerfreiem Ende
+  einspielen (Begründung im aktuellen [Backup-Runbook](backup.md), Schritt 3).
+  Der dafür nötige TCP-Healthcheck steht in jedem bisherigen Release in
+  `docker-compose.yml`. Anschließend AD-Konvergenz ausführen;
+  neuere offene Browserseiten und Callbacks müssen an ihren Revisions-/
+  Generationfences scheitern.
+- Nach Restore oder Rückbau bleiben `uncertain`-Einheiten, fremde
+  Runtimegenerationen und verlorene externe Antworten sichtbar. Neustart ist
+  keine Erfolgsevidenz.
+
+## Erneuerung der Nachweise
+
+Schema-, Runtime-, Compose-, Image-, EnvBoot-, Asset- oder Lieferänderungen
+erneuern ihre gezielten Fresh-/Upgrade-/Restore- und Betriebsproben. Änderungen
+an Query-/Sessionownern erneuern die betroffenen P01-Reihen; reine
+Dokumentänderungen nicht. Ein finaler Release benötigt weiterhin Q02 und die
+erreichbaren Standortlabore. Diese Matrix ist keine Commit-, Push- oder
+Produktivfreigabe.

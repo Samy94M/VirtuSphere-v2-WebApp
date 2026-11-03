@@ -1,0 +1,293 @@
+# ADR-0033: Cancellation is a confirmed state machine
+
+Status: accepted (2026-07-27). Decision 4 of the 2026-07 hardening campaign.
+
+## Context
+
+`repo_cancel_deploy_job()` set even a running job straight to `cancelled` and
+nulled its lock and heartbeat. The worker honours a stop only at step
+boundaries (by design, AP6: killing a create/powercycle mid-run leaves ESXi
+state no later step can reason about). For the length of the current playbook
+the portal therefore showed a terminal job whose sequence was still executing:
+
+- the mission-delete and enqueue guards count only queued/running, so a
+  mission could be deleted or a NEW job enqueued OVER a still-running sequence;
+- db_importMAC.php accepts callbacks only for `running` jobs, so the sequence's
+  own valid MAC upload bounced with 409 and the addresses were lost;
+- the nulled heartbeat made the row invisible to the reaper, so a worker that
+  died mid-sequence after a cancel was never converged.
+
+## Decision
+
+- **queued → cancelled** directly: nothing started, the wish is the end state.
+- **running → cancelling → cancelled**: the cancel request sets
+  `cancel_requested_at`/`cancel_requested_by` and the status `cancelling`;
+  lock, heartbeat and every protective effect of an active job stay. The
+  worker confirms at its next step boundary via an ownership CAS
+  (`cancelling → cancelled`, only under its own lock). A dead worker is
+  converged by the heartbeat reaper: a stale `cancelling` job becomes
+  `cancelled`, never `failed` - the operator asked for exactly this outcome.
+- **A step boundary is one playbook** (Etappe 8 of the deploy-reliability
+  masterplan). Until then a mode's playbooks ran as a single remote `a && b`
+  chain, so the only boundaries were before the first and after the last one:
+  this ADR and the portal promised a stop the worker could not perform for a
+  five-playbook pipeline. Each playbook is now its own remote command with an
+  ownership/cancel decision between them. The promise is therefore exactly:
+  *the step that is currently running can carry out its changes on ESXi
+  completely, and no further step is started afterwards* - nothing is killed
+  mid-playbook, because a hard stop inside a VM creation leaves a state no
+  later step can reason about.
+- **The last-step race is decided by competing swaps, never by a status read
+  before it.** Success, partial and failure may only finalise from `running`
+  under this worker's lock. If the cancel committed first, the terminal swap
+  finds zero rows, reloads the row and confirms `cancelled` itself, with bounded
+  terminal metadata saying that the step that was running did complete its work;
+  if the
+  terminal swap won first, a later cancel POST cannot change the finished job.
+  So there is neither "succeeded despite an accepted cancellation" nor a
+  `cancelled` job whose next playbook is still running.
+- **A terminal state and its terminal evidence are one database fact**
+  (amendments 2026-08-25). Success, partial and failure append their closing
+  SYSTEM line and change status in the same transaction. Cancellation is the
+  deliberate exception: `queued -> cancelled` writes its single cancellation
+  line in that transaction; `running -> cancelling` writes the single accepted
+  request line, while the later confirmation changes only `cancelled_at` and
+  bounded terminal metadata. It never manufactures a second operator action.
+  Normal job-log writers lock the parent row and reject every append after a
+  terminal status. The portal drains by sequence cursor until both terminal
+  status and `caught_up` are true.
+- **cancelled_at names the end state only.** The wish carries its own
+  timestamp and actor; a `cancelling` job has `cancelled_at IS NULL`.
+- **Cancellation metadata is not an error** (amendment 2026-08-25).
+  `cancel_requested_at` and `cancel_requested_by` retain the first request and
+  are never overwritten by a repeated POST. `terminal_reason_code` explains
+  operator confirmation versus reaper convergence; `terminal_reason_detail`
+  is bounded. A normal cancellation, group cancellation and partial result keep
+  `last_error` NULL. Historical cancelled rows may still contain old prose in
+  that column, but the presenter suppresses it by status instead of guessing
+  from the string. A deleted requester is displayed by its retained numeric id.
+- **Active means queued, running or cancelling** (one SSoT constant). Deleting
+  the mission, enqueueing a second job and enqueueing a second system pull for
+  the same credential stay blocked until the cancellation is confirmed.
+- **The MAC callback window follows the machine, not the wish.** db_importMAC
+  accepts a scoped callback while the job is running OR cancelling (the
+  sequence that produced the MACs is still the owner); only `cancelled` and the
+  other terminal states answer 409, and that rejection leaves a job-log line
+  and a throttled portal audit row. VMs whose import committed keep their
+  deployed state through the confirmation (the cancel convergence only touches
+  VMs still `deploying`).
+- **Cancelling is not retryable and not cancellable again**; the cancel button
+  renders only for queued/running (VIRTUSPHERE_DEPLOY_JOB_CANCELLABLE_STATUSES),
+  a repeated cancel POST is idempotent.
+- The legacy job_id-less callback path is untouched here; it falls with E3
+  (Etappe 5b), not with this ADR.
+- **The reaper may only judge silence it was awake for** (amendment
+  2026-08-11). A stale heartbeat proves that nobody wrote, not that the worker
+  died: while the database was unreachable nothing could write, so the moment it
+  returns every running job looks abandoned. A process records when its current
+  connection was established and waits out
+  VIRTUSPHERE_DEPLOY_REAP_OBSERVER_GRACE_SECONDS before reaping; an observer
+  that was connected throughout was never blind and reaps without any delay.
+  The verdict names the cause it established, never one it assumed - the
+  convergence note claimed "the worker died before confirming" on a path that
+  is also reached with the worker alive. This is a bound on WHEN the reaper
+  speaks, not a change to the state machine above: a stale `cancelling` job
+  still converges to `cancelled`, never to `failed`.
+- **The reap message states observation, never cause** (amendment 2026-08-12).
+  `deploy_job_reap_observation()` is the one wording, pure so it can be pinned
+  without a database, and it carries exactly what the transaction can see: job
+  id, heartbeat age against the limit that made it stale, `locked_by`, and the
+  transition. A caller with a further OBSERVATION may append it, labelled as
+  separate - the deploy worker appends whether a deploy service is reporting its
+  status row right now. That row identifies no process: a restart writes a fresh
+  one, so "reporting" does not establish that this job's owner survived and
+  "not reporting" does not establish that it died.
+- **`--once` never reaps** (amendment 2026-08-12). It connects and reaps
+  immediately, so it is always inside its own observer grace. This is a tool
+  contract, not a side effect: a one-shot run has observed nothing and has no
+  business concluding somebody else's job. A forced reap would need its own
+  named operator switch.
+- **A database outage during a run is not a job failure** (amendment
+  2026-08-12). The playbook executes on the Ansible host; the job log and the
+  heartbeat are a side channel, and a side channel must not end the run whose
+  exit code is the only remaining evidence about the VMs it created. Every write
+  of a running job goes through `DeployWorkerDbChannel`, which owns the live
+  connection (callbacks ask for the handle, they never capture one), announces
+  an outage exactly once on STDERR redacted, spools finished redacted log lines
+  in a bounded FIFO, and attempts at most one backed-off reconnect per tick so
+  the SSH stream keeps being read. After a reconnect the order is ownership,
+  heartbeat, spool - draining first would write into a job that was reaped and
+  re-claimed meanwhile. A job whose ownership is gone stops WITHOUT publishing a
+  result, because overwriting an established terminal state with a guess is
+  worse than the gap. When the remote command ends during the outage the loop
+  worker waits bounded for the database and finalizes exactly once; `--once`
+  stays bounded and reports the non-persistable outcome explicitly. This closes
+  the reaper's blind spot at its source: fewer heartbeat gaps to judge, and the
+  ones that remain are judged only by an observer that was awake.
+
+## Consequences
+
+- New ENUM value `cancelling` in both schema mirrors (position 3); migration
+  0031 adds it plus cancel_requested_at/cancel_requested_by (plain INT,
+  historical actor, deliberately no FK: the log line names the user anyway and
+  a deleted account must not erase who asked).
+- Migration 0043 adds nullable `terminal_reason_code` and bounded
+  `terminal_reason_detail` without backfilling historical rows. The status/code
+  combinations are checked in PHP and in both database schema paths.
+- The heartbeat UPDATE covers running and cancelling, so a cancelling job's
+  current step keeps proving liveness.
+- deploy_job_retry_plan/deploy_job_is_retryable unchanged: cancelled keeps its
+  plain re-queue semantics, cancelling is active and never offered.
+- Help explains the two words: "Abbruch angefordert" (worker will stop at the
+  next step boundary; the job still holds its locks) vs. "abgebrochen"
+  (confirmed end state).
+
+## Amendment (2026-08-31): callback fence and retry precedence
+
+The callback window still includes `cancelling`, but status alone is no longer
+sufficient. `db_importMAC.php` locks and validates Mission -> Job -> runtime
+identity -> current remote export handle when applicable -> VM -> interfaces.
+Mode/export expectation, execution contract, attempt and runtime/handle
+generation must all describe the execution that produced the body. A callback
+to any terminal state is 409, including a byte- or semantically identical
+replay; only an identical callback while that exact execution is active is a
+200 no-op.
+
+Active-job scope includes both `running` and `cancelling` for network writer
+guards. An interface/WDS write racing such a job rolls back rather than changing
+the meaning of an in-flight callback. Retry likewise refuses unresolved active
+or foreign-generation remote evidence before it evaluates identity, network or
+external prerequisites. A fully reconciled terminal historical handle does not
+poison later generations. These additions preserve the existing cancellation
+ownership, one terminal publication and retained `result_json` rules.
+
+A worker network preflight is still before the first remote boundary. Its
+bounded result and `failed/configuration_blocked` terminal state therefore use
+one atomic owner/status CAS. A cancellation that wins first is confirmed as
+`cancelled` without retaining `kind=network_preflight`; the cancellation detail
+uses the pre-remote wording and never claims an already-running remote step.
+
+## Amendment (2026-09-09): VM convergence belongs to the original claim
+
+A worker carries the claim's original worker id, token, lease epoch, attempt
+and execution generation through every VM and terminal write. Reading a fresh
+token after a reconnect cannot adopt a successor's claim. The current ownership
+read and its VM writes share Mission -> Job -> Runtime -> VM locks, with a
+lifecycle compare-and-swap and the current committed MAC successes preserved.
+An older REPEATABLE READ snapshot cannot supply the final MAC verdict.
+
+Cancellation confirmation, failure/success convergence and terminal publication
+are one transaction. A terminal, deleted or foreign claim performs no VM write;
+maintenance owns any remaining orphaned state. Reaper convergence also happens
+before its terminal commit, so a successor cannot be claimed between the old
+job's end and its VM write. Its wrapper performs no later VM sweep.
+Before any VM convergence, the reaper locks its complete Create row set by
+job id and position, matching historical admission scans even when heartbeat
+age orders the batch differently. `DeployReaperCreateBatchTest` checks this
+boundary through a second MySQL session using `NOWAIT`.
+
+`DeployWorkerVmOwnershipFenceTest` covers the individual ownership fields and
+atomic rollback. `DeployWorkerVmOwnershipRaceTest` exercises two MySQL sessions
+at callback, reaper and successor-claim boundaries, including lock-wait refusal
+and an earlier transaction snapshot. Callback HTTP behavior remains covered
+separately by `MacImportCallbackTest`.
+
+## Amendment (2026-10-19): a completed run outranks a late cancel
+
+A cancel accepted while the last playbook ran used to be confirmed at the last
+boundary with the stop journal, so the VMs of a run that had ended with exit
+code 0 everywhere were marked failed. The last boundary now checks only claim
+and lock. The conclusion confirms the pending cancel and converges the VMs as
+the success path would (`deploy_worker_conclude_cancel_after_sequence()`): a
+sequence without an export step restores its lifecycle bracket, a complete MAC
+result keeps the imported VMs, a partial one fails only the VMs it missed.
+Without a usable MAC result the run is no verified success, and the stop journal
+applies unchanged. The terminal state stays `cancelled`, the state the operator
+asked for, and its detail records that the run completed. The boundary after a
+create section stops at once only while a remote step is still to start.
+
+The loop worker's database wait after a finished remote command is sized
+against the stale deadline: `deploy_worker_db_recover_wait_seconds()` of the
+loop budget must exceed `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS`, because no
+heartbeat reaches a dead database. A failure is written only through a live
+connection, and an outcome the wait gave up on is never written afterwards as a
+guess; the reaper records the remote outcome as unknown instead.
+`DeployWorkerOutcomeTest`, `DeployCancellationStateMachineTest`,
+`DeployJobReaperTest` and `DeployWorkerDbChannelTest` cover these rules.
+
+## Amendment (2026-10-26): a silent running job ends as `outcome_unknown`
+
+The reaper observes silence, never the remote run. Since migration 0065 a
+stale `running` job of a mission therefore ends with the terminal status
+`outcome_unknown` instead of `failed` (WK-04/WK-07 A). The reason stays
+`stale_heartbeat`, which is now valid for both statuses: `failed` remains for
+rows reaped before 0065 (no backfill) and for a stale mission-less inventory
+pull, whose playbook only reads and is recorded as a failed fetch attempt. A
+stale `cancelling` job still converges to `cancelled` (decision 4: the
+operator's wish wins).
+
+- Only the reaper writes the status; `repo_finish_deploy_job()` refuses it,
+  because a worker alive to conclude its job knows how it ended.
+- It is terminal and releases the mission like any other end. Badge and the
+  `deploy.outcome` audit result are `warning`: unknown is not a failure, and
+  success would be a guess.
+- It is retryable like `failed`. `deploy_retry_blockers()` adds the
+  non-blocking external finding `retry_remote_outcome_unknown`; the
+  confirmation leads with what to check on ESXi. Every existing block (open
+  remote handle, unresolved Create unit, identity, network) applies unchanged,
+  and no action rewrites the old job to success or failure.
+- VM convergence is unchanged (the journal decides per VM, contract A49).
+- Returning to code without the status fails at the migration status preflight
+  once a row carries it: intended, because older code would mistake it for an
+  unknown value. Return only through the consistent restore of
+  `docs/operations/upgrade-recovery.md`.
+
+A worker that is alive but loses its SSH session in the middle of a step still
+writes `failed` with `timeout` or `execution_failed`; whether that case also
+deserves the unknown outcome (U-01) is a separate follow-up.
+
+## Amendment (2026-11-01): a lost Ansible host connection mid-step is `outcome_unknown`
+
+U-01, user decision of 2026-10-30, migration 0071. A worker that loses its SSH
+connection to the Ansible host while a playbook step runs now ends the job
+`outcome_unknown` with the new reason `ansible_connection_lost`, the way the
+reaper ends a silent job. This supersedes the first bullet and the last
+paragraph of the amendment of 2026-10-26: the reaper is no longer the only
+writer of the status.
+
+Measured on 2026-11-01 against a real sshd with the production read loop
+(phpseclib 3.0.57): a loss while the channel is read surfaces only as
+phpseclib's `ConnectionClosedException`. In the black-hole case the keepalive
+reports it once the portal host's TCP retry limit is reached, and the step had
+finished on the Ansible host although the worker would have written
+`execution_failed`. A playbook error arrives as an exit code, an expired idle
+or total budget as `SshTransportBudgetExceeded`, and a remote process killed by
+a signal as a channel end without exit status; none of them is that type.
+
+- Detection is by type in one place: `ssh_stream_command_output()` turns the
+  phpseclib type from the read slice into `SshTransportConnectionLost`. Login,
+  the exec request and SFTP are untouched.
+- Only a playbook step in flight counts (`$remoteStepInFlight` in the mission
+  loop). The read-only host preflight, the K21 sweep, SFTP, an inventory pull
+  and a Create control call stay `failed`; a Create unit decides its own
+  outcome and stays `uncertain` when the launch is unclear. An expired budget
+  stays `timeout` even when a network outage caused it: silence cannot be told
+  from a hanging playbook.
+- `deploy_worker_handle_failure()` derives the status from the reason after
+  its cancel branch, so a pending cancel still wins (decision 4); its detail
+  then says the step's end is unknown. VM convergence is the failure path's
+  (journal decision, contract A49, MECM `deploy_failed`): no MECM pickup is
+  advertised without proof, and no new waiting value exists.
+- `repo_finish_deploy_job()` accepts `outcome_unknown` only with
+  `ansible_connection_lost`; `stale_heartbeat` stays the reaper's. The redacted
+  diagnosis is also kept in `last_error`, as the reaper keeps it; the portal
+  shows "Last error" only for `failed`. No `failed_step` is stored, so a retry
+  never resumes at a step nobody saw end (K4b resume needs `failed`); it plans
+  like every unknown outcome, with `retry_remote_outcome_unknown` and the
+  warning sentence first.
+- `deploy.outcome` is a `warning` row with the closed reason code. The result
+  text says that the connection broke off during a step and that the end of
+  the step is unknown; the raw transport text appears only as reason detail.
+- This is the Portal-to-Ansible-host leg. Short ESXi interruptions on the
+  Ansible-to-ESXi leg are retried inside the playbooks (K2 to K4a) and are
+  unaffected.

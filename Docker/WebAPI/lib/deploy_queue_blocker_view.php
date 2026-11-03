@@ -1,0 +1,169 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/deploy_preflight_bounds.php';
+require_once __DIR__ . '/deploy_display.php';
+
+/**
+ * How a queue decision is shown and serialized: the blocker/warning render, the
+ * permission filter on a structured action, and the JSON shape the live
+ * endpoint returns.
+ *
+ * Split from deploy_blockers.php so that the DECISION module stays free of
+ * presentation. Both sides read the same complete union; only this one is
+ * allowed to shorten a list, and only for display.
+ */
+
+/**
+ * Renders the queue decision. `$blockers` is the COMPLETE list, because the
+ * count, the disabled state and the jump target are derived from it; only how
+ * many boxes are painted is bounded, and the omitted line says by how much.
+ *
+ * @param list<array<string,mixed>> $blockers
+ */
+/** @return array{state:string,status:string,context:string} */
+function deploy_blocker_presentation(array $state, array $blockers, ?int $scopeCount): array
+{
+    $count = count($blockers);
+    $mode = deploy_mode_label((string) $state['mode']);
+
+    return [
+        'state' => $count === 0 ? 'ready' : 'blocked',
+        'status' => __t($count === 0
+            ? 'deploy.preparation_ready'
+            : ($count === 1 ? 'deploy.preparation_blocked_one' : 'deploy.preparation_blocked_many'), ['count' => $count]),
+        'context' => __t($scopeCount === null
+            ? 'deploy.preparation_context_unknown'
+            : ($scopeCount === 1 ? 'deploy.preparation_context_one' : 'deploy.preparation_context_many'), [
+            'mode' => $mode,
+            'count' => $scopeCount ?? 0,
+        ]),
+    ];
+}
+
+function deploy_render_remedy_form(array $action, string $code, array $formValues): void
+{
+    ?>
+    <form class="inline-form" method="post" action="deploy.php">
+        <?php echo csrf_field(); ?>
+        <input type="hidden" name="action" value="open_remedy">
+        <input type="hidden" name="remedy_code" value="<?php echo h($code); ?>">
+        <?php echo deploy_form_draft_hidden_fields($formValues); ?>
+        <button class="button-as-link" type="submit"><?php echo h((string) $action['label']); ?></button>
+    </form>
+    <?php
+}
+
+function deploy_render_blockers(array $blockers, array $user, array $warnings = [], array $presentation = [], array $formValues = []): void
+{
+    $count = count($blockers);
+    if ($presentation === []) {
+        $presentation = deploy_blocker_presentation(
+            ['mode' => VIRTUSPHERE_DEPLOY_MODE_FULL],
+            $blockers,
+            null
+        );
+    }
+    $shown = deploy_preflight_bounded_findings($blockers, VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT);
+    $shownWarnings = deploy_preflight_bounded_findings($warnings, VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT);
+    ?>
+    <div class="deploy-preparation" data-deploy-blockers data-endpoint="deploy_blockers.php" data-error-message="<?php echo h(__t('deploy.blocker_refresh_failed')); ?>" data-checking-message="<?php echo h(__t('deploy.preparation_checking')); ?>" data-unreliable-message="<?php echo h(__t('deploy.preparation_unreliable')); ?>" data-hard-network-modes="<?php echo h(json_encode(deploy_modes_with_hard_network_gate(), JSON_THROW_ON_ERROR)); ?>" data-initial-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT); ?>" data-preparation-state="<?php echo h((string) $presentation['state']); ?>">
+        <div class="deploy-preparation-head">
+            <div>
+                <h3><?php echo h(__t('deploy.preparation_heading')); ?></h3>
+                <p class="muted" data-deploy-preparation-context><?php echo h((string) $presentation['context']); ?></p>
+            </div>
+            <p data-deploy-blocker-summary role="status" aria-live="polite" aria-atomic="true">
+                <strong data-deploy-preparation-status><?php echo h((string) $presentation['status']); ?></strong>
+                <a href="#deploy-blocker-1" data-deploy-blocker-jump<?php echo $count === 0 ? ' hidden' : ''; ?>><?php echo h(__t('deploy.blocker_jump')); ?></a>
+            </p>
+        </div>
+        <div data-deploy-blocker-list>
+        <?php foreach ($shown['items'] as $index => $blocker) {
+            $id = (string) ($blocker['target_id'] ?? ('deploy-blocker-' . ($index + 1)));
+            $kind = (string) ($blocker['kind'] ?? '');
+            $action = deploy_blocker_action_for_user($blocker, $user);
+            if ($kind === VIRTUSPHERE_DEPLOY_BLOCKER_PREREQUISITE || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_EMPTY_MISSION || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_VM_NETWORK_MAPPING || $kind === VIRTUSPHERE_DEPLOY_BLOCKER_IDENTITY_CONFLICT) { ?>
+                <?php
+                // Follow-ups go into the shared .alert-actions row, not after the
+                // sentence: two underlined links separated by one space read as a
+                // single long link, and the scope blocker is the first one here
+                // that has two. The row opens only when something fills it, and
+                // the middle dot appears only between two of them, because a lone
+                // link would otherwise start the row with a separator to its left.
+                $help = is_array($blocker['help'] ?? null) ? $blocker['help'] : null;
+                ?>
+                <div class="alert alert-error" id="<?php echo h($id); ?>" data-deploy-blocker tabindex="-1">
+                    <?php echo h((string) $blocker['message']); ?>
+                    <?php if ($action !== null && (string) $action['type'] !== 'link') {
+                        throw new LogicException('Unknown deploy blocker action for ' . $kind . ': ' . (string) $action['type']);
+                    } ?>
+                    <?php if ($action !== null || $help !== null) { ?>
+                        <div class="alert-actions">
+                            <?php if ($action !== null) { deploy_render_remedy_form($action, (string) $blocker['code'], $formValues); } ?>
+                            <?php if ($action !== null && $help !== null) { ?><span class="muted" aria-hidden="true">&middot;</span><?php } ?>
+                            <?php if ($help !== null) { ?><a href="<?php echo h((string) $help['url']); ?>" data-deploy-blocker-help><?php echo h((string) $help['label']); ?></a><?php } ?>
+                        </div>
+                    <?php } ?>
+                </div>
+            <?php } else {
+                throw new LogicException('Unknown deploy blocker kind: ' . $kind);
+            }
+        } ?>
+        </div>
+        <?php if ($shown['omitted_count'] > 0) { ?>
+            <p class="muted" data-deploy-blocker-omitted><?php echo h(__t('deploy.blocker_omitted', ['count' => $shown['omitted_count']])); ?></p>
+        <?php } ?>
+        <h3 data-deploy-warning-heading<?php echo $warnings === [] ? ' hidden' : ''; ?>><?php echo h(__t('deploy.preparation_warnings')); ?></h3>
+        <div data-deploy-warning-list>
+        <?php foreach ($shownWarnings['items'] as $warning) { $action = deploy_blocker_action_for_user($warning, $user); ?>
+            <div class="alert alert-warning" data-deploy-network-warning>
+                <strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h((string) $warning['message']); ?>
+                <?php if ($action !== null && (string) $action['type'] === 'link') { deploy_render_remedy_form($action, (string) $warning['code'], $formValues); } ?>
+            </div>
+        <?php } ?>
+        </div>
+        <?php if ($shownWarnings['omitted_count'] > 0) { ?>
+            <p class="muted" data-deploy-warning-omitted><?php echo h(__t('deploy.blocker_omitted', ['count' => $shownWarnings['omitted_count']])); ?></p>
+        <?php } ?>
+    </div>
+    <?php
+}
+
+/** @return null|array<string,mixed> */
+function deploy_blocker_action_for_user(array $blocker, array $user): ?array
+{
+    $action = $blocker['action'] ?? null;
+    if (!is_array($action)) {
+        return null;
+    }
+    $permission = (string) ($action['permission'] ?? '');
+    if ($permission !== '' && !can($permission, $user)) {
+        return null;
+    }
+
+    return $action;
+}
+
+/** @return array<string,mixed> */
+function deploy_blocker_json(array $blocker, array $user): array
+{
+    $result = [
+        'kind' => (string) $blocker['kind'],
+        'code' => (string) $blocker['code'],
+        'message' => (string) $blocker['message'],
+        'target_id' => (string) ($blocker['target_id'] ?? ''),
+    ];
+    $action = deploy_blocker_action_for_user($blocker, $user);
+    if ($action !== null) {
+        unset($action['permission']);
+        $result['action'] = $action;
+    }
+    // The help follow-up travels too, or the live list would drop it on the
+    // first refresh and the page would quietly show less than it did on load.
+    if (is_array($blocker['help'] ?? null)) {
+        $result['help'] = $blocker['help'];
+    }
+    return $result;
+}

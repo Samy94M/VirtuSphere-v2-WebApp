@@ -1,0 +1,421 @@
+# Deployment
+
+## Ubuntu Ansible Host
+
+SSH and SFTP verify the Ubuntu host's public key before every password login, and block in-place phpseclib reauthentication because its signature-validation cache does not establish a new handshake. Each external connection uses a fresh guarded object. Store the Ansible credential, run its test to observe the fingerprint and key type, compare them directly on the host, then explicitly confirm the checked identity in **Credentials**. New credentials cannot authenticate until confirmed. Existing credentials provisionally pin their first key after the upgrade, continue operating and show “please confirm”; every later mismatch blocks before authentication, with no automatic pin replacement. A legitimate key rotation requires another independent comparison and explicit confirmation. Fingerprint, observed mismatch and confirmation are shown in Credentials and System status. The [trust flow](operations/trust-flows.md) and [ADR-0045](adr/ADR-0045-ansible-host-identity.md) describe the upgrade risk and repair path.
+
+VirtuSphere keeps Ansible outside the PHP/nginx stack. The browser queues a deploy job in the portal, the CLI deploy worker uploads generated YAML and playbooks over SFTP, then the Ubuntu Ansible host runs `ansible-playbook` against ESXi.
+
+Required on the Ubuntu host:
+
+- A dedicated SSH user reachable from the `deploy-worker` container.
+- `ansible-playbook` and `ansible-doc` in the SSH user's `PATH`, from `ansible-core` 2.19 or newer.
+- `python3` with `pyvmomi` 8.0.3.0.1 or newer, importable as `pyVim` and `pyVmomi`.
+- `python3` with `requests`, importable in the **same** interpreter as `pyvmomi`. This is not optional and `pyvmomi` does not pull it in: every `community.vmware` module the playbooks call imports the collection's `vmware_rest_client`, which aborts with `Failed to import the required Python library (requests)` before it looks at a single argument. Without it the inventory pull, the VM creation and both power playbooks all fail on a host that meets every other requirement here, and seven of the eight inventory queries (all but the datacenter canary) run under `ignore_errors`, so they report "0 datastores" rather than an error. The QA image proves the pair on every run (`check.ps1 -Gate ansible-module-contract`).
+- The complete collection set from `Ansible/requirements.yml`, installed **before** air-gapped operation with `ansible-galaxy collection install -r Ansible/requirements.yml`. That file is the single source of truth for both the directly used collection and every transitive collection. The QA gate reads installed `MANIFEST.json` dependency maps recursively, rejects an unpinned dependency and compares every installed version with this lock. For an air-gapped host, the normal offline bundle downloads those exact collection archives together; do not reconstruct a dependency set by hand. Each installed collection's own `meta/runtime.yml` supplies its Ansible-core floor to the preflight, so an older core is rejected without a duplicated version list in this document.
+- Network access from Ubuntu to ESXi and from Ubuntu back to the VirtuSphere WebAPI base URL.
+- Recommended: the cleanup timer `virtusphere-secret-cleanup.timer`, installed once as root from the offline bundle with `sh virtusphere/Ansible/host-cleanup/install-secret-cleanup.sh <ansible-account>`. It runs as the Ansible account and removes only `accounts.yml` files under `/tmp/virtusphere-job-*` that are older than 24 hours, belong to that account and sit in a job directory of that account. It needs no network and no package. Without it, a leftover file waits for the next contact with its Ansible credential.
+
+### ESXi support matrix
+
+| Dimension | Supported | Notes |
+|---|---|---|
+| ESXi / vSphere | 7.0, 8.0 | The range `community.vmware` 6.x targets. Older releases are out of general support. The 6.x line itself reaches end of life in November 2027; `Ansible/requirements.yml` is the single source for that date and for the one module the pin already marks deprecated. |
+| ESXi for **creating** VMs | 7.0 or newer, hardware version per host | The worker derives the hardware version of a NEW VM from the release the last fresh inventory pull reported (`Docker/WebAPI/lib/esxi_create_compatibility.php`, Broadcom KB 312100, ADR-0023 amendment 7): 7.0: vmx-17, 7.0 Update 1: vmx-18, 7.0 Update 2: vmx-19, 8.0: vmx-20, 8.0 Update 2: vmx-21. A release between two rows takes the lower one (7.0 Update 3 creates vmx-19, 8.0 Update 1 vmx-20), and anything newer than the last row keeps vmx-21. When the release is not currently known, no version is passed and ESXi uses its own default, which is what the playbook did before July 2026. An existing VM never gets a version, so converging it never upgrades its virtual hardware. A fresh release below 7.0 refuses `create` and `full` at queue time and again in the worker. Until 15.10.2026 the playbook hardwired vmx-21, and every create on a 7.0.3 host failed with "The operation is not supported on the object". The earlier note that the retired desktop client shipped the same 21 was wrong: its tracked playbook set no version at all. `check-doc-semantics.sh` (rule 15) fails the build if these pairs and the table drift apart, or if a number is hardwired in the playbook again. |
+| Guest OS for **creating** VMs | by host release | Windows Server 2019 from 7.0, Windows Server 2022 from 7.0 Update 1, Windows 11 and Windows Server 2025 from 8.0 (vSphere Web Services API, "Since" of each guest identifier; Server 2025 also needs vmx-20). A fresh release below a VM's guest floor refuses the job and names each such VM with a link to its editor. The floors live next to the options in `VIRTUSPHERE_GUEST_OS_OPTIONS` (`Docker/WebAPI/lib/defaults.php`); a legacy guest value without a catalog row is left to ESXi. |
+| Licence | any licensed edition (Standard, Enterprise Plus, VCF) | The write API is what deploy and autostart need. |
+| Free licence (incl. 8.0 U3e) | inventory only | Broadcom's free hypervisor exposes a read-only API. Inventory pulls work; creating VMs and writing the autostart policy do not. The portal reads the licence from the host. While a current pull reports the free licence, no writing mode can be queued (only MAC export and inventory pull remain); a stale or missing licence finding only warns. |
+| Host in a vSphere HA cluster | deploy yes, autostart no | ESXi disables autostart on HA cluster members; the HA restart priority owns startup there. |
+| Standalone host | full support | `datacenter_name` must resolve to `ha-datacenter`; the portal derives it from the credential's inventory when the mission leaves it empty. |
+| vCenter (`api_type = VirtualCenter`) | deploy **no**, partial read-only inventory | Production support is standalone ESXi only (decision of 2026-07-26); vCenter credentials remain a partial read-only inventory source. The pull reads datacenters, datastores and distributed portgroups of the **first datacenter only** (`inventoryESXi_playbook.yml` limitation) and addresses VMs by name under folder `/`; standard portgroups and host capacity come from the host itself and stay empty. Register the ESXi host for a complete inventory and for deployments. |
+
+The portal reports the host's product, version, licence and HA/maintenance state in System status after the first successful inventory pull (ADR-0023, ADR-0025). The URL remains `portal/system_status.php` for compatibility.
+
+Runtime setup:
+
+- Provide `APP_PUBLIC_BASE_URL` in `.env`, or open `Settings -> Deployment` and store an API base URL in the portal. The URL field and **Save** button form one row; examples and the host-side connection check are available under **Examples and connection test**. The non-empty portal value (`deploy_settings.api_base_url` / `VIRTUSPHERE_SETTING_API_BASE_URL`) takes precedence. **Reset to .env fallback** is only shown for a stored portal value and removes that override. With neither source configured, deploy jobs are blocked. The read-only **Effective deploy configuration** overview shows the effective URL and its source.
+- Store one `esxi` credential for the ESXi API. The host may be a bare hostname/IP or an `http(s)` URL without path, credentials, query or fragment; deploy artifacts normalize it to `esxi_hostname` plus `esxi_port`.
+- Store one `ansible` credential for the Ubuntu SSH account. Use only the Ansible host/IP in the host field, not a URL. This credential is the SSH/SFTP login; it is separate from the callback URL and is selected per deploy job.
+- Use **Check connection and environment** on the Ansible credential, or **Run full test now** in its System status row. Both use the same handler. Before opening SSH, it resolves the effective Ansible source through `ANSIBLE_SOURCE_DIR` and reads `requirements.yml` from that same directory; the Compose services mount the repository's `Ansible/` there as `/var/www/ansible-src`. A missing, unreadable or malformed pin is therefore a local `config` failure and performs no SSH/SFTP operation. The remaining test runs SSH login, the host toolchain preflight (`ansible-playbook`, `python3`, `pyvmomi`, `requests`, `community.vmware`, then `runtime-versions`: every collection installed at exactly its `requirements.yml` pin and ansible-core at or above the floor that installed collection declares, and `async-workspace`: a temporary async directory created with mode 0700, written with 0600 and removed again), a real SFTP write into `/tmp`, and, when an API base URL is set, a portal-reachability probe (`health.php`). A failure names the component that broke, and the manual or scheduled full-test result persists on both pages. Once older than `VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS`, a passed/restricted result reads "test outdated": not a reported failure, but no current full proof. The last mission job a worker actually processed is displayed separately from `deploy_jobs`, including outcome, time and direct job log; it proves only the mode that ran and never refreshes the full test. Only a job a worker claimed at least once (`attempts > 0`) qualifies, so a job cancelled out of the queue cannot pose as executed evidence. Editing the credential discards the full-test result (back to "not tested"), because it proved the old host, not the new one. The collection probe targets `vmware_host_auto_start`, so it also catches a collection that is present but older than the pinned floor. It uses `ansible-doc --json`, verifies the exact module key and emits nothing on success; the former plain `ansible-doc` call copied the complete module manual (about 1,300 lines for `vmware_guest`) into every job log and still exited zero for an unknown module. Failure diagnostics remain visible. The deploy worker's own preflight reports the failed component in the job error the same way (`failed at: pyvmomi`), and the existing `credentials` audit trail carries each manual or scheduled test without a duplicate log channel.
+
+SSH and SFTP have separate, typed failure boundaries. `SshTransportBudgetExceeded` means only a VirtuSphere-owned idle, command-total, SFTP-operation or SFTP-total budget. `SftpTransportFailed` means the SFTP subsystem or a remote file operation failed after the SSH/preflight path worked. `SshTransportConfigurationException` is reserved for local prerequisites such as a missing phpseclib class, empty host/user fields, a vanished local artifact directory or an unreadable effective Ansible requirements file. The SFTP total uses a monotonic clock starting after login. Before every `is_dir`, `mkdir`, upload, probe write and probe delete, phpseclib receives the smaller of the operation budget and the remaining total; the same total is checked after every operation and before success. A `false` or exception is classified through `isTimeout()` before disconnect, and upload/probe each disconnect exactly once in their outer `finally`. Logger and heartbeat callbacks stay outside that guard, so a database fault cannot be relabelled as SFTP. The credential test maps the exact budget type to `ansible_timeout`, local prerequisites to `config` and other SFTP failures to its SFTP result; identical text in an ordinary `RuntimeException` is not a budget.
+- Queueing a deploy job now preflights the session user, mission deploy fields, VM presence and ESXi/Ansible credential completeness before the worker can claim the job.
+
+The worker never writes plaintext secrets to deploy logs. It generates `accounts.yml` only inside the temporary job directory, uploads it to the Ansible host, and removes the local job directory after processing. The copy on the Ansible host is removed at the end of every job that uploaded it; if that removal fails, the next job with the same Ansible credential removes it, as long as that credential still points at the same host with the same host key. A passed full test of that credential removes such files too. While a file is open, the portal refuses to delete the Ansible credential or to change its host, port or pinned host key (ADR-0046). System status shows an open notice after 24 hours, or at once for a deleted or moved credential, and an operator can confirm a removal by hand with a reason.
+
+A database outage while a job runs is survivable and does not fail the job. The playbook executes on the Ansible host, so the job log and the job heartbeat are a side channel, and ending the SSH stream because that side channel broke would throw away the remote exit code, which is the only remaining evidence about the VMs already created. Every write of a running job therefore goes through a channel that owns the live connection: it announces the outage exactly once on STDERR (redacted), spools finished log lines in a bounded FIFO, and attempts at most one backed-off reconnect per liveness tick. After a reconnect it re-checks ownership, refreshes the job heartbeat and replays the spool in order, reporting any lines the buffer limit dropped in its own SYSTEM line. A job whose ownership changed meanwhile stops without publishing a result, so an established terminal state is never overwritten by this worker's older view. When the remote command ends during the outage, the loop worker waits bounded for the database and finalizes exactly once; `deploy_worker.php --once` stays bounded and states on STDERR that the outcome could not be persisted and that the job stays claimed. Both effects are visible in `docker compose logs deploy-worker maintenance-worker`.
+
+### Generated vars and the playbook variable contract
+
+The playbooks under `Ansible/` are not self-contained: they read variables that the WebAPI generates at deploy time in `Docker/WebAPI/lib/ansible_yaml.php` (called from `lib/ansible.php`). The playbook `{{ ... }}` names and the generated keys must stay in lockstep; renaming one side breaks the deploy silently, so change both together.
+
+- `accounts.yml` (from `ansible_accounts_yml`): `esxi_hostname`, `esxi_port`, `esxi_username`, `esxi_password`, `esxi_validate_certs`, `esxi_ca_bundle_path`, `ansible_username`, `apiUrl` (the two trust keys are `true` and the uploaded trust file only for a `strict` credential). `esxi_port` is always emitted; `credential_esxi_normalize` defaults it to `443` (`VIRTUSPHERE_CREDENTIAL_PORT_ESXI_HTTPS`) when the ESXi credential has no explicit port, so `port: "{{ esxi_port | int }}"` is always defined.
+- `serverlist.yml` (from `ansible_serverlist_yml`): `vm_configurations`, a list whose items carry `vm_name`, `vm_moid`, `vm_instance_uuid`, `guest_id`, `datacenter_name`, `datastore_name`, `disks` (a list), `network` (a list of `name` + `device_type`, where `device_type` is one of `vmxnet3`/`e1000`/`e1000e` from `VIRTUSPHERE_INTERFACE_TYPES`, enum-validated on write so it always matches what `vmware_guest` accepts), `memory`, `vcpus`, `hotadd_cpu`/`hotadd_memory` (bool, from the VM `cpu_hotplug`/`ram_hotplug` flags; the create playbook maps them to `hardware.hotadd_cpu`/`hotadd_memory`), `needs_mac` (bool) and `autostart` (a block of `enabled`, `start_delay`, `stop_delay`; a delay of `-1` means "inherit the mission default" and is passed through to `vmware_host_auto_start` unchanged). It also emits the top-level `PowerCycleWaitSeconds` and `StartWaitSeconds` (both in seconds, both portal fields), the fixed retry pause list `EsxiRetryPauseSeconds` (from `VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS`), and `ansible_prepare_job_artifacts` appends `create_hardware_version` (`ansible_create_hardware_yml`): the hardware version the worker derived from the host release, or an empty value when that release is not currently known. A `full` job rewrites and re-uploads this file after its create section (`ansible_refresh_serverlist_after_create`, IDR-R2), so every later playbook reads the instance UUID the create just bound and recomputed `needs_mac`; the former `identity_unbound_allowed` bypass is gone and power-cycle, export, start and autostart always require a bound UUID. The fixed `CreateSettleSeconds` is gone with the per-VM create flow: its blind 60-second wait was replaced by reading each VM's live identity back. Every playbook pause reads one of the three timing values or the retry pause list; no single pause may reach the SSH idle budget or the budget of the call it runs in, which `AnsiblePauseBudgetContractTest` enforces. Plus a `mission_configuration.autostart` block (`enabled`, `start_delay`, `stop_delay`, `stop_action`, `wait_for_heartbeat`) which becomes the host's `system_defaults`. The create playbook maps these into `vmware_guest` `disk`/`networks`/`hardware`; when connecting straight to a standalone ESXi host, `datacenter_name` must resolve to `ha-datacenter`. When a deploy job selects specific VMs, `vm_configurations` contains only that subset; an empty selection means the whole mission.
+- Only `createVMLaunch-ESXi_playbook.yml` defines a `hardware:` block (VM sizing, firmware, and the hardware version for a VM that did not exist before); `startVMs-` powers on existing VMs via `vmware_guest_powerstate` and has no hardware settings. It pauses `StartWaitSeconds` first, so MECM can take the freshly registered devices into their collections before the VM PXE-boots.
+
+### Deploy modes and the MAC-generation power-cycle
+
+Each mode and each playbook is drawn step by step in [Bereitstellung: Abläufe](operations/deploy-flows.md); the checks behind the system status cards are in [Systemstatus: Prüfungen](operations/system-status-checks.md).
+
+Modes map to playbooks in `ansible_playbooks_for_mode()`: `create`, `export`, `start`, `powercycle` (runs `powercycleVMs-ESXi_playbook.yml` then the export playbook), `autostart` (writes the ESXi autostart policy, ADR-0025) and `full` (`create → powercycle → export → start`, plus `autostart` when the mission enabled it). The power-cycle exists because ESXi may only assign a NIC its MAC once the VM has been powered on, and the MAC export otherwise reads nothing. `powercycleVMs-ESXi_playbook.yml` briefly powers a VM on, waits `PowerCycleWaitSeconds` (portal field, default 5s, clamped 1–300s), then hard powers it off (`state: powered-off`, `force: yes`; freshly created VMs have no guest OS/tools, so a graceful shutdown would hang).
+
+Before any remote upload, the shared network contract validates the selected VM
+scope (empty selection means the complete mission). A VLAN/portgroup is trimmed
+at the portal boundary, then compared exactly and case-sensitively. Empty or
+exactly duplicated names within one VM block `create`, `full`, `powercycle` and
+`export`; `start` and `autostart` retain the finding as a warning. Separately,
+the WDS/PXE contract requires exactly one interface whose name exactly equals
+the mission WDS portgroup. That specialized finding blocks `full`,
+`powercycle` and `export`, while `create`, `start` and `autostart` warn. Queue,
+stagger, worker and retry use the same aggregator, and the worker rechecks after
+claim before SFTP/SSH. A network blocker produces no remote work at all: no
+upload, no async job id and no change on ESXi.
+
+The same gate caps one job's regular scope at
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS` VMs and
+`VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM` interfaces per VM
+(`lib/network_mac_constants.php`), enforced at queue time, per stagger slot, on
+a retry and at the worker's pre-remote recheck; an oversize selection appears as
+a queue blocker asking the operator to split it. The reason is the callback
+bound below: a V2 result larger than 1 MiB answers 409 only after the export
+already created the VMs it reports on, which no split can undo afterwards. The
+union of a stagger group is exempt, because it becomes one job per VM.
+
+`post_max_size=20M` lives in `Docker/php/conf.d/zz-virtusphere.ini`, which is
+COPIED into the image. After changing it, `docker compose build` plus `up -d`
+for `php`, `deploy-worker` and `maintenance-worker` is required; a plain restart
+keeps the old image and the old limit, and `db_importMAC.php` would then answer
+a parse error over an empty body instead of its documented `413
+request_too_large`. `php -i | grep post_max_size` inside the container is the
+check.
+
+The deploy form's label map (`virtusphere_deploy_mode_labels()`) is the source of truth for which modes an operator may ask for. `inventory` is a *system* mode: it has no label, cannot be posted, and `repo_create_system_job()` refuses anything else. The read side (`deploy_job_normalize_mode()`) still accepts it, because the worker reads back a queued inventory job's payload. The location gate follows the same shape: `autostart` reads neither `datacenter_name` nor `datastore_name`, so a mission without a datastore can still have its autostart policy written, while every other mode is refused. Staggering is refused for `autostart` in the repository as well as on the page, because a config write has nothing to spread over time.
+
+### One VM at a time: the create contract
+
+`create` and `full` do not run one playbook over a loop of VMs. The queue
+materializes the selected scope into one durable `deploy_create_vm_results` row
+per VM in the same transaction that creates the job, ordered by `vm_name, id`,
+so position 7 means the same VM in the portal, in the job log and on a retry. An
+empty selection is resolved at queue time and no longer means "all VMs, decided
+later": a VM created afterwards cannot silently widen a job that is waiting for
+its scheduled start.
+
+The worker then drives each row itself through four control playbooks
+(`createVMPrepare`, `createVMLaunch`, `createVMStatus`, `createVMCleanup`, plus
+the shared `create_identity_check_tasks.yml`, `emit_create_result.py` and
+`inspect_create_async_state.py`; all seven are listed in `VIRTUSPHERE_CREATE_ARTIFACTS` because the SFTP upload has to carry
+them). `createVMLaunch` starts exactly one `vmware_guest` call with `async` and
+`poll: 0`; the worker polls its job id and pauses
+`VIRTUSPHERE_CREATE_POLL_INTERVAL_SECONDS` (10 s) after every `running` answer.
+A poll is itself an `ansible-playbook` run of a few seconds that does not reach
+ESXi, so one cycle is about 15 s. The shared identity check reads the host's VM
+list three times per VM with every `show_*` detail switch of `vmware_vm_info`
+off; it needs name, MOID, instance UUID and power state of every VM and nothing
+else. Control calls switch off exactly two ansible-core warnings
+(`ANSIBLE_LOCALHOST_WARNING`, `ANSIBLE_INVENTORY_UNPARSED_WARNING`) that every
+localhost run without an inventory prints. Operational consequences:
+
+- **Runtime versions are checked, not assumed.** The preflight compares every
+  installed collection against the complete lock in `Ansible/requirements.yml`
+  and the installed `ansible-core` against what each collection itself requires.
+  A missing or differing transitive collection fails there instead of changing
+  module behaviour after an otherwise identical rebuild.
+- **Every mode step and every create control call runs `ansible-playbook` with
+  `PYTHONUNBUFFERED=1`** (the inventory pull does not set it). Python buffers
+  stdout blockwise once it is not a terminal, and the worker reads over an SSH
+  pipe. Without it a long run's result lines sit in the buffer until the process
+  ends, which is what produced "no output for 1800 seconds" over work that was
+  still running on ESXi.
+- **The async state directory is derived, not stored.** It is
+  `<remote job dir>/create.vm.<position>/async` under the already deterministic
+  `/tmp/virtusphere-job-<id>-<mission slug>` on the Ansible host, created with
+  mode 0700 and without following symlinks. A restarted worker finds the same job
+  id there without a second copy in the database, which is why the Ansible host's
+  `/tmp` must survive a worker restart and must not be a per-session mount.
+- **The wall-clock budget of the create section is the SSH total budget**
+  (`deploy_create_total_budget_seconds()`), measured from
+  `deploy_jobs.create_started_at`, which is set once with `COALESCE` so a resumed
+  job does not restart its own clock. Exceeding it makes the unit `uncertain`,
+  never a blind retry.
+- **Cleanup is explicit.** `createVMCleanup` removes one job id's status file;
+  the worker removes the whole work directory only after a step sequence ended.
+  A step that never returned leaves that directory in place and says so in the
+  log, because deleting under a running playbook would destroy the evidence about
+  VMs whose outcome is still unknown. `accounts.yml` is the one file removed in
+  every case, at the end of every job that uploaded it, including an unresolved
+  create unit; only the async state of such a unit stays on the host (K21).
+- **Identity is bound immediately.** After each successful unit one transaction
+  locks job, result row and VM, binds an empty UUID, refreshes only the MOID on
+  an equal UUID and writes nothing on a differing one. A create-only job does not
+  need a later export to learn who the VM is.
+
+### VM identity and collision block
+
+The name is an address, not an identity. VirtuSphere binds a portal VM to vSphere's `instance_uuid`; `vm_moid` is retained as the current managed-object handle but may legitimately change when the same VM is unregistered and registered again. The inventory mirror supplies name, UUID and MOID. A matching UUID with a changed MOID therefore refreshes the handle; a different UUID means a different VM.
+
+Queueing is blocked when the selected credential's cached VM inventory (including an old observation whose age and refresh link are shown) already contains a namesake that is not bound to the portal row. Create repeats this check against the live host immediately before `vmware_guest state: present`, so the module cannot silently align an already-known foreign VM's hardware. Power-cycle, start and autostart validate the returned name and UUID before their first write, then select the concrete mutation by that live instance UUID with `use_instance_uuid: true`; a replacement that acquires the old name after validation is not a fallback target. The pinned `vmware_host_auto_start` module supports the same UUID selector for the per-VM policy; its host-wide defaults intentionally have no VM selector. Export preserves its per-VM partial-result contract: a mismatch becomes a failed item before `upload_mac_list.py` calls the portal, and the callback independently rejects an identity contradiction before writing MACs, lifecycle or MECM state.
+
+Historical per-VM create rows that predate the async-result correction are not
+rewritten. Operators inventory the two affected result shapes read-only with
+`php /var/www/html/lib/create_history_review_cli.php` (optionally
+`--job-id=<id>` and `--before=<UTC timestamp>`); the complete interpretation and
+evidence boundary is documented in
+[`operations/deploy-chain.md`](operations/deploy-chain.md#historische-create-ergebnisse-lesend-bewerten).
+
+There is no adoption (WM-E2a). A namesake that is not bound to the portal row blocks until an operator renames or deletes it on ESXi or deletes the portal VM; after a change on ESXi the VM inventory has to be refreshed before the block lifts. Legacy VMs without a binding are not taken over. Audit rows of the former **Adopt identity** action (`vm.identity_adopted`) stay registered, labelled and filterable. Every mode after create requires a stored UUID: standalone `powercycle`, `export`, `start` and `autostart` refuse an unbound VM, and inside `full` the worker rewrites `serverlist.yml` after its create section, so the following steps carry the UUID that create bound.
+
+`full` appends the autostart step only for a mission whose `autostart_enabled` is set. A full deploy of any other mission must not touch the host's autostart manager: one host can carry VMs of several missions, and writing `system_defaults` from a mission that never asked for autostart would overwrite the policy of the missions that did. The explicit `autostart` mode always runs, including for a disabled mission, because setting every one of its VMs to `start_action: none` is how a policy is withdrawn. A fresh free-licence fact refuses every writing mode (`create`, `full`, `powercycle`, `start`, `autostart`) already at queue time, for a single job, a stagger group and a retry, and the worker refuses it again before it marks a VM (`configuration_blocked`); only `export` and the inventory pull run on a read-only host (DF-E2). Before the autostart step runs, a fresh HA-cluster fact aborts mode `autostart` and skips the step inside `full`. Unknown or stale facts only warn, because the inventory cache never blocks a deploy (ADR-0023).
+
+It only touches VMs whose `needs_mac` is true. `needs_mac` reflects whether the mission's **WDS-VLAN** NIC already has a MAC (`vlan == mission.wds_vlan`), so a VM whose MAC the portal already knows is left alone — and since the state-capture rework, so is every VM this run did not start itself: `vmware_guest_info` records each target's power state before any change and only targets that were `poweredOff` are offered to the UUID-bound power-on. When the mission has no WDS VLAN or no NIC of the VM is on it, `ansible_vm_needs_mac()` falls back to `true`, so MAC generation is never skipped silently; the WDS gate (`deploy_mode_requires_wds_ready()`) normally blocks such a VM before a PXE mode is queued. The cleanup list is narrower than that candidate list: it contains only module results that succeeded with `changed: true`, so an external start racing the call (`changed: false`) is not powered off. A failed or ambiguous power-on is never repeated blindly (`powercycle_power_on_tasks.yml`): the run reads the UUID's power state first. `poweredOn` means only the answer was lost; since this run saw the VM `poweredOff` at the start, it counts as this run's own start and goes onto the cleanup list. `poweredOff` with attempts left leads to the next power-on after the retry pause, and on such a retry an unchanged answer also counts as own start, because the earlier read proved the VM off. An unreadable state, the last attempt or any other state ends the VM as a hard job error; nothing is powered off without that proof, and the UUID must be inspected on ESXi. The hard power-off (`powercycle_power_off_tasks.yml`) retries on its own, because its target state is idempotent; if it still fails, the job error says that this run powered the VM on. Each VM completes power-on, its own configured pause and hard power-off before the next VM starts. The `always:` block cleans up the current confirmed own start even if its pause fails. A power-on or cleanup failure stops the sequence before the next VM. API execution time is additional to the configured per-VM wait. The flat `powercycle_vm_tasks.yml` dependency and its includes are listed in `ansible_required_files()` for remote upload. Running and suspended VMs keep their state (their MACs exist already; the export reads them without a cycle), a VM without a `needs_mac` statement is not touched at all, and a guest-info reply without a power state fails the run loudly instead of shrinking the selection. Remaining limit: a hard process kill (worker cancel that severs SSH, ansible process kill) cannot run the `always:` cleanup and may leave started VMs powered on; the selection and successful-start accounting are proven offline by the `ansible-powercycle-selection` gate. Boot order is intentionally **not** changed: PXE only completes on the NIC that receives a DHCP/PXE offer, which is the WDS-VLAN NIC, so the exported MAC matches the NIC that actually boots. Operating requirement: only the WDS VLAN may provide a PXE/DHCP responder; otherwise a different NIC could win PXE and its MAC would not match the MECM device record.
+
+The MAC export is intentionally tolerant per VM: a failed `vmware_guest_info` item remains in `vm_infos.json` next to the successful items and is classified by the callback instead of aborting the whole export before the callback runs. Each read is retried first (see the next paragraph); a VM whose read still fails becomes `esxi_query_failed`. Its reason with the module message (`query_failed after N attempt(s): <module message>`) is written only to the job log; the result stores the closed code, and the portal shows a fixed sentence that points to the log (ADR-0030: no free text in `result_json`). `upload_mac_list.py` accepts only an HTTP 2xx response with valid JSON and an explicit `outcome` of `success`, `partial` or `failed`. These map to exit codes `0`, `20` and `21`; invalid local data, transport failure and an invalid response use `22`, `23` and `24`. After an HTTP 5xx or a transient network error the client retries up to three times, after 5, 15 and 45 seconds (`RETRY_DELAYS_SECONDS`). It logs the outcome plus bounded counters and, on an HTTP error, only the portal's bounded `error` field, never the raw response body.
+
+Automatic ESXi step retries: a short ESXi outage (for example HTTP 503 from `hostd`) should not end a step. These calls get up to three more attempts after 5, 15 and 45 seconds: every read (power-cycle state, export read, the identity check of start and autostart, the create prepare inventory read), the hard power-off of the power-cycle, the power-on of start and each autostart write. The pauses come from `VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS` through the serverlist key `EsxiRetryPauseSeconds`; the playbook fallback and `upload_mac_list.py` repeat the same list, and `AnsiblePauseBudgetContractTest` derives and compares all three. A retry is safe because each of these calls either only reads or sets an idempotent target state (`powered-off`, `powered-on` with `force: false`, an autostart entry): repeating it cannot do more than the first attempt intended. The power-cycle power-on is the exception and is read back instead (above), because its cleanup decision depends on who started the VM. Create launch and status read once: their control call budgets (`VIRTUSPHERE_CREATE_CONTROL_IDLE_TIMEOUT_SECONDS`, `VIRTUSPHERE_CREATE_CONTROL_TOTAL_TIMEOUT_SECONDS`) must stay with the one mutation and its status; only prepare retries its read, and its markers and codes stay unchanged. ansible-core's `until`/`delay` only knows one fixed delay, so the retries are recursive includes (`esxi_vm_read_tasks.yml`, `esxi_retry_wait_tasks.yml` and the per-step files). Every retry writes `[n/total] RETRY <unit>: <host message>; attempt m of 4 in s s`, and start and autostart write `RUN` and `pass`/`fail` per VM. Start and autostart no longer stop at the first VM: a VM that still fails is collected, the others continue, and the job ends failed with the list (autostart also with the `::virtusphere-autostart:: written=… total=…` marker).
+
+The web worker patches `api_base_url`, `mission_id` and `job_id` into its private script copy. An unresolved `job_id` placeholder is omitted from the payload, which the callback since ADR-0035 rejects with 400: a mis-templated export fails loudly at the portal instead of importing unscoped. A genuine callback failure makes the export step fail instead of appearing green.
+
+The callback accepts `{ "mission_id": 123, "job_id": 456, "results": [...] }`, `job_id` required (ADR-0035). It rejects a missing, mission-foreign or terminal job with HTTP 409 before opening its request transaction, then locks the running job again to close the worker race. The complete payload is resolved first; only a VM whose every NIC is valid is written. NICs, VM state, status history and the versioned `deploy_jobs.result_json` are one transaction, so a database/program failure cannot leave a partial callback. Repeating the same callback while the job is still `running` is idempotent; callbacks after terminal completion return 409.
+
+The `Ansible/` copies are the web-app deploy source; the former desktop `bin/` build outputs are removed with the client (ADR-0035).
+
+### Worker resilience
+
+The `deploy-worker`, `maintenance-worker`, `php`, `webserver` and `mysql` services run with `restart: unless-stopped` so the stack recovers after a host reboot or a container crash without manual intervention. Every runtime service carries a healthcheck (AP8): MySQL answers `mysqladmin ping`, PHP answers the FPM FastCGI ping, nginx answers its own `/nginx-health` location, and both workers keep a liveness file fresh that `lib/worker_healthcheck.php` judges. `webserver` waits for real PHP readiness (`service_healthy`), so a cold `docker compose up -d --wait` only returns green when the whole chain accepts work. phpMyAdmin is admin tooling in the optional `tools` profile (`docker compose --profile tools up -d phpmyadmin`, loopback-only) and is not part of the runtime stack.
+
+**Stopping a worker is answered rather than waited out.** Until Etappe 14C a
+`docker stop` on `deploy-worker` or `maintenance-worker` took the full grace
+period and ended in exit 137 (measured: 30.4 s), on every restart, stack update
+and host reboot. Two individually harmless facts combined into that. A process
+that is PID 1 ignores every signal it has installed no handler for, because the
+kernel applies no default actions there; and this container inherits
+`STOPSIGNAL SIGQUIT` from the `php:*-fpm` base image, where that is php-fpm's
+graceful shutdown. So SIGQUIT arrived, nobody listened, and Docker eventually
+sent SIGKILL, leaving the worker no chance to write a last line or release
+ownership while its playbook kept changing ESXi. All three loop processes now
+install the shared handler from `lib/worker_stop_signal.php` and stop in 0.4 s
+with exit 0. The promise is deliberately modest: an IDLE process exits at once,
+which is the vast majority of stops; a BUSY one records the request, logs one
+line and keeps going, because no signal to this process can stop a playbook on
+another host.
+
+**Two process shapes (ADR-0042).** `docker-compose.yml` runs the worker directly
+and stays that way. `docker-compose.supervisor.yml` runs a supervisor that holds
+exactly one worker as its child, restarts it after confirmed heartbeat failures
+and never starts a second one before `waitpid` confirms the old one is gone. It
+is applied only together with an audited switch of the stored process contract
+(`lib/deploy_supervisor_switch.php`); the service snapshot fails closed to
+`degraded` while the running shape and the stored contract disagree.
+
+In `--loop` mode the worker tolerates a MySQL outage instead of exiting: it retries the initial connection with backoff (up to 30s between attempts) and, if the database drops mid-loop, reconnects through `db(true)` and continues claiming jobs. This closes the earlier failure where a slow MySQL start or a MySQL restart left the worker container dead and deploy jobs stuck in `queued` with no portal-visible error. The `--once` mode used by tooling still fails fast (three connection attempts, then a non-zero exit).
+
+Long-running worker phases send heartbeats at least every `VIRTUSPHERE_DEPLOY_HEARTBEAT_INTERVAL_SECONDS` (30s) through phase boundaries and streamed Ansible output. At the beginning of each loop the worker reaps running jobs whose heartbeat is older than `VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS` (600s): the job is marked `failed`, its lock is cleared, a SYSTEM log line is written, and affected mission VMs are reset through the existing deploy-worker VM status path. A reaped ESXi inventory job additionally records the durable `worker` failure and its exact job id, so the System-status card cannot retain an older green result while the terminal system job disappears from the active queue. Terminal updates are guarded by `id`, `locked_by` and `running` status so a worker that lost ownership cannot overwrite a cancelled or reaped job.
+
+### Deploy job retention
+
+The maintenance worker prunes on its hourly retention pass:
+
+- **`deploy_job_logs`** of jobs that have been terminal for more than `VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS` (30). The window is measured on the **job**, not on the log row, so a job that streams for an hour never loses its opening lines and a live tail cannot race the purge. Queued and running jobs are untouchable by construction. The job row survives with status, versioned `result_json`, cancel metadata and bounded terminal reason. `last_error` survives only as the redacted fallback of a failed job; success, partial and cancellation leave it NULL. `deploy_log.php` says the detailed output was pruned instead of showing an unexplained empty table.
+- **Finished mission-less system jobs** (the ESXi inventory pulls) after `VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS` (30), rows and all; their logs cascade. No shared list shows them once terminal, but until retention their System-status card links the exact latest completed job through `deploy_esxi_inventory_state.last_job_id`. That field is only a relationship: `deploy_jobs` and `deploy_job_logs` remain authoritative. Its `ON DELETE SET NULL` foreign key removes the link with the retained job, so an old failure renders a retention explanation instead of a dead URL. Mission jobs are kept, because the deploy page shows their history.
+
+The HTML log view and JSON polling endpoint share the same bounded repository readers. The first page is the newest tail in ascending sequence order, forward polling uses `after_seq`, and older history uses `before_seq`. A terminal response is not sufficient to stop polling: the client drains immediately until the endpoint also reports `caught_up`. The response also carries the centrally rendered result/cancellation blocks and allowed actions, so another tab's cancellation updates metadata and removes the button. Terminal status and its terminal evidence commit atomically, and normal writers cannot append afterwards. The accepted request is the only cancellation SYSTEM line; worker or reaper confirmation adds no duplicate.
+
+The portal table deliberately holds only a bounded browser window. Loading older pages pauses live updates and preserves the visible scroll anchor; reloading returns to the newest tail. The separately authorized **Complete raw log** download streams every retained row as NDJSON in sequence order, in bounded batches, with source, UTC timestamp, portal timestamp and the configured retention period in `X-VirtuSphere-Log-Retention-Days`. It uses the same `deploy.run` permission and is not a second retained copy: once maintenance has pruned the job log, neither view nor download can reconstruct it.
+
+## Runtime logs and error references
+
+VirtuSphere writes runtime logs into host-mounted directories so troubleshooting evidence survives container restarts:
+
+- Application error handler log: `Docker/WebAPI/logs/error.log` maps to `/var/www/html/logs/error.log`.
+- PHP engine log: `Docker/WebAPI/logs/php-error.log` maps to `/var/www/html/logs/php-error.log` through `Docker/php/conf.d/zz-virtusphere.ini`.
+- nginx access/error logs: stdout/stderr of the webserver container, retained by Docker as five files of at most 10 MiB each (`docker compose logs webserver`).
+
+The global handler in `Docker/WebAPI/lib/errors.php` is installed before EnvBoot completes. Web errors render a full internal error page with a short reference ID, while CLI errors print the same reference to STDERR and exit non-zero. The handler also appends the full context and stack trace to `error.log`; when the database boot path is healthy it records an `error [ref] ...` row in `deploy_logs` for the portal log view.
+
+The trace carries **no argument values**: `zend.exception_ignore_args = 1` in `Docker/php/conf.d/zz-virtusphere.ini`. File, line and function of every frame stay, the values do not. That is not cosmetic. The decrypted ESXi password is a positional argument of `ansible_prepare_job_artifacts()`, of its inventory twin and of `ssh_execute_command()`, and those frames throw on routine conditions (mission not found, mission is a template, no VMs), so with PHP's default setting a plaintext credential would land in this file, in worker STDERR and, under `VIRTUSPHERE_DEBUG`, in the browser. Pasting a trace into a ticket is therefore safe; if you need an argument value, add a deliberate log line rather than turning the setting off.
+
+For a reported error page, use this order:
+
+1. Copy the displayed reference ID.
+2. Search `Docker/WebAPI/logs/error.log` for that ID.
+3. Check `Docker/WebAPI/logs/php-error.log` for PHP engine-level parse/startup errors or handler fallback messages.
+4. Check `docker compose logs --tail 100 webserver` if nginx returned the response before PHP was reached.
+5. In the portal log view, search for `error [ref]` when the database is available.
+
+Expected behavior:
+
+- A portal exception, warning promoted to `ErrorException`, or parse error returns HTTP 500 with a generic error page plus reference ID and writes the full detail to `error.log`. Set `VIRTUSPHERE_DEBUG=1` only in a local/debug environment to include message, file and stack details in the browser response.
+- A CLI exception returns exit code `1`, writes STDERR, and writes `error.log`.
+- EnvBoot failures still render/log through the handler; database audit may be skipped because the same broken environment can block DB boot.
+- Real log files are ignored by Git. Only `.gitkeep` files keep the log directories present in fresh checkouts.
+
+Useful checks:
+
+```bash
+docker compose ps
+docker compose config --quiet
+docker exec virtusphere-v2-webapp-php-1 php -r "echo ini_get('error_log'), PHP_EOL;"
+docker exec virtusphere-v2-webapp-webserver-1 nginx -t
+docker exec virtusphere-v2-webapp-php-1 php-fpm -t
+```
+
+## Backup and restore
+
+`scripts/backup.sh` writes a full MySQL dump, a config tarball and a SHA-256 manifest to `Docker/backups/`; `scripts/restore_test.sh` runs the full restore drill against a throwaway environment (manifest, schema convergence, migrations, invariants, `APP_KEY` binding, app smoke). See `docs/operations/backup.md` for scheduling, offsite handling and the disaster-recovery procedure (ADR-0017, amendment 1). The drill is the `restore-drill` gate of the Release lane (`scripts/check.ps1`).
+
+Each run also appends a status line to `Docker/backups/status/backup-status.jsonl`. Only this `status/` subdirectory is bind-mounted read-only into the `php` service (`./Docker/backups/status:/var/backups/virtusphere-status:ro`, ADR-0021) so the portal can show a backup card and dashboard banner; the dumps and the config tar (which holds `.env`) are never mounted. After adding or changing this mount, recreate the container (`docker compose up -d php`, or `--force-recreate` if the bind was already present) or the portal keeps reporting the `unknown` state.
+
+**Rule: run `sudo sh scripts/backup.sh` once before every migration** (the schedule runs as root, so `Docker/backups` belongs to root). Migrations have no down path, so a fresh dump is the only rollback net.
+
+## Machine API hardening notes
+
+The legacy machine API remains wire-compatible during migration, but the WP1 hotfixes make dangerous edge cases loud:
+
+- Phase D removes the old root/portal tombstones and passthroughs from the WebAPI webroot: `login.php`, `register.php`, `db_cleanup.php`, `upgradeMysqlLatest.php`, `testdata.php`, `mecm_api_old.php`, `portal/register.php`, `portal/createUser.php`, `portal/create_user.php`, `portal/TESTintern.php`, `portal/_OLDlandingpage.php`, `portal/_OLDindex2.php`, `portal/access.php`, `portal/mysql.php`, `portal/intern.php` and `portal/vorgaben.txt`. Create users only from the authenticated portal user administration or `lib/seed.php`.
+- Root `intern.php` remains a redirect stub to `/portal/dashboard.php`; root `login.php` is no longer present. Logout is only `/portal/logout.php` as a POST plus CSRF. A stale logout POST without an active portal session, for example after a container restart or expired server-side session, is treated as already logged out and redirects to `login.php`; GET requests and active-session CSRF mismatches still return HTTP 400.
+- The former desktop token API (root `access.php`, `api/login.php`) is removed (ADR-0035); both paths answer 404 by wire contract.
+- `mecm_packages.php` rejects a completely empty JSON payload (`{}` or `[]`) with HTTP 400 before catalog sync can run. Missing payload types are now non-destructive: if a request contains only packages, `deploy_os` is left untouched; if it contains only task sequences, `deploy_packages` is left untouched. The absent type is logged as a warning.
+- `db_importMAC.php?action=updateInterface` requires `{ "mission_id": 123, "job_id": 456, "results": [...] }` (ADR-0035). Existing response fields remain; `result_version`, `outcome`, `job_id`, `vm_results`, `counts` and bounded `errors` are additive. New result V2 also persists exact per-VM WDS evidence and a semantic callback fingerprint; historical V1 remains readable. Per-VM failures return HTTP 200 with `success:false` and write no NIC or deployed state for that VM. Job/mission/status/attempt/generation/remote-handle conflicts and differing or terminal duplicate callbacks return 409 without domain writes; only an identical replay of the same active execution is 200/no-op. The request body is capped at 16 MiB, stored result and response at 1 MiB, with PHP `post_max_size=20M` so the application owns the structured rejection.
+- `mecm-api.php?action=getDeviceInfos&mac=...` deliberately keeps its old IP-or-MAC allowlist behavior. The legacy 403 response still echoes the client IP for compatibility in the LAN contract.
+- Since ADR-0019/E3 that GET is side-effect-free and returns only the client bootstrap fields. V23 posts client readiness to `mecm_client_ack.php`; the POST uses the same IP-or-known-MAC authentication, is idempotent, and works over the default HTTP mode without CA/certificate/thumbprint configuration.
+- Unhandled machine-API exceptions return the existing JSON envelope shape with generic `Interner Serverfehler`; internal details are written through `machine_api_log_warning`/fallback logging instead of being sent to clients.
+
+## Operational preflight
+
+Etappe 8R-O enthält außerdem den rein lesenden Standortpreflight
+`Ansible/runner/virtusphere_remote_preflight.py`. Er prüft Python/Ansible,
+systemd-User-Manager, Linger, cgroup v2, Besitzer/Modi, freien Speicher und die
+Runner-Prüfsummen und gibt nur redigiertes JSON mit gehashtem Hostfingerprint
+aus. Er verändert den Host nicht und aktiviert keinen Produktpfad. Sein
+Mindestfreiplatz hat absichtlich keinen Default: Ohne einen autorisierten
+8R-S-Lauf auf dem echten Ziel und den späteren Evidenzimport bleiben alle neuen
+Remote-Modi `disabled`; der bestehende SSH-Pfad ändert sich dadurch nicht.
+
+Migration `0050_mecm_rollout_hostname` ist eine Grenze mit einer eigenen
+Reihenfolge (Etappe 14D, ADR-0043). Vor der DDL prüft sie alle
+Nicht-Vorlagen-VMs case-insensitiv auf kollidierende **gültige**
+`vm_hostname`-Werte und bricht ab, wenn zwei VMs denselben beanspruchen: Welche
+davon den Namen behält, ist eine Betreiberentscheidung, und hier eine zu treffen
+würde jemandes Maschine still umbenennen. Ungültige Altwerte blockieren nicht,
+werden aber begrenzt benannt; sie migrieren als Bestand, bekommen keinen Claim
+und bleiben vom nächsten Reset und Erstimport ausgeschlossen, bis sie korrigiert
+sind. Bestands-VMs starten mit Snapshot gleich Sollwert, Revision 1 und ohne
+Tombstone: genau der Zustand, den der Kompatibilitätszweig annimmt, damit ein
+heute migrierender Standort mit seinen vorhandenen MECM-Skripten und
+Clientpaketen weiterläuft. Vorlagen bekommen überall `NULL`.
+
+**Die Ausrollreihenfolge danach ist Teil des Vertrags:** zuerst Web/API, dann
+MECM-Serverskripte und Client-Content atomar, dann Versions-/Pester-/Labnachweis,
+und erst danach Hostnamenänderung und Reset freigeben. Ein Reset hebt die
+Revision über 1, und ab da beantwortet die WebApp eine Rückmeldung ohne Revision
+mit 409. Ein teilweise aktualisierter Standort bleibt dadurch sicher in der
+Warteschlange, statt einen falschen Datensatz zu registrieren.
+
+Migration `0042_remote_execution_foundation` ist dieselbe fail-closed Grenze in
+der Datenbank: Sie erzeugt die Runtime-Generation genau einmal, speichert die
+globale Claim-Pause und legt Aktivierungszeilen ausschließlich als `disabled`
+ohne Vertrag an. Die neuen Job-, Lease-, Handle- und Recoveryspalten sind
+additiv; bestehende Claims, Reaper und SSH-Schritte lesen sie in 8R-O-2 noch
+nicht. Vor einer späteren Verdrahtung bleiben Backup, Claim-Pause/Drain,
+einheitliche Revision und 8R-S-Standortevidenz zwingend.
+
+Der 8R-O-3-Inventarconsumer liegt als unverdrahtete Bibliothek vor. Selbst ein
+direkter Aufruf benötigt eine `pilot_remote`- oder `remote_enabled`-Zeile mit
+`remote_v1`, aktuelle Generation sowie übereinstimmende Worker-ID, Lock-Token
+und Lease-Epoch. Der ausgelieferte Zustand erfüllt diese Bedingungen nicht:
+Aktivierungen bleiben `disabled`, Claim-Pause bleibt gesetzt und kein Worker
+lädt den Consumer. Das ist die beabsichtigte Installationslage bis zum
+autorisierten 8R-S-Lauf; lokale Tests sind keine Aktivierungsevidenz.
+
+Dasselbe gilt für die in 8R-O-5 ergänzte Step-Policy für Export, Start,
+Autostart und Powercycle: Sie hält ausschließlich die geschlossenen
+Reconciliationanforderungen fest. Geladen wird sie nur vom MAC-Rückruf, der aus
+ihr die erwartete Rückrufart des Exportschritts liest
+(`remote_step_callback_expectation()`); Registry und Aktivierungsurteil hat kein
+Produktpfad als Aufrufer. Sie
+enthält keinen Setter für `deploy_remote_mode_activations`; Runtimebudgets sind
+ausdrücklich `site_acceptance_required`. Ein Deployment dieser Revision
+aktiviert daher keinen Remote-Modus. Create und Full bleiben unabhängig davon
+bis 14B gesperrt. Falls niemals eine autorisierte 8R-S-Abnahme stattfindet,
+bleiben alle Aktivierungen dauerhaft `disabled` und die Etappe wird nicht als
+Standortfreigabe ausgewiesen.
+
+Use the migration checker before deployments or after changing `.env`:
+
+```bash
+docker compose exec -T php php /var/www/html/lib/migrate.php --check
+```
+
+The check is non-mutating. It verifies EnvBoot, database connectivity, data preflight rules and reports pending migrations. Run the real migration only after the check is clean:
+
+```bash
+docker compose exec -T php php /var/www/html/lib/migrate.php
+```
+
+`Docker/scripts/setup.sh` wraps the local bootstrap flow: create log/data directories, create `.env` when missing with random local secrets from `openssl`, run compose validation, build/start containers, execute `migrate.php --check`, then apply migrations. It skips first-admin seeding unless `SEED_ADMIN_USER` and `SEED_ADMIN_PASSWORD` are set in `.env`.
+
+## Health endpoint
+
+`/portal/health.php` returns JSON for automation: `status` (`ok`, `degraded` or `error`), `db` and the coarse `php` version. `status` is `degraded` when the application or PHP error-log directory is unwritable, or when the deploy service snapshot that System status also reads (`deploy_service_health_snapshot()`) says degraded or offline, or cannot be computed. A deliberate pause is therefore not `degraded`.
+
+**The HTTP status is 200 for `ok` and for `degraded`; only a database/bootstrap failure answers 503** (`status: "error"`, a generic service-unavailable message, the exception in the server-side log). This endpoint is an address probe before it is a health report: the MECM installer, every client script's `Resolve-VsApi` and the Ansible host's deploy preflight all ask it "are you there", and PowerShell 5.1's `Invoke-RestMethod` throws on a 5xx while discarding the body. While `degraded` answered 503, a single stale deploy job made the portal look unreachable to the entire machine chain, and the PHPUnit integration suite skipped itself. The client side holds the same rule independently: a status code of any kind proves the address, only a transport error moves on to the next candidate (`Test-VsApiAnswered`).
+
+The body deliberately carries nothing else. Job counts, heartbeat timestamps and the backup age used to be here, unauthenticated, for any host in the deploy VLAN; they are read in the portal instead.
+
+## Backend validation and login throttling
+
+Shared validation lives in `Docker/WebAPI/lib/validate.php`. VM saves now validate VM name, DNS FQDN domains, OS, RAM/CPU ranges, disk rows, static interface IP/subnet/gateway, DNS and MAC formats before repository writes. The portal VM editor and Ansible artifact generation share the `VIRTUSPHERE_VM_DEFAULTS` disk contract: missing/new disk rows default to a `System` disk with 50 GB and type `eagerzeroedthick`; allowed disk types stay `thin`, `thick` and `eagerzeroedthick`. Those three tokens are the wire values `vmware_guest` expects and stay unchanged in payloads and in the create/update audit lines; everything an operator reads goes through `disk_type_label()` instead. The type applies at creation only: changing it converts neither an existing VM nor a disk that already exists, and eager zeroing can lengthen the creation of large or numerous disks enough to reach the transport's time budgets. What the array actually provisions is not read back, so the portal reports the requested type and never claims a realized end state. Interface subnet masks accept IPv4 masks and CIDR-style `/0` through `/30` values. VM edits still preserve existing interface MACs when no new MAC is submitted.
+
+The backend-only follow-up extends the same validation style to repo/service layers that do not need frontend design work: Credentials validate type, name, host/URL, port, username, secret requirement and per-type duplicate names; missions validate names/status/details and duplicate names; OS/VLAN/package catalog writes validate required values, lengths, duplicates and missing IDs before returning success.
+
+Deploy queue creation now blocks invalid work before the CLI worker sees it: missing user, template mission, missing datacenter/datastore, empty mission VM list, wrong credential type or incomplete credential data all return clear repository errors.
+
+Portal login keeps the existing per-user lockout and adds an IP-wide 15-minute throttle for repeated failed attempts across usernames. The throttle is backed by `deploy_login_attempts` and the `login_attempt_ip_lookup` index.
+
+## Retired unsafe bootstrap endpoints
+
+The root `index.php` no longer conditionally redirects to `testdata.php`. It redirects to `/portal/login.php`. `testdata.php` is removed; use `lib/seed.php` and migrations instead.
+
+## Backend/Ops plan completion audit
+
+Audit date: 2026-07-05. Scope: the backend/Ops plan plus the Findings/SSoT update, excluding future milestones that the migration plan already keeps separate.
+
+Completed in code and runtime-tested:
+
+- Phase 1 logging/error handling: global web/CLI handlers, persistent PHP/nginx log paths, non-fatal but loud status-event logging, worker/repo/migration errors surfaced with clear messages.
+- Phase 2 validation and edge cases: shared `ValidationException`/`Validator`, VM/credential/mission/catalog/deploy preflight validation, empty MECM payload guard, mandatory MAC-import `mission_id`, unmatched MAC import entries with `status:error`.
+- Phase 3 Ops/QOL backend: `setup.sh`, `.env.example` Ubuntu `openssl` hint, `migrate.php --check`, JSON health endpoint and backend-side form error plumbing.
+- Findings/SSoT update: unsafe legacy web entry points were first retired and later removed in Phase D, root `intern.php` remains only a redirect stub, nginx denies internal webroot paths, credential/deploy/status/role/settings/machine-API literals centralized, ESXi URL normalization writes `esxi_hostname` plus `esxi_port`, Ansible required files derive from `VIRTUSPHERE_PLAYBOOKS`, `VIRTUSPHERE_TABLES` removed, and real historical log files are removed from Git tracking.
+- Contract preservation: machine API status strings, `updated`, `mecm_id`, `mecm-api.php?action=getDeviceInfos&mac=...` IP-or-MAC allowlist behavior and the legacy 403 IP echo are intentionally preserved. ADR-0019/E3 explicitly retired `getMissionName`, narrowed `getDeviceInfos`, and moved its lifecycle side effect to the POST-only ACK. The desktop token API is since removed (ADR-0035).
+
+Not claimed as complete by this audit:
+
+- Pure visual frontend/design work.
+- A completely fresh Ubuntu/Clean-Checkout execution of `Docker/scripts/setup.sh`; the same setup steps are verified locally through Docker build/start, migration check, migration and health probes.
+
+## Backend/Ops release checklist
+
+For backend-only slices, keep the frontend/settings worktree separate and verify with this minimum set before commit or handoff:
+
+```bash
+git diff --check -- ':!Docker/WebAPI/vendor/**'
+docker compose config --quiet
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo/Docker/WebAPI virtusphere-php:8.4-tooling composer test
+docker run --rm -v C:\projekte\VirtuSphere-v2-WebApp:/repo -w /repo virtusphere-php:8.4-tooling php scripts/lang-audit.php --ci
+docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/migrate.php --check
+curl -fsS http://127.0.0.1:8021/portal/health.php
+```
+
+Also lint every changed PHP entry point in the PHP container. For broader confidence, lint all first-party PHP files while excluding `vendor/` and `logs/`.
+
+See `docs/QA.md` for the full container-first QA baseline, hook scan, `/tests/` exposure check and Composer vendor policy.
+
+When testing deploy-worker failure handling, a failed probe should leave the job in `failed`, write at least one `deploy_job_logs` row, set a valid `terminal_reason_code` and retain a redacted `deploy_jobs.last_error`. Success, partial and cancellation must leave `last_error` NULL. Clean up any probe rows afterwards.
+
+## Portal validation UX
+
+`Docker/WebAPI/lib/forms.php` provides session-backed sticky-form helpers. On a `ValidationException` the POST handler stashes submitted values and per-field errors, redirects, and the next render consumes the stash exactly once. `_csrf`, `password` and `secret` fields are never stashed. The helpers back the OS, VLAN, package, credential, user, mission and settings forms; the VM editor renders inline errors on its main fields plus an aggregated list for interface/disk rows. `portal/logs.php` groups the audit log into four server-rendered tabs (security, resources, deployment, system and integrations) defined by `VIRTUSPHERE_LOG_TABS` in `lib/constants.php`, so the protocol is not one undifferentiated table; each tab scopes a `deploy_logs.category IN (...)` filter and the category dropdown is limited to that tab's categories. Within a tab it adds a full-text search over message/user, an exact IP filter (LIKE wildcards are escaped) and a per-category filter. The table walks globally `id DESC` through bounded 50-row `before`/`after` keyset windows; filter and tab links deliberately omit the cursor, invalid or retained-away positions offer an explicit return to the newest window, and no numeric page total is claimed across concurrent inserts or retention. Since Etappe 10C no call site chooses a category any more: a producer names a registered event code (`lib/audit_event_definitions.php`) and the registry maps it to exactly one `VIRTUSPHERE_LOG_CATEGORY_*` constant, along with the allowed object types, results and typed context fields. New rows therefore carry `event_code`, `object_type`, `object_id`, `result` and `context_json` next to the rendered description; historical rows keep those five columns NULL and their unchanged text, with no backfill. `audit_event()` in `lib/repo/log.php` is the only writer, and `scripts/check-audit-contract.php` fails the build on a second one. The tab's CSV export uses the same validated filter struct as the table (`lib/log_filter.php`), starts its independent bounded snapshot at the newest match rather than at the table cursor, counts before it streams, caps at `VIRTUSPHERE_LOG_EXPORT_MAX_ROWS` data rows, announces that cap on the page and in `X-VirtuSphere-Total-Rows`/`-Export-Limit`/`-Truncated`, and writes exactly one audit row carrying the counts and a keyed filter fingerprint but neither the search term nor the IP filter.
+
+Remaining frontend work is purely visual (navigation, settings styling, form layout); those files can still be iterated separately without touching the validation flow.
+
+Automatic Ansible full tests use the separately configurable interval in Settings → Catalog and inventory. Apply migration 0055 and restart the deployment worker to activate the scheduler. See [Automatic Ansible full tests](operations/ansible-full-test.md) for scheduling, permissions and failure handling.

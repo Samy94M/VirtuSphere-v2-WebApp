@@ -1,0 +1,429 @@
+// Portal forms: repeat rows (add/remove/toggle), the subnet CIDR helper, the
+// compound RAM/combo field, the DHCP interface-mode disabling and the VM bulk
+// selection. Independent of core.js and the deploy modules; registers its own delegated
+// click/input/change listeners for the form hooks only.
+(function () {
+    var lastRepeatIndex = 0;
+
+    function nextRepeatIndex() {
+        lastRepeatIndex = Math.max(Date.now(), lastRepeatIndex + 1);
+        return String(lastRepeatIndex);
+    }
+
+    function selectHasValue(select, value) {
+        for (var index = 0; index < select.options.length; index += 1) {
+            if (select.options[index].value === value) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function cidrToSubnetMask(prefix) {
+        var parts = [];
+        var remaining = prefix;
+        for (var index = 0; index < 4; index += 1) {
+            if (remaining >= 8) {
+                parts.push('255');
+            } else if (remaining <= 0) {
+                parts.push('0');
+            } else {
+                parts.push(String(256 - Math.pow(2, 8 - remaining)));
+            }
+            remaining -= 8;
+        }
+
+        return parts.join('.');
+    }
+
+    function subnetMaskForValue(value) {
+        var normalized = String(value || '').trim();
+        var match = normalized.match(/^\/(?:[0-9]|[12][0-9]|30)$/);
+        if (match) {
+            return cidrToSubnetMask(parseInt(normalized.substring(1), 10));
+        }
+
+        return normalized;
+    }
+
+    function subnetPickerValueForInput(value) {
+        var normalized = subnetMaskForValue(value);
+        for (var prefix = 0; prefix <= 30; prefix += 1) {
+            var mask = cidrToSubnetMask(prefix);
+            if (normalized === mask) {
+                return mask;
+            }
+        }
+
+        return '';
+    }
+
+    function syncSubnetPicker(picker) {
+        if (!picker || picker.value === '') {
+            return;
+        }
+
+        var row = picker.closest('[data-repeat-row]');
+        var input = row ? row.querySelector('[data-subnet-input]') : null;
+        if (input && !input.readOnly) {
+            input.value = picker.value;
+            input.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+    }
+
+    function syncSubnetInput(input, normalize) {
+        if (!input) {
+            return;
+        }
+
+        var value = input.value.trim();
+        if (normalize) {
+            var normalized = subnetMaskForValue(value);
+            if (normalized !== value) {
+                input.value = normalized;
+                value = normalized;
+            }
+        }
+
+        var row = input.closest('[data-repeat-row]');
+        var picker = row ? row.querySelector('[data-subnet-picker]') : null;
+        if (picker) {
+            picker.value = subnetPickerValueForInput(value);
+        }
+    }
+
+    function syncInterfaceMode(select) {
+        if (!select || select.disabled) {
+            return;
+        }
+        var row = select.closest('[data-repeat-row]');
+        if (!row) {
+            return;
+        }
+        var dhcpValue = (select.getAttribute('data-mode-select') || 'dhcp').trim().toLowerCase();
+        var isDhcp = select.value.trim().toLowerCase() === dhcpValue;
+        row.querySelectorAll('[data-dhcp-disable]').forEach(function (field) {
+            field.disabled = isDhcp;
+        });
+    }
+
+    // VM bulk selection (vms.php): the row checkboxes sit in the table body and
+    // associate with the bulk form via form="..."; they are not descendants, so
+    // form.elements is the one collection that sees them. The submit buttons are
+    // rendered enabled, so the action also works without JavaScript (the server
+    // refuses an empty selection); here a non-empty selection enables them, and
+    // an empty one disables them. The header checkbox mirrors the selection
+    // (checked = all, indeterminate = some).
+    function bulkItems(form) {
+        var items = [];
+        for (var index = 0; index < form.elements.length; index += 1) {
+            var element = form.elements[index];
+            if (element.hasAttribute('data-bulk-item')) {
+                items.push(element);
+            }
+        }
+
+        return items;
+    }
+
+    function syncBulkForm(form) {
+        var items = bulkItems(form);
+        var checkedCount = items.filter(function (item) { return item.checked; }).length;
+
+        var counter = form.querySelector('[data-bulk-count]');
+        if (counter) {
+            counter.textContent = String(checkedCount);
+        }
+        form.querySelectorAll('[data-bulk-submit]').forEach(function (button) {
+            button.disabled = checkedCount === 0;
+        });
+
+        var all = document.querySelector('[data-bulk-all]');
+        if (all) {
+            all.checked = items.length > 0 && checkedCount === items.length;
+            all.indeterminate = checkedCount > 0 && checkedCount < items.length;
+        }
+    }
+
+    // The one downgrade of the credential editor: a strict ESXi row whose
+    // certificate type is switched to "none" stops verifying the host, so its
+    // Save button asks first. The question sits on the form (data-downgrade-confirm,
+    // rendered for strict rows only). The button carries data-confirm only while
+    // that choice is selected and loses the attribute otherwise: core.js matches
+    // any data-confirm, even an empty one, so a blank value must never be left behind.
+    function syncVerificationDowngrade(form) {
+        var question = (form.getAttribute('data-downgrade-confirm') || '').trim();
+        var submit = form.querySelector('button[type="submit"]');
+        var typeField = form.querySelector('select[name="type"]');
+        var certField = form.querySelector('select[name="esxi_cert_kind"]');
+        if (!submit || !typeField || !certField) {
+            return;
+        }
+        var downgrade = question !== ''
+            && typeField.value === 'esxi'
+            && certField.value === 'none';
+        if (downgrade) {
+            submit.setAttribute('data-confirm', question);
+        } else {
+            submit.removeAttribute('data-confirm');
+        }
+    }
+
+    // AV-R12 (lib/vm_mecm_save.php): a registered VM whose wanted OS differs from the one MECM
+    // holds shows the hint and the two save buttons instead of the single one. The server rendered
+    // the stored state; this follows the OS field while the editor is open. The server still decides
+    // the transfer alone, from the submitted button. aria-describedby follows the hint's visibility.
+    function syncMecmSave(form) {
+        var osField = form.querySelector('select[name="vm_os"]');
+        var hint = form.querySelector('[data-mecm-os-hint]');
+        var portalButton = form.querySelector('[data-mecm-save-portal]');
+        var transferButton = form.querySelector('[data-mecm-save-transfer]');
+        var singleButton = form.querySelector('[data-mecm-save-single]');
+        if (!osField || !hint || !portalButton || !transferButton || !singleButton) {
+            return;
+        }
+        var mecmOs = (form.getAttribute('data-mecm-os') || '').trim();
+        var portalOs = osField.value.trim();
+        var deviates = portalOs !== mecmOs;
+        hint.hidden = !deviates;
+        portalButton.hidden = !deviates;
+        transferButton.hidden = !deviates;
+        singleButton.hidden = deviates;
+        var portalValue = hint.querySelector('[data-mecm-os-portal]');
+        if (portalValue) {
+            portalValue.textContent = portalOs;
+        }
+        var ids = (osField.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+        var position = ids.indexOf(hint.id);
+        if (deviates && position === -1) {
+            ids.push(hint.id);
+        } else if (!deviates && position !== -1) {
+            ids.splice(position, 1);
+        }
+        if (ids.length) {
+            osField.setAttribute('aria-describedby', ids.join(' '));
+        } else {
+            osField.removeAttribute('aria-describedby');
+        }
+    }
+
+    // The certificate text means nothing while "No certificate verification" is
+    // chosen: the server removes the stored certificate then. The field is disabled,
+    // so it is visibly unused and not submitted, until a certificate type is chosen.
+    function syncCertificateText(form) {
+        var certField = form.querySelector('select[name="esxi_cert_kind"]');
+        var pemField = form.querySelector('textarea[name="esxi_certificate_pem"]');
+        if (!certField || !pemField) {
+            return;
+        }
+        pemField.disabled = certField.value === 'none';
+    }
+
+    function initDynamicControls(root) {
+        root.querySelectorAll('[data-mode-select]').forEach(function (select) {
+            syncInterfaceMode(select);
+        });
+        root.querySelectorAll('[data-subnet-picker]').forEach(function (picker) {
+            syncSubnetPicker(picker);
+        });
+        root.querySelectorAll('[data-subnet-input]').forEach(function (input) {
+            syncSubnetInput(input, false);
+        });
+    }
+
+    // A repeated row is a copy of the FIRST row, so every disk added below the
+    // system disk arrived carrying its name and a VM with three disks showed
+    // "System" three times. The row's position decides the proposed name; both
+    // labels come from the PHP constants through data-autoname-* attributes, so
+    // this file holds no copy of them and cannot drift from
+    // vm_disk_default_name(). A name already taken (a middle row was removed,
+    // then a new one added) is stepped over rather than duplicated: two disks
+    // with one name is the very thing this fixes.
+    function applyRowAutoName(row, target) {
+        var input = row.querySelector('[data-autoname-prefix]');
+        if (!input) {
+            return;
+        }
+
+        var first = input.getAttribute('data-autoname-first') || '';
+        var prefix = input.getAttribute('data-autoname-prefix') || '';
+        var taken = [];
+        target.querySelectorAll('[data-autoname-prefix]').forEach(function (field) {
+            if (field !== input) {
+                taken.push(field.value.trim());
+            }
+        });
+
+        var position = target.querySelectorAll('[data-repeat-row]').length;
+        var candidate = position <= 1 ? first : prefix + ' ' + position;
+        while (taken.indexOf(candidate) !== -1) {
+            position += 1;
+            candidate = prefix + ' ' + position;
+        }
+
+        input.value = candidate;
+    }
+
+    document.addEventListener('click', function (event) {
+        var add = event.target.closest('[data-add-row]');
+        if (add) {
+            var key = add.getAttribute('data-add-row');
+            var template = document.querySelector('template[data-template="' + key + '"]');
+            var target = document.querySelector('[data-repeat-target="' + key + '"]');
+            if (template && target) {
+                // Date.now() alone can repeat when keyboard activation or a fast
+                // test inserts two rows in the same millisecond. The monotonic
+                // index keeps both the field names and generated IDs unique.
+                var html = template.innerHTML.replaceAll('__INDEX__', nextRepeatIndex());
+                var holder = document.createElement('div');
+                holder.innerHTML = html.trim();
+                var row = holder.firstElementChild;
+                target.appendChild(row);
+                applyRowAutoName(row, target);
+                initDynamicControls(row);
+            }
+            return;
+        }
+
+        var remove = event.target.closest('[data-remove-row]');
+        if (remove) {
+            var removeRow = remove.closest('[data-repeat-row]');
+            if (removeRow) {
+                removeRow.remove();
+            }
+            return;
+        }
+
+        var rowToggle = event.target.closest('[data-row-toggle]');
+        if (rowToggle) {
+            var editor = document.getElementById(rowToggle.getAttribute('data-row-toggle'));
+            if (editor) {
+                editor.hidden = !editor.hidden;
+                rowToggle.setAttribute('aria-expanded', editor.hidden ? 'false' : 'true');
+            }
+        }
+    });
+
+    document.addEventListener('input', function (event) {
+        var subnetInput = event.target.closest('[data-subnet-input]');
+        if (subnetInput) {
+            syncSubnetInput(subnetInput, false);
+            return;
+        }
+
+    });
+
+    document.addEventListener('change', function (event) {
+        var downgradeForm = event.target.form;
+        if (event.target.name === 'esxi_cert_kind' && downgradeForm) {
+            syncCertificateText(downgradeForm);
+        }
+        if (downgradeForm && downgradeForm.hasAttribute('data-downgrade-confirm')) {
+            syncVerificationDowngrade(downgradeForm);
+        }
+        if (downgradeForm && event.target.name === 'vm_os' && downgradeForm.hasAttribute('data-mecm-os')) {
+            syncMecmSave(downgradeForm);
+        }
+
+        if (event.target.closest('[data-bulk-all]')) {
+            var bulkForm = document.querySelector('[data-bulk-form]');
+            if (bulkForm) {
+                var selectAll = event.target.checked;
+                bulkItems(bulkForm).forEach(function (item) { item.checked = selectAll; });
+                syncBulkForm(bulkForm);
+            }
+            return;
+        }
+
+        var bulkItem = event.target.closest('[data-bulk-item]');
+        if (bulkItem && bulkItem.form) {
+            syncBulkForm(bulkItem.form);
+            return;
+        }
+
+        var modeSelect = event.target.closest('[data-mode-select]');
+        if (modeSelect) {
+            syncInterfaceMode(modeSelect);
+            return;
+        }
+
+        var subnetPicker = event.target.closest('[data-subnet-picker]');
+        if (subnetPicker) {
+            syncSubnetPicker(subnetPicker);
+            return;
+        }
+
+
+        var subnetInput = event.target.closest('[data-subnet-input]');
+        if (subnetInput) {
+            syncSubnetInput(subnetInput, true);
+            return;
+        }
+
+    });
+
+    document.querySelectorAll('[data-ram-field]').forEach(function (root) {
+        var factors = JSON.parse(root.getAttribute('data-ram-factors'));
+        var minimum = Number(root.getAttribute('data-ram-min'));
+        var maximum = Number(root.getAttribute('data-ram-max'));
+        var input = root.querySelector('[data-ram-value]');
+        var unit = root.querySelector('[data-ram-unit]');
+        var preset = root.querySelector('[data-ram-preset]');
+        var output = root.parentElement.querySelector('[data-ram-output]');
+        var oldUnit = unit.value;
+        preset.disabled = input.readOnly;
+        function parse(value, token) {
+            value = value.trim();
+            var pattern = token === 'mb' ? /^[0-9]+$/ : /^[0-9]+(?:[.,][0-9]{1,10})?$/;
+            if (!factors[token] || value.length > 16 || !pattern.test(value)) { return null; }
+            var parts = value.replace(',', '.').split('.');
+            var whole = Number(parts[0]);
+            var factor = factors[token];
+            if (whole > maximum / factor) { return null; }
+            var denominator = Math.pow(10, (parts[1] || '').length);
+            var fractional = Number(parts[1] || '0') * factor;
+            var base = whole * factor;
+            if (base + fractional / denominator < minimum || base + fractional / denominator > maximum) { return null; }
+            return {mb: base + Math.floor((fractional + Math.floor(denominator / 2)) / denominator), rounded: fractional % denominator !== 0};
+        }
+        function numberInUnit(mb, token) {
+            return (mb / factors[token]).toFixed(10).replace(/\.?0+$/, '');
+        }
+        function refresh() {
+            var value = parse(input.value, unit.value);
+            preset.value = value ? String(value.mb) : '';
+            output.textContent = input.value.trim() === '' ? '' : value
+                ? root.getAttribute('data-ram-preview').replace(':mb', String(value.mb)) + (value.rounded ? ' ' + root.getAttribute('data-ram-rounded') : '')
+                : root.getAttribute('data-ram-invalid');
+        }
+        input.addEventListener('input', refresh);
+        unit.addEventListener('change', function () {
+            var value = parse(input.value, oldUnit);
+            if (value && factors[unit.value]) { input.value = numberInUnit(value.mb, unit.value); }
+            oldUnit = unit.value;
+            refresh();
+        });
+        preset.addEventListener('change', function () {
+            if (preset.value !== '') {
+                unit.value = 'gb';
+                oldUnit = unit.value;
+                input.value = numberInUnit(Number(preset.value), unit.value);
+            }
+            refresh();
+        });
+        refresh();
+    });
+
+    initDynamicControls(document);
+    // Back/forward navigation restores checkbox state without change events, so
+    // the counter and buttons must be derived from the DOM once at load.
+    document.querySelectorAll('[data-bulk-form]').forEach(syncBulkForm);
+    document.querySelectorAll('select[name="esxi_cert_kind"]').forEach(function (select) {
+        if (select.form) {
+            syncCertificateText(select.form);
+        }
+    });
+    document.querySelectorAll('form[data-downgrade-confirm]').forEach(syncVerificationDowngrade);
+    document.querySelectorAll('form[data-mecm-os]').forEach(syncMecmSave);
+}());

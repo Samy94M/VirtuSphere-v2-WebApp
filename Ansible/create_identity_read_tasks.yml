@@ -1,0 +1,85 @@
+---
+# Die Inventarabfrage der Create-Identitaetspruefung (K4a, W1).
+#
+# Eingebunden aus create_identity_check_tasks.yml. Die Abfrage liest nur.
+# Wiederholt wird sie ausschliesslich im Prepare (vs_identity_read_retries,
+# gesetzt von createVMPrepare-ESXi_playbook.yml): bis zu dreimal mit den
+# Pausen aus esxi_retry_wait_tasks.yml, jede Wiederholung als RETRY-Zeile.
+# Launch und Status lesen einmal. Ihr Steueraufruf hat ein festes Budget
+# (VIRTUSPHERE_CREATE_CONTROL_TOTAL_TIMEOUT_SECONDS), und ein Launch, der es
+# mit Wartezeiten vor der einen Mutation aufbraucht, haette einen unbekannten
+# Ausgang statt eines klaren Fehlers.
+#
+# Scheitert auch der letzte Versuch, bricht create_identity_check_tasks.yml
+# den Steueraufruf ohne Marker ab, wie zuvor: Marker, Codes und der
+# Worker-Vertrag bleiben unveraendert (`protocol_error` mit Ursache).
+#
+# Alle VMs des Hosts, aber ohne Zusatzangaben. Die Matrix braucht nur
+# guest_name, moid, instance_uuid und power_state; das Modul liefert sie in
+# 6.2.0 immer, aus vm.summary und dem MOID. Jede Zusatzangabe kostet dagegen je
+# VM eigene Abfragen an ESXi (Netz, Ordnerpfad, Datacenter, Datastores,
+# Resource Pool, Host und Cluster, MAC-Adressen); acht davon sind standardmäßig
+# an, und mit ihnen dauerte dieser Task auf Prod rund 20 Sekunden, dreimal je
+# VM. Das Gate ansible-create-async leitet die show_*-Schalter aus dem
+# gepinnten Modul ab und verlangt jeden davon hier ausgeschaltet.
+#
+# Bewusst KEIN vm_name und kein folder: die Erkennung einer umbenannten
+# gebundenen VM (IDR-P02) sucht die gespeicherte UUID unter allen VMs des
+# Hosts, und ein Filter auf den Namen fände sie nie.
+- name: Ersten Inventarleseversuch zaehlen
+  ansible.builtin.set_fact:
+    vs_identity_read_attempt: 1
+  when: not (vs_identity_read_is_retry | default(false) | bool)
+
+- name: Live-Inventar fuer die Identitaetspruefung lesen
+  community.vmware.vmware_vm_info:
+    hostname: "{{ esxi_hostname }}"
+    port: "{{ esxi_port | int }}"
+    username: "{{ esxi_username }}"
+    password: "{{ esxi_password }}"
+    validate_certs: "{{ esxi_validate_certs | bool }}"
+    show_allocated: false
+    show_attribute: false
+    show_cluster: false
+    show_datacenter: false
+    show_datastore: false
+    show_esxi_hostname: false
+    show_folder: false
+    show_mac_address: false
+    show_net: false
+    show_resource_pool: false
+    show_tag: false
+  delegate_to: localhost
+  register: vs_identity_inventory
+  # Toleriert bis zum letzten Versuch; danach bricht
+  # create_identity_check_tasks.yml mit der Meldung des Moduls ab.
+  ignore_errors: true
+
+- name: Naechsten Inventarleseversuch entscheiden
+  ansible.builtin.set_fact:
+    vs_identity_read_again: >-
+      {{
+        (vs_identity_inventory['failed'] | default(false) | bool)
+        and (vs_identity_read_retries | default(false) | bool)
+        and (vs_identity_read_attempt | int) <= ((EsxiRetryPauseSeconds | default([5, 15, 45])) | length)
+      }}
+
+- name: Vor dem naechsten Inventarleseversuch warten
+  ansible.builtin.include_tasks: ./esxi_retry_wait_tasks.yml
+  vars:
+    vs_retry_position: ""
+    vs_retry_unit: "Create identity read {{ vs_target.vm_name }}"
+    vs_retry_attempt: "{{ vs_identity_read_attempt }}"
+    vs_retry_cause: "{{ vs_identity_inventory['msg'] | default('') }}"
+  when: vs_identity_read_again | bool
+
+- name: Inventarleseversuch hochzaehlen
+  ansible.builtin.set_fact:
+    vs_identity_read_attempt: "{{ vs_identity_read_attempt | int + 1 }}"
+  when: vs_identity_read_again | bool
+
+- name: Live-Inventar erneut lesen
+  ansible.builtin.include_tasks: ./create_identity_read_tasks.yml
+  vars:
+    vs_identity_read_is_retry: true
+  when: vs_identity_read_again | bool

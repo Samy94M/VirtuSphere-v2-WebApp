@@ -1,0 +1,774 @@
+// Portal core: theme, the shared <dialog> modals (confirm + session), tabs,
+// the session timer and clock-drift warning. Loaded first; forms.js and
+// the deploy modules are independent IIFEs that follow. No cross-file calls: each file
+// registers only the delegated listeners for its own concern, and several
+// document-level listeners coexist without conflict.
+(function () {
+    function setTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        try {
+            localStorage.setItem('virtusphere.theme', theme);
+        } catch (error) {}
+    }
+
+    // Modal dialogs (SSoT: the .modal block in feedback.css). Both portal
+    // modals are native <dialog> elements, so the browser owns the top layer,
+    // the focus trap and Escape. These helpers only add the background scroll
+    // lock and guard against calling showModal() on an already open dialog,
+    // which throws. Browsers without <dialog> fall back to toggling [open],
+    // which still shows the panel but without the modal semantics.
+    function openDialog(dialog) {
+        if (!dialog || dialog.hasAttribute('open')) {
+            return;
+        }
+        if (typeof dialog.showModal === 'function') {
+            dialog.showModal();
+        } else {
+            dialog.setAttribute('open', '');
+        }
+        document.documentElement.classList.add('is-modal-open');
+    }
+
+    function closeDialog(dialog, returnValue) {
+        if (!dialog || !dialog.hasAttribute('open')) {
+            return;
+        }
+        if (typeof dialog.close === 'function') {
+            dialog.close(returnValue || '');
+        } else {
+            dialog.removeAttribute('open');
+        }
+        releaseScrollLock();
+    }
+
+    function releaseScrollLock() {
+        if (!document.querySelector('.modal[open]')) {
+            document.documentElement.classList.remove('is-modal-open');
+        }
+    }
+
+    // Escape closes a <dialog> without passing through closeDialog(). The close
+    // event does not bubble, so this listens in the capture phase.
+    document.addEventListener('close', function () {
+        releaseScrollLock();
+    }, true);
+
+    // Set by initConfirmDialog() once the dialog is present and usable. A browser
+    // without <dialog> leaves it null and every submit proceeds unconfirmed,
+    // exactly as it does with JS disabled: the POST handler is the real gate.
+    // No such browser reaches this portal (the portal sheets already rely on :has(),
+    // which no engine shipped before <dialog>), so there is no window.confirm()
+    // fallback to keep alive.
+    var requestConfirm = null;
+
+    // window.confirm() blocked, so the click continued natively and the browser
+    // carried the button along as the form's submitter. A dialog cannot block:
+    // the click is cancelled and replayed once the user accepts. requestSubmit()
+    // preserves that submitter; a plain form.submit() would drop it and silently
+    // strip name="action" (os.php, credentials.php, the VM bulk actions).
+    // The click() path covers engines that have <dialog> but not requestSubmit
+    // (Safari 15.4-15.6); a native click carries the submitter just the same.
+    function replayTrigger(trigger) {
+        var form = trigger.form;
+        if (form && typeof form.requestSubmit === 'function') {
+            form.requestSubmit(trigger);
+            return;
+        }
+        trigger.setAttribute('data-confirm-bypass', '1');
+        try {
+            trigger.click();
+        } finally {
+            trigger.removeAttribute('data-confirm-bypass');
+        }
+    }
+
+    function initConfirmDialog() {
+        var dialog = document.querySelector('[data-confirm-dialog]');
+        if (!dialog || typeof dialog.showModal !== 'function') {
+            return;
+        }
+        var message = dialog.querySelector('[data-confirm-msg]');
+        var accept = dialog.querySelector('[data-confirm-accept]');
+        if (!message || !accept) {
+            return;
+        }
+
+        // Server-rendered generic label, used when a trigger carries no text of
+        // its own. Captured before the first open overwrites it.
+        var defaultAcceptLabel = accept.textContent;
+        var pending = null;
+        var opener = null;
+
+        dialog.addEventListener('click', function (event) {
+            // The dialog element is the dim layer and .modal-box swallows its
+            // own clicks, so a hit on the element itself is a backdrop click.
+            if (event.target === dialog) {
+                closeDialog(dialog, 'cancel');
+            }
+        });
+
+        dialog.addEventListener('close', function () {
+            // The browser queues this event as a task, so a reopen can outrun
+            // it: Escape closes, the user reopens, and only then does the stale
+            // close arrive. It must not clear the fresh pending trigger, or the
+            // accept closes the dialog without submitting anything. An open
+            // dialog means this close belongs to an already finished session.
+            if (dialog.hasAttribute('open')) {
+                return;
+            }
+            var accepted = dialog.returnValue === 'confirm';
+            var request = pending;
+            pending = null;
+            dialog.returnValue = '';
+
+            // Escape, backdrop and dismiss all land here; only an accept replays.
+            if (opener && opener.isConnected && typeof opener.focus === 'function') {
+                opener.focus();
+            }
+            opener = null;
+
+            if (request && request.resultTarget && request.resultTarget.isConnected) {
+                request.resultTarget.dispatchEvent(new CustomEvent('virtusphere:confirm-result', {
+                    detail: {accepted: accepted},
+                }));
+            } else if (accepted && request && request.trigger && request.trigger.isConnected) {
+                replayTrigger(request.trigger);
+            }
+        });
+
+        requestConfirm = function (trigger, options) {
+            if (dialog.hasAttribute('open')) {
+                return false;
+            }
+
+            // Cancelling the click also skipped the browser's constraint check,
+            // so run it here. Asking "reset this password?" and only then
+            // rejecting an empty field would waste the answer (users.php).
+            var form = trigger.form;
+            if (!options && form && !trigger.formNoValidate && typeof form.checkValidity === 'function' && !form.checkValidity()) {
+                if (typeof form.reportValidity === 'function') {
+                    form.reportValidity();
+                }
+                return false;
+            }
+
+            pending = options
+                ? {resultTarget: trigger}
+                : {trigger: trigger};
+            opener = trigger;
+            message.textContent = options
+                ? options.message
+                : (trigger.getAttribute('data-confirm') || '').trim();
+
+            // The accept button names the action it performs instead of saying
+            // "OK". A trigger's own label is already localized; data-confirm-action
+            // overrides it where that label would collide with the dismiss button
+            // ("Abbrechen" on a deploy job).
+            var label = options
+                ? options.label
+                : (trigger.getAttribute('data-confirm-action') || trigger.textContent || '').trim();
+            accept.textContent = label !== '' ? label : defaultAcceptLabel;
+
+            var danger = options ? options.danger : trigger.classList.contains('button-danger');
+            accept.classList.toggle('button-danger', danger);
+            dialog.classList.toggle('modal-danger', danger);
+
+            openDialog(dialog);
+            return true;
+        };
+    }
+
+    // Page-specific modules request the same dialog through a DOM event. The
+    // result returns to the requesting element, keeping the shared owner in
+    // this file without publishing a global callable or building another
+    // modal. Only already-rendered localized strings are accepted.
+    document.addEventListener('virtusphere:confirm-request', function (event) {
+        var detail = event.detail || {};
+        var target = event.target;
+        var message = typeof detail.message === 'string' ? detail.message.trim() : '';
+        var label = typeof detail.label === 'string' ? detail.label.trim() : '';
+        if (!requestConfirm || !(target instanceof Element) || message === '' || label === '') {
+            return;
+        }
+        if (requestConfirm(target, {message: message, label: label, danger: detail.danger === true})) {
+            event.preventDefault();
+        }
+    });
+
+    // Global chrome clicks: theme toggle, sidebar nav toggle, and the shared
+    // confirmation. Form-row editing (add/remove/toggle) is handled by forms.js
+    // in its own listener.
+    document.addEventListener('click', function (event) {
+        var toggle = event.target.closest('[data-theme-toggle]');
+        if (toggle) {
+            var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+            setTheme(next);
+            return;
+        }
+
+        var navToggle = event.target.closest('[data-nav-toggle]');
+        if (navToggle) {
+            var sidebar = navToggle.closest('.sidebar');
+            if (sidebar) {
+                var open = sidebar.classList.toggle('nav-open');
+                navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            return;
+        }
+
+        var confirmButton = event.target.closest('[data-confirm]');
+        // Three ways a [data-confirm] click proceeds untouched, all deliberate:
+        // the replayed click after an accept (data-confirm-bypass), a browser
+        // without <dialog> (requestConfirm stays null), and a blank question. A
+        // conditional prompt must omit the attribute rather than render it empty,
+        // because this selector matches a blank value too; blank means "no
+        // confirmation configured" and must not swallow the submit. The static
+        // contract test rejects a blank value, so this only guards markup that
+        // never reaches the repo.
+        if (confirmButton
+            && requestConfirm
+            && !confirmButton.hasAttribute('data-confirm-bypass')
+            && (confirmButton.getAttribute('data-confirm') || '').trim() !== '') {
+            event.preventDefault();
+            requestConfirm(confirmButton);
+        }
+    });
+
+    function currentHashId() {
+        var hash = window.location.hash.replace(/^#/, '');
+        try {
+            return decodeURIComponent(hash);
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function focusHashTarget() {
+        var hash = currentHashId();
+        if (!hash) {
+            return;
+        }
+        var target = document.getElementById(hash);
+        if (!target || target.hidden || target.closest('[hidden]')) {
+            return;
+        }
+        target.scrollIntoView({block: 'start'});
+        if (!target.matches('a, button, input, select, textarea, [tabindex]')) {
+            target.tabIndex = -1;
+        }
+        target.focus({preventScroll: true});
+    }
+
+    function initTabs() {
+        var root = document.querySelector('[data-tabs]');
+        if (!root) {
+            return;
+        }
+
+        var list = root.querySelector('[data-tab-list]');
+        var tabs = Array.prototype.slice.call(root.querySelectorAll('[data-tab-target]'));
+        var panels = Array.prototype.slice.call(root.querySelectorAll('[data-tab-panel]'));
+        if (!list || tabs.length === 0) {
+            return;
+        }
+
+        function activate(tab, focus, updateHash) {
+            var target = tab.getAttribute('data-tab-target');
+            tabs.forEach(function (other) {
+                var selected = other === tab;
+                other.setAttribute('aria-selected', selected ? 'true' : 'false');
+                other.tabIndex = selected ? 0 : -1;
+            });
+            panels.forEach(function (panel) {
+                panel.hidden = panel.id !== target;
+            });
+            if (focus) {
+                tab.focus();
+            }
+            if (updateHash && window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', '#' + target);
+            }
+        }
+
+        function tabAndTargetForHash() {
+            var hash = currentHashId();
+            var result = {tab: null, target: null};
+            tabs.forEach(function (tab) {
+                if (hash && tab.getAttribute('data-tab-target') === hash) {
+                    result.tab = tab;
+                    result.target = document.getElementById(hash);
+                }
+            });
+            if (!result.tab && hash) {
+                var nested = document.getElementById(hash);
+                if (nested) {
+                    panels.forEach(function (panel) {
+                        if (panel.contains(nested)) {
+                            tabs.forEach(function (tab) {
+                                if (tab.getAttribute('data-tab-target') === panel.id) {
+                                    result.tab = tab;
+                                    result.target = nested;
+                                }
+                            });
+                        }
+                    });
+                }
+            }
+            return result;
+        }
+
+        list.addEventListener('click', function (event) {
+            var tab = event.target.closest('[data-tab-target]');
+            if (tab) {
+                activate(tab, false, true);
+            }
+        });
+
+        list.addEventListener('keydown', function (event) {
+            var index = tabs.indexOf(document.activeElement);
+            if (index === -1) {
+                return;
+            }
+            var next = -1;
+            if (event.key === 'ArrowRight') {
+                next = (index + 1) % tabs.length;
+            } else if (event.key === 'ArrowLeft') {
+                next = (index - 1 + tabs.length) % tabs.length;
+            } else if (event.key === 'Home') {
+                next = 0;
+            } else if (event.key === 'End') {
+                next = tabs.length - 1;
+            }
+            if (next !== -1) {
+                event.preventDefault();
+                activate(tabs[next], true, true);
+            }
+        });
+
+        var initial = tabs[0];
+        var resolved = tabAndTargetForHash();
+        var scrollTarget = resolved.target;
+        var matchedTab = resolved.tab && resolved.target
+            && resolved.tab.getAttribute('data-tab-target') === resolved.target.id
+            ? resolved.tab
+            : null;
+        if (resolved.tab) {
+            initial = resolved.tab;
+        }
+
+        list.hidden = false;
+        activate(initial, false, false);
+        if (scrollTarget && scrollTarget.scrollIntoView) {
+            focusHashTarget();
+        } else if (matchedTab && document.querySelector('[data-flash]')) {
+            // A save redirect carries its tab as the fragment. The browser's
+            // anchor jump to that panel parks the flash message behind the
+            // sticky topbar, so the save looks like a no-op. [data-flash]
+            // (not .alert, which also matches static info boxes) only exists
+            // right after such a redirect; scroll back to the top so it is
+            // seen. The jump is deferred (it fires once the panel is visible,
+            // up to the load event), so the counter-scroll must run after
+            // load or it would be overridden.
+            var revealFlash = function () {
+                window.requestAnimationFrame(function () {
+                    window.scrollTo(0, 0);
+                });
+            };
+            if (document.readyState === 'complete') {
+                revealFlash();
+            } else {
+                window.addEventListener('load', revealFlash);
+            }
+        }
+
+        window.addEventListener('hashchange', function () {
+            var next = tabAndTargetForHash();
+            if (next.tab) {
+                activate(next.tab, false, false);
+            }
+        });
+    }
+
+    function initHashNavigation() {
+        // Native fragment navigation restores the scroll position, but it does
+        // not consistently move keyboard focus to a non-interactive table row.
+        // Tabbed panels own their initial fragment handling in initTabs(); all
+        // other pages use the same focus helper on first render as on a later
+        // hash change.
+        if (!document.querySelector('[data-tabs]') && currentHashId()) {
+            window.requestAnimationFrame(focusHashTarget);
+        }
+        window.addEventListener('hashchange', function () {
+            window.requestAnimationFrame(focusHashTarget);
+        });
+        document.addEventListener('click', function (event) {
+            var link = event.target.closest('a[href*="#"]');
+            if (!link) {
+                return;
+            }
+            var targetUrl = new URL(link.href, window.location.href);
+            if (targetUrl.origin === window.location.origin
+                && targetUrl.pathname === window.location.pathname
+                && targetUrl.search === window.location.search
+                && targetUrl.hash === window.location.hash
+            ) {
+                window.requestAnimationFrame(focusHashTarget);
+            }
+        });
+    }
+
+    function initSessionTimer() {
+        var root = document.querySelector('[data-session-timer]');
+        if (!root) {
+            return;
+        }
+
+        var clock = root.querySelector('[data-session-clock]');
+        var modal = document.querySelector('[data-session-modal]');
+        var modalMsg = modal ? modal.querySelector('[data-session-modal-msg]') : null;
+        var i18n = {};
+        var i18nIsland = document.querySelector('[data-i18n-session]');
+        if (i18nIsland) {
+            try {
+                i18n = JSON.parse(i18nIsland.textContent);
+            } catch (error) {
+                i18n = {};
+            }
+        }
+        var logoutForm = document.querySelector('[data-session-logout-form]');
+        var csrfInput = root.querySelector('input[name="_csrf"]');
+        var csrfToken = csrfInput ? csrfInput.value : '';
+
+        var warnAt = parseInt(root.getAttribute('data-warn-at') || '300', 10);
+        var expiresIn = parseInt(root.getAttribute('data-expires-in') || '0', 10);
+        // Absolute deadline. Recomputed against the wall clock on every tick so an
+        // inactive/throttled tab still logs out at the right real-world moment.
+        var deadline = Date.now() + (expiresIn > 0 ? expiresIn : 0) * 1000;
+        var loggingOut = false;
+        var pingPending = false;
+
+        function fmt(totalSeconds) {
+            var s = Math.max(0, totalSeconds);
+            var m = Math.floor(s / 60);
+            var r = s % 60;
+            return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+        }
+
+        if (modal) {
+            // The expiry warning is not dismissable: Escape would only hide it
+            // until the next tick reopened it a second later.
+            modal.addEventListener('cancel', function (event) {
+                event.preventDefault();
+            });
+        }
+
+        function openModal() {
+            openDialog(modal);
+        }
+
+        function closeModal() {
+            closeDialog(modal);
+        }
+
+        function doLogout() {
+            if (loggingOut) {
+                return;
+            }
+            loggingOut = true;
+            if (logoutForm) {
+                logoutForm.submit();
+            } else {
+                window.location.href = 'login.php';
+            }
+        }
+
+        function tick() {
+            if (loggingOut) {
+                return;
+            }
+            var remaining = Math.ceil((deadline - Date.now()) / 1000);
+
+            if (remaining <= 0) {
+                if (clock) {
+                    clock.textContent = fmt(0);
+                }
+                closeModal();
+                doLogout();
+                return;
+            }
+
+            if (clock) {
+                clock.textContent = fmt(remaining);
+                if (remaining <= warnAt) {
+                    clock.classList.add('is-warning');
+                } else {
+                    clock.classList.remove('is-warning');
+                }
+            }
+
+            if (remaining <= warnAt) {
+                openModal();
+                if (modalMsg && i18n.countdown_html) {
+                    // Localized template comes from PHP via the [data-i18n-session]
+                    // JSON island (ADR-0014); no translatable strings live in JS.
+                    modalMsg.innerHTML = i18n.countdown_html.replace(
+                        '{n}',
+                        '<strong>' + remaining + '</strong>'
+                    );
+                }
+            } else {
+                closeModal();
+            }
+        }
+
+        function extend() {
+            if (pingPending || loggingOut) {
+                return;
+            }
+            pingPending = true;
+            fetch('session_ping.php', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: '_csrf=' + encodeURIComponent(csrfToken)
+            }).then(function (response) {
+                if (response.status === 401) {
+                    doLogout();
+                    return null;
+                }
+                if (!response.ok) {
+                    throw new Error('session ping failed');
+                }
+                return response.json();
+            }).then(function (payload) {
+                pingPending = false;
+                if (!payload || !payload.ok) {
+                    return;
+                }
+                deadline = Date.now() + (parseInt(payload.expires_in, 10) || 0) * 1000;
+                if (clock) {
+                    clock.classList.remove('is-warning');
+                }
+                closeModal();
+                tick();
+            }).catch(function () {
+                // Transient failure (e.g. LAN blip): keep the existing countdown
+                // running so the user can retry rather than being logged out.
+                pingPending = false;
+            });
+        }
+
+        document.addEventListener('click', function (event) {
+            if (event.target.closest('[data-session-extend]')) {
+                extend();
+                return;
+            }
+            if (event.target.closest('[data-session-logout-now]')) {
+                doLogout();
+            }
+        });
+
+        tick();
+        window.setInterval(tick, 1000);
+    }
+
+    // Settings "time" card: warn when the browser clock drifts from the server.
+    // Labels come from a CSP-nonced JSON island (no hardcoded strings in JS).
+    function initTimeDrift() {
+        var island = document.querySelector('[data-server-time]');
+        var target = document.querySelector('[data-time-drift]');
+        if (!island || !target) {
+            return;
+        }
+        var data;
+        try {
+            data = JSON.parse(island.textContent);
+        } catch (error) {
+            return;
+        }
+        var serverEpoch = Number(data.epoch);
+        var warnSeconds = Number(data.warn_seconds) || 120;
+        if (!serverEpoch) {
+            return;
+        }
+        var browserEpoch = Math.round(Date.now() / 1000);
+        var drift = Math.abs(browserEpoch - serverEpoch);
+        if (drift > warnSeconds) {
+            var minutes = Math.round(drift / 60);
+            target.textContent = String(data.drift_message || '').replace('{minutes}', String(minutes));
+            target.hidden = false;
+        }
+    }
+
+    // A submit button carrying data-busy-label swaps to that label, shows a
+    // spinner and disables itself on submit, so a synchronous POST (the
+    // credential test does a real SSH round-trip that can take seconds) gives
+    // immediate feedback instead of a button that looks unclicked. Pure
+    // progressive enhancement: without JS the POST still works, it just lacks
+    // the pending state. The disable is deferred one tick so the current
+    // submission is captured first; the pages using this keep the form action
+    // in a hidden input, never on the button, so nothing is dropped from POST.
+    function initBusyButtons() {
+        document.addEventListener('submit', function (event) {
+            var form = event.target;
+            // A submit some other handler cancelled must not strand a disabled
+            // button on a page that is not navigating anywhere.
+            if (!form || typeof form.querySelector !== 'function' || event.defaultPrevented) {
+                return;
+            }
+            // The submitter decides (NL1): a button without its own busy label,
+            // such as "Continue with my input" after an edit conflict, saves
+            // nothing and must not turn a save button into "Saving...". Only a
+            // submit without a submitter (a script) falls back to the form's
+            // first busy button.
+            var submitter = event.submitter;
+            var button = submitter
+                ? (typeof submitter.matches === 'function' && submitter.matches('button[data-busy-label]') ? submitter : null)
+                : form.querySelector('button[data-busy-label]');
+            if (!button || button.disabled) {
+                return;
+            }
+            var label = (button.getAttribute('data-busy-label') || '').trim();
+            if (label !== '') {
+                button.setAttribute('data-busy-restore', button.textContent);
+                button.textContent = label;
+            }
+            button.classList.add('is-busy');
+            button.setAttribute('aria-busy', 'true');
+            window.setTimeout(function () {
+                button.disabled = true;
+            }, 0);
+        });
+
+        // Back/forward cache: Firefox and Safari restore the submitted page's
+        // DOM as-is, including a disabled "Testing..." button that would stay
+        // dead forever. pageshow with persisted=true is that restore moment.
+        window.addEventListener('pageshow', function (event) {
+            if (!event.persisted) {
+                return;
+            }
+            Array.prototype.forEach.call(document.querySelectorAll('.button.is-busy'), function (button) {
+                var restore = button.getAttribute('data-busy-restore');
+                if (restore !== null) {
+                    button.textContent = restore;
+                    button.removeAttribute('data-busy-restore');
+                }
+                button.classList.remove('is-busy');
+                button.removeAttribute('aria-busy');
+                button.disabled = false;
+            });
+        });
+    }
+
+    // Copy-to-clipboard for displayed diagnostic identifiers and package report values.
+    //
+    // A real <button> with a real label, so it is reachable with Tab and
+    // activated with Enter and Space by the browser rather than by a key
+    // handler of ours. It is rendered inside a container that also carries the
+    // value as text, so the value stays visible and selectable without JS: the
+    // button is an accelerator, never the only way to get the id.
+    //
+    // The confirmation is announced as well as shown. A silent success looks
+    // exactly like a silent failure, and clipboard writes DO fail (an insecure
+    // origin has no navigator.clipboard at all, which is the normal case on a
+    // LAN portal served over plain HTTP before the HTTPS flow is enabled). So
+    // the failure branch is a real branch with its own message, not a catch
+    // that shrugs.
+    function initCopyButtons() {
+        var RESET_MS = 2000;
+
+        function sourceFor(button) {
+            var sourceId = button.getAttribute('data-copy-source') || '';
+            return sourceId === '' ? null : document.getElementById(sourceId);
+        }
+
+        function currentValue(button) {
+            if (button.hasAttribute('data-copy-link')) {
+                try {
+                    var target = new URL(button.getAttribute('data-copy-link') || '', document.baseURI);
+                    return target.origin === window.location.origin ? target.href : '';
+                } catch (error) {
+                    return '';
+                }
+            }
+            if (!button.hasAttribute('data-copy-source')) {
+                return button.getAttribute('data-copy-value') || '';
+            }
+            var source = sourceFor(button);
+            if (!source) {
+                return '';
+            }
+            return typeof source.value === 'string' ? source.value : source.textContent || '';
+        }
+
+        function syncSourceButton(button) {
+            if (!button.hasAttribute('data-copy-source')) {
+                return;
+            }
+            button.hidden = currentValue(button) === '';
+        }
+
+        function syncSourceButtons() {
+            document.querySelectorAll('[data-copy-source]').forEach(syncSourceButton);
+        }
+
+        function announce(button, message, ok) {
+            var status = button.parentNode ? button.parentNode.querySelector('[data-copy-status]') : null;
+            if (!status) {
+                return;
+            }
+            status.textContent = message;
+            status.classList.toggle('is-error', !ok);
+            status.hidden = false;
+            window.clearTimeout(Number(status.getAttribute('data-copy-timer')) || 0);
+            status.setAttribute('data-copy-timer', String(window.setTimeout(function () {
+                status.hidden = true;
+                status.textContent = '';
+                status.classList.remove('is-error');
+            }, RESET_MS)));
+        }
+
+        document.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-copy-value], [data-copy-source], [data-copy-link]');
+            if (!button) {
+                return;
+            }
+            event.preventDefault();
+            var value = currentValue(button);
+            var done = button.getAttribute('data-copy-done') || '';
+            var failed = button.getAttribute('data-copy-failed') || '';
+            if (value === '') {
+                syncSourceButton(button);
+                return;
+            }
+            if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+                announce(button, failed, false);
+                return;
+            }
+            try {
+                navigator.clipboard.writeText(value).then(function () {
+                    announce(button, done, true);
+                }).catch(function () {
+                    announce(button, failed, false);
+                });
+            } catch (error) {
+                announce(button, failed, false);
+            }
+        });
+
+        document.addEventListener('input', function (event) {
+            if (event.target && event.target.id) {
+                syncSourceButtons();
+            }
+        });
+        syncSourceButtons();
+    }
+
+    initConfirmDialog();
+    initTabs();
+    initHashNavigation();
+    initSessionTimer();
+    initTimeDrift();
+    initBusyButtons();
+    initCopyButtons();
+}());

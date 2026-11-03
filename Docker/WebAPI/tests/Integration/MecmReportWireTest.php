@@ -1,0 +1,639 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+require_once __DIR__ . '/ClientIpAllowlist.php';
+
+// Wire contract of the report channel (ADR-0018). Runs against the live
+// Docker stack like MachineApiWireTest; the POST helper is the first POST
+// usage in the wire suite.
+final class MecmReportWireTest extends TestCase
+{
+    use ClientIpAllowlist;
+
+    /** @var list<array<string,mixed>>|null */
+    private static ?array $heartbeatRows = null;
+
+    /**
+     * These tests report the way a real MECM task would, so they write real
+     * rows into the shared dev database, and nothing put them back: afterwards
+     * System status showed four sources on an interval no script had sent (the
+     * fixture 30 s) with a reporter generation that never ran on this host, and
+     * the next person to read the page asked why. Same contract as
+     * restoreClientIpAllowlistIfTouched(): a wire test restores what it touched.
+     * Scoped to the sources this class reports for, so the maintenance worker,
+     * which really is beating in this stack, keeps its own row.
+     */
+    public static function setUpBeforeClass(): void
+    {
+        self::$heartbeatRows = self::readHeartbeatRows();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        $rows = self::$heartbeatRows;
+        self::$heartbeatRows = null;
+        if ($rows === null) {
+            return;
+        }
+
+        $db = db(true);
+        $sources = self::reportedSources();
+        $in = implode(',', array_fill(0, count($sources), '?'));
+        $delete = $db->prepare('DELETE FROM deploy_integration_heartbeats WHERE source IN (' . $in . ')');
+        $delete->bind_param(str_repeat('s', count($sources)), ...$sources);
+        $delete->execute();
+
+        foreach ($rows as $row) {
+            $columns = array_keys($row);
+            $insert = $db->prepare(
+                'INSERT INTO deploy_integration_heartbeats (' . implode(',', $columns) . ') '
+                . 'VALUES (' . implode(',', array_fill(0, count($columns), '?')) . ')'
+            );
+            $insert->bind_param(str_repeat('s', count($columns)), ...array_values($row));
+            $insert->execute();
+        }
+    }
+
+    /**
+     * @return list<array<string,mixed>>|null null when the stack is unreachable,
+     *   which is also the case in which nothing was written and nothing needs
+     *   restoring.
+     */
+    private static function readHeartbeatRows(): ?array
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+
+        try {
+            $db = db(true);
+        } catch (Throwable) {
+            return null;
+        }
+
+        $sources = self::reportedSources();
+        $in = implode(',', array_fill(0, count($sources), '?'));
+        // SELECT *, never a column list: a list would silently drop whatever
+        // column the table gains next, which is exactly how the E2E restore
+        // turned every row back into a legacy heartbeat row.
+        $statement = $db->prepare('SELECT * FROM deploy_integration_heartbeats WHERE source IN (' . $in . ')');
+        $statement->bind_param(str_repeat('s', count($sources)), ...$sources);
+        $statement->execute();
+
+        $rows = [];
+        $result = $statement->get_result();
+        while ($row = $result->fetch_assoc()) {
+            $rows[] = $row;
+        }
+
+        return $rows;
+    }
+
+    /** @return list<string> */
+    private static function reportedSources(): array
+    {
+        return array_values(array_unique(array_merge(
+            VIRTUSPHERE_INTEGRATION_RUN_SOURCES,
+            VIRTUSPHERE_INTEGRATION_WIRE_SOURCES
+        )));
+    }
+
+    protected function setUp(): void
+    {
+        $health = @file_get_contents(virtusphere_test_base_url() . '/portal/health.php');
+        if ($health === false) {
+            self::markTestSkipped('VirtuSphere test stack is not reachable.');
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreClientIpAllowlistIfTouched();
+    }
+
+    public function testGetIsRejectedWithMethodNotAllowed(): void
+    {
+        $context = stream_context_create(['http' => ['ignore_errors' => true, 'timeout' => 5]]);
+        $body = @file_get_contents(virtusphere_test_base_url() . '/mecm_report.php?action=heartbeat', false, $context);
+        if ($body === false) {
+            self::markTestSkipped('VirtuSphere test endpoint is not reachable.');
+        }
+
+        self::assertSame(['error' => 'Method not allowed'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testInvalidActionReturns400(): void
+    {
+        [$status, , $body] = $this->post('/mecm_report.php?action=nope', ['x' => 1]);
+        $this->skipUnlessAuthorized($status);
+
+        self::assertSame(400, $status);
+        self::assertSame(['message' => 'Invalid action specified'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testReportPhaseValidatesMacPhaseAndEvent(): void
+    {
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => 'not-a-mac', 'phase' => 'getinfo', 'event' => 'started']);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status);
+        self::assertSame(['error' => 'Invalid MAC address'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => '00:50:56:AA:BB:CC', 'phase' => 'reboot', 'event' => 'started']);
+        self::assertSame(400, $status);
+        self::assertSame(['error' => 'Invalid phase'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => '00:50:56:AA:BB:CC', 'phase' => 'getinfo', 'event' => 'done']);
+        self::assertSame(400, $status);
+        self::assertSame(['error' => 'Invalid event'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testHeartbeatValidatesSourceAndInterval(): void
+    {
+        // Selbst allowlisten statt skippen (ADR-0015-Ergaenzung).
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'unknown-source', 'interval_seconds' => 10]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status);
+        self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'device-sync', 'interval_seconds' => 0]);
+        self::assertSame(400, $status);
+        self::assertSame(['error' => 'Invalid interval_seconds'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-02: only a JSON integer is an interval. A string such as "12abc", an
+     * array or an absent value used to be cast to 12 or 1 and was accepted; now
+     * each answers the existing 400 body of an out-of-range interval.
+     */
+    public function testIntervalSecondsAcceptsOnlyAJsonInteger(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach ([['interval_seconds' => '12abc'], ['interval_seconds' => ['10']], ['interval_seconds' => '10'], []] as $extra) {
+            $payload = array_merge(['source' => 'device-sync'], $extra);
+            [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', $payload);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(400, $status, json_encode($extra, JSON_THROW_ON_ERROR) . ' ' . $body);
+            self::assertSame(['error' => 'Invalid interval_seconds'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), json_encode($extra, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    public function testHeartbeatRoundTripLandsInDatabase(): void
+    {
+        // Selbst allowlisten statt skippen (ADR-0015-Ergaenzung).
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'device-sync', 'interval_seconds' => 10, 'detail' => 'phpunit wire test']);
+        $this->skipUnlessAuthorized($status);
+
+        self::assertSame(200, $status);
+        self::assertSame(['success' => true, 'source' => 'device-sync'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        $db = db(true);
+        $row = $db->query("SELECT last_status, last_detail, interval_seconds FROM deploy_integration_heartbeats WHERE source = 'device-sync'")->fetch_assoc();
+        self::assertIsArray($row);
+        self::assertSame('ok', $row['last_status']);
+        self::assertSame('phpunit wire test', $row['last_detail']);
+        self::assertSame(10, (int) $row['interval_seconds']);
+    }
+
+    public function testOversizedBodyReturns413(): void
+    {
+        $payload = ['mac' => '00:50:56:AA:BB:CC', 'phase' => 'getinfo', 'event' => 'started', 'detail' => str_repeat('x', 9000)];
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', $payload);
+        $this->skipUnlessAuthorized($status);
+
+        self::assertSame(413, $status);
+        self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-02: an array in mac, phase, event or source answers the endpoint's
+     * existing 400 body. Before the fix each one was a cast that threw into a 500.
+     */
+    public function testArrayFieldsAnswerTheirExistingEnvelopes(): void
+    {
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => ['00:50:56:AA:BB:CC'], 'phase' => 'getinfo', 'event' => 'started']);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid MAC address'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => '00:50:56:AA:BB:CC', 'phase' => ['getinfo'], 'event' => 'started']);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid phase'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => '00:50:56:AA:BB:CC', 'phase' => 'getinfo', 'event' => ['started']]);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid event'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // The heartbeat is IP-gated, so the own container IP is allowlisted first.
+        $this->ensureClientIpAllowlisted(db(true));
+        [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => ['device-sync'], 'interval_seconds' => 10]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'device-sync', 'interval_seconds' => 10, 'detail' => ['x']]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testReportTokenGuardsHeartbeatOnly(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        require_once dirname(__DIR__, 2) . '/lib/repo/settings.php';
+        try {
+            $db = db(true);
+        } catch (Throwable $exception) {
+            self::markTestSkipped('Database not reachable: ' . $exception->getMessage());
+        }
+
+        // Configure a token, then prove the gate is scoped to heartbeats. Restore
+        // the previous value in finally so a real token setup is never clobbered
+        // (empty string = "no token", which is how the endpoint treats it).
+        $key = VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH;
+        $previous = repo_setting_value($db, $key, '');
+        repo_set_setting($db, $key, hash('sha256', 'phpunit-report-token'));
+        try {
+            // reportPhase authenticates by MAC, so a configured token must NOT turn
+            // a token-less client report into a 401 (that was the provisioning trap).
+            // A non-allowlisted IP with an unknown MAC lands on the MAC gate (403/404),
+            // never on the token gate (401).
+            [$status] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => '02:00:00:00:00:01', 'phase' => 'getinfo', 'event' => 'started']);
+            self::assertNotSame(401, $status, 'reportPhase must not require the report token');
+            self::assertContains($status, [403, 404], 'reportPhase should reach the MAC gate, not the token gate');
+
+            // heartbeat still requires the token when one is configured (checked
+            // before the IP gate, so a wrong/missing token is a deterministic 401).
+            [$status] = $this->post('/mecm_report.php?action=heartbeat', ['source' => 'device-sync', 'interval_seconds' => 10]);
+            self::assertSame(401, $status, 'heartbeat must require the report token when configured');
+
+            // reportRun is the other server sync channel and is token-gated too.
+            [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'started', 'run_id' => $this->runId(), 'interval_seconds' => 10]);
+            self::assertSame(401, $status, 'reportRun must require the report token when configured');
+        } finally {
+            repo_set_setting($db, $key, $previous);
+        }
+    }
+
+    public function testReportRunValidatesItsFields(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $run = $this->runId();
+
+        $cases = [
+            [['source' => 'nope', 'event' => 'started', 'run_id' => $run, 'interval_seconds' => 10], 'Invalid source'],
+            [['source' => 'device-sync', 'event' => 'paused', 'run_id' => $run, 'interval_seconds' => 10], 'Invalid event'],
+            [['source' => 'device-sync', 'event' => 'started', 'run_id' => 'short', 'interval_seconds' => 10], 'Invalid run_id'],
+            [['source' => 'device-sync', 'event' => 'started', 'run_id' => $run, 'interval_seconds' => 0], 'Invalid interval_seconds'],
+            [['source' => 'device-sync', 'event' => 'completed', 'run_id' => $run, 'interval_seconds' => 10, 'outcome' => 'meh'], 'Invalid outcome'],
+            [['source' => 'device-sync', 'event' => 'completed', 'run_id' => $run, 'interval_seconds' => 10, 'outcome' => 'fail'], 'Invalid error_category'],
+            // The site reporter never announces a start.
+            [['source' => 'mecm-site-health', 'event' => 'started', 'run_id' => $run, 'interval_seconds' => 300], 'Invalid event'],
+        ];
+        foreach ($cases as [$payload, $expected]) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', $payload);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(400, $status, $expected . ' must be a 400');
+            self::assertSame(['error' => $expected], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    public function testReportRunAcceptsEveryRunSourceAndRejectsNonRunSources(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach (VIRTUSPHERE_INTEGRATION_RUN_SOURCES as $source) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => $source, 'event' => 'completed', 'run_id' => $this->runId(), 'interval_seconds' => 30, 'outcome' => 'ok']);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(200, $status, $source . ' must be accepted');
+            self::assertSame(['success' => true, 'source' => $source], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $source . ' reportRun wire shape');
+        }
+
+        // maintenance-worker is internal-only and never reports over the wire.
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'maintenance-worker', 'event' => 'started', 'run_id' => $this->runId(), 'interval_seconds' => 30]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(400, $status);
+        self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testReportRunCompletedRoundTripStreakDedupAndReset(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+
+        $runA = $this->runId();
+        // started: no result yet, report_version ratchets to V2.
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'started', 'run_id' => $runA, 'interval_seconds' => 10, 'script_version' => '2.0.0']);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(200, $status);
+        $row = $this->deviceRow($db);
+        self::assertSame('started', $row['last_event']);
+        self::assertSame(2, (int) $row['report_version']);
+        self::assertNull($row['last_result_at']);
+
+        // completed fail: streak 1, failure timestamp, error category, summary.
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $runA, 'interval_seconds' => 10, 'outcome' => 'fail', 'error_category' => 'mecm_unavailable', 'duration_ms' => 1200, 'summary' => ['received' => 5, 'imported' => 3, 'item_failures' => 2]]);
+        self::assertSame(200, $status);
+        self::assertSame(['success' => true, 'source' => 'device-sync'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        $row = $this->deviceRow($db);
+        self::assertSame('fail', $row['last_status']);
+        self::assertSame('completed', $row['last_event']);
+        self::assertSame(1, (int) $row['failure_streak']);
+        self::assertSame('mecm_unavailable', $row['last_error_category']);
+        self::assertNotNull($row['last_failure_at']);
+        self::assertNull($row['last_success_at']);
+        // MySQL normalizes JSON object key order, so compare canonically.
+        self::assertEqualsCanonicalizing(['received' => 5, 'imported' => 3, 'item_failures' => 2], json_decode((string) $row['last_summary'], true));
+
+        // Idempotent replay of the same completed run_id: acknowledged, no change.
+        [$status, , $body] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $runA, 'interval_seconds' => 10, 'outcome' => 'ok']);
+        self::assertSame(200, $status);
+        self::assertSame(['success' => true, 'source' => 'device-sync', 'deduplicated' => true], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        $row = $this->deviceRow($db);
+        self::assertSame('fail', $row['last_status'], 'a deduplicated replay must not change the row');
+        self::assertSame(1, (int) $row['failure_streak']);
+
+        // A fresh completed ok resets the streak and stamps a success.
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $this->runId(), 'interval_seconds' => 10, 'outcome' => 'ok']);
+        self::assertSame(200, $status);
+        $row = $this->deviceRow($db);
+        self::assertSame('ok', $row['last_status']);
+        self::assertSame(0, (int) $row['failure_streak']);
+        self::assertNotNull($row['last_success_at']);
+
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+    }
+
+    public function testReportRunStartedDoesNotOverwriteTheLastResult(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'completed', 'run_id' => $this->runId(), 'interval_seconds' => 10, 'outcome' => 'fail', 'error_category' => 'partial_failure']);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(200, $status);
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', ['source' => 'device-sync', 'event' => 'started', 'run_id' => $this->runId(), 'interval_seconds' => 10]);
+        self::assertSame(200, $status);
+        $row = $this->deviceRow($db);
+        self::assertSame('started', $row['last_event']);
+        self::assertSame('fail', $row['last_status'], 'a start must keep the last completed result');
+        self::assertNotNull($row['last_attempt_at']);
+
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'device-sync'");
+    }
+
+    public function testLegacyHeartbeatInvalidatesCompletedAutoimporterResultUntilFreshCompletion(): void
+    {
+        require_once dirname(__DIR__, 2) . '/lib/db.php';
+        require_once dirname(__DIR__, 2) . '/lib/layout.php';
+        require_once dirname(__DIR__, 2) . '/lib/system_status_mecm_panels.php';
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'autoimporter'");
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'completed', 'run_id' => $this->runId(),
+            'interval_seconds' => 60, 'outcome' => 'fail', 'error_category' => 'partial_failure',
+            'duration_ms' => 1200, 'detail' => 'package_content_failed target=Agent-1',
+            'summary' => ['open_points' => 987654],
+        ]);
+        $this->skipUnlessAuthorized($status);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertStringContainsString(__t('system_status.run_result_fail'), $this->renderRunRow($row, 'danger'));
+
+        [$status] = $this->post('/mecm_report.php?action=heartbeat', [
+            'source' => 'autoimporter', 'interval_seconds' => 60, 'detail' => 'legacy heartbeat',
+        ]);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertSame('heartbeat', $row['last_event']);
+        foreach (['last_result_at', 'last_error_category', 'last_duration_ms', 'last_summary', 'last_run_id'] as $field) {
+            self::assertNull($row[$field], $field . ' belongs to the invalidated completion tuple');
+        }
+        self::assertSame(0, (int) $row['failure_streak']);
+        $html = $this->renderRunRow($row, 'ok');
+        self::assertStringContainsString(__t('system_status.run_result_unknown'), $html);
+        self::assertStringNotContainsString(__t('system_status.run_result_fail'), $html);
+        self::assertStringNotContainsString(__t('system_status.finding_package_content_failed'), $html);
+        self::assertStringNotContainsString('987654', $html);
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'completed', 'run_id' => $this->runId(),
+            'interval_seconds' => 60, 'outcome' => 'warning', 'error_category' => 'partial_failure',
+            'detail' => 'package_content_unknown target=Agent-2',
+        ]);
+        self::assertSame(200, $status);
+        [$status] = $this->post('/mecm_report.php?action=heartbeat', [
+            'source' => 'autoimporter', 'interval_seconds' => 60,
+        ]);
+        self::assertSame(200, $status);
+        $freshRun = $this->runId();
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'started', 'run_id' => $freshRun,
+            'interval_seconds' => 60,
+        ]);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertNull($row['last_result_at']);
+        self::assertStringContainsString(__t('system_status.run_result_unknown'), $this->renderRunRow($row, 'ok'));
+
+        [$status] = $this->post('/mecm_report.php?action=reportRun', [
+            'source' => 'autoimporter', 'event' => 'completed', 'run_id' => $freshRun,
+            'interval_seconds' => 60, 'outcome' => 'ok', 'duration_ms' => 25,
+        ]);
+        self::assertSame(200, $status);
+        $row = $this->integrationRow($db, 'autoimporter');
+        self::assertNotNull($row['last_result_at']);
+        self::assertStringContainsString(__t('system_status.run_result_ok'), $this->renderRunRow($row, 'ok'));
+
+        $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'autoimporter'");
+    }
+
+    private function runId(): string
+    {
+        return bin2hex(random_bytes(16));
+    }
+
+    /** @return array<string,mixed> */
+    private function deviceRow(mysqli $db): array
+    {
+        $row = $db->query("SELECT * FROM deploy_integration_heartbeats WHERE source = 'device-sync'")->fetch_assoc();
+        self::assertIsArray($row);
+
+        return $row;
+    }
+
+    /** @return array<string,mixed> */
+    private function integrationRow(mysqli $db, string $source): array
+    {
+        $statement = $db->prepare('SELECT * FROM deploy_integration_heartbeats WHERE source = ?');
+        $statement->bind_param('s', $source);
+        $statement->execute();
+        $row = $statement->get_result()->fetch_assoc();
+        self::assertIsArray($row);
+
+        return $row;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function renderRunRow(array $row, string $state): string
+    {
+        ob_start();
+        try {
+            system_status_render_run_rows([['source' => 'autoimporter', 'state' => $state, 'row' => $row]]);
+            return (string) ob_get_contents();
+        } finally {
+            ob_end_clean();
+        }
+    }
+
+    public function testEveryWireSourceIsAcceptedAndReturnsItsShapeInternalSourcesRejected(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        // The wire contract: exactly the wire sources may report a heartbeat,
+        // each returns {success:true, source:<echo>}; the internal-only sources
+        // (written by the maintenance worker) are refused at the wire.
+        foreach (VIRTUSPHERE_INTEGRATION_WIRE_SOURCES as $source) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => $source, 'interval_seconds' => 30]);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(200, $status, $source . ' must be accepted');
+            self::assertSame(['success' => true, 'source' => $source], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $source . ' heartbeat wire shape');
+        }
+
+        $internalOnly = array_diff(VIRTUSPHERE_INTEGRATION_SOURCES, VIRTUSPHERE_INTEGRATION_WIRE_SOURCES);
+        self::assertNotSame([], $internalOnly, 'there must be internal-only sources to guard');
+        foreach ($internalOnly as $source) {
+            [$status, , $body] = $this->post('/mecm_report.php?action=heartbeat', ['source' => $source, 'interval_seconds' => 30]);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(400, $status, $source . ' must not be reportable over the wire');
+            self::assertSame(['error' => 'Invalid source'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    public function testReportPhaseRoundTripEchoesVmIdAndDeduplicates(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $db = db(true);
+        $prefix = 'phpunit_wire_' . bin2hex(random_bytes(4));
+        $mac = sprintf('02:00:%02x:%02x:%02x:%02x', random_int(0, 255), random_int(0, 255), random_int(0, 255), random_int(0, 255));
+
+        require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
+        $missionId = 0;
+        try {
+            $missionId = repo_create_mission($db, ['mission_name' => $prefix . '_m'], false, null);
+            $vmName = strtoupper($prefix);
+            $stmt = $db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname) VALUES (?, ?, ?)');
+            $stmt->bind_param('iss', $missionId, $vmName, $vmName);
+            $stmt->execute();
+            $vmId = (int) $db->insert_id;
+            $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', 'WDS', ?, 'dhcp')");
+            $stmt->bind_param('is', $vmId, $mac);
+            $stmt->execute();
+
+            // First report: the success shape echoes the resolved vm_id.
+            $detail = $prefix . '-detail';
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => $mac, 'phase' => 'getinfo', 'event' => 'started', 'detail' => $detail]);
+            $this->skipUnlessAuthorized($status);
+            self::assertSame(200, $status);
+            self::assertSame(['success' => true, 'vm_id' => $vmId], json_decode($body, true, 512, JSON_THROW_ON_ERROR), 'reportPhase success wire shape');
+
+            // It landed in the client-event log.
+            $count = (int) ($db->query('SELECT COUNT(*) AS c FROM deploy_client_events WHERE vm_id = ' . $vmId)->fetch_assoc()['c'] ?? 0);
+            self::assertSame(1, $count, 'the event was recorded once');
+
+            // An identical repeat inside the dedup window is acknowledged as a
+            // duplicate and writes no second row.
+            [$status2, , $body2] = $this->post('/mecm_report.php?action=reportPhase', ['mac' => $mac, 'phase' => 'getinfo', 'event' => 'started', 'detail' => $detail]);
+            self::assertSame(200, $status2);
+            self::assertSame(['success' => true, 'vm_id' => $vmId, 'deduplicated' => true], json_decode($body2, true, 512, JSON_THROW_ON_ERROR), 'the duplicate wire shape carries deduplicated:true');
+            $count2 = (int) ($db->query('SELECT COUNT(*) AS c FROM deploy_client_events WHERE vm_id = ' . $vmId)->fetch_assoc()['c'] ?? 0);
+            self::assertSame(1, $count2, 'the duplicate wrote no second row');
+        } finally {
+            if ($missionId > 0) {
+                $db->query('DELETE FROM deploy_client_events WHERE vm_id IN (SELECT id FROM deploy_vms WHERE mission_id = ' . $missionId . ')');
+                $db->query('DELETE FROM deploy_missions WHERE id = ' . $missionId);
+            }
+        }
+    }
+
+    public function testInvalidJsonBodyReturns400(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => '{not valid json',
+                'ignore_errors' => true,
+                'timeout' => 5,
+            ],
+        ]);
+        $body = @file_get_contents(virtusphere_test_base_url() . '/mecm_report.php?action=heartbeat', false, $context);
+        if ($body === false) {
+            self::markTestSkipped('VirtuSphere test endpoint is not reachable.');
+        }
+        // $http_response_header is populated by the successful call above; no
+        // `?? []` guard (the post() helper's guarded use is the baselined one).
+        $status = 0;
+        foreach ($http_response_header as $header) {
+            if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $match) === 1) {
+                $status = (int) $match[1];
+            }
+        }
+        self::assertContains($status, [400, 401], 'malformed JSON is a 400 (or the token gate if one is configured)');
+    }
+
+    // Only action=heartbeat can return 401 (report token). reportPhase is
+    // MAC-authenticated and never token-gated, so its posts skip on 401 as a
+    // no-op safety net only.
+    private function skipUnlessAuthorized(int $status): void
+    {
+        if ($status === 401) {
+            self::markTestSkipped('A machine report token is configured; wire test runs token-less.');
+        }
+    }
+
+    /**
+     * @return array{0:int,1:string,2:string}
+     */
+    private function post(string $path, array $payload): array
+    {
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => json_encode($payload, JSON_THROW_ON_ERROR),
+                'ignore_errors' => true,
+                'timeout' => 5,
+            ],
+        ]);
+        $body = @file_get_contents(virtusphere_test_base_url() . $path, false, $context);
+        if ($body === false) {
+            self::markTestSkipped('VirtuSphere test endpoint is not reachable.');
+        }
+
+        $status = 0;
+        $headers = [];
+        foreach (($http_response_header ?? []) as $header) {
+            $headers[] = $header;
+            if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $match) === 1) {
+                $status = (int) $match[1];
+            }
+        }
+
+        return [$status, implode("\n", $headers), $body];
+    }
+}

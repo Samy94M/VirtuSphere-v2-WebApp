@@ -1,0 +1,388 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../constants.php';
+require_once __DIR__ . '/../audit_registry.php';
+require_once __DIR__ . '/../audit_presenter.php';
+require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/audit_vm_refs.php';
+// log_category_labels()/log_tab_labels() call __t(). Every portal caller has the
+// bootstrap, but this module is also reachable from a CLI entrypoint that has
+// none: lib/seed.php loads db.php, whose error handler requires this file to
+// write its audit line. lang.php has no requires and no top-level side effects,
+// so closing the closure here costs nothing.
+require_once __DIR__ . '/../lang.php';
+
+/**
+ * Structured audit entry point. Event/category/object/result/context are
+ * validated by the central registry before a row can reach the repository.
+ * The English description remains the compatibility display for existing
+ * operators; unlike a legacy row, it is rendered from the same structured data.
+ *
+ * @param array<string,mixed> $context
+ */
+function audit_event(
+    mysqli $connection,
+    string $eventCode,
+    string $objectType,
+    string|int|null $objectId,
+    string $result,
+    array $context = [],
+    ?int $userId = null,
+    ?string $ip = null
+): bool
+{
+    $objectId = audit_object_id($objectId, audit_event_object_id_kind($eventCode));
+    $definition = audit_event_definition($eventCode, $objectType, $objectId, $result);
+    $context = audit_context_normalize($context, $definition, $result);
+    $message = audit_event_description($eventCode, $objectType, $objectId, $result, $context);
+    $contextJson = audit_context_json($context);
+    $ip = $ip ?? (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli');
+    // ADR-0032: every audit row carries the correlation id of the execution
+    // that wrote it (request id, or the adopted job id inside the worker).
+    $correlationId = virtusphere_correlation_id();
+    $category = $definition['category'];
+    $stmt = $connection->prepare(
+        'INSERT INTO deploy_logs (ip, category, log_message, user_id, correlation_id, event_code, object_type, object_id, result, context_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+    );
+    $stmt->bind_param(
+        'sssissssss',
+        $ip,
+        $category,
+        $message,
+        $userId,
+        $correlationId,
+        $eventCode,
+        $objectType,
+        $objectId,
+        $result,
+        $contextJson
+    );
+
+    // SP3: a context that names VMs (`vm_ids`) is indexed with its row (migration 0069).
+    return audit_vm_refs_execute($connection, $stmt, $context);
+}
+
+/**
+ * The audit row of a domain write that must not outlive a missing trace (MECM
+ * plan decision 32). It runs inside the repo_transaction() of that write: a
+ * false from audit_event() becomes an exception, so the write rolls back
+ * instead of committing a change nobody can attribute.
+ *
+ * @param array<string,mixed> $context
+ */
+function audit_event_required(mysqli $connection, string $eventCode, string $objectType, string|int|null $objectId, string $result, array $context = [], ?int $userId = null, ?string $ip = null): void
+{
+    if (repo_transaction_depth($connection) === 0) {
+        throw new LogicException('audit_event_required() must run inside the transaction of the write it records.');
+    }
+    if (!audit_event($connection, $eventCode, $objectType, $objectId, $result, $context, $userId, $ip)) {
+        throw new RuntimeException('Audit event ' . $eventCode . ' could not be stored; the change was rolled back.');
+    }
+}
+
+function log_category_label(string $category): string
+{
+    return match ($category) {
+        VIRTUSPHERE_LOG_CATEGORY_AUTH => __t('logs.category_auth'),
+        VIRTUSPHERE_LOG_CATEGORY_SYSTEM => __t('logs.category_system'),
+        VIRTUSPHERE_LOG_CATEGORY_LEGACY_API => __t('logs.category_legacy_api'),
+        VIRTUSPHERE_LOG_CATEGORY_USERS => __t('logs.category_users'),
+        VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS => __t('logs.category_credentials'),
+        VIRTUSPHERE_LOG_CATEGORY_DIRECTORY => __t('logs.category_directory'),
+        VIRTUSPHERE_LOG_CATEGORY_MISSIONS => __t('logs.category_missions'),
+        VIRTUSPHERE_LOG_CATEGORY_OS => __t('logs.category_os'),
+        VIRTUSPHERE_LOG_CATEGORY_SETTINGS => __t('logs.category_settings'),
+        VIRTUSPHERE_LOG_CATEGORY_VMS => __t('logs.category_vms'),
+        VIRTUSPHERE_LOG_CATEGORY_VLANS => __t('logs.category_vlans'),
+        VIRTUSPHERE_LOG_CATEGORY_DEPLOY => __t('logs.category_deploy'),
+        VIRTUSPHERE_LOG_CATEGORY_MECM => __t('logs.category_mecm'),
+        VIRTUSPHERE_LOG_CATEGORY_MACHINE_API => __t('logs.category_machine_api'),
+        default => $category,
+    };
+}
+
+function log_tab_label(string $tab): string
+{
+    return match ($tab) {
+        VIRTUSPHERE_LOG_TAB_SECURITY => __t('logs.tab_security'),
+        VIRTUSPHERE_LOG_TAB_RESOURCES => __t('logs.tab_resources'),
+        VIRTUSPHERE_LOG_TAB_DEPLOY => __t('logs.tab_deploy'),
+        VIRTUSPHERE_LOG_TAB_SYSTEM => __t('logs.tab_system'),
+        default => $tab,
+    };
+}
+
+// Retention window of the rows a tab shows (ADR-0026). Keyed on the tab, not
+// on a second category list, so VIRTUSPHERE_LOG_TABS stays the only place that
+// says which categories are security. Unknown tabs get the general window.
+function log_retention_days_for_tab(string $tab): int
+{
+    return $tab === VIRTUSPHERE_LOG_TAB_SECURITY
+        ? VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS
+        : VIRTUSPHERE_LOG_RETENTION_DAYS;
+}
+
+// Colour variant of the category badge on the logs page. Display-only, like
+// log_category_label(); unknown categories fall back to neutral. Colours
+// separate categories within one tab, they do not grade severity.
+function log_category_badge_class(string $category): string
+{
+    return match ($category) {
+        VIRTUSPHERE_LOG_CATEGORY_AUTH,
+        VIRTUSPHERE_LOG_CATEGORY_MISSIONS,
+        VIRTUSPHERE_LOG_CATEGORY_MECM,
+        VIRTUSPHERE_LOG_CATEGORY_SETTINGS => 'info',
+        VIRTUSPHERE_LOG_CATEGORY_CREDENTIALS,
+        VIRTUSPHERE_LOG_CATEGORY_DIRECTORY,
+        VIRTUSPHERE_LOG_CATEGORY_OS,
+        VIRTUSPHERE_LOG_CATEGORY_LEGACY_API => 'warning',
+        VIRTUSPHERE_LOG_CATEGORY_VMS,
+        VIRTUSPHERE_LOG_CATEGORY_DEPLOY => 'success',
+        default => 'neutral',
+    };
+}
+
+// Deep link into the log view filtered to one category. The tab has to travel
+// with it: logs.php scopes the category filter to the active tab and drops a
+// category that does not belong to it, so a bare `?category=` lands on the
+// default tab with no filter at all.
+function log_category_url(string $category): string
+{
+    foreach (VIRTUSPHERE_LOG_TABS as $tab => $categories) {
+        if (in_array($category, $categories, true)) {
+            $query = ['tab' => $tab, 'category' => $category];
+
+            return 'logs.php?' . http_build_query($query);
+        }
+    }
+
+    return 'logs.php';
+}
+
+/**
+ * Prunes deploy_logs on two windows (ADR-0026). Rows of the security categories
+ * (derived from the security tab, never restated here) keep $securityDays;
+ * every other row keeps $generalDays. Each window is one DELETE with no LIMIT and
+ * no batching, so the time window is its only bound (LG-17). The general delete
+ * matches by NOT IN, so a category outside today's taxonomy (pre-taxonomy rows, a
+ * category later removed) decays on the general window (the column is NOT NULL).
+ *
+ * @return int Total rows purged across both windows.
+ */
+function removeLog(mysqli $db, int $securityDays = VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS, int $generalDays = VIRTUSPHERE_LOG_RETENTION_DAYS, array &$windows = []): int
+{
+    $security = VIRTUSPHERE_LOG_TABS[VIRTUSPHERE_LOG_TAB_SECURITY];
+    $placeholders = implode(', ', array_fill(0, count($security), '?'));
+    $types = str_repeat('s', count($security)) . 'i';
+
+    $stmt = $db->prepare('DELETE FROM deploy_logs WHERE category IN (' . $placeholders . ') AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)');
+    $stmt->bind_param($types, ...[...$security, $securityDays]);
+    $stmt->execute();
+    $purged = max(0, $stmt->affected_rows);
+
+    $stmt = $db->prepare('DELETE FROM deploy_logs WHERE category NOT IN (' . $placeholders . ') AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)');
+    $stmt->bind_param($types, ...[...$security, $generalDays]);
+    $stmt->execute();
+    // Both windows, for the retention audit row (LG-19).
+    $windows = ['security' => $purged, 'general' => max(0, $stmt->affected_rows)];
+
+    return $purged + $windows['general'];
+}
+
+/**
+ * Prunes the login-attempt table, which is a lockout counter, not an archive:
+ * only the last 15 minutes decide whether an account or an IP is locked. The
+ * sign-in story lives on the `auth` audit channel (every failure below the IP
+ * rate limit, plus the onset of the limit itself) and is retained on the
+ * security window there, so the rows here have no forensic value of their own.
+ * Deliberately its own short window (ADR-0026), not the audit windows: this
+ * table only needs to outlive the lockout decision by a comfortable margin.
+ */
+function repo_purge_login_attempts(mysqli $db, int $retentionDays = VIRTUSPHERE_LOGIN_ATTEMPT_RETENTION_DAYS): int
+{
+    $stmt = $db->prepare('DELETE FROM deploy_login_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL ? DAY)');
+    $stmt->bind_param('i', $retentionDays);
+    $stmt->execute();
+
+    return max(0, $stmt->affected_rows);
+}
+
+/**
+ * The WHERE clause of one audit-log filter.
+ *
+ * Takes the validated struct from lib/log_filter.php rather than a growing list
+ * of positional strings. Nine of them had already accumulated in the call sites
+ * by the time the date range and the structured fields arrived, and a caller
+ * that swaps two same-typed arguments in that shape produces a working query
+ * for the wrong question. The struct also keeps the count, the table page and
+ * the export literally the same argument.
+ *
+ * Only fields present in the struct are read, and every one of them is a
+ * parameter; nothing here is interpolated. Categories are re-checked against the
+ * taxonomy even though the caller validated them, because this is the layer
+ * that owns what the column may contain.
+ *
+ * @param array<string,mixed> $filter
+ * @return array{sql: string, types: string, params: array<int, string>}
+ */
+function repo_log_filter(array $filter): array
+{
+    $search = (string) ($filter['search'] ?? '');
+    $ip = (string) ($filter['ip'] ?? '');
+    $categories = (array) ($filter['categories'] ?? []);
+    $conditions = [];
+    $types = '';
+    $params = [];
+    // Internal repository cursors. Request values only reach these keys after
+    // strict parsing in log_filter.php; CSV export creates its own snapshot.
+    foreach (['_max_id' => '<=', '_before_id' => '<', '_after_id' => '>'] as $key => $operator) {
+        if (isset($filter[$key])) {
+            $conditions[] = 'l.id ' . $operator . ' ?';
+            $types .= 'i';
+            $params[] = (int) $filter[$key];
+        }
+    }
+    if ($search !== '') {
+        $conditions[] = '(l.log_message LIKE ? OR u.name LIKE ?)';
+        $needle = '%' . addcslashes($search, '%_\\') . '%';
+        $types .= 'ss';
+        $params[] = $needle;
+        $params[] = $needle;
+    }
+    if ($ip !== '') {
+        $conditions[] = 'l.ip = ?';
+        $types .= 's';
+        $params[] = $ip;
+    }
+    $categories = array_values(array_filter(
+        $categories,
+        static fn (string $category): bool => in_array($category, VIRTUSPHERE_LOG_CATEGORIES, true)
+    ));
+    if ($categories !== []) {
+        $placeholders = implode(', ', array_fill(0, count($categories), '?'));
+        $conditions[] = 'l.category IN (' . $placeholders . ')';
+        $types .= str_repeat('s', count($categories));
+        foreach ($categories as $category) {
+            $params[] = $category;
+        }
+    }
+
+    // Half-open interval: `>=` on the lower bound, `<` on the upper. The upper
+    // bound is the start of the day AFTER the one typed, so the last day is
+    // included whole; a `<=` on that value would additionally match rows written
+    // in the first second of the following day.
+    if (($filter['from_utc'] ?? null) !== null) {
+        $conditions[] = 'l.created_at >= ?';
+        $types .= 's';
+        $params[] = (string) $filter['from_utc'];
+    }
+    if (($filter['to_utc'] ?? null) !== null) {
+        $conditions[] = 'l.created_at < ?';
+        $types .= 's';
+        $params[] = (string) $filter['to_utc'];
+    }
+
+    // Exact equality throughout. The correlation id is a diagnostic identity and
+    // the structured fields are closed vocabularies; a LIKE on any of them would
+    // turn an identity into a prefix and return rows that merely start the same.
+    foreach ([
+        'correlation' => 'l.correlation_id',
+        'event_code' => 'l.event_code',
+        'object_type' => 'l.object_type',
+        'object_id' => 'l.object_id',
+        'result' => 'l.result',
+    ] as $field => $column) {
+        $value = (string) ($filter[$field] ?? '');
+        if ($value !== '') {
+            $conditions[] = $column . ' = ?';
+            $types .= 's';
+            $params[] = $value;
+        }
+    }
+
+    $sql = $conditions !== [] ? ' WHERE ' . implode(' AND ', $conditions) : '';
+
+    return ['sql' => $sql, 'types' => $types, 'params' => $params];
+}
+
+/** @param array<string,mixed> $filter The validated struct (lib/log_filter.php). */
+function repo_count_logs(mysqli $db, array $filter): int
+{
+    $filter = repo_log_filter($filter);
+    $sql = 'SELECT COUNT(*) AS total FROM deploy_logs l LEFT JOIN deploy_users u ON u.id = l.user_id' . $filter['sql'];
+
+    $stmt = $db->prepare($sql);
+    if ($filter['types'] !== '') {
+        $stmt->bind_param($filter['types'], ...$filter['params']);
+    }
+    $stmt->execute();
+    $row = repo_fetch_all($stmt->get_result())[0] ?? ['total' => 0];
+
+    return (int) $row['total'];
+}
+
+/**
+ * The IPs whose machine access was refused within the given window, newest
+ * first, with the time of the most recent refusal.
+ *
+ * This is what lets the System status tell three states apart that all rendered
+ * as the same grey "no data yet": never configured, configured but the first run
+ * is still pending, and configured but REJECTED. The third is the commonest
+ * setup mistake in the product - a missing IP allowlist entry - and it looked
+ * exactly like a server on which MECM was never installed. A refusal is
+ * positive evidence that somebody is knocking, so it is the one signal that
+ * distinguishes them.
+ *
+ * It matches the EVENT CODE, not the category. The `machine_api` category also
+ * holds `machine_api.callback_rejected` (a MAC callback whose job scope no
+ * longer matched) and `machine_api.internal_failure`, and neither says anything
+ * about the IP allowlist. Counting the category told an operator whose Ansible
+ * callback had raced a cancelled job to add that host to the allowlist it was
+ * already on, and left the real cause unexamined. Rows written before Etappe
+ * 10C carry no event code and are deliberately not guessed at from their text:
+ * a stale legacy row cannot claim a refusal happened in the last day.
+ *
+ * @return list<array{ip: string, last_at: string, hits: int}>
+ */
+function repo_recent_machine_api_denials(mysqli $db, int $withinSeconds = 86400, int $limit = 5): array
+{
+    $limit = max(1, min(50, $limit));
+    $eventCode = VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED;
+    $stmt = $db->prepare(
+        'SELECT ip, MAX(created_at) AS last_at, COUNT(*) AS hits
+         FROM deploy_logs
+         WHERE event_code = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) AND ip <> \'\'
+         GROUP BY ip
+         ORDER BY last_at DESC, ip ASC
+         LIMIT ' . $limit
+    );
+    $stmt->bind_param('si', $eventCode, $withinSeconds);
+    $stmt->execute();
+
+    $rows = [];
+    foreach (repo_fetch_all($stmt->get_result()) as $row) {
+        $rows[] = ['ip' => (string) $row['ip'], 'last_at' => (string) $row['last_at'], 'hits' => (int) $row['hits']];
+    }
+
+    return $rows;
+}
+
+/** Complete count plus a bounded historical display list. */
+function repo_recent_machine_api_denial_summary(mysqli $db, int $withinSeconds = 86400, int $limit = 5): array
+{
+    $eventCode = VIRTUSPHERE_AUDIT_EVENT_MACHINE_API_DENIED;
+    $total = (int) (repo_scalar(
+        $db,
+        'SELECT COUNT(DISTINCT ip) FROM deploy_logs WHERE event_code = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) AND ip <> \'\'',
+        'si',
+        [$eventCode, $withinSeconds]
+    ) ?? 0);
+    $rows = repo_recent_machine_api_denials($db, $withinSeconds, $limit);
+
+    return ['rows' => $rows, 'total' => $total, 'omitted' => max(0, $total - count($rows)), 'window_seconds' => $withinSeconds];
+}
+
+require_once __DIR__ . '/log_queries.php';

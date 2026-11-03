@@ -1,0 +1,841 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+require_once __DIR__ . '/ClientIpAllowlist.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/mecm_provenance.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/package_sync.php';
+
+final class MachineApiWireTest extends TestCase
+{
+    use ClientIpAllowlist;
+
+    protected function setUp(): void
+    {
+        $health = @file_get_contents(virtusphere_test_base_url() . '/portal/health.php');
+        if ($health === false) {
+            self::markTestSkipped('VirtuSphere test stack is not reachable.');
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreClientIpAllowlistIfTouched();
+    }
+
+    public function testInvalidMacKeepsMachineApiWireEnvelope(): void
+    {
+        [$status, $headers, $body] = $this->get('/mecm-api.php?action=getDeviceInfos&mac=not-a-mac');
+
+        self::assertSame(400, $status);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame(['error' => 'Invalid MAC address'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testForbiddenEnvelopeIncludesClientIp(): void
+    {
+        // Zustand herstellen statt skippen (ADR-0015-Ergaenzung): der Test
+        // behauptet die 403-Envelope, also entfernt er die eigene IP aus der
+        // Allowlist; tearDown stellt den Ausgangszustand wieder her.
+        $this->ensureClientIpNotAllowlisted(db(true));
+
+        [$status, $headers, $body] = $this->get('/mecm-api.php?action=getDeviceList');
+
+        self::assertSame(403, $status);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertArrayHasKey('error', $payload);
+        self::assertStringStartsWith('Zugriff verweigert. Ihre IP: ', (string) $payload['error']);
+    }
+
+    public function testSeparatorAndCaseVariantsAreNeverRejectedAsInvalid(): void
+    {
+        // E2: any FILTER_VALIDATE_MAC-valid notation must reach the lookup
+        // (403 or data), never the 400 invalid-MAC envelope.
+        foreach (['00-50-56-aa-bb-cc', '00:50:56:aa:bb:cc', '0050.56aa.bbcc'] as $mac) {
+            [$status] = $this->get('/mecm-api.php?action=getDeviceInfos&mac=' . urlencode($mac));
+            self::assertNotSame(400, $status, $mac);
+        }
+    }
+
+    /**
+     * `getDeviceList` lost its `SELECT *` in Etappe 14D, and this is what makes
+     * that stick. The star had been promoting every new `deploy_vms` column to a
+     * wire field by accident, and the same stage adds three internal ones.
+     *
+     * Walked in BOTH directions against the live payload: a column added to the
+     * constant but not delivered is a wire promise nothing keeps, and a key
+     * delivered without being in the constant is exactly the silent leak the
+     * projection replaced. The aliases are named here rather than derived,
+     * because each is a deliberate decision: `vm_hostname` carries the frozen
+     * snapshot (never the current desired value), `previous_resource_id` is the
+     * tombstone under a wire name so the internal column name never leaves the
+     * database, `rollout_revision` is the fence, and `transfer_generation`
+     * (AV-P0) is the queueing counter updateDevice reports back.
+     */
+    public function testDeviceListProjectsExactlyThePinnedColumns(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'device-list');
+
+        try {
+            [$status, , $body] = $this->get('/mecm-api.php?action=getDeviceList');
+            self::assertSame(200, $status, $body);
+
+            $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+            self::assertIsArray($payload);
+            $row = null;
+            foreach ($payload as $candidate) {
+                if ((int) $candidate['id'] === $fixture['vm_id']) {
+                    $row = $candidate;
+                }
+            }
+            self::assertIsArray($row, 'the fixture VM did not appear in getDeviceList');
+
+            // Everything the endpoint composes on top of the projection. These
+            // are separate contracts (ADR-0019 for the mission, ADR-0034 for the
+            // provenance) and are listed here so this test measures the
+            // projection and nothing else.
+            $composed = ['interfaces', 'mission', 'packages', 'owned_collections'];
+            $aliases = ['vm_hostname', 'rollout_revision', 'previous_resource_id', 'transfer_generation'];
+
+            $delivered = array_values(array_diff($this->sortedKeys($row), $composed, $aliases));
+            $expected = VIRTUSPHERE_MECM_DEVICE_LIST_COLUMNS;
+            sort($expected);
+            self::assertSame($expected, $delivered, 'the delivered columns drifted from the pinned projection');
+
+            foreach ([...$composed, ...$aliases] as $key) {
+                self::assertArrayHasKey($key, $row, $key . ' is part of the wire and stopped being delivered');
+            }
+
+            // The two decisions the aliases encode, measured rather than assumed.
+            self::assertSame($fixture['vm_name'], $row['vm_name'], 'vm_name stays the ESXi identity');
+            self::assertSame($fixture['rollout_hostname'], $row['vm_hostname'], 'vm_hostname on the wire is the frozen snapshot');
+            self::assertNotSame($fixture['vm_hostname'], $row['vm_hostname'], 'the current desired value must not be exported');
+
+            // No internal column name may leak, whatever the projection says.
+            foreach (['mecm_rollout_hostname', 'mecm_rollout_revision', 'mecm_previous_id', 'mecm_transfer_generation'] as $internal) {
+                self::assertArrayNotHasKey($internal, $row, $internal . ' leaked its database column name onto the wire');
+            }
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * MX0 (migration 0070, ADR-0019 amendment 5): a failed deploy marks the MECM
+     * axis `deploy_failed` in the database, but the wire keeps the name the
+     * device-sync always received. A queued VM is the case where it is listed.
+     */
+    public function testDeviceListKeepsTheWireNameOfTheDeployFailureMark(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'deploy-failed');
+
+        try {
+            repo_execute($db, 'UPDATE deploy_vms SET lifecycle_state = ?, mecm_sync_state = ?, updated = 1 WHERE id = ?', 'ssi', [
+                VIRTUSPHERE_LIFECYCLE_FAILED,
+                VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED,
+                $fixture['vm_id'],
+            ]);
+            self::assertSame(VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, $this->vmState($db, $fixture['vm_id'])['mecm_sync_state']);
+
+            [$status, , $body] = $this->get('/mecm-api.php?action=getDeviceList');
+            self::assertSame(200, $status, $body);
+            $row = null;
+            foreach (json_decode($body, true, 512, JSON_THROW_ON_ERROR) as $candidate) {
+                if ((int) $candidate['id'] === $fixture['vm_id']) {
+                    $row = $candidate;
+                }
+            }
+            self::assertIsArray($row, 'a queued VM with a deploy failure mark must stay on getDeviceList');
+            self::assertSame('failed', $row['mecm_sync_state'], 'the wire value of the deploy failure mark changed');
+            self::assertSame(VIRTUSPHERE_STATUS_INITIALIZING, $row['vm_status'], 'the computed stage value changed');
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /** ADR-0019/E3: the mission already rides on getDeviceList. */
+    public function testRetiredMissionNameActionUsesTheUnknownActionEnvelope(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, $headers, $body] = $this->get('/mecm-api.php?action=getMissionName&mission_id=1');
+
+        self::assertSame(400, $status);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame(['message' => 'Invalid action specified'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * ADR-0019/E3: getDeviceInfos is a read-only bootstrap read with an exact,
+     * deliberately small payload. Lifecycle progress belongs to the explicit
+     * client-ready acknowledgement below, never to a GET.
+     */
+    public function testDeviceInfosIsMinimalAndDoesNotAdvanceLifecycle(): void
+    {
+        $db = db(true);
+        $fixture = $this->createClientFixture($db, 'device-infos');
+
+        try {
+            [$status, $headers, $body] = $this->get('/mecm-api.php?action=getDeviceInfos&mac=' . urlencode($fixture['mac']));
+
+            self::assertSame(200, $status, $body);
+            self::assertStringContainsString('application/json', strtolower($headers));
+            $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+            self::assertIsArray($payload);
+            // ADR-0044 adds exactly the two report generations to the previous
+            // minimal contract. The list stays spelled out rather than
+            // derived: minimality is the property, and a derived list would
+            // grow with the payload it is supposed to bound.
+            self::assertSame(
+                ['acceptance_generation', 'device_generation', 'interfaces', 'mission_id', 'rollout_revision',
+                    'vm_domain', 'vm_hostname', 'vm_name', 'vm_os'],
+                $this->sortedKeys($payload)
+            );
+            // `vm_hostname` is the FROZEN snapshot, not the desired value. The
+            // client renames Windows to what it reads here, so it has to read
+            // the name this rollout was handed.
+            self::assertSame($fixture['rollout_hostname'], $payload['vm_hostname']);
+            self::assertNotSame($fixture['vm_hostname'], $payload['vm_hostname']);
+            self::assertSame($fixture['vm_name'], $payload['vm_name'], 'vm_name stays the ESXi identity');
+            self::assertSame($fixture['rollout_revision'], $payload['rollout_revision']);
+            self::assertSame((string) repo_scalar($db,
+                'SELECT LOWER(BIN_TO_UUID(package_report_generation)) FROM deploy_vms WHERE id = ?',
+                'i', [$fixture['vm_id']]), $payload['device_generation']);
+            self::assertSame((string) repo_scalar($db,
+                'SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM deploy_package_report_state WHERE id = 1'),
+                $payload['acceptance_generation']);
+            self::assertSame([
+                'dns1', 'dns2', 'gateway', 'ip', 'mac', 'mode', 'subnet', 'type', 'vlan',
+            ], $this->sortedKeys($payload['interfaces'][0]));
+            self::assertSame($fixture['mac'], $payload['interfaces'][0]['mac']);
+
+            $state = $this->vmState($db, $fixture['vm_id']);
+            self::assertSame(VIRTUSPHERE_LIFECYCLE_DEPLOYED, $state['lifecycle_state']);
+            self::assertSame(VIRTUSPHERE_MECM_SYNC_PENDING, $state['mecm_sync_state']);
+            self::assertSame(0, $this->statusEventCount($db, $fixture['vm_id']));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * The new POST is the sole 5/5 writer. Retrying after an uncertain network
+     * result is safe and must not produce another status-history event.
+     *
+     * VT-E1 C: it writes the lifecycle only. A MAC is no authority over the
+     * MECM binding, so `pending` stays `pending`, its watch clock keeps
+     * running and the retry deduplicates without a MECM `registered`.
+     */
+    public function testClientReadyAcknowledgementIsPostOnlyAndIdempotent(): void
+    {
+        $db = db(true);
+        $fixture = $this->createClientFixture($db, 'client-ready');
+        $pendingSince = '2026-01-02 03:04:05';
+        repo_execute($db, 'UPDATE deploy_vms SET mecm_pending_since = ? WHERE id = ?', 'si', [$pendingSince, $fixture['vm_id']]);
+
+        try {
+            [$status, , $body] = $this->get('/mecm_client_ack.php');
+            self::assertSame(405, $status, $body);
+            self::assertSame(['error' => 'Method not allowed'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+            [$status, $headers, $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac']]);
+            self::assertSame(200, $status, $body);
+            self::assertStringContainsString('application/json', strtolower($headers));
+            self::assertSame(
+                ['success' => true, 'vm_id' => $fixture['vm_id']],
+                json_decode($body, true, 512, JSON_THROW_ON_ERROR)
+            );
+
+            $state = $this->vmState($db, $fixture['vm_id']);
+            self::assertSame(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, $state['lifecycle_state']);
+            self::assertSame(VIRTUSPHERE_MECM_SYNC_PENDING, $state['mecm_sync_state'], 'the ACK must not register the VM in MECM');
+            self::assertSame(VIRTUSPHERE_STATUS_OS_INSTALLED, $this->vmColumn($db, $fixture['vm_id'], 'vm_status'));
+            self::assertSame($pendingSince, $this->vmColumn($db, $fixture['vm_id'], 'mecm_pending_since'));
+            self::assertSame(1, $this->statusEventCount($db, $fixture['vm_id']));
+
+            [$status, , $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac']]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(
+                ['success' => true, 'vm_id' => $fixture['vm_id'], 'deduplicated' => true],
+                json_decode($body, true, 512, JSON_THROW_ON_ERROR)
+            );
+            self::assertSame(1, $this->statusEventCount($db, $fixture['vm_id']));
+            self::assertSame($pendingSince, $this->vmColumn($db, $fixture['vm_id'], 'mecm_pending_since'));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * VT-E1 C, self-healing: an ACK before the binding leaves os_installed /
+     * pending, and the device-sync's later updateDevice registers the VM
+     * without stepping the lifecycle back to 4/5.
+     */
+    public function testAcknowledgementBeforeBindingEndsInstalledAndRegisteredAfterUpdateDevice(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'ack-before-binding');
+
+        try {
+            [$status, , $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac'], 'rollout_revision' => $fixture['rollout_revision']]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(
+                ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_PENDING],
+                $this->vmState($db, $fixture['vm_id'])
+            );
+            self::assertNull($this->vmColumn($db, $fixture['vm_id'], 'mecm_id'));
+
+            [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', [
+                'deviceResourceID' => '16777301',
+                'deviceid' => $fixture['vm_id'],
+                'rollout_revision' => $fixture['rollout_revision'],
+            ]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(
+                ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_OS_INSTALLED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_REGISTERED],
+                $this->vmState($db, $fixture['vm_id'])
+            );
+            self::assertSame('16777301', $this->vmColumn($db, $fixture['vm_id'], 'mecm_id'));
+            self::assertSame(VIRTUSPHERE_STATUS_OS_INSTALLED, $this->vmColumn($db, $fixture['vm_id'], 'vm_status'));
+            self::assertNull($this->vmColumn($db, $fixture['vm_id'], 'mecm_pending_since'));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * FM-09: the wire answer of the fence. A client of an earlier rollout gets
+     * 409 with the current revision, and nothing about the VM changes.
+     */
+    public function testAcknowledgementWithAStaleRolloutRevisionIs409AndWritesNothing(): void
+    {
+        $db = db(true);
+        $fixture = $this->createClientFixture($db, 'ack-stale');
+        repo_execute($db, 'UPDATE deploy_vms SET mecm_rollout_revision = 2 WHERE id = ?', 'i', [$fixture['vm_id']]);
+
+        try {
+            [$status, $headers, $body] = $this->post('/mecm_client_ack.php', ['mac' => $fixture['mac'], 'rollout_revision' => 1]);
+
+            self::assertSame(409, $status, $body);
+            self::assertStringContainsString('application/json', strtolower($headers));
+            self::assertSame(
+                ['error' => 'Rollout revision is stale', 'rollout_revision' => 2],
+                json_decode($body, true, 512, JSON_THROW_ON_ERROR)
+            );
+            self::assertSame(
+                ['lifecycle_state' => VIRTUSPHERE_LIFECYCLE_DEPLOYED, 'mecm_sync_state' => VIRTUSPHERE_MECM_SYNC_PENDING],
+                $this->vmState($db, $fixture['vm_id'])
+            );
+            self::assertSame(VIRTUSPHERE_STATUS_DEPLOYED, $this->vmColumn($db, $fixture['vm_id'], 'vm_status'));
+            self::assertSame(0, $this->statusEventCount($db, $fixture['vm_id']));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    public function testWrongMethodIs405ButUnknownActionIs400(): void
+    {
+        // db_importMAC.php and mecm_updateid.php must keep the two cases
+        // apart like mecm-api.php and mecm_report.php do: a wrong HTTP method
+        // answers 405, an unknown action answers the 400 invalid-action
+        // envelope. Both gates sit behind the IP allowlist, also traegt sich
+        // der Test selbst ein statt zu skippen (ADR-0015-Ergaenzung).
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach (['/db_importMAC.php?action=updateInterface', '/mecm_updateid.php?action=updateDevice'] as $path) {
+            [$status, , $body] = $this->get($path);
+            self::assertSame(405, $status, $path);
+            self::assertSame(['error' => 'Method not allowed'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $path);
+        }
+
+        foreach (['/db_importMAC.php?action=nope', '/mecm_updateid.php?action=nope'] as $path) {
+            [$status, , $body] = $this->post($path, ['probe' => true]);
+            self::assertSame(400, $status, $path);
+            self::assertSame(['message' => 'Invalid action specified'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $path);
+        }
+    }
+
+    public function testMacCallbackRejectionAndRequestBoundHavePinnedWireEnvelopes(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, $headers, $body] = $this->post('/db_importMAC.php?action=updateInterface', [
+            'mission_id' => 2147483001,
+            'job_id' => 2147483002,
+            'results' => [['failed' => true]],
+        ]);
+        self::assertSame(409, $status, $body);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame([
+            'error' => 'Deploy job does not accept this MAC import',
+            'reason_code' => 'callback_job_not_active',
+            'job_id' => 2147483002,
+            // MA-09: additive, the same key the 200 body uses; null without a valid correlation_id.
+            'correlation_id' => null,
+        ], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // What "no results" means on the wire. A `results` that is absent or
+        // not a list is an unusable request and keeps its legacy 400; an
+        // explicitly empty list is a statement the V2 planner answers per
+        // expected VM, so it must not be refused by shape. Both halves are
+        // pinned because only one of them is a legacy meaning.
+        foreach ([
+            ['mission_id' => 2147483001],
+            ['mission_id' => 2147483001, 'job_id' => 2147483002, 'results' => 'oops'],
+            ['mission_id' => 2147483001, 'job_id' => 2147483002, 'results' => 5],
+        ] as $shape) {
+            [$status, , $body] = $this->post('/db_importMAC.php?action=updateInterface', $shape);
+            self::assertSame(400, $status, $body);
+        }
+        [$status, , $body] = $this->post('/db_importMAC.php?action=updateInterface', [
+            'mission_id' => 2147483001,
+            'job_id' => 2147483002,
+            'results' => [],
+        ]);
+        self::assertSame(409, $status, $body);
+        self::assertStringNotContainsString(
+            'No result entries received',
+            $body,
+            'an explicitly empty list must be judged on its job, not rejected by shape'
+        );
+
+        // The request bound, on the wire, at MAX-1 / MAX / MAX+1. Only the last
+        // one is 413; the two below it must reach JSON decoding and fail there
+        // on their content, never on their size. A bound that also refuses the
+        // exact limit is a limit nobody can use.
+        foreach ([
+            VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES - 1,
+            VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES,
+        ] as $size) {
+            [$status, $headers, $body] = $this->postRepeated(
+                '/db_importMAC.php?action=updateInterface',
+                'x',
+                $size
+            );
+            self::assertNotSame(413, $status, 'size ' . $size . ' is inside the request bound: ' . $body);
+            self::assertStringContainsString('application/json', strtolower($headers), 'size ' . $size);
+            self::assertStringNotContainsString('request_too_large', $body, 'size ' . $size);
+        }
+
+        [$status, $headers, $body] = $this->postRepeated(
+            '/db_importMAC.php?action=updateInterface',
+            'x',
+            VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES + 1
+        );
+        self::assertSame(413, $status, $body);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame([
+            'error' => 'MAC import payload exceeds the request limit',
+            'reason_code' => 'request_too_large',
+        ], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // Bytes, not characters: the same byte count in two-byte characters is
+        // still inside the bound, one character more is over it.
+        [$status] = $this->postRepeated(
+            '/db_importMAC.php?action=updateInterface',
+            'ä',
+            intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2)
+        );
+        self::assertNotSame(413, $status);
+        [$status, , $body] = $this->postRepeated(
+            '/db_importMAC.php?action=updateInterface',
+            'ä',
+            intdiv(VIRTUSPHERE_MAC_IMPORT_REQUEST_MAX_BYTES, 2) + 1
+        );
+        self::assertSame(413, $status, $body);
+    }
+
+    /**
+     * Negative contract of the E3 retirement (ADR-0035): the legacy desktop
+     * token API is gone as a path, not merely disabled. 404 is the claim; any
+     * 2xx/4xx envelope here would mean a resurrected endpoint. The check runs
+     * allowlisted on purpose, so a 403 cannot mask a still-deployed file.
+     */
+    public function testRetiredLegacyTokenApiPathsAnswer404(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach (['/access.php?action=getMissions', '/api/login.php'] as $path) {
+            [$status] = $this->get($path);
+            self::assertSame(404, $status, $path . ' must not exist anymore (ADR-0035)');
+        }
+    }
+
+    /**
+     * A ResourceID reported for a VM id that does not exist is a failure, and the
+     * wire now says so.
+     *
+     * It answered 200 "Data updated successfully" for it. The device-sync reads
+     * that as done and never reports the device again, for a row somebody deleted
+     * in the portal: the machine sat in MECM with nothing in VirtuSphere pointing
+     * at it, and no log line anywhere named the mismatch. This is a deliberate
+     * wire-behaviour change, and the PowerShell side already treats a non-2xx as
+     * a failure it counts and reports (resource_update_failed).
+     */
+    public function testAResourceIdForAnUnknownVmIsRejectedInsteadOfConfirmed(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        [$status, $headers, $body] = $this->post('/mecm_updateid.php?action=updateDevice', [
+            'deviceName' => 'phpunit-does-not-exist',
+            'deviceResourceID' => '16777999',
+            'deviceid' => 999000111,
+        ]);
+
+        self::assertSame(404, $status, $body);
+        self::assertStringContainsString('application/json', strtolower($headers));
+        self::assertSame(['error' => 'Unknown VM id'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /** The two input rejections keep their frozen 400 envelope. */
+    public function testMissingResourceIdOrVmIdKeepsTheInvalidDataEnvelope(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+
+        foreach ([['deviceResourceID' => '', 'deviceid' => 1], ['deviceResourceID' => '4711', 'deviceid' => 0]] as $payload) {
+            [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', $payload);
+            self::assertSame(400, $status, $body);
+            self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        }
+    }
+
+    /**
+     * MA-02 and MA-10 on the ACK: an array MAC answers the existing invalid-MAC
+     * 400 instead of a 500, and the body is bounded at the 8 KiB limit.
+     */
+    public function testAckRefusesAnArrayMacAndBoundsItsBody(): void
+    {
+        [$status, , $body] = $this->post('/mecm_client_ack.php', ['mac' => ['00:50:56:AA:BB:CC']]);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid MAC address'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->postRepeated('/mecm_client_ack.php', 'x', VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES + 1);
+        self::assertSame(413, $status, $body);
+        self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        // Exactly at the limit the body is read in full and judged by its content.
+        [$status, , $body] = $this->postRepeated('/mecm_client_ack.php', 'x', VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Invalid JSON body'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-03 and MA-05 on updateDevice: the ResourceID is a non-empty string of at
+     * most 255 characters and the VM id a JSON integer. Every other shape gets the
+     * existing 400 before anything is written. Nothing here reaches a VM row.
+     */
+    public function testUpdateDeviceRefusesCoercedAndArrayFieldsBeforeAnyWrite(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $unknownVm = 999000111;
+        $refused = [
+            'deviceid as true' => ['deviceResourceID' => '16777999', 'deviceid' => true],
+            'deviceid as "12abc"' => ['deviceResourceID' => '16777999', 'deviceid' => '12abc'],
+            'deviceid as array' => ['deviceResourceID' => '16777999', 'deviceid' => [$unknownVm]],
+            'deviceResourceID as array' => ['deviceResourceID' => ['16777999'], 'deviceid' => $unknownVm],
+            'deviceResourceID as true' => ['deviceResourceID' => true, 'deviceid' => $unknownVm],
+            'deviceResourceID as number' => ['deviceResourceID' => 16777999, 'deviceid' => $unknownVm],
+            'deviceResourceID of 256 characters' => ['deviceResourceID' => str_repeat('1', 256), 'deviceid' => $unknownVm],
+        ];
+        foreach ($refused as $case => $payload) {
+            [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', $payload);
+            self::assertSame(400, $status, $case . ': ' . $body);
+            self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $case);
+        }
+
+        // Boundary: 255 characters are a storable ResourceID, so the request gets
+        // past the shape check and the unknown VM answers 404 exactly as before.
+        [$status, , $body] = $this->post('/mecm_updateid.php?action=updateDevice', [
+            'deviceResourceID' => str_repeat('1', 255),
+            'deviceid' => $unknownVm,
+        ]);
+        self::assertSame(404, $status, $body);
+        self::assertSame(['error' => 'Unknown VM id'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-10 on mecm_updateid.php: both actions read a bounded body. One byte past
+     * VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES is 413; at the limit the body is
+     * read and fails on its content.
+     */
+    public function testUpdateIdBodyIsBoundedForBothActions(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        foreach (['updateDevice', 'reportMembership'] as $action) {
+            [$status, , $body] = $this->postRepeated('/mecm_updateid.php?action=' . $action, 'x', VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES + 1);
+            self::assertSame(413, $status, $action . ': ' . $body);
+            self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $action);
+
+            [$status, , $body] = $this->postRepeated('/mecm_updateid.php?action=' . $action, 'x', VIRTUSPHERE_MECM_UPDATEID_MAX_BODY_BYTES);
+            self::assertSame(400, $status, $action . ': ' . $body);
+            self::assertSame(['error' => 'Invalid JSON body'], json_decode($body, true, 512, JSON_THROW_ON_ERROR), $action);
+        }
+    }
+
+    /**
+     * MA-10 on mecm_packages.php: the whole catalog is one body, bounded by
+     * VIRTUSPHERE_MECM_PACKAGES_MAX_BODY_BYTES (lib/repo/package_sync.php).
+     */
+    public function testPackageCatalogBodyIsBoundedAt8MiB(): void
+    {
+        $this->ensureClientIpAllowlisted(db(true));
+        $limit = VIRTUSPHERE_MECM_PACKAGES_MAX_BODY_BYTES;
+
+        [$status, , $body] = $this->postRepeated('/mecm_packages.php', 'x', $limit + 1);
+        self::assertSame(413, $status, $body);
+        self::assertSame(['error' => 'Payload too large'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+        [$status, , $body] = $this->postRepeated('/mecm_packages.php', 'x', $limit);
+        self::assertSame(400, $status, $body);
+        self::assertSame(['error' => 'Ungueltiger JSON-Body'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * MA-02 on reportPhase: a detail that is not a string is refused with 400 on a
+     * known device. A string detail on the same device is still recorded.
+     */
+    public function testReportPhaseDetailMustBeAStringOnAKnownDevice(): void
+    {
+        $db = db(true);
+        $this->ensureClientIpAllowlisted($db);
+        $fixture = $this->createClientFixture($db, 'phase-detail');
+
+        try {
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', [
+                'mac' => $fixture['mac'],
+                'phase' => 'getinfo',
+                'event' => 'started',
+                'detail' => ['not', 'a', 'string'],
+            ]);
+            self::assertSame(400, $status, $body);
+            self::assertSame(['error' => 'Invalid data format'], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+
+            [$status, , $body] = $this->post('/mecm_report.php?action=reportPhase', [
+                'mac' => $fixture['mac'],
+                'phase' => 'getinfo',
+                'event' => 'started',
+                'detail' => 'phpunit phase detail',
+            ]);
+            self::assertSame(200, $status, $body);
+            self::assertSame(['success' => true, 'vm_id' => $fixture['vm_id']], json_decode($body, true, 512, JSON_THROW_ON_ERROR));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * @return array{0:int,1:string,2:string}
+     */
+    private function post(string $path, array $payload): array
+    {
+        return $this->postRaw($path, json_encode($payload, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * POSTs $unit repeated $repeat times without ever holding that body in
+     * memory (K21-N2). The bound cases send up to 16 MiB; built as one string
+     * and handed to the HTTP stream wrapper, which copies it again into the
+     * request, they took about 64 MB on top of the suite and pushed phpunit-full
+     * over its 128 MB limit as soon as the suite grew a little. The body is
+     * written in 64 KiB slices of the same bytes, so the wire sees exactly what
+     * str_repeat($unit, $repeat) would have sent.
+     *
+     * HTTP/1.0 with Connection: close keeps the response unchunked, so the body
+     * is everything after the blank line.
+     *
+     * @return array{0:int,1:string,2:string}
+     */
+    private function postRepeated(string $path, string $unit, int $repeat): array
+    {
+        $url = parse_url(virtusphere_test_base_url());
+        $scheme = (string) ($url['scheme'] ?? 'http');
+        $host = (string) ($url['host'] ?? 'webserver');
+        $port = (int) ($url['port'] ?? ($scheme === 'https' ? 443 : 80));
+        $socket = @stream_socket_client(($scheme === 'https' ? 'ssl://' : 'tcp://') . $host . ':' . $port, $errno, $error, 5);
+        if ($socket === false) {
+            self::markTestSkipped('VirtuSphere test endpoint is not reachable: ' . $error);
+        }
+        stream_set_timeout($socket, 30);
+
+        $length = strlen($unit) * $repeat;
+        fwrite($socket, 'POST ' . $path . " HTTP/1.0\r\nHost: " . $host . "\r\nContent-Type: application/json\r\n"
+            . 'Content-Length: ' . $length . "\r\nConnection: close\r\n\r\n");
+        $perSlice = max(1, intdiv(65536, strlen($unit)));
+        $slice = str_repeat($unit, $perSlice);
+        for ($left = $repeat; $left > 0; $left -= $perSlice) {
+            // A server that answers before reading the whole body (413) closes
+            // its side; the answer is read below either way.
+            if (@fwrite($socket, $left >= $perSlice ? $slice : str_repeat($unit, $left)) === false) {
+                break;
+            }
+        }
+        $response = (string) stream_get_contents($socket);
+        fclose($socket);
+
+        [$head, $body] = array_pad(explode("\r\n\r\n", $response, 2), 2, '');
+        $headers = explode("\r\n", $head);
+        $status = preg_match('/^HTTP\/\S+\s+(\d+)/', $headers[0], $match) === 1 ? (int) $match[1] : 0;
+
+        return [$status, implode("\n", $headers), $body];
+    }
+
+    /** @return array{0:int,1:string,2:string} */
+    private function postRaw(string $path, string $body): array
+    {
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => $body,
+                'ignore_errors' => true,
+                'timeout' => 5,
+            ],
+        ]);
+
+        return $this->request($path, $context);
+    }
+
+    /**
+     * @return array{0:int,1:string,2:string}
+     */
+    private function get(string $path): array
+    {
+        $context = stream_context_create([
+            'http' => [
+                'ignore_errors' => true,
+                'timeout' => 5,
+            ],
+        ]);
+
+        return $this->request($path, $context);
+    }
+
+    /**
+     * @param resource $context
+     * @return array{0:int,1:string,2:string}
+     */
+    private function request(string $path, $context): array
+    {
+        $body = @file_get_contents(virtusphere_test_base_url() . $path, false, $context);
+        if ($body === false) {
+            self::markTestSkipped('VirtuSphere test endpoint is not reachable.');
+        }
+
+        $status = 0;
+        $headers = [];
+        foreach (($http_response_header ?? []) as $header) {
+            $headers[] = $header;
+            if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $match) === 1) {
+                $status = (int) $match[1];
+            }
+        }
+
+        return [$status, implode("\n", $headers), $body];
+    }
+
+    /** @return array{mission_id:int,vm_id:int,mac:string,vm_name:string,vm_hostname:string,rollout_hostname:string,rollout_revision:int} */
+    private function createClientFixture(mysqli $db, string $label): array
+    {
+        $suffix = bin2hex(random_bytes(5));
+        $missionName = 'phpunit-e3-' . $label . '-' . $suffix;
+        $stmt = $db->prepare('INSERT INTO deploy_missions (mission_name, mission_status) VALUES (?, ?)');
+        $active = 'active';
+        $stmt->bind_param('ss', $missionName, $active);
+        $stmt->execute();
+        $missionId = (int) $db->insert_id;
+
+        $vmName = 'E3-' . strtoupper(substr($suffix, 0, 8));
+        $hostname = strtolower($vmName);
+        // The frozen rollout snapshot is DELIBERATELY a different value from the
+        // desired hostname (Etappe 14D). Seeding them equal would let a wire
+        // that exports the desired value pass a test meant to prove it exports
+        // the snapshot, which is the whole distinction this stage introduced.
+        $rolloutHostname = 'ROLLOUT-' . strtoupper(substr($suffix, 0, 6));
+        $rolloutRevision = VIRTUSPHERE_MECM_ROLLOUT_REVISION_INITIAL;
+        $domain = 'example.test';
+        $os = 'Windows 11';
+        $lifecycle = VIRTUSPHERE_LIFECYCLE_DEPLOYED;
+        $mecm = VIRTUSPHERE_MECM_SYNC_PENDING;
+        $status = VIRTUSPHERE_STATUS_DEPLOYED;
+        $stmt = $db->prepare('INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, mecm_rollout_hostname, mecm_rollout_revision, vm_domain, vm_os, lifecycle_state, mecm_sync_state, vm_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssisssss', $missionId, $vmName, $hostname, $rolloutHostname, $rolloutRevision, $domain, $os, $lifecycle, $mecm, $status);
+        $stmt->execute();
+        $vmId = (int) $db->insert_id;
+
+        $mac = '02:' . strtoupper(implode(':', str_split(substr($suffix, 0, 10), 2)));
+        $ip = '192.0.2.10';
+        $subnet = '255.255.255.0';
+        $gateway = '192.0.2.1';
+        $dns1 = '192.0.2.53';
+        $dns2 = '';
+        $vlan = 'E3';
+        $mode = 'static';
+        $type = 'vmxnet3';
+        $stmt = $db->prepare('INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, dns1, dns2, vlan, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('isssssssss', $vmId, $ip, $subnet, $gateway, $dns1, $dns2, $vlan, $mac, $mode, $type);
+        $stmt->execute();
+
+        return [
+            'mission_id' => $missionId,
+            'vm_id' => $vmId,
+            'mac' => $mac,
+            'vm_name' => $vmName,
+            'vm_hostname' => $hostname,
+            'rollout_hostname' => $rolloutHostname,
+            'rollout_revision' => $rolloutRevision,
+        ];
+    }
+
+    /** @return array{lifecycle_state:string,mecm_sync_state:string} */
+    private function vmState(mysqli $db, int $vmId): array
+    {
+        $stmt = $db->prepare('SELECT lifecycle_state, mecm_sync_state FROM deploy_vms WHERE id = ? LIMIT 1');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+        $state = $stmt->get_result()->fetch_assoc();
+        self::assertIsArray($state);
+
+        return $state;
+    }
+
+    private function vmColumn(mysqli $db, int $vmId, string $column): ?string
+    {
+        self::assertContains($column, ['vm_status', 'mecm_id', 'mecm_pending_since']);
+        $value = repo_scalar($db, 'SELECT ' . $column . ' FROM deploy_vms WHERE id = ?', 'i', [$vmId]);
+
+        return $value === null ? null : (string) $value;
+    }
+
+    private function statusEventCount(mysqli $db, int $vmId): int
+    {
+        $stmt = $db->prepare('SELECT COUNT(*) AS amount FROM deploy_vm_status_events WHERE vm_id = ?');
+        $stmt->bind_param('i', $vmId);
+        $stmt->execute();
+
+        return (int) $stmt->get_result()->fetch_assoc()['amount'];
+    }
+
+    private function deleteClientFixture(mysqli $db, int $missionId): void
+    {
+        $stmt = $db->prepare('DELETE FROM deploy_missions WHERE id = ?');
+        $stmt->bind_param('i', $missionId);
+        $stmt->execute();
+    }
+
+    /** @return list<string> */
+    private function sortedKeys(array $value): array
+    {
+        $keys = array_keys($value);
+        sort($keys);
+
+        return $keys;
+    }
+}

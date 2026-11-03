@@ -1,0 +1,360 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../constants.php';
+require_once __DIR__ . '/../deploy_constants.php';
+require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/status_events.php';
+require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/deploy_job_worker.php';
+require_once __DIR__ . '/../deploy_worker_vm_state.php';
+require_once __DIR__ . '/../deploy_worker_finish.php';
+require_once __DIR__ . '/deploy_create_identity.php';
+
+/**
+ * Unattended maintenance: log and system-job retention, the stale-job reaper and
+ * the orphaned-VM convergence sweep.
+ *
+ * These run from the maintenance worker without an operator. The retention purges
+ * are bounded by their time window and by nothing else: each is one DELETE with no
+ * LIMIT and no batching (LG-17), so the first purge after a long gap is one long
+ * statement. The reaper and the convergence sweep use SKIP LOCKED where they
+ * compete with live work, and the row each one writes states what was observed
+ * rather than a cause it did not establish.
+ */
+
+/**
+ * Drops the streamed output of jobs that finished more than $retentionDays ago.
+ *
+ * The window is measured on the JOB, not on the log row: a job that streams for
+ * an hour must not lose its opening lines while it is still running, and a live
+ * tail must never race a purge. Only terminal jobs qualify, so `queued` and
+ * `running` are untouchable by construction.
+ *
+ * The job row survives with its status and last_error, so the deploy list keeps
+ * its history; deploy_log.php tells the reader that the output was pruned.
+ *
+ * ZB-05: a job with a create unit that is still `prepared`, `running` or
+ * `uncertain` keeps its output however old it is. That unit stays open until an
+ * operator releases it, and its remote output, often the only trace of the VM
+ * that may exist on the host, lives in this log. Once the unit is released the
+ * job ages out like any other.
+ */
+function repo_purge_deploy_job_logs(mysqli $db, int $retentionDays = VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS): int
+{
+    $terminal = VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES;
+    $placeholders = implode(',', array_fill(0, count($terminal), '?'));
+    $open = VIRTUSPHERE_CREATE_RESULT_INFLIGHT_STATUSES;
+    $openPlaceholders = implode(',', array_fill(0, count($open), '?'));
+    $stmt = $db->prepare(
+        'DELETE l FROM deploy_job_logs l
+         JOIN deploy_jobs j ON j.id = l.job_id
+         WHERE j.status IN (' . $placeholders . ')
+           AND j.updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+           AND NOT EXISTS (
+               SELECT 1 FROM deploy_create_vm_results r
+               WHERE r.job_id = j.id AND r.status IN (' . $openPlaceholders . ')
+           )'
+    );
+    $params = array_merge($terminal, [$retentionDays], $open);
+    $stmt->bind_param(str_repeat('s', count($terminal)) . 'i' . str_repeat('s', count($open)), ...$params);
+    $stmt->execute();
+
+    return $stmt->affected_rows;
+}
+
+/**
+ * Removes finished mission-less system jobs (the ESXi inventory pulls). No page
+ * lists them once they are terminal, and their one durable result lives in
+ * deploy_esxi_inventory_state, so the rows are pure growth: one every interval
+ * per credential. Their log rows cascade with the FK.
+ *
+ * Mission jobs are deliberately kept: the deploy page shows their history.
+ */
+function repo_purge_finished_system_jobs(mysqli $db, int $retentionDays = VIRTUSPHERE_SYSTEM_JOB_RETENTION_DAYS): int
+{
+    $terminal = VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES;
+    $placeholders = implode(',', array_fill(0, count($terminal), '?'));
+    $stmt = $db->prepare(
+        'DELETE FROM deploy_jobs
+         WHERE mission_id IS NULL
+           AND status IN (' . $placeholders . ')
+           AND updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)'
+    );
+    $params = array_merge($terminal, [$retentionDays]);
+    $stmt->bind_param(str_repeat('s', count($terminal)) . 'i', ...$params);
+    $stmt->execute();
+
+    return $stmt->affected_rows;
+}
+
+/**
+ * The one sentence of observable fact a reap writes, as a pure function so the
+ * wording can be pinned without a database.
+ *
+ * Four facts, all of them readable from the row being written: which job, who
+ * held the lock, how stale the heartbeat is against the limit that made it
+ * stale, and the transition. No claim about why, because nothing in this
+ * transaction can see why.
+ */
+function deploy_job_reap_observation(
+    int $jobId,
+    string $lockedBy,
+    ?int $heartbeatAgeSeconds,
+    int $staleAfterSeconds,
+    string $fromStatus,
+    string $toStatus
+): string {
+    $age = $heartbeatAgeSeconds === null
+        ? 'no heartbeat was ever written'
+        : 'last heartbeat ' . max(0, $heartbeatAgeSeconds) . ' s ago';
+
+    return 'Job ' . $jobId . ': ' . $age . ', limit ' . $staleAfterSeconds . ' s; lock held by '
+        . (trim($lockedBy) === '' ? 'nobody' : trim($lockedBy)) . '; ' . $fromStatus . ' -> ' . $toStatus . '.';
+}
+
+/**
+ * Concludes jobs whose heartbeat has gone stale.
+ *
+ * The message this writes is the operator's whole account of what happened, so
+ * it says only what this transaction can see: which job, who held its lock, how
+ * old its last heartbeat is against the limit, and the transition that follows.
+ * Everything else is a guess. "No heartbeat for N seconds" alone named the
+ * mechanism that noticed rather than the event, and the sentence that used to
+ * follow it went further and asserted a cause - that the worker had died, or
+ * that it had not - from a singleton status row that proves neither. A restart
+ * writes a fresh row, so a reporting service does not establish that the
+ * process holding THIS job survived, and a silent one does not establish that
+ * it died.
+ *
+ * @param string $cause An additional observation the caller established, if it
+ *        has one. It is appended verbatim, so it must be phrased as an
+ *        observation and not as a cause; the deploy worker passes the current
+ *        state of the service's own status row, explicitly labelled as separate.
+ */
+function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, string $cause = ''): array
+{
+    $staleAfterSeconds = max(60, $staleAfterSeconds);
+    $running = VIRTUSPHERE_DEPLOY_STATUS_RUNNING;
+    $cancelling = VIRTUSPHERE_DEPLOY_STATUS_CANCELLING;
+    $failed = VIRTUSPHERE_DEPLOY_STATUS_FAILED;
+    $outcomeUnknown = VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN;
+    $cancelled = VIRTUSPHERE_DEPLOY_STATUS_CANCELLED;
+    $suffix = $cause === '' ? '' : ' ' . $cause;
+
+    return repo_transaction($db, static function () use ($db, $staleAfterSeconds, $running, $cancelling, $failed, $outcomeUnknown, $cancelled, $suffix): array {
+        $stmt = $db->prepare('SELECT id, mission_id FROM deploy_jobs WHERE status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) ORDER BY heartbeat_at ASC, id ASC');
+        $stmt->bind_param('ssi', $running, $cancelling, $staleAfterSeconds);
+        $stmt->execute();
+        $candidates = repo_fetch_all($stmt->get_result());
+        // Lock the whole batch in Mission -> Job -> Runtime -> VM order.
+        // In particular, never take the next mission after changing a VM of
+        // the previous job. Recheck stale status with a current locking read;
+        // the initial candidate scan is only discovery, never authorization.
+        $missionIds = array_values(array_unique(array_filter(array_map(
+            static fn (array $row): int => (int) ($row['mission_id'] ?? 0),
+            $candidates
+        ))));
+        sort($missionIds, SORT_NUMERIC);
+        $lockedMissions = [];
+        foreach ($missionIds as $missionId) {
+            if (repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE SKIP LOCKED', 'i', [$missionId]) !== null) {
+                $lockedMissions[$missionId] = true;
+            }
+        }
+        $jobs = [];
+        foreach ($candidates as $candidate) {
+            $missionId = (int) ($candidate['mission_id'] ?? 0);
+            if ($missionId > 0 && !isset($lockedMissions[$missionId])) {
+                continue;
+            }
+            $job = repo_fetch_one(
+                $db,
+                'SELECT id, mission_id, user_id, status, payload_json, result_json, LOWER(HEX(execution_generation_id)) AS execution_generation_id, credential_esxi_id, locked_by, heartbeat_at, TIMESTAMPDIFF(SECOND, heartbeat_at, NOW()) AS heartbeat_age_seconds FROM deploy_jobs WHERE id = ? AND status IN (?, ?) AND (heartbeat_at IS NULL OR heartbeat_at < DATE_SUB(NOW(), INTERVAL ? SECOND)) FOR UPDATE SKIP LOCKED',
+                'issi',
+                [(int) $candidate['id'], $running, $cancelling, $staleAfterSeconds]
+            );
+            if ($job !== null && (int) ($job['mission_id'] ?? 0) === $missionId) {
+                $jobs[] = $job;
+            }
+        }
+        if ($jobs !== []) {
+            repo_fetch_one($db, 'SELECT id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+        }
+
+        // Admission scans historical Create rows by job and position. Acquire
+        // the whole batch in that same order before convergence takes VM locks;
+        // heartbeat order can be the reverse and would deadlock with admission
+        // from an otherwise unrelated mission. Keep the returned heartbeat order.
+        $createLockJobIds = array_map('intval', array_column($jobs, 'id'));
+        sort($createLockJobIds, SORT_NUMERIC);
+        foreach ($createLockJobIds as $createLockJobId) {
+            repo_deploy_create_results($db, $createLockJobId, true);
+        }
+
+        foreach ($jobs as &$job) {
+            $jobId = (int) $job['id'];
+            // A stale cancelling job converges to what the operator asked for,
+            // never to failed: the wish was recorded, only the confirmation is
+            // missing, and a dead worker cannot deliver it (ADR-0033). The
+            // reaped-from status travels with the row so the caller's VM
+            // convergence can phrase its note truthfully.
+            $wasCancelling = (string) $job['status'] === $cancelling;
+            $payload = json_decode((string) ($job['payload_json'] ?? ''), true);
+            // WK-04/WK-07 A: a silent running job ends as outcome_unknown, because
+            // the reaper never sees the remote run. The one exception is a
+            // mission-less system job of a read-only playbook (the ESXi inventory
+            // pull): it changes nothing on ESXi, so a silent one is simply a
+            // failed attempt, as its inventory state records it below.
+            $readOnlySystemJob = ($job['mission_id'] ?? null) === null
+                && is_array($payload)
+                && isset(VIRTUSPHERE_SYSTEM_PLAYBOOKS[(string) ($payload['mode'] ?? '')]);
+            $job['reaped_to'] = $wasCancelling ? $cancelled : ($readOnlySystemJob ? $failed : $outcomeUnknown);
+            $observation = deploy_job_reap_observation(
+                $jobId,
+                (string) ($job['locked_by'] ?? ''),
+                $job['heartbeat_age_seconds'] === null ? null : (int) $job['heartbeat_age_seconds'],
+                $staleAfterSeconds,
+                $wasCancelling ? $cancelling : $running,
+                (string) $job['reaped_to']
+            );
+            // WK-07: the reaper observes silence, never the remote run. Whether the
+            // playbook sequence ended with exit code 0 before the silence is unknown,
+            // so the terminal detail must not present the job as a known failure.
+            $message = ($wasCancelling ? 'Cancellation converged by the reaper. ' : 'Reaped stale deploy job. ') . $observation
+                . ' Remote outcome unknown: the reaper cannot see whether the remote run finished, so its exit code is not known.' . $suffix;
+            // Converge and describe the open Create units before terminalizing
+            // their parent. The log owner rejects every terminal append; doing
+            // this afterwards rolled back the entire mixed reaper batch.
+            // Already decided units and their async identity remain untouched.
+            $converged = repo_deploy_create_converge_reaped($db, $jobId, $observation);
+            if ($converged > 0) {
+                $message .= ' ' . $converged . ' create unit(s) of this job had not finished and are now recorded as unresolved. '
+                    . 'Their VMs may or may not exist on ESXi; check the host before running this mission again.';
+            }
+            $note = $wasCancelling
+                ? 'deploy job ' . $jobId . ' cancelled; converged by the reaper after a stale heartbeat'
+                : 'deploy job ' . $jobId . ' reaped after stale heartbeat';
+            deploy_worker_fail_locked_job_vms($db, $job, $note, $payload['vm_ids'] ?? []);
+            if ($wasCancelling) {
+                // The accepted request already is the single immutable cancel
+                // SYSTEM line. The reaper supplies only the terminal metadata.
+                $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CANCEL_CONVERGED;
+                $reasonDetail = deploy_terminal_reason_detail($message);
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), terminal_reason_code = ?, terminal_reason_detail = ?, last_error = NULL, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                $stmt->bind_param('sssis', $cancelled, $reasonCode, $reasonDetail, $jobId, $cancelling);
+            } else {
+                repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
+                $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT;
+                $reasonDetail = deploy_terminal_reason_detail($message);
+                $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, last_error = ?, terminal_reason_code = ?, terminal_reason_detail = ?, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
+                // last_error keeps the reaper's account for outcome_unknown too:
+                // it is the diagnosis that outlives the log retention. The
+                // presenter shows "Last error" only for failed; for the unknown
+                // outcome the same text is the reason detail.
+                $reapedTo = (string) $job['reaped_to'];
+                $stmt->bind_param('ssssis', $reapedTo, $message, $reasonCode, $reasonDetail, $jobId, $running);
+            }
+            $stmt->execute();
+            if ($stmt->affected_rows === 1) {
+                // WK-03: a requested pause becomes real once the job it waited
+                // for has ended, whichever way it ended (repo_finish_deploy_job()).
+                repo_deploy_confirm_claim_pause($db);
+                // LG-07: the conclusion's outcome row, written in this transaction
+                // like the job's other writes: a reaped job never commits without it.
+                if (!deploy_worker_write_outcome_audit($db, $job, (string) $job['reaped_to'], VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT)) {
+                    throw new RuntimeException('Deploy outcome audit could not be stored; the reaper change was rolled back.');
+                }
+                if (!$wasCancelling
+                    && ($job['mission_id'] ?? null) === null
+                    && (int) ($job['credential_esxi_id'] ?? 0) > 0
+                    && is_array($payload)
+                    && (string) ($payload['mode'] ?? '') === VIRTUSPHERE_DEPLOY_MODE_INVENTORY) {
+                    // A reaped inventory pull is a real failed attempt. Without
+                    // this state transition the active-job link vanished while
+                    // the ESXi card kept its previous (possibly green) result,
+                    // and no page listed the now-terminal system job. A
+                    // CANCELLING pull is exempt on purpose: the operator asked
+                    // for the stop, which is not a fetch failure.
+                    repo_esxi_inventory_record_failure(
+                        $db,
+                        (int) $job['credential_esxi_id'],
+                        VIRTUSPHERE_INVENTORY_ERROR_WORKER,
+                        $jobId
+                    );
+                }
+            } else {
+                throw new RuntimeException('Stale-job reaper lost its locked job row.');
+            }
+        }
+        unset($job);
+
+        return $jobs;
+    });
+}
+
+/**
+ * Converge only a journaled bracket of its latest terminal owner. Historical
+ * deploying rows without a prestate, newer owners and unknown Create units are
+ * not repair authority. Locks remain Mission -> Job -> Runtime -> VM.
+ * @return array<int,array{vm_id:int,mission_id:int,vm_name:string}>
+ */
+function repo_sweep_orphaned_deploying_vms(mysqli $db): array
+{
+    $candidates = repo_fetch_all($db->query(
+        "SELECT v.id AS vm_id, v.mission_id, s.job_id FROM deploy_vms v
+         JOIN deploy_job_vm_states s ON s.vm_id = v.id AND s.marked_deploying = 1
+         WHERE v.lifecycle_state = 'deploying'
+           AND NOT EXISTS (SELECT 1 FROM deploy_job_vm_states newer WHERE newer.vm_id = v.id AND newer.id > s.id)
+         ORDER BY v.mission_id, s.job_id, v.id"
+    ));
+    $swept = [];
+    foreach ($candidates as $candidate) {
+        $changed = repo_transaction($db, static function () use ($db, $candidate): ?array {
+            $missionId = (int) $candidate['mission_id'];
+            $jobId = (int) $candidate['job_id'];
+            $vmId = (int) $candidate['vm_id'];
+            if (repo_fetch_one($db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE SKIP LOCKED', 'i', [$missionId]) === null) {
+                return null;
+            }
+            $active = VIRTUSPHERE_DEPLOY_JOB_ACTIVE_STATUSES;
+            $stmt = $db->prepare('SELECT id FROM deploy_jobs WHERE mission_id = ? AND status IN (' . implode(',', array_fill(0, count($active), '?')) . ') ORDER BY id FOR UPDATE');
+            $stmt->bind_param('i' . str_repeat('s', count($active)), $missionId, ...$active);
+            $stmt->execute();
+            if ($stmt->get_result()->num_rows !== 0) {
+                return null;
+            }
+            $job = repo_fetch_one($db, 'SELECT *, LOWER(HEX(execution_generation_id)) AS execution_generation_id FROM deploy_jobs WHERE id = ? AND mission_id = ? FOR UPDATE SKIP LOCKED', 'ii', [$jobId, $missionId]);
+            if ($job === null || !in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)) {
+                return null;
+            }
+            $runtime = repo_fetch_one($db, 'SELECT LOWER(HEX(current_generation_id)) AS generation_id FROM deploy_runtime_identity WHERE id = 1 FOR UPDATE');
+            if ($runtime === null || (string) ($job['execution_generation_id'] ?? '') === ''
+                || !hash_equals((string) $runtime['generation_id'], (string) $job['execution_generation_id'])) {
+                return null;
+            }
+            // Create result locks precede VM locks. The shared rule rereads them
+            // under the same transaction and will not turn uncertainty into failure.
+            deploy_worker_vm_create_evidence($db, $jobId);
+            $vm = repo_fetch_one($db, 'SELECT id, vm_name, lifecycle_state FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE SKIP LOCKED', 'ii', [$vmId, $missionId]);
+            if ($vm === null || (string) $vm['lifecycle_state'] !== VIRTUSPHERE_LIFECYCLE_DEPLOYING) {
+                return null;
+            }
+            $owner = repo_fetch_one($db, 'SELECT job_id, marked_deploying FROM deploy_job_vm_states WHERE vm_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE', 'i', [$vmId]);
+            if ($owner === null || (int) $owner['job_id'] !== $jobId || (int) $owner['marked_deploying'] !== 1) {
+                return null;
+            }
+            if ((string) $job['status'] === VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED) {
+                $changed = deploy_worker_restore_locked_vm_journal($db, $job, 'convergence sweep: restore completed job bracket', [$vmId]);
+            } else {
+                $changed = deploy_worker_apply_locked_vm_journal($db, $job, 'convergence sweep: apply recorded job/VM outcome', [$vmId]);
+            }
+            return $changed > 0 ? ['vm_id' => $vmId, 'mission_id' => $missionId, 'vm_name' => (string) $vm['vm_name']] : null;
+        });
+        if ($changed !== null) {
+            $swept[] = $changed;
+        }
+    }
+    return $swept;
+}

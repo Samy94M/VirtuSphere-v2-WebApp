@@ -1,0 +1,283 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+require_once dirname(__DIR__) . '/Support/NetworkMacFixtures.php';
+
+require_once dirname(__DIR__, 2) . '/lib/db.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/missions.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/vms.php';
+require_once dirname(__DIR__, 2) . '/lib/repo/deploy_jobs.php';
+
+/**
+ * Claim priority (ADR-0023 amendment): mission deploys claim before
+ * mission-less system jobs (inventory pulls), so an interval burst of pulls
+ * cannot delay an operator's deploy. Within each class the order stays FIFO.
+ */
+final class DeployClaimPriorityTest extends TestCase
+{
+    private const PREFIX = 'phpunit_prio_';
+
+    private ?mysqli $db = null;
+    private int $missionId = 0;
+    private int $esxiId = 0;
+    private int $ansibleId = 0;
+
+    protected function setUp(): void
+    {
+        try {
+            $this->db = db(true);
+        } catch (Throwable $exception) {
+            self::markTestSkipped('Database not reachable: ' . $exception->getMessage());
+        }
+        $this->cleanup();
+
+        $this->missionId = repo_create_mission($this->db, [
+            'mission_name' => self::PREFIX . 'm',
+            'hypervisor_datastorage' => 'ds1',
+            'hypervisor_datacenter' => 'DC1',
+            'domain' => 'dc.example.com',
+        ], true);
+        $this->makeVm('PHPUNITPRIO1', '10.0.0.40');
+        $this->esxiId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ESXI, 443);
+        $this->ansibleId = $this->makeCredential(VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE, 22);
+        test_prepare_network_mac_fixture($this->db, $this->missionId, $this->esxiId, 'VLAN10');
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->db !== null) {
+            $this->cleanup();
+        }
+    }
+
+    public function testMissionJobClaimsBeforeOlderSystemJob(): void
+    {
+        // The production claim is global; skip rather than mutate unrelated jobs.
+        $eligible = (int) $this->db->query("SELECT COUNT(*) AS c FROM deploy_jobs WHERE status = 'queued' AND cancelled_at IS NULL AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP())")->fetch_assoc()['c'];
+        if ($eligible > 0) {
+            self::markTestSkipped('Other eligible queued jobs present; claim is global.');
+        }
+
+        // The system job is enqueued FIRST (lower id), the mission job second.
+        $systemJobId = repo_create_system_job($this->db, VIRTUSPHERE_DEPLOY_MODE_INVENTORY, $this->esxiId, $this->ansibleId, null);
+        self::assertNotNull($systemJobId);
+        $missionJobId = repo_create_deploy_job($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'full'], null);
+
+        $first = repo_claim_next_deploy_job($this->db, 'phpunit-prio');
+        $second = repo_claim_next_deploy_job($this->db, 'phpunit-prio');
+        $claimedIds = array_map(static fn (array $j): int => (int) $j['id'], array_filter([$first, $second]));
+        // A live deploy worker polls the same global queue; if it snatched one
+        // of our jobs between enqueue and claim, the order proves nothing.
+        if (!in_array($missionJobId, $claimedIds, true) || !in_array((int) $systemJobId, $claimedIds, true)) {
+            self::markTestSkipped('A running deploy worker claimed a test job first.');
+        }
+
+        self::assertSame($missionJobId, (int) $first['id'], 'a mission deploy must claim before an older system job');
+        self::assertSame((int) $systemJobId, (int) $second['id']);
+    }
+
+    public function testAMissionJobWithoutAReadableModeIsClaimedWithoutAVmCapture(): void
+    {
+        // AN-04: the claim takes the job (the worker ends it as configuration_blocked) and captures
+        // no VM prestate for a scope whose mode nobody can read.
+        $this->skipWhenAnotherJobIsQueued();
+        $jobId = $this->insertMissionJob('{"vm_ids":[]}');
+
+        $claimed = repo_claim_next_deploy_job($this->db, 'phpunit-stored-mode');
+
+        if ($claimed === null || (int) $claimed['id'] !== $jobId) {
+            $this->skipWhenRaced($jobId);
+        }
+        self::assertNotNull($claimed, 'a job with an unreadable mode must be claimed, not left queued');
+        self::assertSame($jobId, (int) $claimed['id']);
+        self::assertSame(0, (int) repo_scalar($this->db, 'SELECT COUNT(*) FROM deploy_job_vm_states WHERE job_id = ?', 'i', [$jobId]), 'no VM prestate for an unreadable mode');
+    }
+
+    public function testAnUnknownModeDoesNotBlockAValidJobQueuedBehindIt(): void
+    {
+        $this->skipWhenAnotherJobIsQueued();
+        $unknownJobId = $this->insertMissionJob('{"mode":"nonsense"}');
+        // The valid job sits in a second mission: enqueueing refuses a second
+        // active job of one mission, and the point here is the claim loop, which
+        // used to abort at the unknown mode before it reached any later job.
+        $otherMissionId = repo_create_mission($this->db, [
+            'mission_name' => self::PREFIX . 'm2',
+            'hypervisor_datastorage' => 'ds1',
+            'hypervisor_datacenter' => 'DC1',
+            'domain' => 'dc.example.com',
+        ], true);
+        repo_execute(
+            $this->db,
+            "INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id, credential_ansible_id) VALUES (?, 'queued', ?, ?, ?)",
+            'isii',
+            [$otherMissionId, '{"mode":"full","vm_ids":[]}', $this->esxiId, $this->ansibleId]
+        );
+        $validJobId = (int) $this->db->insert_id;
+
+        $first = repo_claim_next_deploy_job($this->db, 'phpunit-stored-mode');
+        if ($first === null || (int) $first['id'] !== $unknownJobId) {
+            $this->skipWhenRaced($unknownJobId);
+        }
+        self::assertNotNull($first, 'the unknown-mode job must be claimed, not refused or aborted');
+        self::assertSame($unknownJobId, (int) $first['id']);
+
+        $second = repo_claim_next_deploy_job($this->db, 'phpunit-stored-mode');
+        if ($second === null || (int) $second['id'] !== $validJobId) {
+            $this->skipWhenRaced($validJobId);
+        }
+        self::assertNotNull($second, 'an unknown mode in front must not abort the claim of the job behind it');
+        self::assertSame($validJobId, (int) $second['id']);
+    }
+
+    /**
+     * WK-05: a mission runs one job at a time. A running job of mission M keeps a
+     * second queued job of M unclaimed, and a cancelling job holds it the same
+     * way. A queued job of another mission is still claimed in the meantime.
+     */
+    public function testARunningOrCancellingJobHoldsItsMissionButNotOtherMissions(): void
+    {
+        $this->skipWhenAnotherJobIsQueued();
+        $otherMissionId = repo_create_mission($this->db, [
+            'mission_name' => self::PREFIX . 'n',
+            'hypervisor_datastorage' => 'ds1',
+            'hypervisor_datacenter' => 'DC1',
+            'domain' => 'dc.example.com',
+        ], true);
+        $runningJobId = $this->insertRunningMissionJob($this->missionId);
+        $blockedJobId = $this->insertMissionJob('{"vm_ids":[]}');
+        $freeJobId = $this->insertMissionJob('{"vm_ids":[]}', $otherMissionId);
+
+        $claimed = repo_claim_next_deploy_job($this->db, 'phpunit-one-per-mission');
+        if ($claimed === null || (int) $claimed['id'] !== $freeJobId) {
+            $this->skipWhenRaced($freeJobId);
+        }
+        self::assertNotNull($claimed, 'a queued job of another mission must still be claimable');
+        self::assertSame($freeJobId, (int) $claimed['id']);
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, $this->statusOf($blockedJobId), 'the second job of a running mission stays queued');
+
+        $this->setStatusOf($runningJobId, VIRTUSPHERE_DEPLOY_STATUS_CANCELLING);
+        self::assertNull(repo_claim_next_deploy_job($this->db, 'phpunit-one-per-mission'), 'a cancelling job holds its mission too');
+        self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, $this->statusOf($blockedJobId));
+    }
+
+    /**
+     * WK-09: a paused service claims nothing. The early exit must not change the
+     * outcome the in-transaction gate has always produced.
+     */
+    public function testAPausedServiceClaimsNothingAndLeavesTheQueuedJobQueued(): void
+    {
+        $this->skipWhenAnotherJobIsQueued();
+        $jobId = $this->insertMissionJob('{"vm_ids":[]}');
+        $previous = repo_fetch_one($this->db, 'SELECT claim_state, claim_changed_at, claim_changed_by FROM deploy_runtime_identity WHERE id = 1');
+        self::assertNotNull($previous);
+        try {
+            $paused = VIRTUSPHERE_DEPLOY_CLAIM_PAUSED;
+            $this->db->query("UPDATE deploy_runtime_identity SET claim_state = '" . $paused . "' WHERE id = 1");
+
+            self::assertNull(repo_claim_next_deploy_job($this->db, 'phpunit-paused'));
+            self::assertSame(VIRTUSPHERE_DEPLOY_STATUS_QUEUED, $this->statusOf($jobId));
+        } finally {
+            $stmt = $this->db->prepare('UPDATE deploy_runtime_identity SET claim_state = ?, claim_changed_at = ?, claim_changed_by = ? WHERE id = 1');
+            $stmt->bind_param('sss', $previous['claim_state'], $previous['claim_changed_at'], $previous['claim_changed_by']);
+            $stmt->execute();
+        }
+    }
+
+    private function insertMissionJob(string $payloadJson, ?int $missionId = null): int
+    {
+        repo_execute(
+            $this->db,
+            "INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id, credential_ansible_id) VALUES (?, 'queued', ?, ?, ?)",
+            'isii',
+            [$missionId ?? $this->missionId, $payloadJson, $this->esxiId, $this->ansibleId]
+        );
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function insertRunningMissionJob(int $missionId): int
+    {
+        repo_execute(
+            $this->db,
+            'INSERT INTO deploy_jobs (mission_id, status, payload_json, credential_esxi_id, credential_ansible_id, locked_at, locked_by, heartbeat_at) VALUES (?, ?, ?, ?, ?, NOW(), ?, NOW())',
+            'issiis',
+            [$missionId, VIRTUSPHERE_DEPLOY_STATUS_RUNNING, '{"vm_ids":[]}', $this->esxiId, $this->ansibleId, 'phpunit-running']
+        );
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function statusOf(int $jobId): string
+    {
+        return (string) repo_scalar($this->db, 'SELECT status FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+    }
+
+    private function setStatusOf(int $jobId, string $status): void
+    {
+        repo_execute($this->db, 'UPDATE deploy_jobs SET status = ? WHERE id = ?', 'si', [$status, $jobId]);
+    }
+
+    private function skipWhenAnotherJobIsQueued(): void
+    {
+        // The production claim is global; skip rather than mutate unrelated jobs.
+        $eligible = (int) $this->db->query("SELECT COUNT(*) AS c FROM deploy_jobs WHERE status = 'queued' AND cancelled_at IS NULL AND (scheduled_at IS NULL OR scheduled_at <= UTC_TIMESTAMP())")->fetch_assoc()['c'];
+        if ($eligible > 0) {
+            self::markTestSkipped('Other eligible queued jobs present; claim is global.');
+        }
+    }
+
+    /** A live worker polls the same global queue: a test job it took says nothing about the claim. */
+    private function skipWhenRaced(int $jobId): void
+    {
+        $status = (string) repo_scalar($this->db, 'SELECT status FROM deploy_jobs WHERE id = ?', 'i', [$jobId]);
+        if ($status !== VIRTUSPHERE_DEPLOY_STATUS_QUEUED) {
+            self::markTestSkipped('A running deploy worker claimed a test job first.');
+        }
+    }
+
+    private function makeVm(string $name, string $ip): void
+    {
+        repo_save_vm(
+            $this->db,
+            $this->missionId,
+            null,
+            ['vm_name' => $name, 'vm_hostname' => $name, 'vm_os' => 'Windows Server 2019', 'vm_domain' => 'dc.example.com', 'vm_guest_id' => 'windows2019srv_64Guest'],
+            [['ip' => $ip, 'subnet' => '255.255.255.0', 'gateway' => '10.0.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
+            [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
+            [],
+            '',
+            1
+        );
+    }
+
+    private function makeCredential(string $type, int $port): int
+    {
+        $stmt = $this->db->prepare('INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext) VALUES (?, ?, ?, ?, ?, ?)');
+        $name = self::PREFIX . $type;
+        $host = 'host.example.com';
+        $user = 'svc';
+        $secret = 'x';
+        $stmt->bind_param('sssiss', $type, $name, $host, $port, $user, $secret);
+        $stmt->execute();
+
+        return (int) $this->db->insert_id;
+    }
+
+    private function cleanup(): void
+    {
+        $like = self::PREFIX . '%';
+        // Mission-less system jobs do not cascade from the credential (SET NULL
+        // would keep orphans); delete them explicitly first.
+        $this->db->query("DELETE FROM deploy_jobs WHERE mission_id IS NULL AND credential_esxi_id IN (SELECT id FROM deploy_credentials WHERE name LIKE '" . $this->db->real_escape_string($like) . "')");
+        foreach (['DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE ?)',
+                  'DELETE FROM deploy_missions WHERE mission_name LIKE ?',
+                  'DELETE FROM deploy_credentials WHERE name LIKE ?'] as $sql) {
+            $stmt = $this->db->prepare($sql);
+            $stmt->bind_param('s', $like);
+            $stmt->execute();
+        }
+    }
+}

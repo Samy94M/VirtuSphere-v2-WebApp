@@ -1,0 +1,20 @@
+[WARNING]: No inventory was parsed, only implicit localhost is available
+[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+
+PLAY [VirtuSphere ESXi inventory (read-only)] **********************************
+
+TASK [Gather datacenters] ******************************************************
+[ERROR]: Task failed: Module failed: Unknown error while connecting to the vCenter or ESXi API at 127.0.0.1:8443 : [Errno 111] Connection refused
+Origin: /tmp/run/inventoryESXi_playbook.yml:23:7
+
+21     # Connection canary: NO ignore_errors, so a connection/auth/authz failure
+22     # fails the run with a categorizable message (the worker classifies it).
+23     - name: Gather datacenters
+         ^ column 7
+
+fatal: [localhost]: FAILED! => {"changed": false, "msg": "Unknown error while connecting to the vCenter or ESXi API at 127.0.0.1:8443 : [Errno 111] Connection refused"}
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+
+exit=2

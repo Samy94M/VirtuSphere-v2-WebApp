@@ -1,0 +1,94 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../lib/bootstrap.php';
+require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/repo/catalog.php';
+require_once __DIR__ . '/../lib/repo/usage_evidence.php';
+require_once __DIR__ . '/../lib/usage_evidence_view.php';
+require_once __DIR__ . '/../lib/system_status_urls.php';
+
+/** @var mysqli $connection Provided by bootstrap.php. */
+
+// Packages are owned by MECM: mecm_packages.php performs a retire-missing +
+// upsert sync from the MECM catalog, so this portal page is read-only. Editing
+// here would be overwritten on the next sync.
+$user = portal_require_user($connection);
+
+$statusFilter = request_string($_GET, 'status', 'active');
+if (!in_array($statusFilter, VIRTUSPHERE_CATALOG_FILTERS, true)) {
+    $statusFilter = 'active';
+}
+
+$rows = getPackages($connection, $statusFilter);
+// The package list is filtered in SQL, so "does the catalog hold anything at
+// all" needs its own answer. It is asked only when the view came back empty,
+// which is the one render where the answer changes what is said; a populated
+// table already proves it. One COUNT, never per row.
+$catalogHasRows = $rows !== [] || repo_package_count($connection) > 0;
+
+// Column sorting: version uses natural order; timestamps sort on the raw UTC
+// string, which is chronological for the DB datetime format.
+[$sort, $dir] = portal_sort_apply($rows, [
+    'name' => portal_sort_text('package_name'),
+    'basename' => portal_sort_text('package_basename'),
+    'version' => portal_sort_text('package_version'),
+    'status' => portal_sort_text('package_status'),
+    'retired' => portal_sort_text('retired_at'),
+    'updated' => portal_sort_text('updated_at'),
+], 'name');
+// F08: one package's "Verwendet in" is read only when the page lists that package.
+$usageId = usage_evidence_requested_id($_GET['usage'] ?? null);
+$usageRow = usage_evidence_find_row($rows, $usageId);
+$usageEvidence = $usageRow !== null ? usage_evidence_package($connection, $usageId) : null;
+
+layout_header(__t('packages.title'), $user, 'packages', 'packages');
+?>
+<div class="stack">
+    <section class="panel">
+        <p class="muted"><?php echo h(__t('packages.readonly_hint')); ?></p>
+        <?php echo portal_catalog_status_filter('packages.php', $statusFilter, [
+            'label' => __t('packages.filter_label'),
+            'apply' => __t('packages.filter_apply'),
+            'active' => __t('packages.filter_active'),
+            'retired' => __t('packages.filter_retired'),
+            'all' => __t('packages.filter_all'),
+        ], ['sort' => $sort, 'dir' => $dir]); ?>
+        <div class="table-wrap" tabindex="0"><table>
+            <thead><tr><?php
+                $pkgSortParams = ['status' => $statusFilter];
+                echo portal_sort_header('packages.php', 'name', __t('common.name'), $sort, $dir, $pkgSortParams);
+                echo portal_sort_header('packages.php', 'basename', __t('packages.th_basename'), $sort, $dir, $pkgSortParams);
+                echo portal_sort_header('packages.php', 'version', __t('packages.th_version'), $sort, $dir, $pkgSortParams);
+                echo portal_sort_header('packages.php', 'status', __t('common.status'), $sort, $dir, $pkgSortParams);
+                echo portal_sort_header('packages.php', 'retired', __t('packages.th_retired_at'), $sort, $dir, $pkgSortParams);
+                echo portal_sort_header('packages.php', 'updated', __t('common.updated'), $sort, $dir, $pkgSortParams);
+            ?><th><?php echo h(__t('packages.diagnostics')); ?></th></tr></thead>
+            <tbody>
+            <?php foreach ($rows as $row) { ?>
+                <tr>
+                    <td><?php echo h((string) ($row['package_name'] ?? '')); ?></td>
+                    <td><?php echo h((string) ($row['package_basename'] ?? '')); ?></td>
+                    <td><?php echo h((string) ($row['package_version'] ?? '')); ?></td>
+                    <td><?php echo catalog_status_badge((string) ($row['package_status'] ?? '')); ?></td>
+                    <td><?php echo h(portal_format_timestamp((string) ($row['retired_at'] ?? ''))); ?></td>
+                    <td><?php echo h(portal_format_timestamp((string) ($row['updated_at'] ?? ''))); ?></td>
+                    <td><a href="<?php echo h('package_reports.php?' . http_build_query([
+                        'scope' => 'package',
+                        'project' => (string) ($row['package_basename'] ?? ''),
+                        'version' => (string) ($row['package_version'] ?? ''),
+                    ], '', '&', PHP_QUERY_RFC3986)); ?>"><?php echo h(__t('packages.diagnostics')); ?></a> <span class="muted" aria-hidden="true">&middot;</span> <?php echo usage_evidence_toggle_html(usage_evidence_toggle_href('packages.php', ['status' => $statusFilter, 'sort' => $sort, 'dir' => $dir], (int) $row['id']), (string) ($row['package_name'] ?? '')); ?></td>
+                </tr>
+                <?php if ($usageEvidence !== null && (int) $row['id'] === $usageId) { echo usage_evidence_expansion_row(usage_evidence_anchor($usageId), 7, usage_evidence_section_html($usageEvidence, can('deploy.run', $user), true)); } ?>
+            <?php } ?>
+            <?php if ($rows === []) { ?><tr><td class="table-empty" colspan="7"><?php echo portal_catalog_empty_state('packages.php', $statusFilter, $catalogHasRows, [
+                'empty' => __t('packages.empty'),
+                'empty_filtered' => __t('packages.empty_filtered'),
+                'show_all' => __t('packages.show_all'),
+            ], ['sort' => $sort, 'dir' => $dir]); ?><?php if (!$catalogHasRows && can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></td></tr><?php } ?>
+            </tbody>
+        </table></div>
+    </section>
+</div>
+<?php layout_footer(); ?>

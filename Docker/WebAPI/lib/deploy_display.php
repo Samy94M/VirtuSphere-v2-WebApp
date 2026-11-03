@@ -1,0 +1,90 @@
+<?php
+
+declare(strict_types=1);
+
+// Portal-only labels for deploy jobs.
+//
+// Same boundary as lib/portal_status_display.php: `deploy_jobs.status` and the
+// `mode` payload stay technical in the database, in the worker, in the retained
+// job logs and in the polling JSON's existing `status` field. Only the visible
+// text comes from here.
+//
+// virtusphere_deploy_mode_labels() stays the technical validation SSoT and is
+// deliberately NOT localized: it decides which modes may be posted, and a
+// display language must never be able to widen or narrow that set. This module
+// names the same modes for a reader, plus `inventory`, which the portal can
+// SHOW but nobody can post, because the scheduler is its only producer.
+require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_mode_labels.php';
+
+/**
+ * The human name of a deploy-job status.
+ *
+ * The eight values are exactly the active and terminal sets; a ninth value
+ * would be a schema change, and it lands on the neutral fallback rather than in
+ * front of an operator as a raw token.
+ */
+function deploy_job_status_label(string $status): string
+{
+    return match ($status) {
+        VIRTUSPHERE_DEPLOY_STATUS_QUEUED => __t('status.job_queued'),
+        VIRTUSPHERE_DEPLOY_STATUS_RUNNING => __t('status.job_running'),
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLING => __t('status.job_cancelling'),
+        VIRTUSPHERE_DEPLOY_STATUS_SUCCEEDED => __t('status.job_succeeded'),
+        VIRTUSPHERE_DEPLOY_STATUS_FAILED => __t('status.job_failed'),
+        VIRTUSPHERE_DEPLOY_STATUS_CANCELLED => __t('status.job_cancelled'),
+        VIRTUSPHERE_DEPLOY_STATUS_PARTIAL => __t('status.job_partial'),
+        VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN => __t('status.job_outcome_unknown'),
+        default => __t('status.job_unknown'),
+    };
+}
+
+/**
+ * The badge for a deploy-job status: variant from the existing class helper,
+ * text from the label above. Callers render this instead of pairing a variant
+ * with the raw value themselves.
+ */
+function deploy_job_status_badge(string $status): string
+{
+    return portal_badge(deploy_job_status_badge_class($status), deploy_job_status_label($status));
+}
+
+/**
+ * The visible summary of a job's payload.
+ *
+ * deploy_job_payload_summary() stays exactly as it is and keeps writing the
+ * technical summary into the retained job log, where it is evidence and must
+ * not move with a display language. This is its portal-facing twin and the two
+ * differ deliberately in one more way: `-vvv` survives verbatim, because it is
+ * the Ansible flag itself and not a word this portal invented, while the scope
+ * is a counted sentence rather than a bracketed number.
+ */
+function deploy_job_payload_display(?string $payloadJson): string
+{
+    if ($payloadJson === null || trim($payloadJson) === '') {
+        return deploy_mode_label(VIRTUSPHERE_DEPLOY_MODE_FULL);
+    }
+
+    $payload = json_decode($payloadJson, true);
+    if (!is_array($payload)) {
+        return __t('status.mode_invalid_payload');
+    }
+
+    $parts = [deploy_mode_label((string) ($payload['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL))];
+    // K4b: a start job that resumes a full pipeline writes autostart afterwards.
+    if ((string) ($payload['mode'] ?? '') === 'start' && !empty($payload['then_autostart'])) {
+        $parts[0] .= ', ' . __t('status.mode_then_autostart');
+    }
+    if (!empty($payload['verbose'])) {
+        $parts[] = '-vvv';
+    }
+    $vmIds = is_array($payload['vm_ids'] ?? null) ? $payload['vm_ids'] : [];
+    if ($vmIds !== []) {
+        $count = count($vmIds);
+        // __t() substitutes but does not pluralize, so the sentence is chosen
+        // by count instead of printing "VM(s)".
+        $parts[] = __t($count === 1 ? 'status.mode_scope_one' : 'status.mode_scope_many', ['count' => (string) $count]);
+    }
+
+    return implode(' ', $parts);
+}

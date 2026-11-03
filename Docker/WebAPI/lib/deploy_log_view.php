@@ -1,0 +1,265 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/deploy_constants.php';
+require_once __DIR__ . '/deploy_log_filter.php';
+require_once __DIR__ . '/deploy_log_phases.php';
+require_once __DIR__ . '/mac_import_binding.php';
+require_once __DIR__ . '/mac_import_result.php';
+require_once __DIR__ . '/repo/deploy_jobs.php';
+
+/**
+ * Everything the HTML view of one job log needs, resolved once (Etappe 13).
+ *
+ * The two readings of a log are deliberately exclusive. Unfiltered, the page is
+ * the live tail of 10A and the poller owns it. Filtered, the page is a bounded
+ * search over everything still retained, live updates are off, and it says so:
+ * a filtered view that kept following would let a reader watch a subset while
+ * believing they were watching the run, and switching back would mark full-log
+ * lines they never saw as read.
+ *
+ * @param array<string,mixed> $job
+ * @param array<string,mixed> $query typically $_GET
+ * @return array{
+ *     timeline: array{phases:list<array{playbook:string,begin_seq:int,end_seq:?int,complete:bool,started_at:?string,finished_at:?string}>,current:?string},
+ *     phase_names: list<string>,
+ *     filter: array{q:string,source:string,phase:string,errors:bool,active:bool},
+ *     page: array<string,mixed>,
+ *     logs: list<array<string,mixed>>,
+ *     match_capped: bool
+ * }
+ */
+function deploy_log_view_model(mysqli $db, array $job, array $query): array
+{
+    $jobId = (int) $job['id'];
+    $timeline = deploy_log_phase_timeline(repo_deploy_job_log_step_markers($db, $jobId));
+    $phaseNames = deploy_log_phase_names($timeline);
+    $filter = deploy_log_filter_from_query($query, $phaseNames);
+
+    if (!$filter['active']) {
+        // The HTML render honours `before_seq` as well, which is what makes the
+        // "load older" control work with scripting off: it was an anchor whose
+        // href the server accepted only on the JSON path, so a click without
+        // JavaScript reloaded the same newest tail and looked like a control
+        // that does nothing. Only this one cursor: `after_seq` is the live
+        // poller's, and a page rendered forward from an arbitrary point would
+        // put a reader somewhere with no way back to the end.
+        $beforeSeq = deploy_job_log_cursor('before_seq', true, $query);
+        $page = $beforeSeq === null
+            ? repo_deploy_job_log_initial_tail($db, $jobId)
+            : repo_deploy_job_log_older($db, $jobId, $beforeSeq);
+
+        return [
+            'timeline' => $timeline,
+            'phase_names' => $phaseNames,
+            'filter' => $filter,
+            'page' => $page,
+            'logs' => $page['logs'],
+            'match_capped' => false,
+        ];
+    }
+
+    $args = deploy_log_filter_repo_args($filter, $timeline);
+    $result = repo_deploy_job_log_search($db, $jobId, $args['needle'], $args['streams'], $args['from_seq'], $args['to_seq'], VIRTUSPHERE_DEPLOY_LOG_SEARCH_LIMIT, $args['any_of']);
+
+    // A filtered page carries no cursor. Handing the poller an `after_seq` that
+    // came from a filtered read is precisely how a follow ends up treating
+    // skipped lines as seen, so the filtered view reports itself as a finished,
+    // caught-up window with nothing older to fetch.
+    return [
+        'timeline' => $timeline,
+        'phase_names' => $phaseNames,
+        'filter' => $filter,
+        'page' => [
+            'logs' => $result['logs'],
+            'oldest_seq' => 0,
+            'newest_seq' => 0,
+            'has_older' => false,
+            'has_more' => false,
+            'caught_up' => true,
+        ],
+        'logs' => $result['logs'],
+        'match_capped' => $result['has_more'],
+    ];
+}
+
+/**
+ * Resolves the currently existing VMs named by a V2 callback once per page.
+ * Historical IDs are never trusted as links because an old VM can be deleted
+ * and its numeric ID eventually reused in another mission.
+ *
+ * @return list<int>|null NULL means that this is not a V2 MAC result.
+ */
+function deploy_log_existing_vm_ids(mysqli $db, array $job): ?array
+{
+    $result = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
+    if (!is_array($result) || $result['version'] !== VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION) {
+        return null;
+    }
+    $ids = array_values(array_unique(array_filter(array_map(
+        static fn (array $row): int => (int) ($row['vm_id'] ?? 0),
+        array_filter($result['vm_results'], 'is_array')
+    ), static fn (int $id): bool => $id > 0)));
+    if ($ids === []) {
+        return [];
+    }
+    $missionId = (int) ($job['mission_id'] ?? 0);
+    $stmt = $db->prepare(
+        'SELECT id FROM deploy_vms WHERE mission_id = ? AND id IN ('
+        . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id'
+    );
+    $params = array_merge([$missionId], $ids);
+    $stmt->bind_param(str_repeat('i', count($params)), ...$params);
+    $stmt->execute();
+
+    return array_map(
+        static fn (array $row): int => (int) $row['id'],
+        $stmt->get_result()->fetch_all(MYSQLI_ASSOC)
+    );
+}
+
+/**
+ * Bound VMs whose first MAC this job's callback took over (K3 decision (b)).
+ * The V2 result cannot say so without a new field, so the callback leaves a
+ * fixed system line in the same transaction and this reads it back. Only
+ * successful rows that wrote something are candidates; after the log
+ * retention the notice is gone and the row reads as an ordinary success.
+ *
+ * @return list<int>
+ */
+function deploy_log_bound_first_mac_vm_ids(mysqli $db, array $job): array
+{
+    $result = mac_import_decode_result(isset($job['result_json']) ? (string) $job['result_json'] : null);
+    if (!is_array($result) || $result['version'] !== VIRTUSPHERE_MAC_IMPORT_RESULT_VERSION) {
+        return [];
+    }
+    $candidates = [];
+    foreach ($result['vm_results'] as $row) {
+        if (is_array($row) && ($row['outcome'] ?? '') === 'success' && (int) ($row['updated_interfaces'] ?? 0) > 0) {
+            $candidates[(int) ($row['vm_id'] ?? 0)] = true;
+        }
+    }
+    if ($candidates === []) {
+        return [];
+    }
+    $jobId = (int) ($job['id'] ?? 0);
+    $stream = VIRTUSPHERE_DEPLOY_LOG_SYSTEM;
+    $prefix = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], VIRTUSPHERE_MAC_IMPORT_BOUND_FIRST_MAC_LOG_PREFIX) . '%';
+    $stmt = $db->prepare('SELECT line FROM deploy_job_logs WHERE job_id = ? AND stream = ? AND line LIKE ? ORDER BY seq');
+    $stmt->bind_param('iss', $jobId, $stream, $prefix);
+    $stmt->execute();
+    $ids = [];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $logRow) {
+        $vmId = mac_import_bound_first_mac_log_vm_id((string) $logRow['line']);
+        if ($vmId !== null && isset($candidates[$vmId])) {
+            $ids[$vmId] = $vmId;
+        }
+    }
+    ksort($ids);
+
+    return array_values($ids);
+}
+
+/** @param array{logs:array<int,array>,oldest_seq:?int,newest_seq:?int,has_older:bool,has_more:bool,caught_up:bool} $page */
+function deploy_job_log_format_page(array $page): array
+{
+    foreach ($page['logs'] as &$entry) {
+        $entry['seq'] = (int) $entry['seq'];
+        $entry['created_at'] = portal_format_timestamp($entry['created_at'] ?? null);
+        $entry['stream_label'] = deploy_job_log_source_label((string) ($entry['stream'] ?? ''));
+        // E1: the browser marks a row from this field alone, so the live rows
+        // and the server-rendered ones cannot disagree about a line.
+        $entry['severity'] = deploy_log_line_severity((string) ($entry['line'] ?? ''));
+    }
+    unset($entry);
+
+    return $page;
+}
+
+/**
+ * @param array<string,mixed>|null $query The request parameters, defaulting to
+ *     $_GET. The view model passes the array it was handed rather than reaching
+ *     for the superglobal a second time, so the same request cannot be read
+ *     from two sources that a test could set apart.
+ */
+function deploy_job_log_cursor(string $name, bool $positive, ?array $query = null): ?int
+{
+    $source = $query ?? $_GET;
+    if (!array_key_exists($name, $source)) {
+        return null;
+    }
+    $raw = $source[$name];
+    if (!is_string($raw) || preg_match('/^\d+$/D', $raw) !== 1) {
+        throw new InvalidArgumentException($name . ' must be an integer cursor.');
+    }
+    $value = (int) $raw;
+    if (($positive && $value <= 0) || (!$positive && $value < 0)) {
+        throw new InvalidArgumentException($name . ' is outside the cursor range.');
+    }
+
+    return $value;
+}
+
+function deploy_job_logs_are_pruned(array $job, array $logs): bool
+{
+    return $logs === []
+        && in_array((string) ($job['status'] ?? ''), VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true)
+        && (int) strtotime((string) ($job['updated_at'] ?? '') . ' UTC') < time() - VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS * 86400;
+}
+
+function deploy_job_log_empty_state(array $job, array $logs): string
+{
+    return deploy_job_logs_are_pruned($job, $logs) ? 'pruned' : 'empty';
+}
+
+function deploy_job_log_empty_message(string $state): string
+{
+    return $state === 'pruned'
+        ? __t('deploy.output_pruned', ['days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS])
+        : __t('deploy.no_output');
+}
+
+function deploy_job_log_raw_utc(?string $value): string
+{
+    if ($value === null || trim($value) === '') {
+        return '';
+    }
+    try {
+        return (new DateTimeImmutable($value, new DateTimeZone('UTC')))->format('Y-m-d\TH:i:s\Z');
+    } catch (Throwable) {
+        return $value;
+    }
+}
+
+/**
+ * How a stored job-log line's source is shown (Etappe 8).
+ *
+ * One helper for both readers - the server-rendered table and the poller's
+ * JSON - because the label is a statement about the transport, and two copies
+ * of it would eventually disagree about what the transport does.
+ *
+ * The statement: `stdout` and `stderr` were never two channels. The remote
+ * command redirects with `2>&1`, so the streams are merged on the Ansible host
+ * before the worker sees a byte, and a line stored as `stdout` may well have
+ * been stderr. Showing the raw value invited a filter that cannot exist. Both
+ * legacy values and the current `ansible` therefore read as one source, while
+ * the worker's own two sources stay separate: `system` is this worker
+ * narrating its steps, `worker_error` is its finding about the job.
+ */
+function deploy_job_log_source_label(string $stream): string
+{
+    if (in_array($stream, VIRTUSPHERE_DEPLOY_LOG_LEGACY_STREAMS, true)
+        || $stream === VIRTUSPHERE_DEPLOY_LOG_ANSIBLE
+    ) {
+        return __t('deploy.log_source_ansible');
+    }
+
+    return match ($stream) {
+        VIRTUSPHERE_DEPLOY_LOG_SYSTEM => __t('deploy.log_source_system'),
+        VIRTUSPHERE_DEPLOY_LOG_WORKER_ERROR => __t('deploy.log_source_worker_error'),
+        // A value from a future writer this build does not know. Shown raw
+        // rather than hidden or guessed: an unlabelled line is still evidence.
+        default => $stream,
+    };
+}

@@ -1,0 +1,97 @@
+---
+# Schaltet die VMs eines Auftrags nach der Startwartezeit ein.
+#
+# Ablauf (K4a):
+#   1. Je VM die Identitaet lesen (vm_identity_read_tasks.yml), mit
+#      `[n/total] RUN|pass|fail Start info <vm>`. Scheitert eine Abfrage auch
+#      nach drei Wiederholungen, endet der Lauf, bevor eine VM startet.
+#   2. Name und Instance-UUID aller VMs pruefen, dann StartWaitSeconds warten.
+#   3. Je VM einschalten (start_vm_power_tasks.yml), mit
+#      `[n/total] RUN|pass|fail Start <vm>`. `powered-on` ohne force ist
+#      idempotent, deshalb bekommt ein Fehlschlag bis zu drei weitere
+#      Versuche. Eine VM, die auch dann nicht startet, haelt die anderen
+#      nicht auf; der Schritt endet danach rot mit ihrer Liste.
+# Jede Wiederholung ist eine RETRY-Zeile mit der Meldung des Moduls; die
+# Pausen kommen aus EsxiRetryPauseSeconds (W1).
+- name: Starten der VMs mit Wartezeit
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ./serverlist.yml
+    - ./accounts.yml
+  environment:
+    SSL_CERT_FILE: "{{ esxi_ca_bundle_path }}"
+    REQUESTS_CA_BUNDLE: "{{ esxi_ca_bundle_path }}"
+
+  tasks:
+    - name: Ergebnisse der Identitaetsabfrage initialisieren
+      ansible.builtin.set_fact:
+        vs_identity_results: []
+        start_power_failures: []
+
+    # AN-01: the bound instance UUID addresses the VM, as the mutation below does.
+    - name: Ziel-VMs fuer die Identitaetspruefung lesen
+      ansible.builtin.include_tasks: ./vm_identity_read_tasks.yml
+      vars:
+        vs_identity_step: Start
+        vs_identity_total: "{{ vm_configurations | length }}"
+        vs_identity_datacenter: "{{ vs_identity_vm['datacenter_name'] }}"
+      loop: "{{ vm_configurations }}"
+      loop_control:
+        loop_var: vs_identity_vm
+        index_var: vs_identity_index
+        label: "{{ vs_identity_vm['vm_name'] }}"
+
+    - name: Loop-Ergebnisform der Identitaetsabfrage erhalten
+      ansible.builtin.set_fact:
+        start_identity_results:
+          results: "{{ vs_identity_results }}"
+
+    - name: Name und Instance-UUID vor dem Start validieren
+      ansible.builtin.assert:
+        that:
+          - ((item['instance'] | default({}))['hw_name'] | default('')) == ((item['item'] | default({}))['vm_name'] | default(''))
+          - >-
+            (
+              ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | trim | length > 0
+              and
+              ((item['instance'] | default({}))['instance_uuid'] | default('')) | lower
+              == ((item['item'] | default({}))['vm_instance_uuid'] | default('')) | lower
+            )
+        # AN-07: both UUIDs are named, identity fields only (no module argument).
+        fail_msg: >-
+          VirtuSphere VM identity mismatch before start for
+          {{ (item['item'] | default({}))['vm_name'] | default('unknown') }}:
+          stored instance UUID
+          {{ (item['item'] | default({}))['vm_instance_uuid'] | default('none', true) }},
+          live instance UUID
+          {{ (item['instance'] | default({}))['instance_uuid'] | default('none', true) }},
+          live VM name
+          {{ (item['instance'] | default({}))['hw_name'] | default('none', true) }}.
+      loop: "{{ start_identity_results.results | default([]) }}"
+      loop_control:
+        label: "{{ (item['item'] | default({}))['vm_name'] | default('unknown') }}"
+
+    # Sekunden, nie Minuten: der Wert kommt aus VIRTUSPHERE_START_WAIT_SECONDS_*
+    # und muss unter dem SSH-Idle-Budget des Workers bleiben. Als `minutes:`
+    # gelesen wurde daraus die Stille, die jeden full-/start-Deploy getötet hat.
+    - name: Warten vor dem Starten der VMs
+      ansible.builtin.pause:
+        seconds: "{{ StartWaitSeconds | default(300) | int }}"
+
+    - name: Vorhandene VMs nacheinander starten
+      ansible.builtin.include_tasks: ./start_vm_power_tasks.yml
+      loop: "{{ start_identity_results.results | default([]) }}"
+      loop_control:
+        loop_var: start_vm
+        index_var: start_index
+        label: "{{ (start_vm['item'] | default({}))['vm_name'] | default('unknown') }}"
+
+    # Teilweise gestartet: die genannten VMs sind aus, die anderen laufen.
+    - name: Nicht gestartete VMs als Fehler des Schritts melden
+      ansible.builtin.fail:
+        msg: >-
+          {{ start_power_failures | length }} of {{ start_identity_results.results | length }}
+          VMs did not start: {{ start_power_failures | join('; ') }}.
+          The other VMs were started.
+      when: start_power_failures | length > 0

@@ -1,0 +1,410 @@
+// TESTPLAN 3.3 / E6: the five VM actions (row + bulk + the vm_edit variant),
+// verified via DB state. MECM reset needs an imported MAC (repo rule), so every
+// seeded VM carries an interface row with one. The bulk buttons stay disabled
+// until a checkbox is ticked, which the specs exercise implicitly.
+
+const { test, expect } = require('../lib/test');
+const { ROLES } = require('../lib/auth');
+const { runPhp, phpJson } = require('../lib/php');
+
+test.use({ storageState: ROLES.admin.storageState });
+
+const PREFIX = 'e2evm-';
+
+/** Mission plus `count` VMs, each deployed/registered with an imported MAC. */
+function seedMission(name, count) {
+  return phpJson(`
+$db = db();
+$id = repo_create_mission($db, ['mission_name' => '${name}', 'hypervisor_datastorage' => 'ds1', 'hypervisor_datacenter' => 'DC1', 'domain' => 'seed.example.local'], false, null);
+$vmIds = [];
+for ($i = 1; $i <= ${Number(count)}; $i++) {
+    $vmName = 'E2EVM' . $i;
+    // The Windows hostname is unique per MISSION, and the row carries its
+    // rollout snapshot, revision and hostname claim (Etappe 14D, ADR-0043).
+    //
+    // This seed writes deploy_vms directly, so it can reach states the product
+    // cannot, and it did: every mission got a VM with hostname 'E2EVM1', which
+    // repo_save_vm refuses and migration 0050 aborts on. The first reset then
+    // claimed that name globally and the second was correctly refused, so a
+    // green product looked like a red test. A fixture has to be a state the
+    // application could actually be in.
+    $vmHost = 'E2E' . $id . 'V' . $i;   // <= 15 chars, NetBIOS-safe, unique
+    $stmt = $db->prepare("INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, mecm_rollout_hostname, mecm_rollout_revision, vm_os, lifecycle_state, mecm_sync_state, mecm_id, updated) VALUES (?, ?, ?, ?, 1, 'Win11', 'deployed', 'registered', ?, 1)");
+    $mecm = 'E2E-MECM-' . $i;
+    $stmt->bind_param('issss', $id, $vmName, $vmHost, $vmHost, $mecm);
+    $stmt->execute();
+    $vmId = (int) $db->insert_id;
+    $stmt = $db->prepare("INSERT INTO deploy_vm_hostname_claims (hostname_key, vm_id, desired_claim, rollout_claim) VALUES (?, ?, 1, 1)");
+    $claimKey = strtolower($vmHost);
+    $stmt->bind_param('si', $claimKey, $vmId);
+    $stmt->execute();
+    $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', 'WDS', ?, 'dhcp')");
+    $mac = sprintf('00:50:56:AA:BB:%02X', $vmId % 256);
+    $stmt->bind_param('is', $vmId, $mac);
+    $stmt->execute();
+    $vmIds[] = $vmId;
+}
+echo 'JSON' . json_encode(['missionId' => $id, 'vmIds' => $vmIds]) . 'JSON';
+`, ['lib/repo/missions.php']);
+}
+
+function vmRow(id) {
+  return phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT vm_name, mecm_id, mecm_sync_state, lifecycle_state, updated, updated_at, mecm_pending_since, os_install_watch_started_at FROM deploy_vms WHERE id = ? LIMIT 1');
+$id = ${Number(id)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc() ?: null) . 'JSON';
+`);
+}
+
+// Every confirmed VM action here posts to the VM list (vms.php) and redirects,
+// often back to the very URL the page is already on. waitForURL resolves at
+// once in that case, and a database read right after it races the POST. Waiting
+// for the POST response itself means the write is committed before any check.
+async function confirmAndAwaitPost(page, dialog) {
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('vms.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+}
+
+function cleanup() {
+  runPhp(`
+$db = db();
+$like = '${PREFIX}%';
+$stmt = $db->prepare('DELETE FROM deploy_vms WHERE mission_id IN (SELECT id FROM deploy_missions WHERE mission_name LIKE ?)');
+$stmt->bind_param('s', $like);
+$stmt->execute();
+$stmt = $db->prepare('DELETE FROM deploy_missions WHERE mission_name LIKE ?');
+$stmt->bind_param('s', $like);
+$stmt->execute();
+$stmt = $db->prepare('DELETE FROM deploy_os WHERE os_name LIKE ?');
+$stmt->bind_param('s', $like);
+$stmt->execute();
+echo 'CLEANED';
+`);
+}
+
+test.beforeAll(() => cleanup());
+test.afterAll(() => cleanup());
+
+function rowFor(page, vmName) {
+  return page.locator('tbody tr', { hasText: vmName }).first();
+}
+
+// e2e-covers: vms.php:reset_mecm_id
+// e2e-covers-cancel: vms.php:reset_mecm_id
+test('row MECM reset: Cancel keeps the ID, Confirm clears it and re-queues the sync', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'reset', 1);
+  const vmId = seed.vmIds[0];
+
+  await page.goto(`vms.php?mission_id=${seed.missionId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const reset = rowFor(page, 'E2EVM1').locator('form:has(input[name="action"][value="reset_mecm_id"]) button');
+
+  await reset.click();
+  await expect(dialog, 'the reset asks first').toBeVisible();
+  await expect(page.locator('[data-confirm-msg]'), 'the dialog names the VM').toContainText('E2EVM1');
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(vmId).mecm_id, 'Cancel kept the MECM ID').toBe('E2E-MECM-1');
+
+  await reset.click();
+  await expect(dialog).toBeVisible();
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
+  const after = vmRow(vmId);
+  expect(after.mecm_id, 'Confirm cleared the MECM ID').toBeNull();
+  expect(after.mecm_sync_state, 'the sync is re-queued').toBe('pending');
+});
+
+// e2e-covers: vm_edit.php:reset_mecm_id
+// e2e-covers-cancel: vm_edit.php:reset_mecm_id
+test('vm_edit MECM reset: Cancel keeps the ID, Confirm clears it and returns to the editor', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'reset-edit', 1);
+  const vmId = seed.vmIds[0];
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const reset = page.locator('form:has(input[name="action"][value="reset_mecm_id"]) button');
+
+  await reset.click();
+  await expect(dialog, 'the reset asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(vmId).mecm_id, 'Cancel kept the MECM ID').toBe('E2E-MECM-1');
+
+  await reset.click();
+  await expect(dialog).toBeVisible();
+  await confirmAndAwaitPost(page, dialog);
+  // return_to points back at the editor, so the operator keeps their context.
+  await expect(page).toHaveURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`));
+  expect(vmRow(vmId).mecm_id, 'Confirm cleared the MECM ID').toBeNull();
+});
+
+// The MECM save of a registered VM whose OS deviates (AV-R12): two buttons, the question first,
+// and a portal-only save that leaves MECM untouched. No e2e-covers marker: neither save is a
+// `name="action"` form, so the action inventory does not list it.
+test('vm_edit MECM save: a deviating OS asks first, Cancel changes nothing, portal-only keeps MECM, Confirm queues', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'mecm-save', 1);
+  const vmId = seed.vmIds[0];
+  // A registered VM whose MECM OS rule names another OS than the portal wants. updated starts at 0
+  // so the effect of each save is observable.
+  runPhp(`
+$db = db();
+$vmId = ${Number(vmId)};
+// The OS field is required and offers catalog entries only, so the portal side needs a real one.
+$os = '${PREFIX}mecm-os';
+$stmt = $db->prepare("INSERT INTO deploy_os (os_name, os_status, retired_at) VALUES (?, 'Active', NULL)");
+$stmt->bind_param('s', $os);
+$stmt->execute();
+// Every seed VM is named E2EVM1, and a save refuses a name another mission already uses.
+$stmt = $db->prepare("UPDATE deploy_vms SET mecm_sync_state = 'registered', updated = 0, vm_os = ?, vm_name = CONCAT('E2EMS', id) WHERE id = ?");
+$stmt->bind_param('si', $os, $vmId);
+$stmt->execute();
+$stmt = $db->prepare("INSERT INTO deploy_vm_mecm_rules (vm_id, collection_id, collection_name, collection_type, origin) VALUES (?, 'E2E00098', 'E2E-MECM-OS', 'os', 'created')");
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'SEEDED';
+`);
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
+  // The suite renders EN; the data attributes name the two buttons in either locale.
+  const transfer = page.locator('button[data-mecm-save-transfer]');
+  const portalOnly = page.locator('button[data-mecm-save-portal]');
+  const dialog = page.locator('[data-confirm-dialog]');
+  await expect(page.locator('[data-mecm-os-hint]'), 'the editor names the deviation').toBeVisible();
+  await expect(transfer, 'the transfer button replaces the single save').toBeVisible();
+  await expect(portalOnly).toBeVisible();
+
+  await transfer.click();
+  await expect(dialog, 'the transfer asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(vmId).updated, 'Cancel queued nothing').toBe(0);
+
+  await portalOnly.click();
+  await expect(page).toHaveURL(new RegExp(`vms\\.php\\?mission_id=${seed.missionId}`));
+  expect(vmRow(vmId).updated, 'the portal-only save leaves MECM untouched').toBe(0);
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
+  await transfer.click();
+  await expect(dialog).toBeVisible();
+  // The editor posts to itself, not to the VM list, so wait for that POST before reading the row.
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes('vm_edit.php') && r.request().method() === 'POST'),
+    dialog.locator('[data-confirm-accept]').click(),
+  ]);
+  expect(vmRow(vmId).updated, 'Confirm queued the VM for the device-sync').toBe(1);
+});
+
+// e2e-covers: vm_edit.php:restart_progress_watch
+// e2e-covers-cancel: vm_edit.php:restart_progress_watch
+test('OS observation: Cancel keeps it unset, Confirm starts only the dedicated clock', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'progress-watch', 1);
+  const vmId = seed.vmIds[0];
+  runPhp(`
+$db = db();
+$vmId = ${Number(vmId)};
+$stmt = $db->prepare("UPDATE deploy_vms SET lifecycle_state = 'os_installing', mecm_sync_state = 'registered', os_install_watch_started_at = NULL, updated_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ?");
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'SEEDED';
+`);
+  const before = vmRow(vmId);
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const observe = page.locator('form:has(input[name="action"][value="restart_progress_watch"]) button');
+  await expect(observe, 'the explicit PXE observation action is visible').toBeVisible();
+
+  await observe.click();
+  await expect(dialog, 'starting the clock asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(vmId).os_install_watch_started_at, 'Cancel left the observation unset').toBeNull();
+
+  await observe.click();
+  await expect(dialog).toBeVisible();
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(new RegExp(`vm_edit\\.php\\?mission_id=${seed.missionId}&vm_id=${vmId}`));
+  const after = vmRow(vmId);
+  expect(after.os_install_watch_started_at, 'Confirm started the dedicated observation').not.toBeNull();
+  expect(after.lifecycle_state, 'the lifecycle is display-only').toBe('os_installing');
+  expect(after.mecm_sync_state, 'the MECM state is untouched').toBe('registered');
+  expect(after.updated_at, 'observation is not a VM edit').toBe(before.updated_at);
+});
+
+// e2e-covers: vms.php:delete
+// e2e-covers-cancel: vms.php:delete
+test('row delete: Cancel keeps the VM, Confirm removes it with its interfaces', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'del', 1);
+  const vmId = seed.vmIds[0];
+
+  await page.goto(`vms.php?mission_id=${seed.missionId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  const del = rowFor(page, 'E2EVM1').locator('form:has(input[name="action"][value="delete"]) button');
+
+  await del.click();
+  await expect(dialog, 'the delete asks first').toBeVisible();
+  await expect(page.locator('[data-confirm-msg]'), 'the dialog names the VM').toContainText('E2EVM1');
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(vmId), 'Cancel left the VM in the DB').not.toBeNull();
+
+  await del.click();
+  await expect(dialog).toBeVisible();
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
+  expect(vmRow(vmId), 'Confirm deleted the VM').toBeNull();
+  const interfaces = phpJson(`
+$db = db();
+$stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_interfaces WHERE vm_id = ?');
+$id = ${Number(vmId)};
+$stmt->bind_param('i', $id);
+$stmt->execute();
+echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]) . 'JSON';
+`);
+  expect(interfaces.c, 'the interfaces cascaded').toBe(0);
+});
+
+// e2e-covers: vms.php:bulk_reset_mecm_id
+// e2e-covers-cancel: vms.php:bulk_reset_mecm_id
+test('bulk MECM reset: Cancel changes nothing, Confirm re-queues the selection', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'bulkreset', 2);
+
+  await page.goto(`vms.php?mission_id=${seed.missionId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  for (const vmId of seed.vmIds) {
+    await page.locator(`input[name="vm_ids[]"][value="${vmId}"]`).check();
+  }
+  const bulkReset = page.locator('button[name="action"][value="bulk_reset_mecm_id"]');
+  await expect(bulkReset, 'a selection enables the bulk button').toBeEnabled();
+
+  await bulkReset.click();
+  await expect(dialog, 'the bulk reset asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(seed.vmIds[0]).mecm_sync_state, 'Cancel changed nothing').toBe('registered');
+  expect(vmRow(seed.vmIds[1]).mecm_sync_state, 'Cancel changed nothing').toBe('registered');
+
+  await bulkReset.click();
+  await expect(dialog).toBeVisible();
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
+  for (const vmId of seed.vmIds) {
+    const after = vmRow(vmId);
+    expect(after.mecm_id, 'the MECM ID is cleared').toBeNull();
+    expect(after.mecm_sync_state, 'the sync is re-queued').toBe('pending');
+  }
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'the exact bulk scope is named').toContainText('2 of 2');
+  await expect(outcome, 'the message does not claim an MECM deletion').toContainText(/were not deleted/i);
+  await expect(outcome.locator('.alert-actions a'), 'the next read path is the MECM status').toHaveAttribute('href', 'system_status.php#mecm');
+});
+
+test('partial bulk MECM reset is a warning with processed, selected and skipped scope', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'bulkpartial', 2);
+  runPhp(`
+$db = db();
+$vm = ${Number(seed.vmIds[1])};
+$stmt = $db->prepare("UPDATE deploy_interfaces SET mac = '' WHERE vm_id = ?");
+$stmt->bind_param('i', $vm);
+$stmt->execute();
+echo 'READY';
+`);
+
+  await page.goto(`vms.php?mission_id=${seed.missionId}`);
+  for (const vmId of seed.vmIds) {
+    await page.locator(`input[name="vm_ids[]"][value="${vmId}"]`).check();
+  }
+  await page.locator('button[name="action"][value="bulk_reset_mecm_id"]').click();
+  const dialog = page.locator('[data-confirm-dialog]');
+  await expect(dialog).toBeVisible();
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
+
+  const outcome = page.locator('.alert-warning').first();
+  await expect(outcome, 'a skipped VM prevents an all-success signal').toBeVisible();
+  await expect(outcome).toContainText('1 of 2');
+  await expect(outcome).toContainText(/1 skipped/i);
+  await expect(outcome).toContainText(/no imported MAC/i);
+});
+
+// e2e-covers: vms.php:bulk_delete
+// e2e-covers-cancel: vms.php:bulk_delete
+test('bulk delete: Cancel changes nothing, Confirm removes the selection', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'bulkdel', 2);
+
+  await page.goto(`vms.php?mission_id=${seed.missionId}`);
+  const dialog = page.locator('[data-confirm-dialog]');
+  // The other bulk test ticks rows one by one; this one proves the select-all
+  // header checkbox and the live counter.
+  await page.locator('input[data-bulk-all]').check();
+  await expect(page.locator('[data-bulk-count]'), 'the counter follows the selection').toHaveText('2');
+  const bulkDelete = page.locator('button[name="action"][value="bulk_delete"]');
+  await expect(bulkDelete, 'a selection enables the bulk button').toBeEnabled();
+
+  await bulkDelete.click();
+  await expect(dialog, 'the bulk delete asks first').toBeVisible();
+  await dialog.locator('button[value="cancel"]').click();
+  await expect(dialog).toBeHidden();
+  expect(vmRow(seed.vmIds[0]), 'Cancel left the VMs in the DB').not.toBeNull();
+  expect(vmRow(seed.vmIds[1]), 'Cancel left the VMs in the DB').not.toBeNull();
+
+  await bulkDelete.click();
+  await expect(dialog).toBeVisible();
+  await confirmAndAwaitPost(page, dialog);
+  await expect(page).toHaveURL(/vms\.php/);
+  expect(vmRow(seed.vmIds[0]), 'Confirm deleted the selection').toBeNull();
+  expect(vmRow(seed.vmIds[1]), 'Confirm deleted the selection').toBeNull();
+  const outcome = page.locator('.alert-success').first();
+  await expect(outcome, 'the exact deletion scope is named').toContainText('2 of 2');
+  await expect(outcome, 'portal deletion is not presented as a hypervisor change').toContainText(/No VM was deleted on the hypervisor/i);
+});
+
+// The list derives the phase and the worst finding from stored evidence (no action, so no e2e-covers marker).
+test('VM list shows the derived phase and the worst finding with its link', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'phase', 2);
+  const vm2 = seed.vmIds[1];
+  // Three hours of MECM wait: past the two-hour clock, so the overdue wait is the worst finding of VM 2.
+  // The clock is written in UTC, because the portal reads the stored timestamp as UTC.
+  runPhp(`
+$db = db();
+$vmId = ${Number(vm2)};
+$stmt = $db->prepare("UPDATE deploy_vms SET lifecycle_state = 'deployed', mecm_sync_state = 'pending', mecm_pending_since = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 3 HOUR) WHERE id = ?");
+$stmt->bind_param('i', $vmId);
+$stmt->execute();
+echo 'SEEDED';
+`);
+
+  await page.goto(`vms.php?mission_id=${seed.missionId}`);
+
+  const header = page.locator('thead');
+  await expect(header, 'the phase column is named').toContainText(/Phase/);
+  await expect(header, 'the finding column is named').toContainText(/Befund|Finding/);
+
+  // The phase is a badge; the raw x/5 value stays visible as the tooltip of its span.
+  const phaseBadge = rowFor(page, 'E2EVM1').locator('.badge', { hasText: /Handed to MECM|An MECM übergeben/ });
+  await expect(phaseBadge, 'VM 1 is handed to MECM').toHaveCount(1);
+  await expect(
+    phaseBadge.locator('xpath=ancestor-or-self::span[@title][1]'),
+    'the raw value is the tooltip of the phase'
+  ).toHaveAttribute('title', /2\/5 Registered/);
+
+  // The worst finding of VM 2 is the overdue MECM wait, and it links to the MECM status.
+  // SP4 R3 (F7): the badge shows the short form, the tooltip keeps the full sentence.
+  const overdue = rowFor(page, 'E2EVM2').locator('a[href*="system_status.php#mecm"]', { hasText: /MECM overdue|MECM überfällig/ });
+  await expect(overdue, 'the overdue wait links to the MECM status').toHaveCount(1);
+  await expect(overdue).toHaveAttribute('href', /system_status\.php#mecm/);
+  await expect(overdue, 'the full sentence is the tooltip').toHaveAttribute('title', /longer than 2 h|länger als 2 h/);
+  await expect(overdue.locator('.badge'), 'the badge is the short form, not the sentence').not.toContainText(/longer than|länger als/);
+
+  // VM 1 has no finding, so its row links nowhere.
+  await expect(
+    rowFor(page, 'E2EVM1').locator('a[href*="system_status.php#mecm"]'),
+    'a VM without a finding links to nothing'
+  ).toHaveCount(0);
+});
