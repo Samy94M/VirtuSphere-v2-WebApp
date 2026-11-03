@@ -88,10 +88,10 @@ Bringt zusätzliche Datenträger online und richtet leere ein. Ohne zusätzliche
 flowchart TD
     lock{"Sperre des Datenträgerlaufs frei?"} -->|nein| failed_lock["disks failed, Exit 1"]
     lock -->|ja| running["disks started, Status Running"]
-    running --> blockers{"Ein Datenträger unsicher: Boot oder System, schreibgeschützt, Cluster, ohne stabile Identität, mehrdeutig, oder ein offenes Journal passt nicht?"}
+    running --> blockers{"Ein Datenträger unsicher: Boot oder System, Cluster, ohne stabile Identität, mehrdeutig, oder ein offenes Journal passt nicht?"}
     blockers -->|ja| failed_block["Status Error, disks failed, Exit 1; nichts formatiert"]
     blockers -->|nein| resume["Offene eigene Vorgänge fortsetzen"]
-    resume --> offline["Offline und leer: Vorgang anlegen, online, GPT, Partition, NTFS. Offline mit Daten: nur online schalten"]
+    resume --> offline["Schreibschutz der SAN-Richtlinie aufheben. Offline und leer: Vorgang anlegen, online, GPT, Partition, NTFS. Offline mit Daten: nur online schalten"]
     offline --> success["Status Success mit Zählern, disks finished, Exit 0"]
     offline -.->|Fehler| failed_run["Status Error, disks failed, Exit 1; ein abgebrochener Lauf hinterlässt Error statt Running"]
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;

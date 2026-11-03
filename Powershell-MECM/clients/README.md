@@ -209,8 +209,11 @@ sowie einmal die Erholung. Daraus entstehen keine weiteren Portalaufrufe.
   befindlicher Platte fortgesetzt. Das Skript liest nach Online, GPT,
   Partition, Laufwerksbuchstabe und NTFS-Volume jeweils den tatsächlichen Stand
   nach. Unbekannte online-RAW-Platten, mehrdeutige Identitäten, abweichende
-  Größen, fremde Partitionen sowie Boot-/System-, schreibgeschützte, Cluster-
-  und größenlose Platten blockieren die Phase ohne Formatierung. Nur wenn weder
+  Größen, fremde Partitionen sowie Boot-/System-, Cluster- und größenlose
+  Platten blockieren die Phase ohne Formatierung. Windows Server legt neue
+  VMDKs nach seiner SAN-Richtlinie (`OfflineShared`, `OfflineAll`) offline und
+  schreibgeschützt an; das Skript hebt den Schreibschutz einer solchen
+  Offline-Platte vor dem Onlineschalten auf und liest ihn danach nach. Nur wenn weder
   eine offene eigene Operation noch eine optionale Zusatzplatte existiert, ist
   `optional: no disk work required` ein erfolgreicher Leerlauf. Ein exklusiver
   Prozesslock verhindert zwei parallele Storage-Läufe.

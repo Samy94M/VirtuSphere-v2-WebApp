@@ -126,13 +126,30 @@ function Set-DiskOperationState {
 }
 
 function Assert-DiskIsSafeTarget {
+    # Schreibschutz ist hier kein Blocker: Unter der SAN-Richtlinie von Windows
+    # Server (OfflineShared, OfflineAll) erscheint jede neue VMDK offline UND
+    # schreibgeschuetzt. Clear-DiskReadOnly hebt ihn vor dem ersten Write auf.
     param([Parameter(Mandatory)][object]$Disk)
     if ([bool]$Disk.IsBoot -or [bool]$Disk.IsSystem) { throw "Datentraeger $($Disk.Number) ist Boot/System-Datentraeger." }
-    if ([bool]$Disk.IsReadOnly) { throw "Datentraeger $($Disk.Number) ist schreibgeschuetzt." }
     if ($Disk.PSObject.Properties.Name -contains 'IsClustered' -and [bool]$Disk.IsClustered) {
         throw "Datentraeger $($Disk.Number) ist als gemeinsam/Cluster-Datentraeger markiert."
     }
     if ([long]$Disk.Size -le 0) { throw "Datentraeger $($Disk.Number) meldet Groesse 0." }
+}
+
+function Clear-DiskReadOnly {
+    # IsReadOnly und IsOffline liegen in getrennten Set-Disk-Parametersaetzen und
+    # brauchen zwei Aufrufe. Reihenfolge nach Microsoft/VMware: erst Schreibschutz
+    # aufheben, dann online schalten; die GPT-Initialisierung verlangt read-write.
+    # Der Aufrufer liest den Datentraeger danach selbst neu.
+    param([Parameter(Mandatory)][object]$Disk)
+    if (-not [bool]$Disk.IsReadOnly) { return }
+    Set-Disk -Number ([int]$Disk.Number) -IsReadOnly $false -ErrorAction Stop
+    $after = Get-Disk -Number ([int]$Disk.Number) -ErrorAction Stop
+    if ([bool]$after.IsReadOnly) {
+        throw "Datentraeger $($Disk.Number) ist nach Set-Disk weiterhin schreibgeschuetzt."
+    }
+    Write-VsClientLog "Schreibschutz von Datentraeger $($Disk.Number) aufgehoben (SAN-Richtlinie)."
 }
 
 function Get-OwnedDataPartition {
@@ -165,6 +182,8 @@ function Invoke-OwnedRawDiskOperation {
     param([Parameter(Mandatory)][object]$Operation, [Parameter(Mandatory)][object]$Disk)
 
     Confirm-OperationDisk -Operation $Operation -Disk $Disk
+    Clear-DiskReadOnly -Disk $Disk
+    $Disk = Get-Disk -Number ([int]$Disk.Number) -ErrorAction Stop
     if ([string]$Disk.OperationalStatus -eq 'Offline') {
         $Disk | Set-Disk -IsOffline $false -ErrorAction Stop
     }
@@ -173,6 +192,9 @@ function Invoke-OwnedRawDiskOperation {
     if ([string]$Disk.OperationalStatus -eq 'Offline') {
         throw "Datentraeger $($Disk.Number) ist nach Set-Disk weiterhin offline (Status $($Disk.OperationalStatus))."
     }
+    # Manche Treiber melden den Schreibschutz erst nach dem Onlineschalten erneut.
+    Clear-DiskReadOnly -Disk $Disk
+    $Disk = Get-Disk -Number ([int]$Disk.Number) -ErrorAction Stop
     Set-DiskOperationState -Operation $Operation -State 'online'
 
     if ([string]$Disk.PartitionStyle -eq 'RAW') {
@@ -214,7 +236,7 @@ function Invoke-OwnedRawDiskOperation {
     Confirm-OperationDisk -Operation $Operation -Disk $Disk
     $verifiedPartition = Get-Partition -DiskNumber ([int]$Disk.Number) -PartitionNumber ([int]$partition.PartitionNumber) -ErrorAction Stop
     $verifiedVolume = Get-Volume -Partition $verifiedPartition -ErrorAction Stop
-    if ([string]$Disk.PartitionStyle -ne 'GPT' -or -not $verifiedPartition.DriveLetter -or
+    if ([string]$Disk.PartitionStyle -ne 'GPT' -or [bool]$Disk.IsReadOnly -or -not $verifiedPartition.DriveLetter -or
         [string]$verifiedVolume.FileSystem -ne 'NTFS' -or [string]$verifiedVolume.FileSystemLabel -cne [string]$Operation.Label) {
         throw "Abschlusspruefung von Datentraeger $($Disk.Number) ist fehlgeschlagen."
     }
@@ -312,11 +334,15 @@ try {
             Invoke-OwnedRawDiskOperation -Operation $operation -Disk $disk
             $created++
         } else {
+            # Schreibschutz vor dem Onlineschalten aufheben, sonst werden die
+            # vorhandenen Volumes schreibgeschuetzt eingehaengt.
+            Clear-DiskReadOnly -Disk $disk
             $disk | Set-Disk -IsOffline $false -ErrorAction Stop
             $after = Get-Disk -Number ([int]$disk.Number) -ErrorAction Stop
             if ([string]$after.OperationalStatus -eq 'Offline') {
                 throw "Datentraeger $($disk.Number) ist nach Set-Disk weiterhin offline (Status $($after.OperationalStatus))."
             }
+            Clear-DiskReadOnly -Disk $after
             Write-VsClientLog "Datentraeger $($disk.Number) online (bestehende Daten erhalten)."
             $existing++
         }

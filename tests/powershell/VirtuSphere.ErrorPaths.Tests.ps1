@@ -1367,6 +1367,79 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         $text | Should -Match 'optional: no disk work required'
     }
 
+    # PS-15: Unter der SAN-Richtlinie von Windows Server (OfflineShared,
+    # OfflineAll) erscheint eine neue VMDK offline UND schreibgeschuetzt. Die
+    # Phase blockierte daran dauerhaft. Schreibschutz ist kein Blocker mehr,
+    # sondern wird vor dem Onlineschalten aufgehoben und nachgelesen.
+    It 'Set-VMDisksOnline hebt den Schreibschutz vor dem Onlineschalten auf (PS-15)' {
+        $text = Get-ClientText -Name 'client_VMDisksOnline.ps1'
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+        @($errors).Count | Should -Be 0
+        $assert = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Assert-DiskIsSafeTarget' }, $true)
+        $assert.Body.Extent.Text | Should -Not -Match 'IsReadOnly\)\s*\{\s*throw'
+
+        foreach ($anchor in @('Invoke-OwnedRawDiskOperation', 'bestehende Daten erhalten')) {
+            $scope = if ($anchor -eq 'Invoke-OwnedRawDiskOperation') {
+                $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $anchor }, $true).Body.Extent.Text
+            } else {
+                $end = $text.IndexOf($anchor)
+                $text.Substring(0, $end).Substring($text.Substring(0, $end).LastIndexOf('} else {'))
+            }
+            $clear = $scope.IndexOf('Clear-DiskReadOnly -Disk')
+            $online = $scope.IndexOf('Set-Disk -IsOffline $false')
+            $clear | Should -BeGreaterThan -1 -Because "$anchor hebt den Schreibschutz auf"
+            $online | Should -BeGreaterThan $clear -Because "$anchor hebt den Schreibschutz vor dem Onlineschalten auf"
+            $scope.IndexOf('Clear-DiskReadOnly -Disk', $online) | Should -BeGreaterThan $online -Because "$anchor prueft nach dem Onlineschalten erneut"
+        }
+        $text | Should -Match "PartitionStyle -ne 'GPT' -or \[bool\]\`$Disk\.IsReadOnly"
+    }
+
+    Context 'Clear-DiskReadOnly (PS-15)' {
+        BeforeAll {
+            $text = Get-ClientText -Name 'client_VMDisksOnline.ps1'
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+            foreach ($name in @('Clear-DiskReadOnly', 'Assert-DiskIsSafeTarget')) {
+                $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
+                . ([scriptblock]::Create($fn.Extent.Text))
+            }
+            # Stubs, damit Mock auch ohne Storage-Modul (Linux-pwsh) greift.
+            function Set-Disk { param($Number, $IsReadOnly, $ErrorAction) }
+            function Get-Disk { param($Number, $ErrorAction) }
+            function Write-VsClientLog { param([Parameter(ValueFromRemainingArguments)]$Rest) }
+        }
+
+        It 'laesst eine beschreibbare Platte unberuehrt' {
+            Mock Set-Disk {}
+            Mock Get-Disk {}
+            Clear-DiskReadOnly -Disk ([pscustomobject]@{ Number = 1; IsReadOnly = $false })
+            Should -Invoke Set-Disk -Times 0 -Exactly
+        }
+
+        It 'hebt den Schreibschutz auf und liest nach' {
+            Mock Set-Disk {}
+            Mock Get-Disk { [pscustomobject]@{ Number = 1; IsReadOnly = $false } }
+            Clear-DiskReadOnly -Disk ([pscustomobject]@{ Number = 1; IsReadOnly = $true })
+            Should -Invoke Set-Disk -Times 1 -Exactly -ParameterFilter { $Number -eq 1 -and $IsReadOnly -eq $false }
+            Should -Invoke Get-Disk -Times 1 -Exactly -ParameterFilter { $Number -eq 1 }
+        }
+
+        It 'bricht ab, wenn der Schreibschutz bleibt' {
+            Mock Set-Disk {}
+            Mock Get-Disk { [pscustomobject]@{ Number = 1; IsReadOnly = $true } }
+            { Clear-DiskReadOnly -Disk ([pscustomobject]@{ Number = 1; IsReadOnly = $true }) } |
+                Should -Throw '*weiterhin schreibgeschuetzt*'
+        }
+
+        It 'Assert-DiskIsSafeTarget blockiert Schreibschutz nicht mehr, Boot/System weiterhin' {
+            { Assert-DiskIsSafeTarget -Disk ([pscustomobject]@{ Number = 1; IsReadOnly = $true; IsBoot = $false; IsSystem = $false; Size = 53687091200 }) } |
+                Should -Not -Throw
+            { Assert-DiskIsSafeTarget -Disk ([pscustomobject]@{ Number = 0; IsReadOnly = $false; IsBoot = $true; IsSystem = $true; Size = 42949672960 }) } |
+                Should -Throw '*Boot/System*'
+        }
+    }
+
     It 'client_staticip wertet null konfigurierte Adapter als Fehlschlag' {
         $text = Get-ClientText -Name 'client_staticip.ps1'
         $text | Should -Match '\$success = \(\$failed -eq 0 -and \$applied -eq \$targets\.Count -and \$targets\.Count -gt 0\)'
