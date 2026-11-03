@@ -4,6 +4,10 @@ Ab dem ersten Release gliedert sich dieses Changelog nach Release-Nummern (`JJJJ
 
 ## Noch in keinem Release
 
+## 2026.11.2 (03.11.2026)
+
+Update vom Prod-Stand `c89c01f` (gemessen am 02.11.2026) oder von 2026.10.3 (`41ee82a5`). 2026.11.1 (`bc325bc3`) wurde nie ausgeliefert und kommt vollständig mit, ab `c89c01f` außerdem alles aus 2026.10.1 bis 2026.10.3 (Abschnitte unten). Die Update-Angaben von 2026.11.1 gelten unverändert: Migrationen 0065 bis 0071 ab `c89c01f`, 0066 bis 0071 ab 2026.10.3, Klasse C 0065 bis 0068 und 0070, deshalb vorher Backup mit grünem Drill; keine neuen `.env`-Schlüssel; neue Images und Compose-Änderung nur ab `c89c01f`; MECM-Serverupdate per `-Upgrade -ServerOnly`. Seit 2026.11.1 ändern sich nur Tests, der Runner des Bildvergleichs und das Clientskript `client_VMDisksOnline.ps1`; dieses erreicht die VMs erst mit einem neuen Clientpaket, der Client-Installer bleibt gesperrt.
+
 - **Die Datenträgerphase richtet neue VMDKs auch auf Windows Server ein (03.11.2026).** Windows Server legt eine zusätzliche VMDK nach seiner SAN-Richtlinie (`OfflineShared`, `OfflineAll`) offline und schreibgeschützt an. `client_VMDisksOnline` brach daran bei jedem Lauf mit „Datenträger 1 ist schreibgeschützt“ ab, die Platte blieb offline und unformatiert. Jetzt hebt die Phase den Schreibschutz einer Offline-Datenplatte vor dem Onlineschalten auf, liest ihn danach nach und richtet die Platte wie bisher ein; bleibt er bestehen, scheitert die Phase mit dieser Meldung. Boot-/System-, Cluster- und größenlose Platten sowie unbekannte online-RAW-Platten blockieren weiter. Wirkt erst mit einem neuen Clientpaket; keine Migration (PS-15, Teil Schreibschutz).
 
 ## 2026.11.1 (02.11.2026)
