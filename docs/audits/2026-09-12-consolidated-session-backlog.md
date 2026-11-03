@@ -3023,7 +3023,7 @@ Cloud-Session, Branch `claude/da1-drift-2026-11-03` auf `be281a17` (Schnappschus
 **Driftfunde, bewusst offen gelassen**
 
 - `Docker/php/Dockerfile:30-33` Kommentar „PHP 8.4.26“ gegen CHANGELOG 8.4.27: nicht prüfbar ohne Docker; Koordination prüft `docker image inspect` am Digest. Nicht geändert, damit 2026.11.3 kein Dockerfile ändert.
-- `.env.example:23-24` `ANSIBLE_SOURCE_DIR` und `VIRTUSPHERE_DEPLOY_WORKDIR` wirken nicht, `docker-compose.yml:158-160` setzt beide fest. Nicht geändert (Vorlage, Runbook-Wächter `check-doc-semantics.sh` Regel 12).
+- `.env.example` enthielt `ANSIBLE_SOURCE_DIR` und `VIRTUSPHERE_DEPLOY_WORKDIR`, die nicht wirken, weil `docker-compose.yml:116,161-163` beide fest setzt. Auf Nutzerwunsch (03.11.2026, wörtlich „2 ja darfst du“) aus der Vorlage genommen, CHANGELOG-Eintrag unter „Noch in keinem Release“; eine bestehende `.env` bleibt gültig. `Docker/qa/qa.env:20-21` (OV1) nicht angefasst.
 - `help_system_status.php` `system_status_identity_4` nennt „Ab Skript device-sync/2.1 … ältere Version“: beschreibt einen gemischten MECM-Serverstand, bleibt bis zum Serverupdate handlungsrelevant; Datei gehört MX1.
 - `upgrade-recovery.md:89,156` („jetzt auch gültig“, „in jedem bisherigen Release“): Migrationsbeschreibung, Datei gehört MX1, nicht angefasst.
 - `help_deploy.php:21`, `help_missions.php:79`, `lang/de/*.php` PHP-Kommentare mit „Etappe“: für Bediener unsichtbar, nicht angefasst.
