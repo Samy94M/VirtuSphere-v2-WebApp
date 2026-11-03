@@ -14,7 +14,7 @@ Der Stufenwert x/5 (`vm_status`) ist das Wire-Feld der MECM-Schnittstelle. Er ha
 
 ### Phasen
 
-Die Spalte „Phase“ in VM-Liste, VM-Übersicht und VM-Editor wird beim Lesen abgeleitet und nie gespeichert oder übertragen. Geprüft wird von oben nach unten; es gilt die erste Phase, deren Beleg vorliegt. Ein fehlgeschlagener Auftrag setzt die Phase nicht zurück, sondern erscheint als Befund.
+Die Phase (Spalte in VM-Liste und VM-Übersicht, Abzeichen im VM-Editor) wird beim Lesen abgeleitet und nie gespeichert oder übertragen. Geprüft wird von oben nach unten; es gilt die erste Phase, deren Beleg vorliegt. Ein fehlgeschlagener Auftrag setzt die Phase nicht zurück, sondern erscheint als Befund.
 
 | Phase | Gilt, wenn | Stufenwert auf der Leitung |
 |---|---|---|
@@ -60,7 +60,7 @@ Die Spalte „Phase“ in VM-Liste, VM-Übersicht und VM-Editor wird beim Lesen 
 
 - **MOID:** Managed Object ID; aktueller Griff eines vSphere-Inventarobjekts. Sie kann sich bei erneuter Registrierung ändern und ist allein kein dauerhafter Identitätsbeweis.
 - **Instance-UUID:** dauerhafte VM-Identität, die vor jeder ESXi-Mutation zusammen mit dem Namen geprüft wird.
-- **Adoption (VM):** frühere, ausdrücklich bestätigte Übernahme einer vorhandenen VM-Identität. Seit WM-E2a zurückgebaut; eine namensgleiche fremde VM blockiert, alte Auditzeilen bleiben lesbar.
+- **Adoption (VM):** ausdrücklich bestätigte Übernahme einer vorhandenen VM-Identität. Das Portal bietet sie nicht an; eine namensgleiche fremde VM blockiert, alte Auditzeilen dazu bleiben lesbar.
 - **Korrelations-ID:** durchgängige Kennung für eine Portal-Anfrage oder einen Auftrag. Sie verbindet Fehlermeldung, Auftragsprotokoll, Maschinenrückruf und Auditzeile.
 - **Trust-Modus `strict`:** ESXi-Zertifikat wird gegen ein CA-Bundle oder ein hinterlegtes Serverzertifikat geprüft.
 - **Trust-Modus `legacy_insecure`:** Zertifikatsprüfung ist ausdrücklich abgeschaltet. Der Modus ist für sichtbare Bestandsmigration gedacht, nicht als stiller Fallback.

@@ -23,7 +23,7 @@ docker compose logs -f deploy-worker maintenance-worker
 
 nginx schreibt Access- und Error-Zeilen für HTTP und generiertes HTTPS direkt in
 stdout/stderr. Es gibt keinen Bind-Mount nach `/var/log/nginx` und keine Dateien
-unter `Docker/logs/nginx` mehr. Dadurch kann eine fehlende Host-Schreibberechtigung
+unter `Docker/logs/nginx`. Dadurch kann eine fehlende Host-Schreibberechtigung
 den Webserver nicht am Start hindern; Rotation und Aufbewahrung haben denselben
 Owner wie die übrigen Containerstreams.
 
@@ -31,8 +31,8 @@ Persistente Anwendungsdiagnose bleibt davon getrennt:
 
 - `Docker/WebAPI/logs/error.log`: globaler PHP-Fehlerhandler mit Referenz-ID
 - `Docker/WebAPI/logs/php-error.log`: PHP-Engine-Fehler
-- `Docker/WebAPI/logs/error-storm.json`: Zähler des Stau-Schutzes für `error.log` (LG-16)
-- `Docker/WebAPI/logs/health-*.flag`: Ausfallmarker des Health-Endpunkts (LG-15)
+- `Docker/WebAPI/logs/error-storm.json`: Zähler des Stau-Schutzes für `error.log`
+- `Docker/WebAPI/logs/health-*.flag`: Ausfallmarker des Health-Endpunkts
 
 Ein fataler Fehler landet bewusst in zwei Kanälen. `php-error.log` ist die Zeile
 der PHP-Engine und entsteht auch dann, wenn der Fehlerhandler nicht mehr läuft; sie

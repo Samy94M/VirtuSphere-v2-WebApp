@@ -17,7 +17,7 @@ VirtuSphere rendert das Portal in PHP, speichert Aufträge in MySQL und lässt d
 ## Gemeinsame Legende
 
 <!-- flow-node-limit: 12 -->
-Neue Detaildiagramme enthalten höchstens zwölf Knoten; größere Abläufe werden in verlinkte Teilabläufe aufgeteilt. Der Vertrauenswächter liest die Grenze hier und prüft den neuen SSH-/SFTP-Ablauf. Die bestehenden Diagramme werden mit ihrem jeweiligen Paket abgeglichen.
+Neue Detaildiagramme enthalten höchstens zwölf Knoten; größere Abläufe werden in verlinkte Teilabläufe aufgeteilt. Der Vertrauenswächter liest die Grenze hier und prüft den neuen SSH-/SFTP-Ablauf. Ältere Diagramme können die Grenze noch überschreiten.
 
 Für neue Diagramme: Rechteck `step` = Arbeit/Beobachtung; Raute `decision` = Prüfung; Rechteck `blocked` = Abbruch/Sperre. Farben: `step` Hintergrund `#eef2ff`, Rand `#475569`; `decision` Hintergrund `#fff7ed`, Rand `#9a3412`; `blocked` Hintergrund `#fef2f2`, Rand `#b91c1c`; Text jeweils `#0f172a`. Die Vertrauensprüfung zeichnet nur diesen Teilablauf. Andere Dokumente verlinken ihn, statt eine zweite SSH-Anmeldelogik zu zeichnen.
 

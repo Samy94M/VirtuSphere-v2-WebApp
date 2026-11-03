@@ -404,8 +404,8 @@ Bindet der Webserver an eine LAN-Adresse, antwortet `localhost` nicht
 3. Einen lesenden Integrationsweg auslösen: ESXi „Inventarabruf starten“ je
    Zugang, beim Ansible-Zugang „Verbindung und Umgebung prüfen“.
 4. **Einstellungen > Version** ansehen: Das Portal nennt die Nummer des neuen
-   Release, die Datenbank „passt“. Die MECM-Zeilen passen erst nach Schritt 4, die
-   Ansible-Zeile nach dem Test aus Punkt 3.
+   Release, die Datenbank „passt“. Die MECM-Zeilen passen erst nach Schritt 4 und dem
+   nächsten Lauf jeder MECM-Aufgabe, die Ansible-Zeile nach dem Test aus Punkt 3.
 5. Erst danach unter **Systemstatus > Bereitstellungsdienst** „Fortsetzen“.
 6. Ein Backup mit dem neuen Skript: `sudo sh scripts/backup.sh`.
 

@@ -35,7 +35,7 @@ flowchart TD
 |---|---|---|
 | Neu, ohne Pin | Nur Handshake zur Anzeige von Fingerprint und Typ; kein Login | Admin vergleicht unabhängig auf dem Host und bestätigt ausdrücklich |
 | Typ, Host oder Port geändert | Pin, Beobachtung, Bestätigung und Upgrade-Ausnahme zurückgesetzt; kein Login | Das neue Ziel unabhängig prüfen und ausdrücklich bestätigen |
-| Bestehend nach Upgrade, noch ohne Pin | Erste Beobachtung wird vor Login atomar samt Audit angeheftet | Bis zur Bestätigung steht „vorläufig angeheftet, bitte bestätigen“ |
+| Mit Upgrade-Ausnahme, noch ohne Pin | Erste Beobachtung wird vor Login atomar samt Audit angeheftet | Bis zur Bestätigung steht „vorläufig angeheftet, bitte bestätigen“ |
 | Vorläufig oder bestätigt, gleicher Schlüssel | Login erlaubt | Bestätigung eines unveränderten Pins entwertet den bisherigen Volltest nicht |
 | Vorläufig oder bestätigt, anderer Schlüssel | Vor Login gesperrt; Beobachtung sichtbar, Pin bleibt erhalten | Einen legitimen Wechsel unabhängig prüfen und ausdrücklich bestätigen |
 | Wiederanmeldung auf demselben Verbindungsobjekt | Vor Login gesperrt, weil phpseclib die Signaturprüfung auf diesem Objekt zwischenspeichert | Jeder externe Verbindungsaufbau verwendet ein frisches Guard-Objekt; kein automatischer Wiederholungsversuch |
