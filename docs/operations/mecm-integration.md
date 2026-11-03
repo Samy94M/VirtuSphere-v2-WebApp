@@ -1281,7 +1281,8 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 |---|---|---|
 | 0 Devices von der WebApp | Leerlauf-Abkürzung, keine MECM-Abfragen | still |
 | Gesperrte VM (dauerhafte Ursache: Mission, MAC, Identität, Collection, Provenienz) | bleibt in der Warteschlange; neu geprüft nur bei geänderter Portalzeile oder alle 5 Minuten, ist keine VM fällig, unterbleibt die MECM-Inventur. Die Ursache bleibt im Lauf-Report | ERROR nur beim Wechsel des Sperrgrunds; unverändert INFO „Weiterhin gesperrt" im 5-Minuten-Takt |
-| VM ohne Mission / ohne PXE-MAC (keine Karte mit MAC auf der WDS-Portgruppe der Mission) | übersprungen, nächste VM; Ursache `mac_missing` | WARN |
+| VM ohne Mission | übersprungen, nächste VM; Ursache `mission_missing` | WARN |
+| VM ohne PXE-MAC (keine Karte mit MAC auf der WDS-Portgruppe der Mission) | übersprungen, nächste VM; Ursache `mac_missing` | WARN |
 | Rolloutname ungültig (`device_name_invalid`) | kein Import; im VM-Editor korrigieren | ERROR |
 | Name mit fremder MAC oder MAC mit fremdem Namen (`mac_conflict`) | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „Identitaet nicht aufloesbar" |
 | Gebundene ResourceID fehlt in MECM (`resource_id_missing`) | blockiert; kein Ersatzdatensatz wird adoptiert. „MECM-ID zurücksetzen" | ERROR |
@@ -1483,9 +1484,10 @@ Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
 **VM taucht nicht in MECM auf**
 1. *Systemstatus* prüfen: läuft „MECM Device-Sync"? Wenn rot → Aufgabenplanung
    auf dem MECM-Server, Task „VirtuSphere MECM Devices Sync" starten.
-2. Hat die VM eine MAC? Im Portal an der VM prüfen; ohne DHCP-MAC überspringt
-   der Sync sie (der Ansible-MAC-Import muss vorher gelaufen sein). Maßgeblich
-   ist die Netzwerkkarte auf der WDS-Portgruppe der Mission, nicht die DHCP-Karte.
+2. Hat die VM eine MAC? Im Portal an der VM prüfen: Maßgeblich ist genau eine
+   Netzwerkkarte auf der WDS-Portgruppe der Mission, nicht die DHCP-Karte. Ohne
+   ihre MAC überspringt der Sync die VM (der Ansible-MAC-Import muss vorher
+   gelaufen sein); mehrere Karten dort ergeben `pxe_nic_ambiguous`.
 3. Gehört die VM zu einer Mission (nicht Template)? Templates werden bewusst
    nicht synchronisiert.
 4. Log auf dem MECM-Server: `%ProgramFiles%\VirtuSphere\Logs\<datum>_device-sync.log`.
