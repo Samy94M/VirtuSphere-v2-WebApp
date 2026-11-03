@@ -47,14 +47,16 @@ flowchart TD
   S --> Q["Warteschlange holen (getDeviceList): neue VMs und zur Übertragung markierte"]
   Q --> QE{"Warteschlange leer?"}
   QE -->|ja| R
-  QE -->|nein| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; je Task Sequence eine Collection anlegen"]
+  QE -->|nein| DUE{"Eine VM fällig? Gesperrte VMs nur bei geänderter Portalzeile oder nach dem Wiederholungstakt $script:VsDeviceRecheckSeconds"}
+  DUE -->|nein| DUE1["Keine MECM-Abfrage; die Ursachen der gesperrten VMs gehen in den Laufbericht"] --> R
+  DUE -->|ja| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; je Task Sequence eine Collection anlegen"]
   M --> V
   subgraph JE["Je VM in der Warteschlange"]
     V{"Mission und genau eine Netzwerkkarte auf der WDS-Portgruppe mit MAC?"}
-    V -->|nein| V1["VM übersprungen, bleibt in der Warteschlange; gesperrt: Prüfung nur bei geänderter Portalzeile oder alle 5 Minuten"]
+    V -->|nein| V1["VM übersprungen, bleibt in der Warteschlange und gilt als gesperrt"]
     V -->|ja| MC["Mission-Collection anlegen, falls sie fehlt"]
     MC --> ID{"Identität eindeutig? (Rolloutname, PXE-MAC, ResourceID; eine gebundene ResourceID passt auf jede Portal-MAC der VM)"}
-    ID -->|nein| ID1["Keine Änderung, VM bleibt mit Ursache in der Warteschlange"]
+    ID -->|nein| ID1["Keine Änderung, VM bleibt mit Ursache in der Warteschlange und gilt als gesperrt"]
     ID -->|ja| G{"Gerät schon in MECM?"}
     G -->|nein| IMP["Rolloutname und MAC importieren und nachlesen; nicht sichtbar oder Fehler: VM wartet auf den nächsten Lauf"]
     IMP -->|importiert| RID
@@ -80,7 +82,7 @@ flowchart TD
 
 ## Packages Sync
 
-Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach `VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` Tagen und nur, wenn keine VM sie mehr nutzt und ihre Zuweisungen nie umgehängt wurden; ein Paket, dessen Zuweisungen einmal automatisch auf eine höhere Version umgehängt wurden (heute nur bei Vorlagen-VMs, früher auch bei VMs), bleibt dauerhaft stehen. Echte VMs hängt das Portal seit AV-R08 nie selbst um. Wie das Portal die Lieferung annimmt, zeigt der [Paketkatalog](machine-api-flows.md#paketkatalog) der Maschinen-API.
+Meldet dem Portal den MECM-Katalog: Jede Device Collection im Ordner `VirtuSphere_Applications` ist ein Paket, jede Task Sequence ein Betriebssystem. Gesendet wird nur bei Änderung oder spätestens stündlich. Das Portal zieht fehlende Einträge zurück, löscht sie aber nicht; der Wartungsdienst entfernt zurückgezogene Pakete erst nach `VIRTUSPHERE_PACKAGE_PURGE_AFTER_DAYS` Tagen und nur, wenn keine VM sie mehr nutzt und ihre Zuweisungen nie umgehängt wurden; ein Paket, dessen Zuweisungen einmal automatisch auf eine höhere Version umgehängt wurden (etwa bei Vorlagen-VMs), bleibt dauerhaft stehen. Echte VMs hängt das Portal nie selbst um. Wie das Portal die Lieferung annimmt, zeigt der [Paketkatalog](machine-api-flows.md#paketkatalog) der Maschinen-API.
 
 ```mermaid
 flowchart TD
@@ -109,13 +111,13 @@ Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applicatio
 
 ```mermaid
 flowchart TD
-  V{"Beim Start: Common-Vertrag passt?"} -->|nein| V1["Abbruch: Ordner Powershell-MECM vollständig bereitstellen, Installer mit -Upgrade ausführen"]
+  V{"Beim Start: Common-Vertrag passt?"} -->|nein| V1["Abbruch: Ordner Powershell-MECM vollständig bereitstellen, Installer mit -Upgrade -ServerOnly ausführen"]
   V -->|ja| SH{"Paketshare (UNC) konfiguriert?"}
   SH -->|nein| SH1["Warten, Registry jede Minute neu lesen"] --> SH
   SH -->|ja| S["Neuer Lauf, „started“ melden"]
   S --> M["Mit MECM verbinden (einmal), Ordner VirtuSphere_Applications anlegen, falls sie fehlen"]
   M --> H["Prüfsumme über files und Package_Vorlage bilden"]
-  H -.->|Datei ändert sich währenddessen| HX["Lauf „fail“ (mecm_unavailable), MECM-Verbindung und Dateistand verwerfen, Pause 60 s"]
+  H -.->|Datei ändert sich währenddessen| HX["Lauf „warning“ (source_changing), Dateistand verwerfen, MECM-Verbindung bleibt, nächster Lauf prüft erneut"]
   H --> C{"Dateien geändert oder offene Punkte im letzten Lauf?"}
   C -->|nein| C1["Ergebnis „ok“ ohne Scan (unverändert)"] --> R
   C -->|ja| B{"Ordner files vorhanden?"}
