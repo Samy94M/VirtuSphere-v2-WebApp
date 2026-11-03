@@ -2919,7 +2919,8 @@ Paket der Nachtrunde, Session mit Opus 5.5, Effort high, Worktree `bk2-rasterrau
 - **Quellen (Regel 7):** [WHATWG HTML „The end“](https://html.spec.whatwg.org/multipage/parsing.html#the-end) (`defer`-Skripte vor `DOMContentLoaded`, `load` danach), [CSS Display 3 `visibility`](https://www.w3.org/TR/css-display-3/#visibility), [CDP `Page.captureScreenshot`](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/pdl/domains/Page.pdl) (`captureBeyondViewport`), [rrweb PR 286](https://github.com/getsentry/rrweb/pull/286) (`replaceSync` unter CSP), die Partial-Raster-Quellen aus BK1. Die Ursache stützt sich auf die Messung.
 - **Gates:**
   - Fast `file-size`, `doc-hygiene`, `doc-semantics`, `js-syntax`: `fast-2.log`.
-  - Integration `qa-stack`, `e2e-portal` (mit echtem Bildvergleich) und `visual-contract` zweimal hintereinander: `integ-1.log` und `integ-2.log`. Ergebnis im Nachtrag unten.
+  - Integration `qa-stack`, `e2e-portal` (mit echtem Bildvergleich) und `visual-contract` zweimal hintereinander unter `heavy-run.ps1 -Label bk2`: `integ-1.log` (08:10 bis 08:42) und `integ-2.log` (08:42 bis 09:13), je „3 pass, 0 fail“, danach 0 QA-Container.
+  - Bildvergleich in beiden Läufen: alle 18 Bilder `matchedOnAttempt=1`, in beiden Versuchen 0 px, `rasterisationNoise` leer. Dazu `integ-1-comparison.txt` und `integ-2-comparison.txt`, Artefakte `qa-artifacts/visual-baselines-20261103-081057-34928-cf11fcd1` und `qa-artifacts/visual-baselines-20261103-084202-18028-2905cd34`.
 - **Offen:**
   - Push offen (Nutzer 31.10.: alles lokal).
   - Worker-Pause des Harness gegen die 90-s-Heartbeat-Grenze: eigenes Paket nach dem Rollout (Nutzerentscheidung 03.11.), nicht angefasst.
