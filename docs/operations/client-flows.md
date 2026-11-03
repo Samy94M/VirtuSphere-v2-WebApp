@@ -88,7 +88,7 @@ Bringt zusätzliche Datenträger online und richtet leere ein. Ohne zusätzliche
 flowchart TD
     lock{"Sperre des Datenträgerlaufs frei?"} -->|nein| failed_lock["disks failed, Exit 1"]
     lock -->|ja| running["disks started, Status Running"]
-    running --> blockers{"Ein Datenträger unsicher: Boot oder System, Cluster, ohne stabile Identität, mehrdeutig, oder ein offenes Journal passt nicht?"}
+    running --> blockers{"Ein Datenträger unsicher: Boot oder System, Cluster, Größe 0, unbekannte online-RAW-Platte, ohne stabile Identität, mehrdeutig, oder ein offenes Journal passt nicht?"}
     blockers -->|ja| failed_block["Status Error, disks failed, Exit 1; nichts formatiert"]
     blockers -->|nein| resume["Offene eigene Vorgänge fortsetzen"]
     resume --> offline["Schreibschutz der SAN-Richtlinie aufheben. Offline und leer: Vorgang anlegen, online, GPT, Partition, NTFS. Offline mit Daten: nur online schalten"]
@@ -167,7 +167,7 @@ flowchart TD
     class stop_config,failed_empty,failed_stop blocked;
 ```
 
-Der Wrapper entfernt den Erkennungswert vor jedem Teilskript, das wirklich läuft; scheitert das Entfernen oder das Speichern des Ergebnisses, endet er mit Exit 1. Ein übersprungenes Skript fordert einen früheren Neustart nicht erneut an. Bei mehreren Ergebnissen gilt die Rangfolge Fehler vor 1641 vor 3010 vor 0, damit ein gescheitertes Paket nicht als „bitte neu starten“ erscheint. Die Logs liegen je Lauf unter `%ProgramData%\VirtuSphere\Logs`, bei `InstallForUser` unter `%LOCALAPPDATA%\VirtuSphere\Logs`; eine unsichere Logwurzel schaltet nur die Logs ab. `DeployTo`, `generateOwnDeviceColletion` und `removeOldVersion` liest der Autoimporter, nicht der Wrapper.
+Der Wrapper entfernt den Erkennungswert vor jedem Teilskript, das wirklich läuft; scheitert das Entfernen oder das Speichern des Ergebnisses, endet er mit Exit 1. Ein übersprungenes Skript fordert einen früheren Neustart nicht erneut an. Bei mehreren Ergebnissen gilt die Rangfolge Fehler vor 1641 vor 3010 vor 0, damit ein gescheitertes Paket nicht als „bitte neu starten“ erscheint. Die Logwurzel ist `%ProgramData%\VirtuSphere\Logs`, bei `InstallForUser` `%LOCALAPPDATA%\VirtuSphere\Logs`; die Gesamtlogs des Wrappers liegen darunter in `PackageWrapper\<Paketkennung>`, bei Systeminstallationen mit geschützter ACL (SYSTEM und Administratoren). Eine unsichere Logwurzel schaltet nur diese Wrapper-Logs ab. `DeployTo`, `generateOwnDeviceColletion` und `removeOldVersion` liest der Autoimporter, nicht der Wrapper.
 
 ## Paketreporter
 
