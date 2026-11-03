@@ -66,7 +66,7 @@ return [
 
     // Missions- und Vorlagenzustände jenseits der Feldprüfung.
     'mission_not_found' => 'Mission nicht gefunden.',
-    'mission_stale' => 'Die Mission wurde zwischenzeitlich von jemand anderem geändert. Ein erneutes Speichern schlägt fehl, bis Sie die Seite neu laden. Das Neuladen verwirft Ihre Eingaben; öffnen Sie die Seite deshalb vorher in einem neuen Tab, um die zwischenzeitliche Änderung zu sehen.',
+    'mission_stale' => 'Die Mission wurde zwischenzeitlich von jemand anderem geändert. Ein erneutes Speichern schlägt fehl, bis Sie „Mit meinen Eingaben weiterarbeiten“ wählen oder die Seite neu laden. Das Neuladen verwirft Ihre Eingaben; der Vergleich über dem Formular zeigt, was sich unterscheidet.',
     'template_name_required' => 'Bitte einen Vorlagennamen eingeben.',
     'target_mission_name_required' => 'Bitte einen Missionsnamen für das Ziel eingeben.',
     'target_mission_no_prefix' => 'Zielmissionen dürfen nicht mit dem Vorlagen-Präfix beginnen.',
