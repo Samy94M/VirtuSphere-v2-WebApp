@@ -86,7 +86,7 @@ require_once __DIR__ . '/../log_filter.php';
             <p><?php echo h(__t('help_system_status.system_status_status_counters')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_cleanup_p4')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_package_p5')); ?></p>
-            <?php // Etappe 14D: Die sieben Identitaetscodes bekommen je eine
+            <?php // Jeder Identitaetscode bekommt eine
                   // Massnahme. Der Grenzwert kommt aus der Konstante, nicht aus
                   // dem Satz, damit er nicht luegen kann, wenn er sich bewegt. ?>
             <h3><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
