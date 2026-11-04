@@ -128,6 +128,7 @@ test('start (scheduled): the preview must be confirmed, then a scheduled job is 
   const form = page.locator('form:has(select[name="credential_esxi_id"])');
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(seed.esxi));
   await form.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
+  await waitForLiveVerdict(page);
   await form.locator('input[name="start_mode"][value="scheduled"]').check();
   // +26h: in the future in any timezone the portal may be configured for, and
   // far inside the scheduling horizon.

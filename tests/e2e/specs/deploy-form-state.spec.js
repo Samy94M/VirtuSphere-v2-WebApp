@@ -133,7 +133,9 @@ async function fillQueueForm(page, ids, scheduledAt) {
   // The precondition of the rule this spec proves. Without it the "disabled but
   // filled" case silently degrades into an ordinary enabled field.
   await expect(form.locator('input[name="start_wait"]'), 'the mode disables the start wait').toBeDisabled();
+  await waitForLiveVerdict(page);
   await form.locator('input[name="verbose"]').check();
+  await waitForLiveVerdict(page);
   // The datetime field is hidden until the radio unhides it.
   await form.locator('input[name="start_mode"][value="scheduled"]').check();
   await form.locator('input[name="scheduled_at"]').fill(scheduledAt);

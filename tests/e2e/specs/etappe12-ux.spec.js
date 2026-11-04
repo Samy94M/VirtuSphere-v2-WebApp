@@ -203,6 +203,7 @@ test('schedule-preview cancel returns to the unchanged editable queue form', asy
   const form = page.locator('#deploy-queue-form');
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
   await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
+  await waitForLiveVerdict(page);
   await form.locator('input[name="start_mode"][value="scheduled"]').check();
   await form.locator('input[name="scheduled_at"]').fill(scheduledAt);
   await waitForLiveVerdict(page);
