@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 /** VM-editor dynamic interface/disk rows, group hints and field-error wrapper. */
 
+require_once __DIR__ . '/vm_disk_layout.php';
+
 function render_interface_row(array $interface, int|string $index, array $vlans, bool $canWrite, bool $template = false, array $fieldErrors = []): void
 {
     $prefix = $template ? 'interfaces[__INDEX__]' : 'interfaces[' . h((string) $index) . ']';
@@ -64,14 +66,23 @@ function render_disk_row(array $disk, int|string $index, bool $canWrite, bool $t
  * sprechende Bezeichnungen; was hier fehlte, war die Vorbelegung und der
  * Hinweis, dass der Typ eine bestehende Platte nicht mehr anfasst. Der
  * vorbelegte Typ kommt aus der Konstante, nicht als ausgeschriebener Name:
- * sonst nennt der Satz beim nächsten Wechsel den falschen.
+ * sonst nennt der Satz beim nächsten Wechsel den falschen. Der zweite Satz
+ * sagt, was Windows aus dem Namen macht (DN1).
  */
 function render_disk_type_hint(): void
 {
+    // DN1: what Windows makes of the name is the question at the name field;
+    // the limit comes from the rule's owner, not as a written-out number.
     ?>
-    <p class="hint" id="<?php echo h(form_hint_id('vm_edit', 'disks')); ?>"><?php echo h(__t('vm_edit.disk_type_hint', [
-        'default' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type']),
-    ])); ?></p>
+    <div id="<?php echo h(form_hint_id('vm_edit', 'disks')); ?>">
+        <p class="hint"><?php echo h(__t('vm_edit.disk_type_hint', [
+            'default' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type']),
+        ])); ?></p>
+        <p class="hint"><?php echo h(__t('vm_edit.disk_name_hint', [
+            'max' => (string) VIRTUSPHERE_DISK_VOLUME_LABEL_MAX,
+            'example' => vm_disk_default_name(2),
+        ])); ?></p>
+    </div>
     <?php
 }
 

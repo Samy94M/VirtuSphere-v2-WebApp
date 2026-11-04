@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 require_once __DIR__ . '/ClientIpAllowlist.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/mecm_provenance.php';
 require_once dirname(__DIR__, 2) . '/lib/repo/package_sync.php';
+require_once dirname(__DIR__, 2) . '/lib/vm_disk_layout.php';
 
 final class MachineApiWireTest extends TestCase
 {
@@ -190,11 +191,11 @@ final class MachineApiWireTest extends TestCase
             $payload = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
             self::assertIsArray($payload);
             // ADR-0044 adds exactly the two report generations to the previous
-            // minimal contract. The list stays spelled out rather than
-            // derived: minimality is the property, and a derived list would
-            // grow with the payload it is supposed to bound.
+            // minimal contract, DN1 the disk layout. The list stays spelled out
+            // rather than derived: minimality is the property, and a derived
+            // list would grow with the payload it is supposed to bound.
             self::assertSame(
-                ['acceptance_generation', 'device_generation', 'interfaces', 'mission_id', 'rollout_revision',
+                ['acceptance_generation', 'device_generation', 'disks', 'interfaces', 'mission_id', 'rollout_revision',
                     'vm_domain', 'vm_hostname', 'vm_name', 'vm_os'],
                 $this->sortedKeys($payload)
             );
@@ -215,11 +216,59 @@ final class MachineApiWireTest extends TestCase
                 'dns1', 'dns2', 'gateway', 'ip', 'mac', 'mode', 'subnet', 'type', 'vlan',
             ], $this->sortedKeys($payload['interfaces'][0]));
             self::assertSame($fixture['mac'], $payload['interfaces'][0]['mac']);
+            // A VM without disk rows gets the one default disk the create
+            // playbook builds, under its default name.
+            self::assertSame([[
+                'position' => 0,
+                'scsi_unit' => 0,
+                'size_gb' => (int) VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'],
+                'volume_label' => vm_disk_default_name(1),
+            ]], $payload['disks']);
 
             $state = $this->vmState($db, $fixture['vm_id']);
             self::assertSame(VIRTUSPHERE_LIFECYCLE_DEPLOYED, $state['lifecycle_state']);
             self::assertSame(VIRTUSPHERE_MECM_SYNC_PENDING, $state['mecm_sync_state']);
             self::assertSame(0, $this->statusEventCount($db, $fixture['vm_id']));
+        } finally {
+            $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * DN1: the disk layout follows deploy_disks in id order, exactly like the
+     * serverlist the create playbook reads, with the SCSI unit vmware_guest
+     * gives each position and the label the rule leaves of each name. The
+     * eighth row skips unit 7; a name with nothing usable left carries null.
+     */
+    public function testDeviceInfosDiskLayoutFollowsTheCreateOrder(): void
+    {
+        $db = db(true);
+        $fixture = $this->createClientFixture($db, 'device-disks');
+        $rows = [
+            ['System', 60], ['Daten/Logs', 100], ['', 20], ['***', 30],
+            ['D5', 5], ['D6', 6], ['D7', 7], ['Archiv mit einem sehr langen Namen fuer Windows', 8],
+        ];
+
+        try {
+            $stmt = $db->prepare('INSERT INTO deploy_disks (vm_id, disk_name, disk_size, disk_type) VALUES (?, ?, ?, ?)');
+            foreach ($rows as [$name, $size]) {
+                $type = 'thin';
+                $stmt->bind_param('isis', $fixture['vm_id'], $name, $size, $type);
+                $stmt->execute();
+            }
+
+            [$status, , $body] = $this->get('/mecm-api.php?action=getDeviceInfos&mac=' . urlencode($fixture['mac']));
+
+            self::assertSame(200, $status, $body);
+            $disks = json_decode($body, true, 512, JSON_THROW_ON_ERROR)['disks'];
+            self::assertSame([0, 1, 2, 3, 4, 5, 6, 8], array_column($disks, 'scsi_unit'));
+            self::assertSame([0, 1, 2, 3, 4, 5, 6, 7], array_column($disks, 'position'));
+            self::assertSame([60, 100, 20, 30, 5, 6, 7, 8], array_column($disks, 'size_gb'));
+            self::assertSame(
+                ['System', 'Daten Logs', vm_disk_default_name(3), null, 'D5', 'D6', 'D7', 'Archiv mit einem sehr langen Nam'],
+                array_column($disks, 'volume_label')
+            );
+            self::assertSame(['position', 'scsi_unit', 'size_gb', 'volume_label'], $this->sortedKeys($disks[0]));
         } finally {
             $this->deleteClientFixture($db, $fixture['mission_id']);
         }
