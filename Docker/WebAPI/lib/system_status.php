@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/directory_constants.php';
+require_once __DIR__ . '/status_evidence.php';
 require_once __DIR__ . '/system_status_urls.php';
 
 /**
@@ -60,7 +61,7 @@ function system_status_legend_items(string $kind): void
     // enforces them, so the sentence cannot keep its number after the constant
     // moves (CLAUDE.md bounds rule).
     $params = [
-        'legend_warning' => ['multiplier' => VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER],
+        'legend_warning' => ['multiplier' => VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER, 'factor' => VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR],
         'esxi_legend_danger' => ['streak' => VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER],
         'esxi_legend_stale' => ['days' => VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS, 'factor' => VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR],
         'ansible_legend_stale' => ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS],

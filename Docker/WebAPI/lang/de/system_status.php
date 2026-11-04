@@ -140,7 +140,7 @@ return [
     'run_distribution_scope' => 'Verteilhinweise aus dem letzten abgeschlossenen Scan, keine Live-Abfrage. Der Bericht enthält keine vollständigen DP-Zahlen pro Paket; eine Quote wie 4/6 lässt sich daraus nicht ermitteln. Offene Punkte sind keine Anzahl fehlgeschlagener DPs.',
     'run_distribution_unknown' => 'Kein gesonderter Verteilnachweis vorhanden. Auch ohne gemeldeten Verteilhinweis ist damit keine vollständige Verteilung bestätigt.',
     'run_completion_open' => 'Abschluss offen',
-    'run_completion_hint' => 'Ein Start wurde gemeldet, aber noch kein Abschluss. Dies ist kein direkter Nachweis, dass der Prozess noch arbeitet. Lange Dateiscans können die Meldefrist überschreiten; prüfen Sie den Fortschritt im aktuellen Tageslog.',
+    'run_completion_hint' => 'Ein Start wurde gemeldet, aber noch kein Abschluss. Dies ist kein direkter Nachweis, dass der Prozess noch arbeitet. Ein Lauf, der deutlich länger dauert als der letzte abgeschlossene, kann die Meldefrist überschreiten; prüfen Sie den Fortschritt im aktuellen Tageslog.',
     'autoimporter_help' => 'Hilfe zu Paketimport und offenen Verteilungen',
     'finding_package_config_invalid' => 'Paketkonfiguration ungültig: ProjectName und version müssen Zeichenketten sein, ErrorAction muss Stop oder Continue sein, und InstallationBehaviorType ist leer, InstallForSystem oder InstallForUser. Bindestriche sind in ProjectName erlaubt, in version nicht. Numerische Versionen wie 0.2 sind eindeutig vergleichbar. Eine Versionsänderung kann eine neue MECM-Anwendung erzeugen.',
     'finding_package_content_failed' => 'Der Contentlauf konnte die Verteilung nicht erfolgreich belegen. Dieser grobe Ursachencode unterscheidet nicht zwischen einer fehlenden DP-Gruppe und einem von mindestens einem DP gemeldeten Fehler. Prüfen Sie zuerst das Autoimporter-Tageslog. Fehlt dort die DP-Gruppe, konfigurieren Sie diese Voraussetzung. Hat MECM den Contentauftrag bestätigt, werden Collection und Deployments trotz der DP-Fehler nachgezogen; Geräte können das Paket über erreichbare DPs anwenden. Den konkreten DP-Fehler prüfen Sie unter Überwachung → Verteilungsstatus → Inhaltsstatus.',
@@ -179,7 +179,7 @@ return [
     'legend_group_heartbeat' => 'Ampel je Quelle (MECM und interne Dienste)',
     'legend_ok' => 'Quelle meldet sich im erwarteten Intervall.',
     'legend_legacy' => 'Frischer Heartbeat einer alten Skriptversion; das Ergebnis ist nicht bestätigt. Installer und Skripte aktualisieren.',
-    'legend_warning' => 'Letzter Lauf mit offenen Punkten oder Meldung überfällig (mehr als das :multiplier-fache des Intervalls; für gestartete Läufe gilt eine zusätzliche Schonfrist).',
+    'legend_warning' => 'Letzter Lauf mit offenen Punkten oder Meldung überfällig (mehr als das :multiplier-fache des Intervalls; ein gestarteter Lauf darf zusätzlich bis zum :factor-fachen seiner letzten Laufdauer brauchen).',
     'legend_danger' => 'Letzter Lauf fehlgeschlagen oder Meldung stark überfällig. Das beweist allein keinen gestoppten Prozess. Bei offenem Lauf gehören Ergebnis, Dauer und Fehler zum vorherigen Abschluss.',
     'legend_missing' => 'Andere Quellen melden sich bereits, diese hat sich noch nie gemeldet. Einrichtung prüfen.',
     // Nannte genau eine Ursache („vermutlich noch nicht eingerichtet") für einen
