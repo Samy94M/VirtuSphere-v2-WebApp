@@ -453,9 +453,11 @@ function Get-VsClientDeploymentTypeContractIssues {
         }
         # Get-CMDeploymentTypeReturnCode liefert ExitCode[]; der Typ ist ein
         # ExitCodeClass-Wert (Microsoft-Doku). An einem Standort (02.11.2026) trug kein
-        # Objekt 'CodeType' oder 'Type', die Codes selbst wurden gefunden. 'Class' ist
-        # der vermutete SDK-Name, die Site-Bestaetigung steht aus. Ein nicht lesbares
-        # Typfeld ist ein eigener Befund, keine Abweichung vom Vertrag.
+        # Objekt 'CodeType' oder 'Type', die Codes selbst wurden gefunden. Das SDK
+        # fuehrt die Codes als IList<ExitCode> (MsiInstaller.ExitCodes); Skripte, die
+        # ExitCode-Objekte selbst anlegen, setzen 'Code' und 'Class' (RL1, 04.11.2026,
+        # Quellen im Aufgabenregister). Die Site-Bestaetigung steht aus. Ein nicht
+        # lesbares Typfeld ist ein eigener Befund, keine Abweichung vom Vertrag.
         $actualType = Get-VsObjectPropertyText -Object $codeMatches[0] -Names @('CodeType', 'Type', 'Class')
         if ([string]::IsNullOrEmpty($actualType)) {
             $issues += ('return-code-type-unreadable:{0}' -f $expectedCode.Value)

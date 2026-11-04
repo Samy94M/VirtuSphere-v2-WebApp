@@ -44,6 +44,7 @@ return [
     'login_controller' => ', Controller :controller',
     'login_rejected' => 'Anmeldung abgewiesen:user_part: :reason',
     'login_user_name' => ' für Benutzer „:username“',
+    'login_user_unknown' => ' für eine Eingabe ohne passendes Konto (:length Zeichen)',
     'login_user_id' => ' für Benutzer-ID :id',
     'account_locked' => 'Konto für :duration Minuten gesperrt nach :failures fehlgeschlagenen Anmeldungen',
     'ip_rate_limited' => 'IP-Adresse für :duration Minuten gedrosselt nach :failures fehlgeschlagenen Anmeldungen',

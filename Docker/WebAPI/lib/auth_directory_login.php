@@ -7,6 +7,7 @@ require_once __DIR__ . '/auth_rate_limit.php';
 require_once __DIR__ . '/directory_auth.php';
 require_once __DIR__ . '/headers.php';
 require_once __DIR__ . '/log_redaction.php';
+require_once __DIR__ . '/repo/directory_users.php';
 
 function auth_login_directory(mysqli $db, string $username, string $password, int $attemptId = 0): array
 {
@@ -67,7 +68,7 @@ function auth_login_directory(mysqli $db, string $username, string $password, in
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY,
             'reason' => VIRTUSPHERE_AUDIT_LOGIN_REASON_INVALID_CREDENTIALS,
-            'username' => virtusphere_log_login_name($username),
+            ...virtusphere_login_name_audit_context($username, repo_directory_upn_is_imported($db, $username)),
         ]);
 
         return ['ok' => false, 'reason' => 'invalid'];

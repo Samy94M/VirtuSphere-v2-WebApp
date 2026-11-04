@@ -100,18 +100,47 @@ echo 'JSON' . json_encode(['credential' => $credential, 'job' => $processed, 'ne
   // single-column mobile layout. This is the wrap boundary changed by the new
   // operational-history fact, so prove geometry rather than only text.
   await page.setViewportSize({ width: 360, height: 800 });
-  const geometry = await row.evaluate((element) => {
+  // D7 (RL1): full WebKit runs measured the page at 560 px (which matches the
+  // 248 px desktop sidebar column plus the 312 px mobile content) while this
+  // row fitted, and
+  // the failure screenshot right after showed the settled mobile layout; the
+  // same page HTML and CSS replayed at 360 px never overflows. So the sample is
+  // retried until the resize has settled. A real overflow stays and still fails,
+  // naming the outermost offenders; a transient first sample is logged.
+  const measure = () => row.evaluate((element) => {
     const rect = element.getBoundingClientRect();
+    const viewport = document.documentElement.clientWidth;
+    // Name the outermost elements that stick out, so a red run says which
+    // part of the page is too wide instead of only that the page is.
+    const offenders = [];
+    for (const node of document.body.querySelectorAll('*')) {
+      const box = node.getBoundingClientRect();
+      if (box.width === 0 || box.right <= viewport + 1) continue;
+      const parent = node.parentElement;
+      if (parent && parent !== document.body && parent.getBoundingClientRect().right > viewport + 1) continue;
+      const classes = typeof node.className === 'string' && node.className.trim() !== '' ? '.' + node.className.trim().split(/\s+/).join('.') : '';
+      offenders.push(`${node.tagName.toLowerCase()}${node.id ? '#' + node.id : ''}${classes} right=${Math.round(box.right)}`);
+      if (offenders.length >= 8) break;
+    }
     return {
       left: rect.left,
       right: rect.right,
-      viewport: document.documentElement.clientWidth,
+      viewport,
       pageWidth: document.documentElement.scrollWidth,
+      offenders,
     };
   });
-  expect(geometry.left).toBeGreaterThanOrEqual(0);
-  expect(geometry.right).toBeLessThanOrEqual(geometry.viewport + 1);
-  expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewport);
+  let first = null;
+  await expect(async () => {
+    const geometry = await measure();
+    first = first ?? geometry;
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewport + 1);
+    expect(geometry.pageWidth, `page wider than the viewport; outermost offenders: ${geometry.offenders.join(' | ') || 'none found'}`).toBeLessThanOrEqual(geometry.viewport);
+  }).toPass({ timeout: 3000 });
+  if (first.pageWidth > first.viewport || first.right > first.viewport + 1) {
+    console.log(`D7-transient: first sample page ${first.pageWidth}/${first.viewport}, row right ${Math.round(first.right)}; ${first.offenders.join(' | ')}`);
+  }
 
   await Promise.all([
     page.waitForResponse((response) => response.url().includes('credentials.php') && response.request().method() === 'POST'),

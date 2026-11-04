@@ -54,6 +54,9 @@ return [
     ['id' => 'auth_login_denied_user_id_only', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials']],
     ['id' => 'auth_login_denied_no_user_no_id', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => null, 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials']],
     ['id' => 'auth_login_denied_literal_unknown_id', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => 'unknown', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials']],
+    // F1: a name without an account is stored as its length; rows from before F1 carry the old placeholder
+    ['id' => 'auth_login_denied_unknown_name_length', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => null, 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials', 'username_length' => 9]],
+    ['id' => 'auth_login_denied_legacy_placeholder', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => null, 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials', 'username' => '<unusual input, 12 characters>']],
     // A redacted marker from the writer survives unchanged (the presenter must not redact it twice).
     ['id' => 'auth_login_denied_redacted_marker', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'password=[redacted] rejected']],
 
