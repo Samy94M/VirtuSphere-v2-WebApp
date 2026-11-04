@@ -48,10 +48,12 @@ if ($isPost) {
         redirect_to(login_return_after_sign_in($returnTarget, !empty($result['must_change_password'])));
     }
 
+    // login() answers a locked account and a name over its attempt budget with
+    // the same reason: a separate "account locked" sentence told an anonymous
+    // caller that the name exists (SEC1, C-04). The audit row keeps the cause.
     $error = match ($result['reason'] ?? '') {
-        'locked' => __t('login.error_locked'),
-        'ip_locked' => __t('login.error_ip_locked'),
         'rate_limited' => __t('login.error_rate_limited'),
+        'ip_locked' => __t('login.error_ip_locked'),
         'directory_unavailable' => __t('login.error_directory_unavailable'),
         default => __t('login.error_invalid'),
     };

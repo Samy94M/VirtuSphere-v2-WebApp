@@ -70,6 +70,14 @@ function virtusphere_send_security_headers(): void
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
     header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    // SEC1 (C-12), as recommended by the OWASP Secure Headers project and the
+    // Mozilla guidelines: X-Frame-Options for browsers that predate
+    // frame-ancestors, and no cross-origin window or resource access to portal
+    // responses. Portal path only; machine endpoints never call this function,
+    // and their clients are PowerShell and Python, not browsers.
+    header('X-Frame-Options: DENY');
+    header('Cross-Origin-Opener-Policy: same-origin');
+    header('Cross-Origin-Resource-Policy: same-origin');
 
     if (virtusphere_is_request_secure() && virtusphere_hsts_enabled()) {
         header('Strict-Transport-Security: max-age=' . VIRTUSPHERE_HTTPS_HSTS_MAX_AGE_SECONDS);

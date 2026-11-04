@@ -81,8 +81,11 @@ services:
     # Werte, und die Ports kommen aus der Host-seitigen Interpolation von qa.env
     # (--env-file), nicht aus der Container-Umgebung.
     volumes:
-      - *qa-code
-      - qa-ssl:/etc/nginx/ssl
+      # Read-only like the base file (SEC1, C-05a); these entries replace the
+      # base mounts for the same targets, so they must repeat read-only.
+      - <<: *qa-code
+        read_only: true
+      - qa-ssl:/etc/nginx/ssl:ro
       - qa-conf:/etc/nginx/virtusphere-conf.d
       - *qa-runtime
       - *qa-logs
