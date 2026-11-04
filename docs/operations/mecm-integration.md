@@ -1412,7 +1412,7 @@ unlesbarer Altstand zählt als kein Auftrag (höchstens ein neuer). Ein Rückweg
 eine ältere Serverversion findet `ContentTracking` unverändert vor. Handarbeit
 ist nicht nötig.
 
-**Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise stammen aus dem letzten Scan und werden höchstens alle 30 Minuten aufgefrischt. Der Bericht liefert keine DP-Zahlen je Paket; den genauen Stand je DP zeigt die MECM-Konsole. Offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben.
+**Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise stammen aus dem letzten Scan und werden höchstens alle 30 Minuten aufgefrischt. Der Bericht liefert keine DP-Zahlen je Paket; den genauen Stand je DP zeigt die MECM-Konsole. Offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben. Jeder `package_`-Code aus der Tabelle oben hat auf der Karte eine Erklärung und in der Portalhilfe (Systemstatus, MECM) einen Eintrag mit Maßnahme.
 
 **Status lesen.** „Abschluss offen“ zeigt eine Startmeldung ohne Abschluss.
 Der Laufzustand bleibt neutral und beschreibt nur die empfangene Meldung; er beweist keinen laufenden oder gestoppten Prozess. Dauer, Zähler und

@@ -110,4 +110,44 @@ final class VmDiskLayoutTest extends TestCase
         self::assertSame(['position' => 7, 'scsi_unit' => 8, 'size_gb' => 8, 'volume_label' => 'Disk 8'], $layout[7]);
         self::assertSame(['position' => 15, 'scsi_unit' => null, 'size_gb' => 16, 'volume_label' => 'Disk 16'], $layout[15]);
     }
+
+    /** @return array<string,mixed> */
+    private static function vectors(): array
+    {
+        $json = (string) file_get_contents(dirname(__DIR__) . '/fixtures/disk-label-vectors.json');
+        $vectors = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($vectors);
+
+        return $vectors;
+    }
+
+    public function testSharedVectorsFollowThePhpConstants(): void
+    {
+        // NZ1: the JavaScript mirror reads the same file; its limit and default
+        // names must be the ones the portal renders.
+        $vectors = self::vectors();
+        self::assertSame(VIRTUSPHERE_DISK_VOLUME_LABEL_MAX, $vectors['max']);
+        self::assertSame(vm_disk_default_name(1), $vectors['defaults']['first']);
+        self::assertSame(vm_disk_default_name(2), $vectors['defaults']['prefix'] . ' 2');
+        self::assertGreaterThan(20, count($vectors['labels']));
+        self::assertGreaterThan(8, count($vectors['notices']));
+    }
+
+    public function testLabelRuleMatchesTheSharedVectors(): void
+    {
+        foreach (self::vectors()['labels'] as $vector) {
+            self::assertSame($vector['label'], vm_disk_volume_label($vector['name']), $vector['why']);
+        }
+    }
+
+    public function testEditorNoticeMatchesTheSharedVectors(): void
+    {
+        foreach (self::vectors()['notices'] as $vector) {
+            self::assertSame(
+                ['kind' => $vector['kind'], 'label' => $vector['label']],
+                vm_disk_label_notice($vector['name'], $vector['position']),
+                $vector['why']
+            );
+        }
+    }
 }

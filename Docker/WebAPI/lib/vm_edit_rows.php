@@ -43,13 +43,19 @@ function render_disk_row(array $disk, int|string $index, bool $canWrite, bool $t
     $prefix = $template ? 'disks[__INDEX__]' : 'disks[' . h((string) $index) . ']';
     $scope = $template ? '__INDEX__' : $index;
     $type = strtolower((string) ($disk['disk_type'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_type']));
+    $name = (string) ($disk['disk_name'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_name']);
+    // NZ1: the Windows label next to the field where it differs from the name.
+    // The template row has no position yet; vm-disk-label.js fills it in.
+    $labelHintId = form_hint_id('vm_edit', 'disk_label', $scope);
+    $labelHint = $template ? '' : vm_disk_label_notice_text(vm_disk_label_notice($name, (int) $index + 1));
     ?>
     <div class="form-row" data-repeat-row>
         <?php // Die beiden data-autoname-Werte sind die einzige Stelle, an der forms.js
               // erfaehrt, wie eine hinzugefuegte Platte heissen soll; die Regel selbst
               // bleibt vm_disk_default_name(). Ohne sie erbte jede neue Zeile den Wert
-              // der ersten und hiess wieder "System". ?>
-        <label><?php echo h(__t('common.name')); ?><input name="<?php echo $prefix; ?>[disk_name]"<?php echo form_control_attrs('vm_edit', 'disk_name', $scope, false, ''); ?> value="<?php echo h($disk['disk_name'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_name']); ?>" data-autoname-first="<?php echo h(VIRTUSPHERE_VM_DEFAULTS['disk_name']); ?>" data-autoname-prefix="<?php echo h(VIRTUSPHERE_VM_DEFAULTS['disk_name_prefix']); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
+              // der ersten und hiess wieder "System". vm-disk-label.js liest dieselben
+              // Werte fuer den Hinweis auf ein leeres Feld. ?>
+        <label><?php echo h(__t('common.name')); ?><input name="<?php echo $prefix; ?>[disk_name]"<?php echo form_control_attrs('vm_edit', 'disk_name', $scope, $labelHint !== '' ? [$labelHintId] : false, ''); ?> value="<?php echo h($name); ?>" data-autoname-first="<?php echo h(VIRTUSPHERE_VM_DEFAULTS['disk_name']); ?>" data-autoname-prefix="<?php echo h(VIRTUSPHERE_VM_DEFAULTS['disk_name_prefix']); ?>" data-disk-label-input <?php echo $canWrite ? '' : 'readonly'; ?>><?php render_disk_label_hint($labelHintId, $labelHint); ?></label>
         <label><?php echo h(__t('vm_edit.label_size_gb')); ?><input name="<?php echo $prefix; ?>[disk_size]"<?php echo form_control_attrs('vm_edit', 'disk_size', $scope, false, ''); ?> type="number" min="1" value="<?php echo h((string) ($disk['disk_size'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'])); ?>" <?php echo $canWrite ? '' : 'readonly'; ?>></label>
         <label><?php echo h(__t('vm_edit.label_type')); ?><select name="<?php echo $prefix; ?>[disk_type]"<?php echo form_control_attrs('vm_edit', 'disk_type', $scope, false, ''); ?> <?php echo $canWrite ? '' : 'disabled'; ?>>
             <?php foreach (VIRTUSPHERE_DISK_TYPES as $option) { ?>
@@ -59,6 +65,39 @@ function render_disk_row(array $disk, int|string $index, bool $canWrite, bool $t
         <?php if ($canWrite) { ?><button class="button button-danger" type="button" data-remove-row><?php echo h(__t('common.remove')); ?></button><?php } ?>
     </div>
     <?php
+}
+
+/** The localized sentence for vm_disk_label_notice(); empty when nothing is to be said. */
+function vm_disk_label_notice_text(array $notice): string
+{
+    return match ($notice['kind'] ?? 'none') {
+        'label' => __t('vm_edit.disk_label_windows', ['label' => (string) $notice['label']]),
+        'default' => __t('vm_edit.disk_label_default', ['label' => (string) $notice['label']]),
+        'fallback' => __t('vm_edit.disk_label_fallback'),
+        default => '',
+    };
+}
+
+/** The hint of one disk name field, hidden while there is nothing to say. */
+function render_disk_label_hint(string $id, string $text): void
+{
+    ?><small class="hint" id="<?php echo h($id); ?>" data-disk-label-hint<?php echo $text === '' ? ' hidden' : ''; ?>><?php echo h($text); ?></small><?php
+}
+
+/**
+ * The JSON island for vm-disk-label.js: the rule's limit and the three
+ * sentences with their :label placeholder, so the script holds no text and no
+ * number of its own (portal reference R3).
+ */
+function render_disk_label_island(): void
+{
+    $island = [
+        'max' => VIRTUSPHERE_DISK_VOLUME_LABEL_MAX,
+        'label' => __t('vm_edit.disk_label_windows', ['label' => ':label']),
+        'default' => __t('vm_edit.disk_label_default', ['label' => ':label']),
+        'fallback' => __t('vm_edit.disk_label_fallback'),
+    ];
+    ?><script type="application/json" data-disk-label-texts nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($island, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script><?php
 }
 
 /**
@@ -83,6 +122,7 @@ function render_disk_type_hint(): void
             'example' => vm_disk_default_name(2),
         ])); ?></p>
     </div>
+    <?php render_disk_label_island(); ?>
     <?php
 }
 

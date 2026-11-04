@@ -179,6 +179,10 @@ return [
     'disk_type_eagerzeroedthick' => 'Eager Zeroed Thick',
     'disk_type_hint' => 'The type decides how ESXi allocates the space on the datastore: Thin grows with actual use, Thick reserves the space now and zeroes each block only on the first write, Eager Zeroed Thick reserves it now and brings it already zeroed. The preselected value is :default. It only applies when the VM is created; for a disk that already exists, changing it does nothing.',
     'disk_name_hint' => 'Windows uses the name as the volume label when it sets up a new data disk: at most :max characters, and control characters, the straight double quote and the characters \ / : * ? < > | become spaces. Without a name of its own a disk gets the default, such as ":example". Disks that are already set up and the system disk keep their label.',
+    // NZ1: the sentence next to the name field, only when the Windows label differs from the name.
+    'disk_label_windows' => 'Windows gets the label ":label".',
+    'disk_label_default' => 'Without a name, ":label" applies, also as the Windows label.',
+    'disk_label_fallback' => 'No usable character: Windows gets the label VM_Disk_ with the disk number.',
     'hotplug_heading' => 'Hot-add (CPU/RAM)',
     'cpu_hotplug' => 'CPU hot-add',
     'ram_hotplug' => 'RAM hot-add',

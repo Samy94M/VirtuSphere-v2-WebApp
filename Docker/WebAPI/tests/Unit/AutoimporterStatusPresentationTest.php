@@ -231,26 +231,75 @@ final class AutoimporterStatusPresentationTest extends TestCase
         self::assertStringContainsString("Add-VsRunCause -Causes \$causes -Cause 'package_folder_failed'", $producer);
     }
 
-    public function testEveryDistributionCodeOfTheServerVocabularyIsLabelledAndExplained(): void
+    public function testEveryPackageCodeOfTheServerVocabularyIsLabelledAndExplained(): void
     {
         // Derived from the PowerShell owner ($script:VsRunCauseVocabulary), not listed here:
-        // a new package_content_ code without portal label and help entry fails this test.
+        // a new package_ code without the portal list, a card label in both locales or a
+        // help entry in both locales fails this test (NZ1; before, only package_content_
+        // codes were checked and three configuration codes had neither label nor help).
         $common = (string) file_get_contents(__DIR__ . '/../../../../Powershell-MECM/mecm/VirtuSphere-Common.ps1');
         self::assertSame(1, preg_match('/\$script:VsRunCauseVocabulary\s*=\s*@\((.*?)\r?\n\)/s', $common, $block));
-        self::assertGreaterThan(0, preg_match_all("/'(package_content_[a-z_]+)'/", (string) ($block[1] ?? ''), $matches));
+        self::assertGreaterThan(0, preg_match_all("/^\s*'(package_[a-z_]+)'/m", (string) ($block[1] ?? ''), $matches));
+        $vocabulary = array_values(array_unique($matches[1]));
+        // An empty or one-code derivation would make the loop below vacuous.
+        self::assertGreaterThan(5, count($vocabulary));
+        self::assertContains('package_content_failed', $vocabulary);
+        self::assertContains('package_config_invalid', $vocabulary);
+        self::assertSame($vocabulary, VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES, 'portal list follows the PowerShell vocabulary');
+
         $helpView = (string) file_get_contents(__DIR__ . '/../../lib/help/system_status.php');
-        foreach (array_unique($matches[1]) as $code) {
+        self::assertStringContainsString('...VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES', $helpView);
+        $catalogs = [];
+        foreach (['de', 'en'] as $locale) {
+            $catalogs[$locale] = [
+                'card' => require __DIR__ . '/../../lang/' . $locale . '/system_status.php',
+                'help' => require __DIR__ . '/../../lang/' . $locale . '/help_system_status.php',
+            ];
+        }
+        foreach ($vocabulary as $code) {
+            $distribution = str_starts_with($code, 'package_content_');
             self::assertSame(
                 [__t('system_status.finding_' . $code)],
-                system_status_autoimporter_findings($code . ' target=Agent-1', true),
+                system_status_autoimporter_findings($code . ' target=Agent-1', $distribution),
                 $code
             );
-            self::assertStringContainsString("'" . $code . "'", $helpView, $code);
-            foreach (['de', 'en'] as $locale) {
-                $help = require __DIR__ . '/../../lang/' . $locale . '/help_system_status.php';
-                self::assertNotSame('', trim((string) ($help['system_status_status_code_' . $code] ?? '')), $locale . ' ' . $code);
+            self::assertSame([], system_status_autoimporter_findings($code . ' target=Agent-1', !$distribution), $code);
+            foreach ($catalogs as $locale => $catalog) {
+                self::assertNotSame('', trim((string) ($catalog['card']['finding_' . $code] ?? '')), $locale . ' card ' . $code);
+                self::assertNotSame('', trim((string) ($catalog['help']['system_status_status_code_' . $code] ?? '')), $locale . ' help ' . $code);
             }
         }
+    }
+
+    public function testHintRefreshIntervalFollowsThePowerShellOwner(): void
+    {
+        // NZ1: card and help state the refresh interval from the PHP mirror, never
+        // as a written-out number (bounds-sync); the mirror must equal the server value.
+        $common = (string) file_get_contents(__DIR__ . '/../../../../Powershell-MECM/mecm/VirtuSphere-Common.ps1');
+        self::assertSame(1, preg_match('/^\$script:VsDistributionHintRefreshSeconds\s*=\s*(\d+)\s*$/m', $common, $match));
+        self::assertSame((int) $match[1], VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS);
+        self::assertSame(0, VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS % 60, 'stated in whole minutes');
+        foreach (['de', 'en'] as $locale) {
+            $catalog = require __DIR__ . '/../../lang/' . $locale . '/system_status.php';
+            $help = require __DIR__ . '/../../lang/' . $locale . '/help_system_status.php';
+            self::assertStringContainsString(':minutes', (string) $catalog['run_distribution_scope'], $locale);
+            self::assertStringContainsString(':minutes', (string) $help['system_status_status_counters'], $locale);
+        }
+        $html = $this->renderAutoimporter(null, 'unknown');
+        self::assertStringContainsString(
+            htmlspecialchars(__t('system_status.run_distribution_scope', ['minutes' => (string) intdiv(VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS, 60)]), ENT_QUOTES, 'UTF-8'),
+            $html
+        );
+    }
+
+    public function testDeployFailureWithCollectionStillMatchesItsTarget(): void
+    {
+        // Add-VsRunCause writes target= before collection=; the DeployTo variant must still match.
+        $detail = 'package_deploy_failed target=Agent-1.0 collection=Pilot-Gruppe; package_source_missing target=D:%3Bfiles';
+        self::assertSame(
+            [__t('system_status.finding_package_source_missing'), __t('system_status.finding_package_deploy_failed')],
+            system_status_autoimporter_findings($detail, false)
+        );
     }
 
     public function testMissingReportRendersThreeAxesWithoutClaimingDistributionSuccess(): void

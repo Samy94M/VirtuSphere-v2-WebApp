@@ -104,6 +104,40 @@ function vm_disk_volume_label(string $name): ?string
 }
 
 /**
+ * What the VM editor says next to a disk name field (NZ1): the Windows label
+ * only where it differs from the name as saved. `$position` is 1-based in the
+ * order of the editor rows, which is the order the validator saves them.
+ *
+ *  - none: the system disk (it is never formatted), or the label equals the name;
+ *  - default: the field is empty, the validator saves vm_disk_default_name()
+ *    and that name becomes the label;
+ *  - fallback: no usable character is left, the client keeps VM_Disk_<number>;
+ *  - label: the label is cut or has characters replaced.
+ *
+ * portal/assets/vm-disk-label.js mirrors this and vm_disk_volume_label() for
+ * live typing; both run the vectors in tests/fixtures/disk-label-vectors.json.
+ *
+ * @return array{kind: 'none'|'default'|'fallback'|'label', label: ?string}
+ */
+function vm_disk_label_notice(string $name, int $position): array
+{
+    if ($position <= 1) {
+        return ['kind' => 'none', 'label' => null];
+    }
+    // The validator trims with trim() (ASCII white space), so does vm_disk_rows().
+    $saved = trim($name);
+    if ($saved === '') {
+        return ['kind' => 'default', 'label' => vm_disk_volume_label(vm_disk_default_name($position))];
+    }
+    $label = vm_disk_volume_label($saved);
+    if ($label === null) {
+        return ['kind' => 'fallback', 'label' => null];
+    }
+
+    return ['kind' => $label === $saved ? 'none' : 'label', 'label' => $label];
+}
+
+/**
  * The `disks` field of getDeviceInfos (DN1, additive): per row its list
  * position, SCSI unit, size and volume label, in the order the playbook
  * creates the disks.
