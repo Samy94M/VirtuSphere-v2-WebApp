@@ -195,7 +195,7 @@ Reihenfolge. Dedup greift einzig bei identischer `run_id` mit
 oder Zeitstempeländerung). Ein laufender Lauf behält den letzten Abschluss als
 Badge und zeigt zusätzlich „läuft seit X"; stale greift erst nach
 `max(3 × Intervall, 60 s, VIRTUSPHERE_RUN_GRACE_SECONDS = 600)` (seit dem Amendment
-2026-11-04 zusätzlich das Doppelte der zuletzt gemeldeten Laufdauer). Providerfehler
+2026-11-04 das Doppelte der zuletzt gemeldeten Laufdauer, falls das größer ist; dieser Anteil ist gedeckelt). Providerfehler
 sind grau (unbekannt); Rot ist exklusiv dem MECM-bestätigten kritischen Status 2
 vorbehalten. `failure_streak` zählt nur aufeinanderfolgende `fail`-Abschlüsse.
 Provider, Site-Code und Berichtsintervall (`MECM_ProviderMachine`,

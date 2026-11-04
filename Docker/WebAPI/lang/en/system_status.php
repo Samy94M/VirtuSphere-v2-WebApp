@@ -183,7 +183,7 @@ return [
     'legend_group_heartbeat' => 'Traffic light per source (MECM and internal services)',
     'legend_ok' => 'Source reports within the expected interval.',
     'legend_legacy' => 'A fresh heartbeat from an old script version; its result is not confirmed. Update the installer and scripts.',
-    'legend_warning' => 'Last run has open items or a report is overdue (more than :multiplier times the interval; a started run may also take up to :factor times the duration of its last run).',
+    'legend_warning' => 'Last run has open items or a report is overdue (more than :multiplier times the interval; a started run may instead take up to :factor times the duration of its last run if that is longer).',
     'legend_danger' => 'Last run failed or a report is substantially overdue. This alone does not prove the process stopped. During an open run, result, duration and errors belong to the previous completion.',
     'legend_missing' => 'Other sources already report, this one never has. Check its setup.',
     // Named exactly one cause ("probably not set up") for a state that three

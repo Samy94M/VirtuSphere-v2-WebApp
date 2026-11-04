@@ -50,7 +50,7 @@ Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
 
 | Gate | Beweist | Form | Rot heißt meist |
 |---|---|---|---|
-| `qa-stack` | Eigener Compose-Stack (`virtusphere-qa`) aus `struktur.sql`, Migrationen, Seed, Health; berührt nie den Dev-Stack | containerisiert | Fresh-Install-Pfad gebrochen; vor allen DB-Gates fixen |
+| `qa-stack` | Eigener Compose-Stack (`virtusphere-qa`) aus `struktur.sql`, Migrationen, Seed, Health; liest den Code aus einer geprüften Kopie des Checkouts (`qa-repo`, Prüfsumme je Datei), nicht aus dem Arbeitsbaum; berührt nie den Dev-Stack | containerisiert | Fresh-Install-Pfad gebrochen; vor allen DB-Gates fixen |
 | `migrate-check` | Migrations-Preflight `pending=0` gegen den QA-Stack | containerisiert | Migration fehlt oder ist nicht idempotent |
 | `phpunit-full` | Volle Suite inkl. Integrationstests, `--fail-on-skipped`; Allowlist-/Credential-Zustände arrangieren die Tests selbst | containerisiert | Ein dynamischer Skip oder eine echte Integrations-Regression |
 | `schema-convergence` | `struktur.sql` allein == `struktur.sql` + alle Migrationen, inkl. der 0019/0020-Edge-Cases | containerisiert | Schema-Änderung nur auf einer Seite |

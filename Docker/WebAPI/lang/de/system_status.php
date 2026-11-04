@@ -183,7 +183,7 @@ return [
     'legend_group_heartbeat' => 'Ampel je Quelle (MECM und interne Dienste)',
     'legend_ok' => 'Quelle meldet sich im erwarteten Intervall.',
     'legend_legacy' => 'Frischer Heartbeat einer alten Skriptversion; das Ergebnis ist nicht bestätigt. Installer und Skripte aktualisieren.',
-    'legend_warning' => 'Letzter Lauf mit offenen Punkten oder Meldung überfällig (mehr als das :multiplier-fache des Intervalls; ein gestarteter Lauf darf zusätzlich bis zum :factor-fachen seiner letzten Laufdauer brauchen).',
+    'legend_warning' => 'Letzter Lauf mit offenen Punkten oder Meldung überfällig (mehr als das :multiplier-fache des Intervalls; ein gestarteter Lauf darf stattdessen bis zum :factor-fachen seiner letzten Laufdauer brauchen, wenn das länger ist).',
     'legend_danger' => 'Letzter Lauf fehlgeschlagen oder Meldung stark überfällig. Das beweist allein keinen gestoppten Prozess. Bei offenem Lauf gehören Ergebnis, Dauer und Fehler zum vorherigen Abschluss.',
     'legend_missing' => 'Andere Quellen melden sich bereits, diese hat sich noch nie gemeldet. Einrichtung prüfen.',
     // Nannte genau eine Ursache („vermutlich noch nicht eingerichtet") für einen

@@ -147,6 +147,15 @@ final class IntegrationHealthGroupTest extends TestCase
         $started['last_attempt_at'] = $at(2400 + 1);
         self::assertTrue(virtusphere_run_report_overdue($started, $now));
 
+        // An unusable duration falls back to the fixed grace, never to zero.
+        $started['last_attempt_at'] = $at($grace + 1);
+        foreach ([-5000, 'abc', '', 0] as $badDuration) {
+            $started['last_duration_ms'] = $badDuration;
+            self::assertTrue(virtusphere_run_report_overdue($started, $now));
+        }
+        $started['last_attempt_at'] = $at($grace);
+        self::assertFalse(virtusphere_run_report_overdue($started, $now));
+
         $legacy = ['last_event' => VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT, 'interval_seconds' => 10, 'last_seen_at' => $at(5)];
         self::assertFalse(virtusphere_run_report_overdue($legacy, $now));
         $legacy['last_seen_at'] = $at($warnAfter + 1);
