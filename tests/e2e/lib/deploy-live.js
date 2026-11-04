@@ -15,9 +15,14 @@
 
 const { expect } = require('@playwright/test');
 
+// The verdict is one server round trip, like a navigation, so it gets the
+// suite's navigationTimeout (playwright.config.js) instead of the 7 s expect
+// default: under host load the blocker GET took 4.6 to 7.2 s (FL1 run2).
+const LIVE_VERDICT_TIMEOUT_MS = 15000;
+
 async function waitForLiveVerdict(page) {
   await expect(page.locator('[data-deploy-blockers]'), 'the live verdict of the last change is rendered')
-    .not.toHaveAttribute('data-preparation-state', 'checking');
+    .not.toHaveAttribute('data-preparation-state', 'checking', { timeout: LIVE_VERDICT_TIMEOUT_MS });
 }
 
 module.exports = { waitForLiveVerdict };
