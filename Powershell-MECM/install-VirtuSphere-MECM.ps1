@@ -9,7 +9,7 @@
     deaktiviert und beendet laufende Aufgaben, kopiert die Sync-Skripte nach
     %ProgramFiles%\VirtuSphere\mecm, registriert die vier geplanten Aufgaben
     (SYSTEM, hoechste Rechte, ohne Profil, beim Systemstart UND stuendlich,
-    ohne Laufzeitlimit) und verifiziert die Erstinstallation.
+    ohne Laufzeitlimit) und verifiziert die Installation.
 
     Upgrade und Re-Run sind transaktional fuer die verwaltete Registry-
     Konfiguration, den vollstaendigen Serverdateisatz und die vier Aufgaben.
@@ -176,6 +176,48 @@ function Write-Hint {
 # Get-VsErrorDetail/-StatusCode fuer die spaetere Verifikation. Nur Funktionen und
 # $script:-Variablen, keine Schleife - unschaedlich.
 . (Join-Path $PSScriptRoot 'mecm\VirtuSphere-Common.ps1')
+# Reine Bausteine ohne $script:-Zustand: liefert Test-VsClientApplyBlocked und
+# die Client-Paketierungsrichtlinie fuer den Abschlusstext.
+. (Join-Path $PSScriptRoot 'mecm\VirtuSphere-ClientPackaging.ps1')
+
+# Abschlusstext je Modus. Der Modus ist $installMode (die eine Ableitung aus
+# -Upgrade/-ServerOnly), die Client-Sperre kommt aus Test-VsClientApplyBlocked,
+# derselben Pruefung, an der install-VirtuSphere-Clients.ps1 abbricht. Ohne
+# Ausgabe, damit Pester jeden Modus pruefen kann; die Schlusszeile selbst bleibt
+# an der Aufrufstelle, weil sie am Blockerzaehler haengt.
+function Get-VsInstallerClosingText {
+    param(
+        [Parameter(Mandatory)][string]$Mode,
+        [Parameter(Mandatory)][bool]$ClientApplyBlocked,
+        [Parameter(Mandatory)][string]$WebApiHost,
+        [Parameter(Mandatory)][bool]$WebApiIsIp
+    )
+    $steps = New-Object System.Collections.Generic.List[string]
+    $notes = New-Object System.Collections.Generic.List[string]
+    switch ($Mode) {
+        'install' {
+            $action = 'Erstinstallation'
+            $steps.Add('Im Portal die IP DIESES MECM-Servers freischalten (Einstellungen > Machine-API > Zugriff auf das Portal (eingehend)).')
+            $steps.Add('Auch die IP des ANSIBLE-Hosts freischalten - sonst laeuft ein Deploy durch, ohne dass je eine MAC zurueckkommt (der Ansible-Host meldet die MACs ueber db_importMAC.php).')
+            if (-not $WebApiIsIp) {
+                $steps.Add(('DNS-Eintrag "{0}" -> WebApp-Host im Deploy-VLAN-DNS anlegen (die per PXE frisch installierten Clients bekommen ihren DNS per DHCP und loesen darueber auf).' -f $WebApiHost))
+            }
+        }
+        'upgrade' { $action = 'Upgrade' }
+        'server-only' {
+            $action = 'Serverupdate (-Upgrade -ServerOnly)'
+            $notes.Add('Paketvorlage, Pakete und Clients bleiben unveraendert; neu sind nur die Serverskripte und die vier Aufgaben.')
+        }
+        default { throw ("Unbekannter Installationsmodus '{0}'." -f $Mode) }
+    }
+    if ($ClientApplyBlocked) {
+        $notes.Add('Kein Client-Schritt: install-VirtuSphere-Clients.ps1 ist bis zum gemeinsamen Core-/Reporter-Cutover gesperrt (MC01).')
+    } elseif ($Mode -ne 'server-only') {
+        $steps.Add(('Client-Paketierung: install-VirtuSphere-Clients.ps1 ausfuehren. Es liest die Standortwerte aus {0} und erzeugt bootstrap.json.' -f (Get-VsClientPackagingPolicy).ConfigPath))
+    }
+    $steps.Add('Seite "Systemstatus" im Portal beobachten - die Ampeln werden gruen.')
+    [pscustomobject]@{ Action = $action; Steps = @($steps); Notes = @($notes) }
+}
 
 # Vor der ersten Warnung, damit auch sie im Tageslog landet.
 Initialize-VsLog -Component 'setup' -LogRoot $logRoot
@@ -1185,7 +1227,7 @@ foreach ($task in $tasks) {
 # --- Verifikation -----------------------------------------------------------
 # Poll statt festem Schlaf: auf einem langsamen Server braucht ein Task laenger,
 # bis er auf 'Running' steht, und ein starrer Sleep meldet ihn faelschlich als tot.
-Write-Step 'Verifiziere Erstinstallation'
+Write-Step 'Verifiziere Installation'
 $allRunning = $false
 for ($i = 0; $i -lt 8 -and -not $allRunning; $i++) {
     Start-Sleep -Seconds 3
@@ -1278,21 +1320,26 @@ Write-Host ''
 #
 # Die Zahl steht in der Zeile, nicht nur die Farbe: fuer einen Menschen vor der
 # Konsole ist ein Exit-Code unsichtbar.
+#
+# Wortlaut und Schritte folgen dem Modus: ein -Upgrade -ServerOnly meldete
+# vorher "Erstinstallation abgeschlossen" und empfahl den gesperrten
+# Client-Installer (Server-Update 04.11.2026).
+$closing = Get-VsInstallerClosingText -Mode $installMode -ClientApplyBlocked (Test-VsClientApplyBlocked -Specs (Get-VsClientAppSpecs)) `
+    -WebApiHost $webApiHost -WebApiIsIp $webApiIsIp
 if ($script:VsInstallBlockers -eq 0) {
-    Write-Host 'Erstinstallation abgeschlossen.' -ForegroundColor Green
+    Write-Host ('{0} abgeschlossen.' -f $closing.Action) -ForegroundColor Green
 } else {
-    Write-Host ('Erstinstallation abgeschlossen, aber {0} offene(r) Punkt(e) - die mit "!!" markierten Zeilen oben pruefen.' -f $script:VsInstallBlockers) -ForegroundColor Yellow
+    Write-Host ('{0} abgeschlossen, aber {1} offene(r) Punkt(e) - die mit "!!" markierten Zeilen oben pruefen.' -f $closing.Action, $script:VsInstallBlockers) -ForegroundColor Yellow
 }
 Write-Host ('Logs: {0}' -f $logRoot) -ForegroundColor Gray
 Write-Host ''
 Write-Host 'Naechste Schritte:' -ForegroundColor Gray
-Write-Host '  1. Im Portal die IP DIESES MECM-Servers freischalten (Einstellungen > Machine-API > Zugriff auf das Portal (eingehend)).' -ForegroundColor Gray
-Write-Host '  2. Auch die IP des ANSIBLE-Hosts freischalten - sonst laeuft ein Deploy durch, ohne dass je eine MAC zurueckkommt (der Ansible-Host meldet die MACs ueber db_importMAC.php).' -ForegroundColor Gray
-if (-not $webApiIsIp) {
-    Write-Host ('  3. DNS-Eintrag "{0}" -> WebApp-Host im Deploy-VLAN-DNS anlegen (die per PXE frisch installierten Clients bekommen ihren DNS per DHCP und loesen darueber auf).' -f $webApiHost) -ForegroundColor Gray
+for ($stepIndex = 0; $stepIndex -lt $closing.Steps.Count; $stepIndex++) {
+    Write-Host ('  {0}. {1}' -f ($stepIndex + 1), $closing.Steps[$stepIndex]) -ForegroundColor Gray
 }
-Write-Host ('  4. Client-Bootstrap: install-VirtuSphere-Clients.ps1 mit -WebApi "{0}" und demselben -Scheme ausfuehren. Der Client-Installer erzeugt bootstrap.json; Clientquelltext wird nicht bearbeitet.' -f $WebApi) -ForegroundColor Gray
-Write-Host '  5. Seite "Systemstatus" im Portal beobachten - die Ampeln werden gruen.' -ForegroundColor Gray
+foreach ($closingNote in $closing.Notes) {
+    Write-Host ('  Hinweis: {0}' -f $closingNote) -ForegroundColor Gray
+}
 
 # Exit-Code als maschinenlesbare Fassung der Schlusszeile: Voraussetzung dafuer,
 # dass ein Rollout-Skript den Installer je pruefen kann.
