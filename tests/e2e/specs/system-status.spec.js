@@ -478,7 +478,10 @@ test('Systemstatus overview: long labels and statuses stay readable inside each 
 // something the section below it contradicts, which is only observable with
 // both rendered from the same request.
 test('Systemstatus overview: the deviation card and its section agree', async ({ page }) => {
-  await page.setViewportSize({ width: 1600, height: 900 });
+  // No resize: nothing here depends on the width. The 1600 px resize this test
+  // started with hung 30 s once on Firefox before any navigation, its window
+  // never left 1280x720, and Juggler waits for the exact size without a limit
+  // (FL1 2026-11-04; 0 of 1500 resizes hung in isolation and under load).
   await page.goto('system_status.php');
 
   const card = page.locator('.status-overview .status-overview-card', { hasText: 'Deviations' });
