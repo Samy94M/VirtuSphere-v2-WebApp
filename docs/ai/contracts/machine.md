@@ -12,7 +12,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A62 mecm-api.php: read surface with getDeviceList and the minimal, side-effect-free getDeviceInfos&
 
-- `mecm-api.php`: read surface with `getDeviceList` and the minimal, side-effect-free `getDeviceInfos&mac=...`; `getMissionName` was retired by ADR-0019. The bootstrap payload additively includes ADR-0044 `device_generation` and `acceptance_generation`, both canonical lowercase UUIDs, so the package reporter can carry its VM-incarnation and post-restore fences.
+- `mecm-api.php`: read surface with `getDeviceList` and the minimal, side-effect-free `getDeviceInfos&mac=...`; `getMissionName` was retired by ADR-0019. The bootstrap payload additively includes ADR-0044 `device_generation` and `acceptance_generation`, both canonical lowercase UUIDs, so the package reporter can carry its VM-incarnation and post-restore fences. Additive `disks` (DN1, ADR-0019 amendment 6) lists the disk layout in serverlist order, `{position, scsi_unit, size_gb, volume_label}` from `vm_disk_client_layout()` (`lib/vm_disk_layout.php`, sole owner of rows, SCSI unit rule and label rule, `VIRTUSPHERE_DISK_VOLUME_LABEL_MAX` mirrored by `$volumeLabelMax` in `client_VMDisksOnline.ps1`). Only that disk phase reads it, and only for NEW data disks; an uncertain match keeps `VM_Disk_<n>` with a closed reason and never fails the phase or renames an existing volume.
 
 ## A63 mecm_client_ack.php: POST-only, idempotent client-ready acknowledgement by known MAC; sole writ
 

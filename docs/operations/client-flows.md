@@ -90,19 +90,22 @@ flowchart TD
     lock -->|ja| running["disks started, Status Running"]
     running --> blockers{"Ein Datenträger unsicher: Boot oder System, Cluster, Größe 0, unbekannte online-RAW-Platte, ohne stabile Identität, mehrdeutig, oder ein offenes Journal passt nicht?"}
     blockers -->|ja| failed_block["Status Error, disks failed, Exit 1; nichts formatiert"]
-    blockers -->|nein| resume["Offene eigene Vorgänge fortsetzen"]
-    resume --> offline["Schreibschutz der SAN-Richtlinie aufheben. Offline und leer: Vorgang anlegen, online, GPT, Partition, NTFS. Offline mit Daten: nur online schalten"]
-    offline --> success["Status Success mit Zählern, disks finished, Exit 0"]
+    blockers -->|nein| resume["Offene eigene Vorgänge mit der Bezeichnung aus ihrem Journal fortsetzen"]
+    resume --> label["Neue leere Offline-Platte: Bezeichnung bestimmen. Einmal je Lauf SCSI-Adressen und die Plattenliste aus getDeviceInfos lesen; Portalname bei passendem SCSI-Target und passender Größe, sonst VM_Disk_n mit Grund"]
+    label --> offline["Schreibschutz der SAN-Richtlinie aufheben. Offline und leer: Vorgang mit der Bezeichnung im Journal anlegen, online, GPT, Partition, NTFS. Offline mit Daten: nur online schalten, nie umbenennen"]
+    offline --> success["Status Success mit Zählern, bei neuen Platten named und default mit Gründen, disks finished, Exit 0"]
     offline -.->|Fehler| failed_run["Status Error, disks failed, Exit 1; ein abgebrochener Lauf hinterlässt Error statt Running"]
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef decision fill:#fff7ed,stroke:#9a3412,color:#0f172a;
     classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
-    class running,resume,offline,success step;
+    class running,resume,label,offline,success step;
     class lock,blockers decision;
     class failed_lock,failed_block,failed_run blocked;
 ```
 
 Jeder Vorgang an einem leeren Datenträger steht vorher in einem Journal unter `SOFTWARE\VirtuSphere\VMDiskManagement\Operations` und durchläuft die Schritte `intent`, `online`, `initialized`, `partitioned`, `formatted`, `complete`; nach jedem Schritt wird der Ist-Zustand zurückgelesen (`Invoke-OwnedRawDiskOperation`). Ein abgebrochener Lauf setzt beim nächsten Versuch an derselben Stelle fort. Ein Datenträger mit Daten wird nie formatiert, ein schon online stehender leerer ohne eigenes Journal ebenfalls nicht.
+
+**Bezeichnung einer neuen Platte (DN1).** Eine neue leere Datenplatte bekommt den Namen, den sie im VM-Editor trägt, als Laufwerksbezeichnung. Das Create-Playbook legt alle Platten an einem SCSI-Controller an, die Platte an Listenposition p auf Unit p (Unit 7 gehört dem Controller, ab Position 7 also p+1; ab Position 15 gibt es keine Unit und damit keinen Namen). `getDeviceInfos` liefert dazu je Portalplatte `scsi_unit`, `size_gb` und die schon bereinigte `volume_label` (`lib/vm_disk_layout.php`). Das Skript fragt mit MAC und Rolloutrevision des veröffentlichten Satzes und nimmt den Namen nur, wenn alle Platten an einem Controller mit LUN 0 hängen, die Bootplatte auf Target 0 liegt, das `SCSITargetId` der Platte genau einer Portalplatte entspricht und deren Größe aufs Byte passt. Sonst bleibt `VM_Disk_<Nummer>`, und das Log, `LastResult` und das Detail der Meldung `finished` nennen den Grund: `rollout_mismatch`, `portal_unreachable`, `portal_without_disk_names`, `disk_list_invalid`, `scsi_layout_unknown`, `no_portal_disk`, `size_mismatch`, `no_usable_name` oder `label_invalid`. Die Phase bleibt erfolgreich. Die Bezeichnung steht ab dem Schritt `intent` im Journal; eine Wiederaufnahme fragt das Portal nicht erneut. Eine schon eingerichtete Platte und die Systemplatte werden nie umbenannt.
 
 ## client_staticip
 

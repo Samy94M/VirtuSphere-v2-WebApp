@@ -35,7 +35,7 @@ verknüpfen                  Rolloutnamen, weist
                             Collections zu)               --->  mecm_updateid.php (ResourceID)
                                                                                         getInfos (Registry füllen)
                                                           <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
-                                                                getDeviceInfos        VMDisksOnline (Platten online)
+                                                                getDeviceInfos        VMDisksOnline (Platten online, Namen aus getDeviceInfos)
                                                                                         staticip (Netz konfigurieren)
                                                           <---  mecm_client_ack.php (Client bereit, 5/5)
                      Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php

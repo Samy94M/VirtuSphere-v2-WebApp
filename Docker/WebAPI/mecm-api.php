@@ -13,6 +13,7 @@ require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/defaults.php'; // mission_name_is_template(), the one template predicate (MA-13)
 require_once __DIR__ . '/lib/status.php';
 require_once __DIR__ . '/lib/repo/mecm_provenance.php';
+require_once __DIR__ . '/lib/vm_disk_layout.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -55,6 +56,21 @@ function machine_client_interfaces(mysqli $db, int $vmId): array
     $stmt->execute();
 
     return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+/**
+ * DN1: the client's disk layout, built from the same rows in the same id order
+ * as the serverlist (vm_disk_client_layout()). Read-only like the rest of
+ * getDeviceInfos; the current portal names, not a rollout snapshot, because a
+ * label is display data and the client confirms each match by SCSI target and size.
+ */
+function machine_client_disks(mysqli $db, int $vmId): array
+{
+    $stmt = $db->prepare('SELECT disk_name, disk_size, disk_type FROM deploy_disks WHERE vm_id = ? ORDER BY id');
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+
+    return vm_disk_client_layout(['disks' => $stmt->get_result()->fetch_all(MYSQLI_ASSOC)]);
 }
 
 function machine_vm_mission(mysqli $db, int $missionId): ?array
@@ -124,6 +140,9 @@ try {
         $data = $stmt->get_result()->fetch_assoc() ?: [];
         if ($data !== []) {
             $data['interfaces'] = machine_client_interfaces($connection, $vmId);
+            // Additive (DN1): read only by client_VMDisksOnline; client_getInfos
+            // persists its whitelist and ignores the field.
+            $data['disks'] = machine_client_disks($connection, $vmId);
         }
 
         machine_api_json($data);
