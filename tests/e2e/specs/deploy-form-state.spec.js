@@ -11,6 +11,7 @@
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
+const { waitForLiveVerdict } = require('../lib/deploy-live');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -98,6 +99,7 @@ function atMission(missionId) {
 // landed and the next reads could see the old document (red once on WebKit,
 // FX1 2026-11-02). Wait for the main frame to commit a new document instead.
 async function reloadByFilter(page, filter) {
+  await waitForLiveVerdict(page);
   await Promise.all([
     page.waitForEvent('framenavigated', (frame) => frame === page.mainFrame()),
     filter.locator('button[type="submit"]').click(),
@@ -179,6 +181,7 @@ test('changing the mission keeps every other field of the queue form', async ({ 
   const form = queueForm(page);
   // Uncheck one VM of mission A: the selection must NOT travel, because those
   // checkboxes name the VMs of the mission being left.
+  await waitForLiveVerdict(page);
   await form.locator('input[name="vm_ids[]"]').first().uncheck();
 
   await Promise.all([
@@ -211,6 +214,7 @@ test('same-mission job filtering preserves a VM subset through blockers, preview
     request.url().includes('deploy_blockers.php')
       && new URL(request.url()).searchParams.getAll('vm_ids[]').length === 1
   ));
+  await waitForLiveVerdict(page);
   await form.locator('input[name="vm_ids[]"]').nth(1).uncheck();
   const blockerRequest = await liveBlockerRequest;
   expect(
@@ -261,6 +265,7 @@ test('same-mission job filtering preserves an explicitly empty VM selection', as
       && new URL(response.url()).searchParams.getAll('vm_ids[]').length === 0
       && new URL(response.url()).searchParams.get('vm_selection_mission_id') === String(ids.a)
   ));
+  await waitForLiveVerdict(page);
   await form.locator('[data-vm-select-all]').uncheck();
   const emptyVerdict = await (await emptyBlockerResponse).json();
   expect(emptyVerdict.can_queue, 'the live decision rejects an explicit empty selection').toBe(false);
@@ -302,6 +307,7 @@ test('job filtering to another mission discards the old VM ids', async ({ page }
 
   const filter = page.locator('form[data-deploy-filter]');
   await filter.locator('select[name="mission_id"]').selectOption(String(ids.b));
+  await waitForLiveVerdict(page);
   await Promise.all([
     page.waitForURL(atMission(ids.b)),
     filter.locator('button[type="submit"]').click(),

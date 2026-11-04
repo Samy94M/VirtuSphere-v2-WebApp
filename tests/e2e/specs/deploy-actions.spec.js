@@ -7,6 +7,7 @@
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
+const { waitForLiveVerdict } = require('../lib/deploy-live');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -131,6 +132,7 @@ test('start (scheduled): the preview must be confirmed, then a scheduled job is 
   // +26h: in the future in any timezone the portal may be configured for, and
   // far inside the scheduling horizon.
   await form.locator('input[name="scheduled_at"]').fill(localDatetimeIn(26));
+  await waitForLiveVerdict(page);
   await form.locator('button[type="submit"]').click();
 
   // B3.3: no redirect; the page renders the computed start times and a confirm
@@ -202,6 +204,8 @@ echo 'JSON' . json_encode(['esxiB' => $esxiB]) . 'JSON';
   const warnings = page.locator('[data-deploy-warning-list]');
 
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(seed.esxi));
+  // A negative read passes on the stale render too; read the verdict for access A.
+  await waitForLiveVerdict(page);
   await expect(warnings, 'the access the VM was bound through warns nothing').not.toContainText('127.0.0.1');
 
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(second.esxiB));
@@ -281,8 +285,14 @@ echo 'JSON' . json_encode($stmt->get_result()->fetch_assoc()) . 'JSON';
 
   await page.goto(`deploy.php?mission_id=${seed.missionId}&credential_esxi_id=${seed.esxi}`);
   const queue = page.locator('#deploy-queue-form');
+  // A creating mode, and the live verdict for it. The namesake blocks only the
+  // VMs a mode acts on, and since K16 power-cycle skips a never-created VM, so
+  // its live verdict has no identity conflict at all. With power-cycle here the
+  // asserts below passed only while they outran the live refresh and read the
+  // server render of the default mode (red once on WebKit, FL1 2026-11-04).
   await queue.locator('select[name="credential_ansible_id"]').selectOption(String(seed.ansible));
-  await queue.locator('select[name="mode"]').selectOption('powercycle');
+  await queue.locator('select[name="mode"]').selectOption('create');
+  await waitForLiveVerdict(page);
 
   const blocker = page.locator('[data-deploy-blocker]', { hasText: fixture.vm_name });
   await expect(blocker, 'a foreign namesake still blocks the queue').toBeVisible();

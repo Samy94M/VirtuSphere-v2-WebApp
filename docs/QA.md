@@ -440,6 +440,16 @@ Two changes address it without hiding anything:
   `agent: false`) with the proven `PHPSESSID`, so every transport error is red.
   A new spec that needs a request to survive a long idle pause does the same
   instead of retrying.
+- On `deploy.php` a spec waits for `waitForLiveVerdict(page)`
+  (`tests/e2e/lib/deploy-live.js`) after changing a queue control and before
+  a pointer action below the live blocker list, or before a read that the
+  stale render would also satisfy. The list re-renders a moment after each
+  change (debounce plus one fetch) and moves the form below it; Playwright
+  judges the hit target on the first pointer event only, so a press before
+  and a release after that move is a lost click without an error. FL1 (04.11.2026) measured
+  that as the cause of the two `deploy-form-state.spec.js` failures of the
+  2026.11.3 release lane, and of a `deploy-actions.spec.js` failure whose
+  assertion had only ever read the server render of the default mode.
 - Each Playwright gate writes its HTML report into its own folder
   (`VIRTUSPHERE_E2E_REPORT_DIR`, set from the project list in
   `Invoke-PlaywrightSuite`). All three gates used to share one folder, so the
