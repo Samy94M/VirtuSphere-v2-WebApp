@@ -111,6 +111,7 @@ try {
     $outcome = Invoke-WithPausedQaWorkers {
         Push-Location $e2eDir
         try { $run = Invoke-Tool 'node' @($updater, '--reason', $Reason) } finally { Pop-Location }
+        if ($run.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $run) $run.Output }
         if ($run.ExitCode -eq 0) { return New-PassResult 'Sollbaselines aktualisiert' $run.Output }
         return New-FailResult 'Baseline-Update abgelehnt oder fehlgeschlagen' $run.Output
     }
@@ -126,4 +127,9 @@ if ($outcome.class -eq 'pass') {
     exit 0
 }
 if ($outcome.class -eq 'fail') { exit 1 }
+if ($outcome.detail -match 'Body-Urteil nicht verwertbar') {
+    # Der Writer hat schon geschrieben, die Aufnahmen sind aber nicht im
+    # Zustand der Sollbilder entstanden (Worker-Pause, RH1). Nichts davon reviewen.
+    Write-Host 'Sollbilder dieses Laufs verwerfen: git checkout -- tests/e2e/visual/baselines' -ForegroundColor Red
+}
 exit 2
