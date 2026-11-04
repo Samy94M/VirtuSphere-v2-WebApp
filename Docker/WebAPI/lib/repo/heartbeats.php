@@ -263,11 +263,14 @@ function repo_integration_heartbeats(mysqli $db): array
  * group has reported, so a site-health report never makes a missing sync red,
  * and vice versa.
  *
- * @return list<array{source: string, row: array|null, state: string}>
+ * Sync rows also carry report_overdue (virtusphere_run_report_overdue()).
+ *
+ * @return list<array{source: string, row: array|null, state: string, report_overdue?: bool}>
  */
 function repo_integration_status_rows(mysqli $db, ?int $now = null): array
 {
     require_once __DIR__ . '/../status.php';
+    $now ??= time();
 
     $heartbeats = repo_integration_heartbeats($db);
 
@@ -282,7 +285,13 @@ function repo_integration_status_rows(mysqli $db, ?int $now = null): array
     foreach ($heartbeats as $source => $row) {
         $kind = virtusphere_integration_source_kind((string) $source);
         $state = virtusphere_integration_row_state($row, $kind, $anySeenByKind[$kind], $now);
-        $out[] = ['source' => $source, 'row' => $row, 'state' => $state];
+        $entry = ['source' => $source, 'row' => $row, 'state' => $state];
+        if ($kind === 'sync') {
+            // Same clock as the state: the action hint follows the cause
+            // (late reporter or punctual run with open points), not the colour.
+            $entry['report_overdue'] = virtusphere_run_report_overdue($row, $now);
+        }
+        $out[] = $entry;
     }
 
     return $out;

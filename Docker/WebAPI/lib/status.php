@@ -275,12 +275,7 @@ function virtusphere_run_running_state(array $row, ?int $now = null): string
         return 'unknown';
     }
     $age = $current - $attemptTs;
-    $grace = max(
-        $interval * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER,
-        VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS,
-        VIRTUSPHERE_RUN_GRACE_SECONDS
-    );
-    if ($age > $grace) {
+    if ($age > virtusphere_run_start_grace_seconds($interval)) {
         $dangerAfter = max(
             $interval * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER,
             VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS

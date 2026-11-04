@@ -168,6 +168,10 @@ return [
     'source_deploy_worker' => 'Deploy service (portal)',
     'action_device_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Devices Sync" must be running. If it hangs, end it first, then start it again.',
     'action_packages_sync' => 'Check Task Scheduler on the MECM server: task "VirtuSphere MECM Packages Sync" must be running. If it hangs, end it first, then start it again.',
+    // A run reported on time with open points: the task runs, a restart does not help.
+    'action_device_sync_open_points' => 'The task is running and reporting on time; restarting it does not clear these items. "Technical details" and the finding "Waiting for MECM" on the VM name the affected VMs and the reason. Decide conflicts over name, MAC or MECM device by hand in the MECM console.',
+    'action_packages_sync_open_points' => 'The task is running and reporting on time; restarting it does not fix this. The last run did not apply the catalog, the message below names the reason. If the source is missing, check the VirtuSphere_Applications collections folder in the MECM console; if the catalog was rejected, the package sync protection threshold.',
+    'device_sync_causes_help' => 'Help with the causes per VM',
     'action_autoimporter' => 'Check the last completion and the daily autoimporter log. DP distribution can remain open while the task is running; restarting does not resolve it. If no new log entries appear, check the "VirtuSphere MECM Package Import" task on the MECM server.',
     'action_maintenance_worker' => 'Internal maintenance service is not running: check "docker compose ps" on the portal host and restart the maintenance-worker service.',
     // Without this service every job stays "waiting", including the ESXi

@@ -90,7 +90,7 @@ require_once __DIR__ . '/../log_filter.php';
             <?php // Jeder Identitaetscode bekommt eine
                   // Massnahme. Der Grenzwert kommt aus der Konstante, nicht aus
                   // dem Satz, damit er nicht luegen kann, wenn er sich bewegt. ?>
-            <h3><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
+            <h3 id="help-status-device-causes" tabindex="-1"><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_identity_p1')); ?></p>
             <ul>
                 <?php for ($identityCause = 1; $identityCause <= 9; $identityCause++) { ?>
