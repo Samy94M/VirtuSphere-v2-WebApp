@@ -64,18 +64,19 @@ BeforeAll {
         }
     }
 
-    # Fuehrt den originalen Content-Controllerblock fuer genau einen Scan aus.
-    # Die Schleifenhuelle macht seine `continue`-Grenzen ausfuehrbar, waehrend
-    # Provider, Registry und MECM-Aufrufe als kleine In-Memory-Fixture dienen.
+    # Fuehrt den originalen Content-Controllerblock (AV2) fuer genau einen Scan
+    # aus. Die Schleifenhuelle macht seine `continue`-Grenzen ausfuehrbar,
+    # waehrend Provider, Registry und MECM-Aufrufe als kleine In-Memory-Fixture
+    # dienen. Der Block wird dot-gesourct, damit $scanWarnings lesbar bleibt.
     $controllerSource = Get-Content -LiteralPath $script:Importer -Raw
     $controllerStart = $controllerSource.IndexOf('$packageManifest = Get-VsFilesManifestStamp -Path $pkgFolder')
     $controllerEnd = if ($controllerStart -ge 0) {
         $controllerSource.IndexOf('# --- Collection + Deployments idempotent nachziehen', $controllerStart)
     } else { -1 }
     if ($controllerStart -lt 0 -or $controllerEnd -le $controllerStart) {
-        throw 'U09-Controllerblock konnte nicht aus dem Autoimporter extrahiert werden.'
+        throw 'Content-Controllerblock konnte nicht aus dem Autoimporter extrahiert werden.'
     }
-    $script:U09ControllerBlock = [scriptblock]::Create("do {`n" + $controllerSource.Substring($controllerStart, $controllerEnd - $controllerStart) + "`n`$RequestCounters.ReconciliationReached = `$true`n} while (`$false)")
+    $script:ContentControllerBlock = [scriptblock]::Create("do {`n" + $controllerSource.Substring($controllerStart, $controllerEnd - $controllerStart) + "`n`$Fixture.ReconciliationReached = `$true`n} while (`$false)")
 
     # Eine vollstaendige Iteration der produktiven Endlosschleife. Nur die
     # aeussere while-Huelle wird entfernt; Paket-Inventar, Contentarbeit,
@@ -88,83 +89,114 @@ BeforeAll {
     $mainBody = $mainLoop[0].Body.Extent.Text
     $script:AutoimporterCycleBlock = [scriptblock]::Create($mainBody.Substring(1, $mainBody.Length - 2))
 
-    function Invoke-U09ControllerScan {
+    # Gespeicherter Auftrag (Schema 3 oder aus ContentTracking uebernommen), mit
+    # synthetischen Werten.
+    function New-RequestRecord {
         param(
-            [Parameter(Mandatory)]$TrackingBox,
-            [Parameter(Mandatory)]$RequestCounters,
-            [Parameter(Mandatory)][string]$Manifest,
-            [Parameter(Mandatory)][string]$ContentId,
-            [Parameter(Mandatory)][ValidateSet('not_started', 'succeeded', 'failed', 'in_progress', 'unknown')][string]$AggregateState,
-            [Parameter(Mandatory)][AllowEmptyCollection()][array]$CopyTargets,
-            [ValidateSet('none', 'initial', 'update')][string]$RequestFailure = 'none',
-            [int]$TargetCount = -1,
-            [AllowEmptyString()][string]$DpGroupName = 'DP-Fixture'
+            [string]$State = 'requested', [string]$Origin = 'current', [string]$Manifest = ('A' * 64),
+            [string]$RequestKind = 'update', [string]$ModelName = 'ScopeId_A/Application_A',
+            [string]$PackageId = 'XYZ00001', [string]$BaselineContentId = 'ContentA'
         )
+        return [pscustomobject]@{
+            State = $State; Origin = $Origin; Manifest = $Manifest; RequestKind = $RequestKind
+            ApplicationModelName = $ModelName; ApplicationPackageId = $PackageId; BaselineContentId = $BaselineContentId
+        }
+    }
+
+    # Synthetischer MECM-Zustand eines Pakets. Ownership: marker (Beschreibung),
+    # folder (ObjectPath im VirtuSphere-Ordner) oder none (fremd).
+    function New-ContentFixture {
+        param(
+            $RequestRecord = $null,
+            [string]$Manifest = ('A' * 64),
+            [string]$ModelName = 'ScopeId_A/Application_A',
+            [string]$PackageId = 'XYZ00001',
+            [string]$ContentId = 'ContentA',
+            [ValidateSet('not_started', 'succeeded', 'failed', 'in_progress', 'unknown')][string]$DistributionState = 'succeeded',
+            [int]$TargetCount = 8,
+            [ValidateSet('marker', 'folder', 'none')][string]$Ownership = 'marker',
+            [AllowEmptyString()][string]$DpGroupName = 'DP-Fixture',
+            [ValidateSet('has_members', 'empty', 'unknown')][string]$DpGroupState = 'has_members',
+            [ValidateSet('none', 'initial', 'update', 'confirm')][string]$RequestFailure = 'none',
+            [switch]$IdentityUnreadable
+        )
+        return [pscustomobject]@{
+            RequestRecord = $RequestRecord; Manifest = $Manifest; ModelName = $ModelName; PackageId = $PackageId
+            ContentId = $ContentId; DistributionState = $DistributionState; TargetCount = $TargetCount
+            Ownership = $Ownership; DpGroupName = $DpGroupName; DpGroupState = $DpGroupState
+            RequestFailure = $RequestFailure; IdentityUnreadable = [bool]$IdentityUnreadable
+            Initial = 0; Update = 0; ReconciliationReached = $false; ScanWarnings = 0
+            Causes = @(); HintCauses = @(); Hints = $null
+            Logs = (New-Object System.Collections.Generic.List[object])
+        }
+    }
+
+    function Invoke-ContentControllerScan {
+        param([Parameter(Mandatory)]$Fixture)
         . $script:MecmCommon
 
-        if (-not $RequestCounters.PSObject.Properties['ReconciliationReached']) {
-            $RequestCounters | Add-Member -MemberType NoteProperty -Name ReconciliationReached -Value $false
+        function Get-VsFilesManifestStamp { param($Path) return $Fixture.Manifest }
+        function Get-VsPackageContentRequest {
+            param($ApplicationName)
+            if ($null -eq $Fixture.RequestRecord) { return (New-VsContentRequestRecord -State none -Origin absent) }
+            return $Fixture.RequestRecord
         }
-        $RequestCounters.ReconciliationReached = $false
-
-        function Get-VsFilesManifestStamp { param($Path) return $Manifest }
-        function Get-VsPackageContentTracking { param($ApplicationName) return $TrackingBox.Value }
+        function Set-VsPackageContentRequest {
+            param($ApplicationName, $State, $Manifest, $RequestKind, $ApplicationModelName, $ApplicationPackageId, $BaselineContentId)
+            $Fixture.RequestRecord = New-VsContentRequestRecord -State $State -Origin current -Manifest $Manifest `
+                -RequestKind $RequestKind -ApplicationModelName $ApplicationModelName `
+                -ApplicationPackageId $ApplicationPackageId -BaselineContentId $BaselineContentId
+        }
+        function Confirm-VsPackageContentRequest {
+            param($ApplicationName)
+            if ($Fixture.RequestFailure -eq 'confirm') { throw 'simulierter Registryfehler nach angenommenem Aufruf' }
+            $Fixture.RequestRecord.State = 'requested'
+        }
         function Get-VsContentDistributionSnapshot {
             param($ApplicationName, $Application)
-            return [pscustomobject]@{ State = $AggregateState; SourceVersion = 1; TargetCount = $(if ($TargetCount -lt 0) { $CopyTargets.Count } else { $TargetCount }) }
+            return [pscustomobject]@{ State = $Fixture.DistributionState; SourceVersion = 1; TargetCount = $Fixture.TargetCount }
         }
-        function Get-VsDistributionCopySnapshot {
-            param($PackageId, $ApplicationModelName, $SiteCode, $ProviderMachine)
-            return [pscustomobject]@{ State = 'known'; Targets = @($CopyTargets) }
-        }
-        function Set-VsPackageContentTracking {
-            param(
-                $ApplicationName, $State, $Manifest, $BaselineSourceVersion = -1, $SourceVersion = -1,
-                $RequestKind, $ApplicationModelName, $ApplicationPackageId, $DeploymentTypeModelName,
-                $DeploymentTypeId, $BaselineContentId, $ContentId = '', $RequestConfirmed = $false,
-                $DistributionBaseline
-            )
-            $TrackingBox.Value = [pscustomobject]@{
-                State = $State; Manifest = $Manifest; BaselineSourceVersion = [int]$BaselineSourceVersion
-                SourceVersion = [int]$SourceVersion; RequestKind = $RequestKind
-                ApplicationModelName = $ApplicationModelName; ApplicationPackageId = $ApplicationPackageId
-                DeploymentTypeModelName = $DeploymentTypeModelName; DeploymentTypeId = $DeploymentTypeId
-                BaselineContentId = $BaselineContentId; ContentId = $ContentId
-                RequestConfirmed = [bool]$RequestConfirmed; DistributionBaseline = $DistributionBaseline
-            }
-        }
+        function Get-VsDistributionPointGroupState { param($GroupName) return $Fixture.DpGroupState }
         function Update-CMDistributionPoint {
             param($ApplicationName, $DeploymentTypeName, $ErrorAction)
-            $RequestCounters.Update++
-            if ($RequestFailure -eq 'update') { throw 'simulierter Updatefehler' }
+            $Fixture.Update++
+            if ($Fixture.RequestFailure -eq 'update') { throw 'simulierter Updatefehler' }
         }
         function Start-CMContentDistribution {
             param($ApplicationName, $DistributionPointGroupName, $ErrorAction)
-            $RequestCounters.Initial++
-            if ($RequestFailure -eq 'initial') { throw 'simulierter Erstverteilungsfehler' }
+            $Fixture.Initial++
+            if ($Fixture.RequestFailure -eq 'initial') { throw 'simulierter Erstverteilungsfehler' }
         }
-        function Write-VsLog { param($Level, $Context, $Message) }
-        function Add-VsRunCause { param($Causes, $Cause, $Target) }
+        function Write-VsLog { param($Level, $Context, $Message) [void]$Fixture.Logs.Add([pscustomobject]@{ Level = $Level; Message = $Message }) }
 
         $pkgFolder = 'fixture-package'
         $fullName = 'Agent-1'
         $deploymentTypeName = 'Agent-1 Deployment'
-        $siteCode = 'ABC'
-        $providerMachine = 'provider.test.invalid'
-        $dpGroupName = $DpGroupName
+        $appFolderName = $script:VsApplicationsFolderName
+        $dpGroupName = $Fixture.DpGroupName
         $scanWarnings = 0
-        $causes = New-Object System.Collections.Generic.List[object]
+        $causes = New-VsRunCauseList
+        $hintCauses = New-VsRunCauseList
+        $distributionHints = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
         $app = [pscustomobject]@{
-            LocalizedDisplayName = $fullName; ModelName = 'ScopeId_A/Application_A'; PackageID = 'ABC00001'
+            LocalizedDisplayName = $fullName; ModelName = $Fixture.ModelName; PackageID = $Fixture.PackageId
+            LocalizedDescription = $(if ($Fixture.Ownership -eq 'marker') { $script:VsManagedPackageApplicationMarker } else { 'Von Hand angelegt' })
+            ObjectPath = $(if ($Fixture.Ownership -eq 'folder') { '/' + $script:VsApplicationsFolderName } else { '/' })
         }
+        if ($Fixture.IdentityUnreadable) { $app.PSObject.Properties.Remove('ModelName') }
         $deploymentTypes = @([pscustomobject]@{
-            LocalizedDisplayName = $deploymentTypeName; AppModelName = $app.ModelName
-            ModelName = 'ScopeId_A/DeploymentType_A'; CI_UniqueID = ('ScopeId_A/DeploymentType_A/{0}' -f $ContentId)
-            ContentId = $ContentId
+            LocalizedDisplayName = $deploymentTypeName; AppModelName = $Fixture.ModelName
+            ModelName = 'ScopeId_A/DeploymentType_A'; CI_UniqueID = ('ScopeId_A/DeploymentType_A/{0}' -f $Fixture.ContentId)
+            ContentId = $Fixture.ContentId
         })
 
-        & $script:U09ControllerBlock
-        return $TrackingBox.Value
+        $Fixture.ReconciliationReached = $false
+        . $script:ContentControllerBlock
+        $Fixture.ScanWarnings = $scanWarnings
+        $Fixture.Causes = @($causes)
+        $Fixture.HintCauses = @($hintCauses)
+        $Fixture.Hints = $distributionHints
+        return $Fixture
     }
 
     function Invoke-AutoimporterCycleFixture {
@@ -175,7 +207,6 @@ BeforeAll {
         $logs = New-Object System.Collections.Generic.List[object]
         $contentReads = [pscustomobject]@{ Agent = 0; Beta = 0 }
         $cleanupErrorActions = New-Object System.Collections.Generic.List[string]
-        $observedSiteCodes = New-Object System.Collections.Generic.List[string]
 
         function Initialize-VsCmSite { param($Config) return 'ABC' }
         function Get-VsProviderMachine { param($Config, $ProviderMachine) return 'provider.fixture' }
@@ -239,30 +270,21 @@ BeforeAll {
                 CI_UniqueID = "ScopeId_A/DeploymentType_$product/Content1"; ContentId = 'Content1'
             }
         }
-        function Get-VsPackageContentTracking {
+        function Get-VsPackageContentRequest {
             param($ApplicationName)
             $product = $ApplicationName.Substring(0, $ApplicationName.LastIndexOf('-'))
             return [pscustomobject]@{
-                State = 'complete'; Manifest = $(if ($product -eq 'Agent') { 'A' * 64 } else { 'B' * 64 })
-                BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
-                ApplicationModelName = "ScopeId_A/Application_$product"
+                State = 'requested'; Origin = 'current'; Manifest = $(if ($product -eq 'Agent') { 'A' * 64 } else { 'B' * 64 })
+                RequestKind = 'update'; ApplicationModelName = "ScopeId_A/Application_$product"
                 ApplicationPackageId = $(if ($product -eq 'Agent') { 'ABC00001' } else { 'ABC00002' })
-                DeploymentTypeModelName = "ScopeId_A/DeploymentType_$product"
-                DeploymentTypeId = "ScopeId_A/DeploymentType_$product/Content1"
-                BaselineContentId = 'Old'; ContentId = 'Content1'; RequestConfirmed = $true
-                DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
+                BaselineContentId = 'Content1'
             }
         }
         function Get-VsContentDistributionSnapshot {
             param($ApplicationName, $Application)
+            $product = $ApplicationName.Substring(0, $ApplicationName.LastIndexOf('-'))
+            $contentReads.$product = [int]$contentReads.$product + 1
             return [pscustomobject]@{ State = 'succeeded'; SourceVersion = 1; TargetCount = 1 }
-        }
-        function Get-VsDistributionCopySnapshot {
-            param($PackageId, $ApplicationModelName, $SiteCode, $ProviderMachine)
-            [void]$observedSiteCodes.Add([string]$SiteCode)
-            return [pscustomobject]@{ State = 'known'; Targets = @(
-                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
-            ) }
         }
         function Test-VsPackageTemplateSetCurrent { param($TemplateRoot, $PackageRoot) return $true }
         function Sync-VsPackageTemplateSet { param($TemplateRoot, $PackageRoot) }
@@ -302,7 +324,7 @@ BeforeAll {
         & $script:AutoimporterCycleBlock
         return [pscustomobject]@{
             Reports = $reports.ToArray(); Logs = $logs.ToArray(); ContentReads = $contentReads
-            CleanupErrorActions = $cleanupErrorActions.ToArray(); ObservedSiteCodes = $observedSiteCodes.ToArray()
+            CleanupErrorActions = $cleanupErrorActions.ToArray()
         }
     }
 }
@@ -325,8 +347,6 @@ Describe 'M03-F02: optionale Altobjektinventare isolieren ihren Lesefehler' {
         $completed[0].Detail | Should -Not -Match 'Agent-0\.9' -Because 'Teilbestand aus nur einer Quelle ist keine Cleanupentscheidung'
         $result.ContentReads.Agent | Should -BeGreaterThan 0 -Because 'Contentarbeit des betroffenen Pakets laeuft weiter'
         $result.ContentReads.Beta | Should -BeGreaterThan 0 -Because 'das unabhaengige Folgepaket wird weiter bearbeitet'
-        $result.ObservedSiteCodes.Count | Should -BeGreaterThan 0 -Because 'der Contentowner muss den Providerkontext tatsaechlich verbrauchen'
-        @($result.ObservedSiteCodes | Where-Object { $_ -ne 'ABC' }).Count | Should -Be 0 -Because 'ein optionaler Inventarfehler setzt den Providerkontext nicht zurueck'
         $result.CleanupErrorActions | Should -Not -Contain 'SilentlyContinue'
         $result.CleanupErrorActions | Should -Contain 'Stop'
         @($result.Logs | Where-Object Message -match 'Automatische Altversionsbereinigung konnte nicht sicher geplant/revalidiert werden').Count | Should -Be 1
@@ -341,9 +361,9 @@ Describe 'M03-F02: optionale Altobjektinventare isolieren ihren Lesefehler' {
     }
 }
 
-Describe 'Autoimporter: bestaetigter Contentauftrag gibt Collection und Deployments frei' {
-    It 'meldet die Generation mit getrennter Deploymentfreigabe' {
-        (Get-Content -LiteralPath $script:Importer -Raw) | Should -Match "\`$SCRIPT_VERSION\s*=\s*'autoimporter/2\.2'"
+Describe 'Autoimporter AV2: Generation und Vertrag' {
+    It 'meldet die Generation, in der DP-Zustaende nichts mehr sperren' {
+        (Get-Content -LiteralPath $script:Importer -Raw) | Should -Match "\`$SCRIPT_VERSION\s*=\s*'autoimporter/2\.3'"
     }
 
     It 'verlangt denselben MECM-Serververtrag wie Common und der Installer prueft Staging und Livebestand' {
@@ -351,8 +371,8 @@ Describe 'Autoimporter: bestaetigter Contentauftrag gibt Collection und Deployme
         $commonText = Get-Content -LiteralPath $script:MecmCommon -Raw
         $installerText = Get-Content -LiteralPath $script:Installer -Raw
 
-        $commonText | Should -Match '\$script:VsMecmServerContractVersion\s*=\s*2'
-        $importerText | Should -Match '\$script:VsRequiredMecmServerContractVersion\s*=\s*2'
+        $commonText | Should -Match '\$script:VsMecmServerContractVersion\s*=\s*3'
+        $importerText | Should -Match '\$script:VsRequiredMecmServerContractVersion\s*=\s*3'
         $importerText | Should -Match 'Get-Variable -Name VsMecmServerContractVersion -Scope Script'
         $importerText | Should -Match 'MECM-Serverpaket inkompatibel'
         $importerText | Should -Match 'install-VirtuSphere-MECM\.ps1 -Upgrade'
@@ -364,273 +384,347 @@ Describe 'Autoimporter: bestaetigter Contentauftrag gibt Collection und Deployme
         }
     }
 
-    It 'erreicht den Deploymentabgleich direkt nach einer bestaetigten Erstverteilung ohne sichtbaren DP' {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-            -ContentId ContentA -AggregateState not_started -CopyTargets @() | Out-Null
-
-        $requests.Initial | Should -Be 1
-        $tracking.Value.State | Should -Be 'intent'
-        $tracking.Value.RequestConfirmed | Should -BeTrue
-        $requests.ReconciliationReached | Should -BeTrue -Because 'MECM hat den Auftrag quittiert; kein DP-Erfolg ist Voraussetzung fuer die Zuweisung'
-    }
-
-    It 'erreicht den Deploymentabgleich fuer einen bestaetigten Intent auch bevor ContentId oder Ziele sichtbar sind' {
-        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
-            State = 'intent'; Manifest = ('A' * 64); BaselineSourceVersion = -1; SourceVersion = -1; RequestKind = 'initial'
-            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
-            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
-            BaselineContentId = 'ContentA'; ContentId = ''; RequestConfirmed = $true; DistributionBaseline = '[]'
-        } }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-            -ContentId ContentA -AggregateState not_started -CopyTargets @() | Out-Null
-
-        $tracking.Value.State | Should -Be 'intent'
-        $requests.ReconciliationReached | Should -BeTrue
-    }
-
-    It 'erreicht den Deploymentabgleich bei <AggregateState> auch wenn kein DP erfolgreich ist' -ForEach @(
-        @{ AggregateState = 'failed'; DpState = 3 },
-        @{ AggregateState = 'in_progress'; DpState = 2 }
-    ) {
-        $targets = @(1..2 | ForEach-Object {
-            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = $DpState; LastCopiedTicks = 100L }
-        })
-        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
-            State = 'pending'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = -1; RequestKind = 'update'
-            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
-            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
-            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
-            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_1","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_2","last_copied_ticks":100}]'
-        } }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-            -ContentId ContentA -AggregateState $AggregateState -CopyTargets $targets | Out-Null
-
-        $tracking.Value.State | Should -Be 'pending'
-        $requests.ReconciliationReached | Should -BeTrue -Because 'die offene Verteilung bleibt Warnung, ist aber kein Deployment-Veto'
-    }
-
-    It 'erreicht den Deploymentabgleich weiter wenn ein frueher vollstaendiger Stand spaeter DP-Fehler meldet' {
-        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 3; LastCopiedTicks = 101L })
-        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
-            State = 'complete'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
-            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
-            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
-            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
-            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
-        } }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-            -ContentId ContentA -AggregateState failed -CopyTargets $targets | Out-Null
-
-        $tracking.Value.State | Should -Be 'complete'
-        $requests.ReconciliationReached | Should -BeTrue
-    }
-
-    It 'blockiert den Deploymentabgleich bei unbekanntem Aggregat oder DP-Loeschzustand' {
-        foreach ($case in @(
-            @{ State = 'unknown'; DpState = 3 },
-            @{ State = 'failed'; DpState = 4 }
-        )) {
-            $tracking = [pscustomobject]@{ Value = $null }
-            $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-            $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = $case.DpState; LastCopiedTicks = 100L })
-            Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-                -ContentId ContentA -AggregateState $case.State -CopyTargets $targets | Out-Null
-            $requests.ReconciliationReached | Should -BeFalse
+    It 'kennt keinen DP-Kopiernachweis mehr' {
+        $importerText = Get-Content -LiteralPath $script:Importer -Raw
+        $commonText = Get-Content -LiteralPath $script:MecmCommon -Raw
+        foreach ($gone in @('Get-VsDistributionCopySnapshot', 'Test-VsDistributionCopyEvidence', 'Test-VsDistributionCopyBaselineReady',
+            'Test-VsDistributionCopyAdvanced', 'ConvertTo-VsDistributionBaselineJson', 'SMS_PackageStatusDistPointsSummarizer',
+            'DistributionEvidenceSafe')) {
+            $importerText | Should -Not -Match ([regex]::Escape($gone))
+            $commonText | Should -Not -Match ([regex]::Escape($gone))
         }
-    }
-
-    It 'blockiert den Deploymentabgleich wenn ein gebundenes DP-Ziel verschwunden ist' {
-        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 3; LastCopiedTicks = 100L })
-        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
-            State = 'pending'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = -1; RequestKind = 'update'
-            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
-            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
-            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
-            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":100}]'
-        } }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-            -ContentId ContentA -AggregateState failed -CopyTargets $targets | Out-Null
-
-        $requests.ReconciliationReached | Should -BeFalse
-    }
-
-    It 'blockiert den Deploymentabgleich ohne DP-Gruppe oder bestaetigten MECM-Aufruf' {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-            -ContentId ContentA -AggregateState not_started -CopyTargets @() -DpGroupName '' | Out-Null
-        $requests.ReconciliationReached | Should -BeFalse
-
-        $tracking.Value = $null
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) `
-            -ContentId ContentA -AggregateState not_started -CopyTargets @() -RequestFailure initial | Out-Null
-        $requests.ReconciliationReached | Should -BeFalse
     }
 }
 
-Describe 'Autoimporter: partial DP distribution never vetoes a new source' {
-    It 'updates 4/6 DPs once per manifest, supersedes pending content, and waits for all six copies' {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-        $targets = @(1..6 | ForEach-Object {
-            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = $(if ($_ -le 4) { 0 } else { 3 }); LastCopiedTicks = 100L }
-        })
-        $argsA = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'failed'; CopyTargets = $targets }
-        Invoke-U09ControllerScan @argsA | Out-Null
-        $requests.Update | Should -Be 1
-        $tracking.Value.RequestConfirmed | Should -BeTrue
-        $tracking.Value.State | Should -Be 'intent'
-        $argsA.ContentId = 'ContentA'
-        Invoke-U09ControllerScan @argsA | Out-Null
-        Invoke-U09ControllerScan @argsA | Out-Null
-        $tracking.Value.State | Should -Be 'pending'
-        $requests.Update | Should -Be 1
-        # A second real source change need not wait for the offline targets.
-        $argsA.Manifest = ('B' * 64)
-        Invoke-U09ControllerScan @argsA | Out-Null
-        $requests.Update | Should -Be 2
-        $tracking.Value.State | Should -Be 'intent'
-        $tracking.Value.BaselineContentId | Should -Be 'ContentA'
-        $argsA.ContentId = 'ContentB'
-        Invoke-U09ControllerScan @argsA | Out-Null
-        $targets | ForEach-Object { $_.State = 0 }
-        $argsA.AggregateState = 'succeeded'
-        Invoke-U09ControllerScan @argsA | Out-Null
-        $tracking.Value.State | Should -Be 'pending' -Because 'old copies cannot confirm the new content'
-        $targets | ForEach-Object { $_.LastCopiedTicks = 101L }
-        Invoke-U09ControllerScan @argsA | Out-Null
-        $tracking.Value.State | Should -Be 'complete'
-        $requests.Update | Should -Be 2
-        $requests.Initial | Should -Be 0
+Describe 'Autoimporter AV2: gemessene Prod-Lagen als Regression (synthetische Werte)' {
+    It 'L1: ein ersetzter DP sperrt nichts, wenn das Manifest unveraendert ist' {
+        # Der alte Stand nannte einen DP, den die Site nicht mehr kennt. Nur
+        # Manifest und Identitaet wurden uebernommen; MECM meldet failed.
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord -Origin migrated) -DistributionState failed
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+
+        $fixture.Update | Should -Be 0 -Because 'derselbe Inhalt wird nicht noch einmal angefordert'
+        $fixture.Initial | Should -Be 0
+        $fixture.ReconciliationReached | Should -BeTrue
+        $fixture.ScanWarnings | Should -Be 0
+        $fixture.Causes.Count | Should -Be 0
+        $fixture.HintCauses | Should -Be @('package_content_failed target=Agent-1')
     }
 
-    It 'allows a new manifest with DP state <DpState> and no previous successful copy' -ForEach @(
-        @{ DpState = 0 }, @{ DpState = 1 }, @{ DpState = 2 }, @{ DpState = 3 }, @{ DpState = 7 }, @{ DpState = 8 }
+    It 'L1b: neuer Inhalt nach DP-Ersatz wird genau einmal angefordert' {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord -Origin migrated -Manifest ('B' * 64)) -DistributionState failed
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+
+        $fixture.Update | Should -Be 1
+        $fixture.RequestRecord.State | Should -Be 'requested'
+        $fixture.RequestRecord.Manifest | Should -Be ('A' * 64)
+        $fixture.ReconciliationReached | Should -BeTrue
+        $fixture.ScanWarnings | Should -Be 0
+        $fixture.HintCauses | Should -Be @('package_content_in_progress target=Agent-1')
+
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Update | Should -Be 1 -Because 'hoechstens ein Auftrag je Manifest'
+        $fixture.ScanWarnings | Should -Be 0
+    }
+
+    It 'L2: eine neu angelegte VirtuSphere-Application (<Ownership>) wird ohne Auftrag uebernommen' -ForEach @(
+        @{ Ownership = 'marker' },
+        @{ Ownership = 'folder' }
     ) {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = $DpState; LastCopiedTicks = 0L })
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) -ContentId Old -AggregateState in_progress -CopyTargets $targets | Out-Null
-        $requests.Update | Should -Be 1
-        $tracking.Value.State | Should -Be 'intent'
+        $old = New-RequestRecord -Origin migrated -ModelName 'ScopeId_A/Application_Old' -PackageId 'XYZ00009'
+        $fixture = New-ContentFixture -RequestRecord $old -Ownership $Ownership -DistributionState succeeded
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+
+        $fixture.Update | Should -Be 0
+        $fixture.Initial | Should -Be 0
+        $fixture.RequestRecord.ApplicationModelName | Should -Be 'ScopeId_A/Application_A'
+        $fixture.RequestRecord.ApplicationPackageId | Should -Be 'XYZ00001'
+        $fixture.RequestRecord.State | Should -Be 'requested'
+        $fixture.ReconciliationReached | Should -BeTrue
+        $fixture.ScanWarnings | Should -Be 0
     }
 
-    It 'blocks removal or unreadable state <DpState>' -ForEach @(
-        @{ DpState = 4 }, @{ DpState = 5 }, @{ DpState = 6 }, @{ DpState = 9 }, @{ DpState = -1 }
+    It 'L2: eine neu angelegte, noch nie verteilte VirtuSphere-Application bekommt genau eine Erstverteilung' {
+        $old = New-RequestRecord -Origin migrated -ModelName 'ScopeId_A/Application_Old' -PackageId 'XYZ00009'
+        $fixture = New-ContentFixture -RequestRecord $old -DistributionState not_started
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+
+        $fixture.Initial | Should -Be 1
+        $fixture.Update | Should -Be 0
+        $fixture.ReconciliationReached | Should -BeTrue
+        $fixture.ScanWarnings | Should -Be 0
+    }
+
+    It 'L2: eine namensgleiche fremde Application wird nicht uebernommen' {
+        $old = New-RequestRecord -Origin migrated -ModelName 'ScopeId_A/Application_Old' -PackageId 'XYZ00009'
+        $fixture = New-ContentFixture -RequestRecord $old -Ownership none
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+
+        $fixture.Update | Should -Be 0
+        $fixture.Initial | Should -Be 0
+        $fixture.ReconciliationReached | Should -BeFalse -Because 'kein Deployment auf ein fremdes Objekt'
+        $fixture.ScanWarnings | Should -Be 1
+        $fixture.Causes | Should -Be @('package_definition_drift target=Agent-1')
+        $fixture.RequestRecord.ApplicationModelName | Should -Be 'ScopeId_A/Application_Old'
+    }
+
+    It 'L3: offline DPs (<State>) sind ein Hinweis, kein offener Punkt' -ForEach @(
+        @{ State = 'failed'; Hint = 'package_content_failed' },
+        @{ State = 'in_progress'; Hint = 'package_content_in_progress' }
     ) {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = $DpState; LastCopiedTicks = 100L })
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) -ContentId Old -AggregateState failed -CopyTargets $targets | Out-Null
-        $requests.Update | Should -Be 0
-        $tracking.Value | Should -BeNullOrEmpty
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord) -DistributionState $State
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+
+        $fixture.ReconciliationReached | Should -BeTrue
+        $fixture.ScanWarnings | Should -Be 0
+        $fixture.Update | Should -Be 0
+        $fixture.HintCauses | Should -Be @("$Hint target=Agent-1")
+        $fixture.Hints['Agent-1'] | Should -Be $Hint
     }
 
-    It 'does not start on an unknown aggregate or incomplete DP projection' {
-        foreach ($case in @(@{ State = 'unknown'; Count = 1 }, @{ State = 'failed'; Count = 6 })) {
-            $tracking = [pscustomobject]@{ Value = $null }
-            $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-            $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 3; LastCopiedTicks = 100L })
-            Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest ('A' * 64) -ContentId Old -AggregateState $case.State -CopyTargets $targets -TargetCount $case.Count | Out-Null
-            $requests.Update | Should -Be 0
-            $tracking.Value | Should -BeNullOrEmpty
-        }
-    }
-
-    It 'does not drop a missing target when superseding a pending request' {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-        $targets = @(1..2 | ForEach-Object { [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = 3; LastCopiedTicks = 100L } })
-        $scan = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'failed'; CopyTargets = $targets }
-        Invoke-U09ControllerScan @scan | Out-Null
-        $scan.ContentId = 'ContentA'
-        Invoke-U09ControllerScan @scan | Out-Null
-        $scan.Manifest = ('B' * 64)
-        $scan.CopyTargets = @($targets[0])
-        Invoke-U09ControllerScan @scan | Out-Null
-        $requests.Update | Should -Be 1
-        $tracking.Value.Manifest | Should -Be ('A' * 64)
-        $tracking.Value.State | Should -Be 'pending'
-    }
-
-    It 'allows added targets after completion but still blocks loss of a previous target' {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-        $targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
-        $scan = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'succeeded'; CopyTargets = $targets }
-        Invoke-U09ControllerScan @scan | Out-Null
-        $scan.ContentId = 'ContentA'
-        Invoke-U09ControllerScan @scan | Out-Null
-        $targets[0].LastCopiedTicks = 101L
-        Invoke-U09ControllerScan @scan | Out-Null
-        $tracking.Value.State | Should -Be 'complete'
-
-        $scan.Manifest = ('B' * 64)
-        $scan.CopyTargets = @($targets[0], [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 50L })
-        Invoke-U09ControllerScan @scan | Out-Null
-        $requests.Update | Should -Be 2 -Because 'a newly required DP belongs in the new request baseline'
-
-        $tracking.Value = [pscustomobject]@{
-            State = 'complete'; Manifest = ('A' * 64); BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
-            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
-            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
-            BaselineContentId = 'Old'; ContentId = 'ContentA'; RequestConfirmed = $true
-            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":50}]'
-        }
-        $scan.CopyTargets = @($targets[0])
-        Invoke-U09ControllerScan @scan | Out-Null
-        $requests.Update | Should -Be 2 -Because 'loss of a previously required DP remains blocked'
-        $tracking.Value.State | Should -Be 'complete'
-    }
-
-    It 'binds initial targets before supersede or completion and never forgets a missing target' {
-        $tracking = [pscustomobject]@{ Value = $null }
-        $requests = [pscustomobject]@{ Update = 0; Initial = 0 }
-        $scan = @{ TrackingBox = $tracking; RequestCounters = $requests; Manifest = ('A' * 64); ContentId = 'Old'; AggregateState = 'not_started'; CopyTargets = @() }
-        Invoke-U09ControllerScan @scan | Out-Null
-        $requests.Initial | Should -Be 1
-
-        $scan.ContentId = 'ContentA'
-        $scan.Manifest = ('B' * 64)
-        Invoke-U09ControllerScan @scan | Out-Null
-        $requests.Initial | Should -Be 1
-        $tracking.Value.Manifest | Should -Be ('A' * 64)
-        $tracking.Value.State | Should -Be 'intent'
-
-        $scan.Manifest = ('A' * 64)
-        $scan.AggregateState = 'in_progress'
-        $targets = @(1..2 | ForEach-Object { [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = "NAL_$_"; State = 3; LastCopiedTicks = 0L } })
-        $scan.CopyTargets = $targets
-        Invoke-U09ControllerScan @scan | Out-Null
-        $tracking.Value.State | Should -Be 'pending'
-        $tracking.Value.DistributionBaseline | Should -Match 'NAL_1'
-        $tracking.Value.DistributionBaseline | Should -Match 'NAL_2'
-
-        $scan.AggregateState = 'succeeded'
-        $targets | ForEach-Object { $_.State = 0; $_.LastCopiedTicks = 1L }
-        $scan.CopyTargets = @($targets[0])
-        Invoke-U09ControllerScan @scan | Out-Null
-        $tracking.Value.State | Should -Be 'pending'
-        $scan.CopyTargets = $targets
-        Invoke-U09ControllerScan @scan | Out-Null
-        $tracking.Value.State | Should -Be 'complete'
-        Invoke-U09ControllerScan @scan | Out-Null
-        $tracking.Value.State | Should -Be 'complete' -Because 'the bound zero-tick baseline remains the request evidence'
-        $requests.Initial | Should -Be 1
+    It 'ein vollstaendig verteiltes Paket meldet weder offenen Punkt noch Hinweis' {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord) -DistributionState succeeded
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.ScanWarnings | Should -Be 0
+        $fixture.HintCauses.Count | Should -Be 0
+        $fixture.Hints.Count | Should -Be 0
     }
 }
 
+Describe 'Autoimporter AV2: hoechstens ein angenommener Auftrag je Manifest' {
+    It 'fordert ein neues Paket einmal an die DP-Gruppe an und wiederholt eine angenommene Erstverteilung nicht' {
+        $fixture = New-ContentFixture -DistributionState not_started
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Initial | Should -Be 1
+        $fixture.RequestRecord.State | Should -Be 'requested'
+        $fixture.RequestRecord.RequestKind | Should -Be 'initial'
+        $fixture.ReconciliationReached | Should -BeTrue
+        $fixture.ScanWarnings | Should -Be 0
+
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Initial | Should -Be 1 -Because 'MECM hat den Auftrag angenommen, auch wenn noch kein Ziel sichtbar ist'
+    }
+
+    It 'wiederholt einen abgelehnten Updateaufruf nur, solange MECM ihn nicht angenommen hat' {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord -Manifest ('B' * 64)) -RequestFailure update
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Update | Should -Be 1
+        $fixture.RequestRecord.State | Should -Be 'intent'
+        $fixture.ScanWarnings | Should -Be 1
+        $fixture.Causes | Should -Be @('package_content_request_failed target=Agent-1')
+        $fixture.ReconciliationReached | Should -BeTrue -Because 'ein abgelehnter Auftrag haelt Collection und Deployments nicht auf'
+
+        # Die DT-ContentId blieb gleich: MECM hat nichts angenommen, ein neuer Versuch.
+        $fixture.RequestFailure = 'none'
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Update | Should -Be 2
+        $fixture.RequestRecord.State | Should -Be 'requested'
+        $fixture.ScanWarnings | Should -Be 0
+    }
+
+    It 'uebernimmt einen trotz Fehlermeldung angenommenen Aufruf ohne zweiten Auftrag' {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord -Manifest ('B' * 64)) -RequestFailure confirm
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Update | Should -Be 1
+        $fixture.RequestRecord.State | Should -Be 'intent'
+
+        # MECM hat die neue Contentversion angelegt: neue DT-ContentId.
+        $fixture.RequestFailure = 'none'
+        $fixture.ContentId = 'ContentB'
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Update | Should -Be 1 -Because 'der Annahmenachweis verhindert eine Auftragsschleife'
+        $fixture.RequestRecord.State | Should -Be 'requested'
+        $fixture.RequestRecord.BaselineContentId | Should -Be 'ContentA'
+        $fixture.ScanWarnings | Should -Be 0
+    }
+
+    It 'abgebrochene Erstverteilung: sichtbares Ziel gilt als angenommen, ohne Ziel genau ein neuer Aufruf (<DistributionState>)' -ForEach @(
+        @{ DistributionState = 'in_progress'; Calls = 0 },
+        @{ DistributionState = 'failed'; Calls = 0 },
+        @{ DistributionState = 'not_started'; Calls = 1 }
+    ) {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord -State intent -RequestKind initial) -DistributionState $DistributionState
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Initial | Should -Be $Calls
+        $fixture.Update | Should -Be 0
+        $fixture.RequestRecord.State | Should -Be 'requested'
+        $fixture.ScanWarnings | Should -Be 0
+        $fixture.ReconciliationReached | Should -BeTrue
+    }
+
+    It 'Schema-1-Altstand ohne Identitaet: eigene Application ohne Auftrag uebernommen, fremde nie (<Ownership>)' -ForEach @(
+        @{ Ownership = 'marker'; Owned = $true },
+        @{ Ownership = 'folder'; Owned = $true },
+        @{ Ownership = 'none'; Owned = $false }
+    ) {
+        $legacy = New-RequestRecord -Origin migrated -ModelName '' -PackageId '' -BaselineContentId ''
+        $fixture = New-ContentFixture -RequestRecord $legacy -Ownership $Ownership -DistributionState failed
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        ($fixture.Initial + $fixture.Update) | Should -Be 0
+        if ($Owned) {
+            $fixture.RequestRecord.State | Should -Be 'requested'
+            $fixture.RequestRecord.ApplicationModelName | Should -Be 'ScopeId_A/Application_A'
+            $fixture.ScanWarnings | Should -Be 0
+            $fixture.ReconciliationReached | Should -BeTrue
+        } else {
+            $fixture.Causes | Should -Be @('package_definition_drift target=Agent-1')
+            $fixture.ReconciliationReached | Should -BeFalse
+        }
+    }
+
+    It 'ein von Hand angestossenes Contentupdate in MECM ist kein offener Punkt' {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord) -ContentId 'ContentManual'
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Update | Should -Be 0
+        $fixture.ScanWarnings | Should -Be 0
+        $fixture.ReconciliationReached | Should -BeTrue
+    }
+
+    It 'leere oder fehlende DP-Gruppe ist ein offener Punkt ohne Auftrag, aber ohne Deployment-Veto (<Name>)' -ForEach @(
+        @{ Name = 'leer'; Group = 'DP-Fixture'; GroupState = 'empty'; Cause = 'package_content_group_empty' },
+        @{ Name = 'fehlt'; Group = ''; GroupState = 'unknown'; Cause = 'package_content_request_failed' }
+    ) {
+        $fixture = New-ContentFixture -DistributionState not_started -DpGroupName $Group -DpGroupState $GroupState
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Initial | Should -Be 0
+        $fixture.ScanWarnings | Should -Be 1
+        $fixture.Causes | Should -Be @("$Cause target=Agent-1")
+        $fixture.ReconciliationReached | Should -BeTrue
+    }
+
+    It 'nennt eine leere DP-Gruppe auch nach angenommener Erstverteilung, ohne neuen Aufruf' {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord -RequestKind initial) -DistributionState not_started -DpGroupState empty
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Initial | Should -Be 0
+        $fixture.Causes | Should -Be @('package_content_group_empty target=Agent-1')
+        $fixture.ReconciliationReached | Should -BeTrue
+    }
+
+    It 'unlesbare eigene Identitaet stellt keinen Auftrag, gleicht Deployments aber weiter ab' {
+        $fixture = New-ContentFixture -IdentityUnreadable -DistributionState not_started
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Initial | Should -Be 0
+        $fixture.Update | Should -Be 0
+        $fixture.Causes | Should -Be @('package_content_unknown target=Agent-1')
+        $fixture.ReconciliationReached | Should -BeTrue
+    }
+
+    It 'unlesbarer Verteilstand: ohne bisherigen Auftrag kein Raten, mit bisherigem Auftrag ein Update' {
+        $fresh = New-ContentFixture -DistributionState unknown
+        Invoke-ContentControllerScan -Fixture $fresh | Out-Null
+        $fresh.Initial + $fresh.Update | Should -Be 0
+        $fresh.Causes | Should -Be @('package_content_unknown target=Agent-1')
+        $fresh.ReconciliationReached | Should -BeTrue
+
+        $known = New-ContentFixture -RequestRecord (New-RequestRecord -Manifest ('B' * 64)) -DistributionState unknown
+        Invoke-ContentControllerScan -Fixture $known | Out-Null
+        $known.Update | Should -Be 1
+        $known.ScanWarnings | Should -Be 0
+    }
+
+    It 'unlesbare Registry stellt keinen Auftrag' {
+        $fixture = New-ContentFixture -RequestRecord (New-RequestRecord -State none -Origin unreadable -Manifest '')
+        Invoke-ContentControllerScan -Fixture $fixture | Out-Null
+        $fixture.Update + $fixture.Initial | Should -Be 0
+        $fixture.Causes | Should -Be @('package_content_unknown target=Agent-1')
+        $fixture.ReconciliationReached | Should -BeTrue
+    }
+}
+
+Describe 'Autoimporter AV2: Verteilhinweise im Lauf' {
+    BeforeAll {
+        function Invoke-HintCycleFixture {
+            param([Parameter(Mandatory)]$StateBox, [int]$Iterations = 1)
+            . $script:MecmCommon
+            $reports = New-Object System.Collections.Generic.List[object]
+            function Initialize-VsCmSite { param($Config) return 'XYZ' }
+            function Get-VsProviderMachine { param($Config, $ProviderMachine) return 'provider.example.test' }
+            function Get-CMFolder { param($FolderPath, $ErrorAction) return [pscustomobject]@{ Name = $FolderPath } }
+            function Get-VsFilesManifestStamp { param($Path, $TemplatePath) if ($Path -eq $basePath) { return 'fixture-scan-stamp' } return ('A' * 64) }
+            function Test-Path { param($Path, $LiteralPath) return $true }
+            function Get-ChildItem { param($Path, [switch]$Directory) return @([pscustomobject]@{ Name = 'agent'; FullName = (Join-Path $basePath 'agent') }) }
+            function Read-VsPackageConfig {
+                param($Folder)
+                return [pscustomobject]@{ ProjectName = 'Agent'; version = '1'; FolderName = 'agent'; removeOldVersion = 'false'; generateOwnDeviceColletion = 'false'; DeployTo = '' }
+            }
+            function Get-CMApplication {
+                param($Name, [switch]$Fast, $ErrorAction)
+                return [pscustomobject]@{ LocalizedDisplayName = $Name; ModelName = 'ScopeId_A/Application_Agent'; PackageID = 'XYZ00001'; LocalizedDescription = $script:VsManagedPackageApplicationMarker }
+            }
+            function Get-CMDeploymentType {
+                param($ApplicationName, $ErrorAction)
+                return [pscustomobject]@{ LocalizedDisplayName = "$ApplicationName Deployment"; AppModelName = 'ScopeId_A/Application_Agent'; ModelName = 'ScopeId_A/DeploymentType_Agent'; CI_UniqueID = 'ScopeId_A/DeploymentType_Agent/Content1'; ContentId = 'Content1' }
+            }
+            function Get-VsPackageContentRequest {
+                param($ApplicationName)
+                return [pscustomobject]@{ State = 'requested'; Origin = 'current'; Manifest = ('A' * 64); RequestKind = 'update'; ApplicationModelName = 'ScopeId_A/Application_Agent'; ApplicationPackageId = 'XYZ00001'; BaselineContentId = 'Content1' }
+            }
+            function Get-VsContentDistributionSnapshot { param($ApplicationName, $Application) $StateBox.Reads++; return [pscustomobject]@{ State = $StateBox.State; SourceVersion = 1; TargetCount = 8 } }
+            function Test-VsPackageTemplateSetCurrent { param($TemplateRoot, $PackageRoot) return $true }
+            function New-VsRunId { return 'fixture-run-id' }
+            function Get-VsRunDurationMilliseconds { param($StartedAt) return 25 }
+            function Send-VsRunReport {
+                param($Config, $Source, $RunEvent, $RunId, $IntervalSeconds, $Outcome, $ErrorCategory, $DurationMs, $Detail, $Summary, $ScriptVersion)
+                if ($RunEvent -eq 'completed') { [void]$reports.Add([pscustomobject]@{ Outcome = $Outcome; Detail = $Detail; Summary = $Summary }) }
+            }
+            function Write-VsLog { param($Level, $Context, $Message) }
+            function Write-Host { param($Object, $ForegroundColor) }
+            function Start-Sleep { param($Seconds) }
+
+            $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) 'fixture'
+            $config = [pscustomobject]@{ PackagesRoot = $fixtureRoot; PackagesShare = '\\fileserver.example.test\packages' }
+            $basePath = Join-Path $fixtureRoot 'files'
+            $templatePath = Join-Path $fixtureRoot 'Package_Vorlage'
+            $networkPath = $config.PackagesShare
+            $appFolderName = $script:VsApplicationsFolderName
+            $dpGroupName = 'DP-Fixture'
+            $intervalSeconds = 300
+            $SCRIPT_VERSION = 'autoimporter/fixture'
+            $siteCode = $null
+            $providerMachine = $null
+            $lastFilesStamp = ''
+            $loop = 0
+            $pendingAppFolderMoves = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+            $rememberedDistributionHints = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+            $lastHintRefresh = Get-Date
+
+            for ($i = 0; $i -lt $Iterations; $i++) {
+                if ($i -gt 0) {
+                    $StateBox.State = $StateBox.NextState
+                    if ($StateBox.RefreshDue) { $lastHintRefresh = (Get-Date).AddHours(-1) }
+                }
+                . $script:AutoimporterCycleBlock
+            }
+            return $reports.ToArray()
+        }
+    }
+
+    It 'ein Scan mit offline DP meldet ok, merkt den Dateistand und nennt den Hinweis' {
+        $box = [pscustomobject]@{ State = 'failed'; NextState = 'failed'; RefreshDue = $false; Reads = 0 }
+        $reports = @(Invoke-HintCycleFixture -StateBox $box -Iterations 2)
+
+        $reports.Count | Should -Be 2
+        $reports[0].Outcome | Should -Be 'ok'
+        $reports[0].Summary.open_points | Should -Be 0
+        $reports[0].Detail | Should -Be 'package_content_failed target=Agent-1'
+        $reports[1].Summary.unchanged | Should -Be 1 -Because 'ein Verteilhinweis erzwingt keinen Vollscan'
+        $reports[1].Outcome | Should -Be 'ok'
+        $reports[1].Detail | Should -Be 'package_content_failed target=Agent-1' -Because 'ruhige Laeufe melden den Hinweis weiter'
+        $box.Reads | Should -Be 1 -Because 'vor Ablauf der Frist wird der Verteilstand nicht neu gelesen'
+    }
+
+    It 'ein ruhiger Lauf nach Ablauf der Frist liest nur den Verteilstand und streicht erledigte Hinweise' {
+        $box = [pscustomobject]@{ State = 'in_progress'; NextState = 'succeeded'; RefreshDue = $true; Reads = 0 }
+        $reports = @(Invoke-HintCycleFixture -StateBox $box -Iterations 2)
+
+        $reports[0].Detail | Should -Be 'package_content_in_progress target=Agent-1'
+        $reports[1].Summary.unchanged | Should -Be 1
+        $reports[1].Outcome | Should -Be 'ok'
+        $reports[1].Detail | Should -BeNullOrEmpty
+        $box.Reads | Should -Be 2
+    }
+}
 Describe 'Autoimporter: ein Lauf mit offenen Punkten merkt den Stamp nicht' {
     It 'die Stamp-Zuweisung liegt im else-Zweig von $scanWarnings -gt 0' {
         # Der Stamp ist die Change-Detection: wird er nach einem Lauf mit offenen
@@ -712,13 +806,14 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
         $source | Should -Match 'Test-VsPackageTemplateSetCurrent'
     }
 
-    It 'jeder Verteilzustand ausser succeeded haelt den Stamp zurueck' {
-        # B7: Targeted > 0 galt als fertig, NumberErrors las niemand. Jetzt
-        # zaehlt jeder Nicht-succeeded-Zweig einen offenen Punkt, und der Stamp
-        # (der nur bei $scanWarnings -eq 0 gemerkt wird) wartet auf die
-        # vollstaendige Zielverteilung.
+    It 'Verteilhinweise halten den Stamp nicht zurueck, echte Contentfehler schon (AV2)' {
+        # B7 machte jeden Nicht-succeeded-Zustand zum offenen Punkt; ein offline
+        # DP hielt damit Stamp und Ampel fuer immer. Seit AV2 stehen failed und
+        # in_progress nur noch als Hinweis in $hintCauses. Ein nicht moeglicher
+        # oder abgelehnter Auftrag und eine unlesbare eigene Identitaet bleiben
+        # offene Punkte.
         $source = Get-Content -Path $script:Importer -Raw
-        foreach ($needle in @('package_content_in_progress', 'package_content_unknown', 'package_content_failed')) {
+        foreach ($needle in @('package_content_unknown', 'package_content_request_failed', 'Add-VsRunCause -Causes \$hintCauses')) {
             $source | Should -Match $needle
         }
         # Der Stamp umfasst den ganzen verwalteten Vorlagenbaum: auch eine nur
@@ -733,22 +828,21 @@ Describe 'Autoimporter: jeder offene Punkt nennt seine Ursache' {
     }
 }
 
-Describe 'Autoimporter U09: Manifest, Intent und providerseitige Contentidentitaet bilden eine Zustandsmaschine' {
+Describe 'Autoimporter AV2: Intent, Auftrag und Controllergrenzen' {
     BeforeAll {
-        $script:A13Source = Get-Content -Path $script:Importer -Raw
-        $script:A13Common = Get-Content -Path $script:MecmCommon -Raw
+        $script:AvSource = Get-Content -Path $script:Importer -Raw
+        $script:AvCommon = Get-Content -Path $script:MecmCommon -Raw
     }
 
-    It 'speichert Intent vor dem MECM-Aufruf und bestaetigt den Request erst nach dessen Rueckkehr' {
-        $intent = $script:A13Source.IndexOf('Set-VsPackageContentTracking -ApplicationName $fullName -State intent')
-        $update = $script:A13Source.IndexOf('Update-CMDistributionPoint -ApplicationName $fullName -DeploymentTypeName $deploymentTypeName')
+    It 'speichert den Intent vor dem MECM-Aufruf und bestaetigt ihn erst nach dessen Rueckkehr' {
+        $intent = $script:AvSource.IndexOf('Set-VsPackageContentRequest -ApplicationName $fullName -State intent')
+        $initial = $script:AvSource.IndexOf('Start-CMContentDistribution -ApplicationName $fullName')
+        $update = $script:AvSource.IndexOf('Update-CMDistributionPoint -ApplicationName $fullName -DeploymentTypeName $deploymentTypeName')
+        $confirm = $script:AvSource.IndexOf('Confirm-VsPackageContentRequest -ApplicationName $fullName')
         $intent | Should -BeGreaterOrEqual 0
+        $initial | Should -BeGreaterThan $intent
         $update | Should -BeGreaterThan $intent
-        $beforeUpdate = $script:A13Source.Substring($intent, $update - $intent)
-        $beforeUpdate | Should -Match '-RequestConfirmed \$false'
-        $afterUpdate = $script:A13Source.Substring($update)
-        $afterUpdate | Should -Match '(?s)Update-CMDistributionPoint.*-RequestConfirmed \$true'
-        $script:A13Source | Should -Match '(?s)State -eq ''intent''.*-not \$tracking\.RequestConfirmed.*package_content_unknown'
+        $confirm | Should -BeGreaterThan $update
     }
 
     It 'verteilt unabhaengig von der optionalen eigenen Collection' {
@@ -756,42 +850,61 @@ Describe 'Autoimporter U09: Manifest, Intent und providerseitige Contentidentita
         $ownCollectionIf | Should -Not -BeNullOrEmpty
         $body = $ownCollectionIf.Clauses[0].Item2.Extent.Text
         $body | Should -Not -Match 'Start-CMContentDistribution|Update-CMDistributionPoint|Get-VsContentDistributionSnapshot'
-        $script:A13Source | Should -Match 'Start-CMContentDistribution'
-        $script:A13Source | Should -Match 'Update-CMDistributionPoint'
+        $script:AvSource | Should -Match 'Start-CMContentDistribution'
+        $script:AvSource | Should -Match 'Update-CMDistributionPoint'
     }
 
-    It 'bestaetigt ein Manifest ueber ContentId und frische erfolgreiche Kopien aller gleichen DP-Ziele' {
-        $script:A13Source | Should -Match 'Get-VsDeploymentTypeContentIdentity'
-        $script:A13Source | Should -Match 'Get-VsDistributionCopySnapshot'
-        $script:A13Source | Should -Match 'Test-VsDistributionCopyAdvanced'
-        $script:A13Source | Should -Match "(?s)State -eq 'succeeded' -and \`$copyAdvanced.*-State complete"
-        $script:A13Source | Should -Not -Match 'SourceVersion -gt \[int\]\$tracking\.BaselineSourceVersion'
-        $script:A13Source | Should -Match 'Get-VsFilesManifestStamp -Path \$pkgFolder'
+    It 'zaehlt Verteilhinweise nie als offenen Punkt' {
+        # Ein Hinweis steht in $hintCauses; ein $scanWarnings++ darf nie im
+        # selben Block stehen, sonst hielte ein offline DP wieder Stamp und Ampel.
+        $hintBlocks = @((Get-Ast -Path $script:Importer).FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and
+            $n.Extent.Text -match '^Add-VsRunCause -Causes \$hintCauses'
+        }, $true))
+        $hintBlocks.Count | Should -BeGreaterThan 1
+        foreach ($hint in $hintBlocks) {
+            $parent = $hint.Parent
+            while ($null -ne $parent -and -not ($parent -is [System.Management.Automation.Language.StatementBlockAst])) { $parent = $parent.Parent }
+            $parent.Extent.Text | Should -Not -Match '\$scanWarnings\+\+'
+        }
     }
 
-    It 'schreibt den Tracking-State als letzten Commit-Marker und akzeptiert nur geschlossene States' {
-        $functionText = [regex]::Match($script:A13Common, '(?s)function Set-VsPackageContentTracking \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
-        $readerText = [regex]::Match($script:A13Common, '(?s)function Get-VsPackageContentTracking \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
-        $functionText | Should -Match "ValidateSet\('intent', 'pending', 'complete'\)"
-        $functionText | Should -Match "(?s)\`$State -in @\('pending', 'complete'\) -and -not \`$RequestConfirmed"
-        $readerText | Should -Match "(?s)\`$state -in @\('pending', 'complete'\) -and \`$requestConfirmed -ne 1"
+    It 'schreibt den Auftrags-State als letzten Commit-Marker und bestaetigt nur den State' {
+        $functionText = [regex]::Match($script:AvCommon, '(?s)function Set-VsPackageContentRequest \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $confirmText = [regex]::Match($script:AvCommon, '(?s)function Confirm-VsPackageContentRequest \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $functionText | Should -Match "ValidateSet\('intent', 'requested'\)"
         $writes = @([regex]::Matches($functionText, 'New-ItemProperty[^\r\n]+-Name State[^\r\n]+'))
         $writes.Count | Should -Be 2
         $writes[0].Value | Should -Match "-Value 'invalid'"
         $writes[1].Value | Should -Match '-Value \$State'
+        @([regex]::Matches($confirmText, 'New-ItemProperty')).Count | Should -Be 1
+        $confirmText | Should -Match "-Name State -Value 'requested'"
+        $functionText | Should -Match "'ContentRequests'|Get-VsPackageContentRequestKey"
+    }
+
+    It 'aendert den alten ContentTracking-Schluessel nur beim Entfernen einer Application' {
+        # Rueckweg auf eine aeltere Serverversion: sie findet ihren Bestand
+        # unveraendert vor. Nur der Leser und das Entfernen einer bereinigten
+        # Application kennen den alten Schluessel.
+        $trackingKeyUse = @([regex]::Matches($script:AvCommon, 'Get-VsPackageContentTrackingKey -ApplicationName'))
+        $trackingKeyUse.Count | Should -Be 2
+        $readerText = [regex]::Match($script:AvCommon, '(?s)function Get-VsPackageContentRequest \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $removeText = [regex]::Match($script:AvCommon, '(?s)function Remove-VsPackageContentTracking \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $readerText | Should -Match 'Get-VsPackageContentTrackingKey'
+        $removeText | Should -Match 'Get-VsPackageContentTrackingKey'
     }
 
     It 'blockiert mehrdeutige Applications und Deployment Types vor Contentwrites' {
-        $script:A13Source | Should -Match '\$appMatches\.Count -gt 1'
-        $script:A13Source | Should -Match '\$deploymentTypes\.Count -ne 1'
-        $script:A13Source | Should -Match 'package_definition_drift'
+        $script:AvSource | Should -Match '\$appMatches\.Count -gt 1'
+        $script:AvSource | Should -Match '\$deploymentTypes\.Count -ne 1'
+        $script:AvSource | Should -Match 'package_definition_drift'
     }
 }
 
-Describe 'U09 Contentidentitaet und DP-Kopiergrenze' {
+Describe 'AV2 Contentidentitaet, Uebernahme und Entscheidung (Common)' {
     It 'liest nur eine vollstaendige Application-/DT-Bindung als bekannt' {
         $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
-            $app = [pscustomobject]@{ LocalizedDisplayName = 'Agent-1'; ModelName = 'ScopeId_A/Application_A'; PackageID = 'ABC00001' }
+            $app = [pscustomobject]@{ LocalizedDisplayName = 'Agent-1'; ModelName = 'ScopeId_A/Application_A'; PackageID = 'XYZ00001' }
             $dt = [pscustomobject]@{
                 LocalizedDisplayName = 'Agent-1 Deployment'; AppModelName = 'ScopeId_A/Application_A'
                 ModelName = 'ScopeId_A/DeploymentType_A'; CI_UniqueID = 'ScopeId_A/DeploymentType_A/1'; ContentId = 'Content_A'
@@ -803,178 +916,152 @@ Describe 'U09 Contentidentitaet und DP-Kopiergrenze' {
             }
         }
         $result.App.State | Should -Be 'known'
-        $result.App.PackageId | Should -Be 'ABC00001'
+        $result.App.PackageId | Should -Be 'XYZ00001'
         $result.Dt.State | Should -Be 'known'
-        $result.Dt.DeploymentTypeModelName | Should -Be 'ScopeId_A/DeploymentType_A'
         $result.Dt.ContentId | Should -Be 'Content_A'
         $result.Foreign.State | Should -Be 'unknown'
     }
 
-    It 'weist alte succeeded-Aggregate ohne neuere LastCopied-Evidenz ab' {
-        $baseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
-        $sameOldSuccess = [pscustomobject]@{
-            State = 'known'; Targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
+    It 'uebernimmt aus Schema 2 nur Manifest und Identitaet, nie die alte DP-Baseline (<Name>)' -ForEach @(
+        @{ Name = 'complete'; State = 'complete'; Confirmed = 1; Expected = 'requested' },
+        @{ Name = 'pending'; State = 'pending'; Confirmed = 1; Expected = 'requested' },
+        @{ Name = 'bestaetigter intent'; State = 'intent'; Confirmed = 1; Expected = 'requested' },
+        @{ Name = 'unbestaetigter intent'; State = 'intent'; Confirmed = 0; Expected = 'intent' }
+    ) {
+        $raw = [pscustomobject]@{
+            ApplicationName = 'Agent-1'; Schema = 2; State = $State; Manifest = ('C' * 64); RequestKind = 'update'
+            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'XYZ00001'
+            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/1'
+            BaselineContentId = 'ContentOld'; ContentId = 'ContentA'; RequestConfirmed = $Confirmed
+            # Ein DP, den die Site nicht mehr kennt (synthetisch).
+            DistributionBaseline = '[{"site_code":"XYZ","server_nal_path":"[\"Display=\\\\DP99.example.test\\\"]MSWNET:","last_copied_ticks":100}]'
         }
-        $newSuccess = [pscustomobject]@{
-            State = 'known'; Targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L })
+        $record = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($raw) -Body {
+            param($r) ConvertFrom-VsLegacyContentTracking -ApplicationName 'Agent-1' -Raw $r
         }
-        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $sameOldSuccess) -Body {
-            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-        } | Should -BeFalse
-        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $newSuccess) -Body {
-            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-        } | Should -BeTrue
+        $record.State | Should -Be $Expected
+        $record.Origin | Should -Be 'migrated'
+        $record.Manifest | Should -Be ('C' * 64)
+        $record.ApplicationModelName | Should -Be 'ScopeId_A/Application_A'
+        $record.BaselineContentId | Should -Be 'ContentOld'
+        $record.PSObject.Properties['DistributionBaseline'] | Should -BeNullOrEmpty
     }
 
-    It 'erlaubt eine leere DP-Baseline nur fuer eine echte Erstverteilung' {
-        $empty = [pscustomobject]@{ State = 'known'; Targets = @() }
-        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($empty) -Body {
-            param($s) Test-VsDistributionCopyBaselineReady -RequestKind initial -Snapshot $s
-        } | Should -BeTrue
-        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($empty) -Body {
-            param($s) Test-VsDistributionCopyBaselineReady -RequestKind update -Snapshot $s
-        } | Should -BeFalse
-    }
-
-    It 'akzeptiert keine leere oder ungueltige Abschluss-Baseline' {
-        $successfulCopy = [pscustomobject]@{ State = 'known'; Targets = @(
-            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 1L }
-        ) }
-        Invoke-InFileScope -Path $script:MecmCommon -Arguments @('[]', $successfulCopy) -Body {
-            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-        } | Should -BeFalse
-        $noCopy = [pscustomobject]@{ State = 'known'; Targets = @() }
-        Invoke-InFileScope -Path $script:MecmCommon -Arguments @('[]', $noCopy) -Body {
-            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-        } | Should -BeFalse
-
-        foreach ($invalidBaseline in @('null', '[null]', '[[]]', '[invalid]')) {
-            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($invalidBaseline, $successfulCopy) -Body {
-                param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-            } | Should -BeFalse -Because "'$invalidBaseline' keine explizite leere Baseline ist"
+    It 'uebernimmt Schema 1 ohne Identitaet und verwirft unvollstaendige Altstaende' {
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            [pscustomobject]@{
+                Legacy = ConvertFrom-VsLegacyContentTracking -ApplicationName 'Agent-1' -Raw ([pscustomobject]@{ ApplicationName = 'Agent-1'; State = 'complete'; Manifest = ('D' * 64) })
+                LegacyIntent = ConvertFrom-VsLegacyContentTracking -ApplicationName 'Agent-1' -Raw ([pscustomobject]@{ ApplicationName = 'Agent-1'; State = 'intent'; Manifest = ('D' * 64) })
+                WrongName = ConvertFrom-VsLegacyContentTracking -ApplicationName 'Agent-1' -Raw ([pscustomobject]@{ ApplicationName = 'Agent-2'; State = 'complete'; Manifest = ('D' * 64) })
+                NoIdentity = ConvertFrom-VsLegacyContentTracking -ApplicationName 'Agent-1' -Raw ([pscustomobject]@{ ApplicationName = 'Agent-1'; Schema = 2; State = 'complete'; Manifest = ('D' * 64); RequestKind = 'update'; RequestConfirmed = 1 })
+            }
         }
-
-        $twoSuccessfulCopies = [pscustomobject]@{ State = 'known'; Targets = @(
-            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 1L }
-            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 1L }
-        ) }
-        $mixedNullBaseline = '[null,{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":0}]'
-        Invoke-InFileScope -Path $script:MecmCommon -Arguments @($mixedNullBaseline, $twoSuccessfulCopies) -Body {
-            param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-        } | Should -BeFalse
+        $result.Legacy.State | Should -Be 'requested'
+        $result.Legacy.ApplicationModelName | Should -Be ''
+        $result.LegacyIntent.State | Should -Be 'none'
+        $result.WrongName.Origin | Should -Be 'invalid'
+        $result.NoIdentity.Origin | Should -Be 'invalid'
     }
 
-    It 'weist Zielwechsel, Fehler und nur teilweise frische Kopien ab' {
-        $baseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":200}]'
-        $cases = @(
-            [pscustomobject]@{ State = 'known'; Targets = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }) }
-            [pscustomobject]@{ State = 'known'; Targets = @(
-                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
-                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 3; LastCopiedTicks = 201L }
-            ) }
-            [pscustomobject]@{ State = 'known'; Targets = @(
-                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
-                [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 200L }
-            ) }
-        )
-        foreach ($snapshot in $cases) {
-            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $snapshot) -Body {
-                param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-            } | Should -BeFalse
+    It 'liest Schema 3 nur vollstaendig und bevorzugt den neuen Schluessel' {
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $valid = [pscustomobject]@{
+                ApplicationName = 'Agent-1'; Schema = 3; State = 'requested'; Manifest = ('E' * 64); RequestKind = 'initial'
+                ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'XYZ00001'; BaselineContentId = 'ContentA'
+            }
+            $script:RegistryFixture = @{ ContentRequests = $valid; ContentTracking = [pscustomobject]@{ ApplicationName = 'Agent-1'; State = 'complete'; Manifest = ('F' * 64) } }
+            function Read-VsRegistryKeyProperties {
+                param($Key)
+                if ($Key -match '\\ContentRequests\\') { return $script:RegistryFixture.ContentRequests }
+                return $script:RegistryFixture.ContentTracking
+            }
+            $preferNew = Get-VsPackageContentRequest -ApplicationName 'Agent-1'
+            $script:RegistryFixture.ContentRequests = $null
+            $fallback = Get-VsPackageContentRequest -ApplicationName 'Agent-1'
+            $script:RegistryFixture.ContentTracking = $null
+            $absent = Get-VsPackageContentRequest -ApplicationName 'Agent-1'
+            function Read-VsRegistryKeyProperties { param($Key) throw 'Registry nicht lesbar' }
+            $unreadable = Get-VsPackageContentRequest -ApplicationName 'Agent-1'
+            $broken = $valid.PSObject.Copy()
+            $broken.BaselineContentId = ''
+            [pscustomobject]@{
+                PreferNew = $preferNew; Fallback = $fallback; Absent = $absent; Unreadable = $unreadable
+                Broken = ConvertFrom-VsContentRequestRecord -ApplicationName 'Agent-1' -Raw $broken
+            }
         }
+        $result.PreferNew.Origin | Should -Be 'current'
+        $result.PreferNew.Manifest | Should -Be ('E' * 64)
+        $result.Fallback.Origin | Should -Be 'migrated'
+        $result.Fallback.Manifest | Should -Be ('F' * 64)
+        $result.Absent.Origin | Should -Be 'absent'
+        $result.Unreadable.Origin | Should -Be 'unreadable'
+        $result.Broken.Origin | Should -Be 'invalid'
     }
 
-    It 'weist ein korruptes oder doppelt belegtes persistiertes Targetset ab' {
-        $current = [pscustomobject]@{ State = 'known'; Targets = @(
-            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L }
-            [pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_B'; State = 0; LastCopiedTicks = 201L }
-        ) }
-        $badBaselines = @(
-            '{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}'
-            '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":-1},{"site_code":"ABC","server_nal_path":"NAL_B","last_copied_ticks":200}]'
-            '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100},{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":100}]'
-        )
-        foreach ($baseline in $badBaselines) {
-            Invoke-InFileScope -Path $script:MecmCommon -Arguments @($baseline, $current) -Body {
-                param($b, $s) Test-VsDistributionCopyAdvanced -BaselineJson $b -CurrentSnapshot $s
-            } | Should -BeFalse
+    It 'erkennt VirtuSphere-eigene Applications an Marker oder Ordner, sonst nie' {
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            [pscustomobject]@{
+                Marker = Test-VsManagedPackageApplication -Application ([pscustomobject]@{ LocalizedDescription = $script:VsManagedPackageApplicationMarker; ObjectPath = '/' })
+                Folder = Test-VsManagedPackageApplication -Application ([pscustomobject]@{ LocalizedDescription = ''; ObjectPath = '/VirtuSphere_Applications' })
+                FolderBackslash = Test-VsManagedPackageApplication -Application ([pscustomobject]@{ ObjectPath = '\VirtuSphere_Applications\' })
+                OtherFolder = Test-VsManagedPackageApplication -Application ([pscustomobject]@{ LocalizedDescription = 'Hand'; ObjectPath = '/VirtuSphere_Applications/Archiv' })
+                Root = Test-VsManagedPackageApplication -Application ([pscustomobject]@{ LocalizedDescription = 'Hand'; ObjectPath = '/' })
+                NoFields = Test-VsManagedPackageApplication -Application ([pscustomobject]@{ LocalizedDisplayName = 'Agent-1' })
+            }
         }
+        $result.Marker | Should -BeTrue
+        $result.Folder | Should -BeTrue
+        $result.FolderBackslash | Should -BeTrue
+        $result.OtherFolder | Should -BeFalse
+        $result.Root | Should -BeFalse
+        $result.NoFields | Should -BeFalse
     }
 
-    It 'schliesst zwei Contentupdates bei Package-SourceVersion 1 erst nach neuer ContentId und neuer DP-Kopie ab' {
-        $manifestA = ('A' * 64) -join ''
-        $manifestB = ('B' * 64) -join ''
-        $manifestC = ('C' * 64) -join ''
-        $baselineA = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":90}]'
-        $tracking = [pscustomobject]@{ Value = [pscustomobject]@{
-            State = 'complete'; Manifest = $manifestA; BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
-            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
-            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
-            BaselineContentId = 'BeforeA'; ContentId = 'ContentA'; RequestConfirmed = $true; DistributionBaseline = $baselineA
-        } }
-        $requests = [pscustomobject]@{ Initial = 0; Update = 0 }
-        $copy100 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
-        $copy101 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 101L })
-        $copy102 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 102L })
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentA -AggregateState succeeded -CopyTargets $copy100 | Out-Null
-        $requests.Update | Should -Be 1
-        $tracking.Value.State | Should -Be 'intent'
-        $tracking.Value.RequestConfirmed | Should -BeTrue
-        $tracking.Value.SourceVersion | Should -Be -1
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy100 | Out-Null
-        $tracking.Value.State | Should -Be 'pending'
-        $tracking.Value.ContentId | Should -Be 'ContentB'
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy100 | Out-Null
-        $tracking.Value.State | Should -Be 'pending' -Because 'das alte succeeded-Aggregat keine frische Kopie der neuen ContentId beweist'
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy101 | Out-Null
-        $tracking.Value.State | Should -Be 'complete'
-        $tracking.Value.SourceVersion | Should -Be 1
-
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentB -AggregateState succeeded -CopyTargets $copy101 | Out-Null
-        $requests.Update | Should -Be 2
-        $tracking.Value.State | Should -Be 'intent'
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentC -AggregateState succeeded -CopyTargets $copy101 | Out-Null
-        $tracking.Value.State | Should -Be 'pending'
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentC -AggregateState succeeded -CopyTargets $copy101 | Out-Null
-        $tracking.Value.State | Should -Be 'pending'
-        Invoke-U09ControllerScan -TrackingBox $tracking -RequestCounters $requests -Manifest $manifestC -ContentId ContentC -AggregateState succeeded -CopyTargets $copy102 | Out-Null
-        $tracking.Value.State | Should -Be 'complete'
-        $tracking.Value.SourceVersion | Should -Be 1
-        $requests.Update | Should -Be 2
+    It 'entscheidet je Lage genau eine Aktion (<Name>)' -ForEach @(
+        @{ Name = 'gleiches Manifest, offline DP'; State = 'requested'; Manifest = 'A'; Model = 'A'; Owned = $true; Dist = 'failed'; Action = 'none'; Kind = '' },
+        @{ Name = 'neues Manifest'; State = 'requested'; Manifest = 'B'; Model = 'A'; Owned = $true; Dist = 'failed'; Action = 'request'; Kind = 'update' },
+        @{ Name = 'kein Auftrag, nie verteilt'; State = 'none'; Manifest = ''; Model = ''; Owned = $true; Dist = 'not_started'; Action = 'request'; Kind = 'initial' },
+        @{ Name = 'kein Auftrag, verteilt'; State = 'none'; Manifest = ''; Model = ''; Owned = $false; Dist = 'succeeded'; Action = 'request'; Kind = 'update' },
+        @{ Name = 'neue eigene Application'; State = 'requested'; Manifest = 'A'; Model = 'Old'; Owned = $true; Dist = 'succeeded'; Action = 'adopt'; Kind = 'update' },
+        @{ Name = 'neue fremde Application'; State = 'requested'; Manifest = 'A'; Model = 'Old'; Owned = $false; Dist = 'succeeded'; Action = 'foreign'; Kind = '' },
+        @{ Name = 'Intent ohne Annahme'; State = 'intent'; Manifest = 'A'; Model = 'A'; Owned = $true; Dist = 'succeeded'; Action = 'request'; Kind = 'update' }
+    ) {
+        $request = [pscustomobject]@{
+            State = $State; Origin = 'current'; Manifest = $(if ($Manifest) { $Manifest * 64 } else { '' }); RequestKind = 'update'
+            ApplicationModelName = $(if ($Model) { "ScopeId_A/Application_$Model" } else { '' }); ApplicationPackageId = $(if ($Model -eq 'A') { 'XYZ00001' } elseif ($Model) { 'XYZ00009' } else { '' })
+            BaselineContentId = 'ContentA'
+        }
+        $decision = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($request, $Owned, $Dist) -Body {
+            param($r, $o, $d)
+            function Get-VsDistributionPointGroupState { param($GroupName) return 'has_members' }
+            Get-VsContentRequestDecision -Request $r -Manifest ('A' * 64) -ApplicationModelName 'ScopeId_A/Application_A' `
+                -ApplicationPackageId 'XYZ00001' -DeploymentTypeContentId 'ContentA' -ApplicationOwned $o -DistributionState $d -DpGroupName 'DP-Fixture'
+        }
+        $decision.Action | Should -Be $Action
+        if ($Kind) { $decision.RequestKind | Should -Be $Kind }
     }
 
-    It 'wiederholt einen fehlgeschlagenen initialen oder Update-Aufruf nicht blind' {
-        $manifestA = ('A' * 64) -join ''
-        $manifestB = ('B' * 64) -join ''
-        $copy100 = @([pscustomobject]@{ SiteCode = 'ABC'; ServerNalPath = 'NAL_A'; State = 0; LastCopiedTicks = 100L })
-
-        $updateTracking = [pscustomobject]@{ Value = [pscustomobject]@{
-            State = 'complete'; Manifest = $manifestA; BaselineSourceVersion = 1; SourceVersion = 1; RequestKind = 'update'
-            ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'ABC00001'
-            DeploymentTypeModelName = 'ScopeId_A/DeploymentType_A'; DeploymentTypeId = 'ScopeId_A/DeploymentType_A/ContentA'
-            BaselineContentId = 'BeforeA'; ContentId = 'ContentA'; RequestConfirmed = $true
-            DistributionBaseline = '[{"site_code":"ABC","server_nal_path":"NAL_A","last_copied_ticks":90}]'
-        } }
-        $updateRequests = [pscustomobject]@{ Initial = 0; Update = 0 }
-        Invoke-U09ControllerScan -TrackingBox $updateTracking -RequestCounters $updateRequests -Manifest $manifestB -ContentId ContentA -AggregateState succeeded -CopyTargets $copy100 -RequestFailure update | Out-Null
-        $updateTracking.Value.State | Should -Be 'intent'
-        $updateTracking.Value.RequestConfirmed | Should -BeFalse
-        Invoke-U09ControllerScan -TrackingBox $updateTracking -RequestCounters $updateRequests -Manifest $manifestB -ContentId ContentB -AggregateState succeeded -CopyTargets $copy100 | Out-Null
-        $updateRequests.Update | Should -Be 1
-        $updateTracking.Value.State | Should -Be 'intent'
-        $updateTracking.Value.RequestConfirmed | Should -BeFalse
-
-        $initialTracking = [pscustomobject]@{ Value = $null }
-        $initialRequests = [pscustomobject]@{ Initial = 0; Update = 0 }
-        Invoke-U09ControllerScan -TrackingBox $initialTracking -RequestCounters $initialRequests -Manifest $manifestA -ContentId ContentA -AggregateState not_started -CopyTargets @() -RequestFailure initial | Out-Null
-        $initialTracking.Value.State | Should -Be 'intent'
-        $initialTracking.Value.RequestConfirmed | Should -BeFalse
-        Invoke-U09ControllerScan -TrackingBox $initialTracking -RequestCounters $initialRequests -Manifest $manifestA -ContentId ContentA -AggregateState not_started -CopyTargets @() | Out-Null
-        $initialRequests.Initial | Should -Be 1
-        $initialTracking.Value.State | Should -Be 'intent'
-        $initialTracking.Value.RequestConfirmed | Should -BeFalse
+    It 'frischt Verteilhinweise nur lesend auf und behaelt sie bei Lesefehlern' {
+        $result = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            function Get-CMApplication {
+                param($Name, $ErrorAction)
+                if ($Name -eq 'Broken-1') { throw 'Provider nicht erreichbar' }
+                return [pscustomobject]@{ LocalizedDisplayName = $Name }
+            }
+            function Get-VsContentDistributionSnapshot {
+                param($ApplicationName, $Application)
+                $state = @{ 'Done-1' = 'succeeded'; 'Offline-1' = 'failed'; 'Busy-1' = 'in_progress'; 'Odd-1' = 'unknown' }[$ApplicationName]
+                return [pscustomobject]@{ State = $state }
+            }
+            $hints = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+            foreach ($name in @('Done-1', 'Offline-1', 'Busy-1', 'Odd-1', 'Broken-1')) { $hints[$name] = 'package_content_in_progress' }
+            , (Update-VsDistributionHints -Hints $hints)
+        }
+        $result.ContainsKey('Done-1') | Should -BeFalse
+        $result['Offline-1'] | Should -Be 'package_content_failed'
+        $result['Busy-1'] | Should -Be 'package_content_in_progress'
+        $result['Odd-1'] | Should -Be 'package_content_in_progress'
+        $result['Broken-1'] | Should -Be 'package_content_in_progress'
     }
 }
 
@@ -1488,7 +1575,8 @@ Describe 'Installer: ein Re-Run ohne Parameter aendert keinen eingestellten Wert
         $text | Should -Match 'Remove-VsPackageContentTracking -ApplicationName \$item\.Name; Remove-CMApplication' -Because 'ein Fehler beim Tracking-Cleanup darf nicht erst nach bereits geloeschter Application sichtbar werden'
         $text | Should -Match 'SMS_CollectionDependencies'
         $text | Should -Match 'NumberOfDependentTS'
-        $text | Should -Match 'DistributionEvidenceSafe = \$true'
+        $text | Should -Match 'ContentState = \$\(if \(\$effectiveRequestConfirmed\) \{ ''requested'' \}'
+        $text | Should -Not -Match 'DistributionEvidenceSafe'
         $text | Should -Match 'DeploymentReady = \$replacementDeploymentReady'
         (Get-Content -Path $script:MecmCommon -Raw) | Should -Match "replacementDistributionState -notin @\('failed', 'in_progress', 'succeeded'\)"
     }
@@ -2044,27 +2132,17 @@ Describe 'Autoimporter PS-09 und AV-F28: der Verschub einer Application wird wie
 }
 
 Describe 'Autoimporter AV-F27: eine DP-Gruppe ohne Mitglieder wird als eigene Ursache genannt' {
-    BeforeAll {
-        $script:ImporterF27 = Get-Content -LiteralPath $script:Importer -Raw
-    }
-
-    It 'prueft die Gruppe vor der Erstanforderung und fordert ohne Ziel nichts an' {
-        $requestStart = $script:ImporterF27.IndexOf('if ($needsContentRequest) {')
-        $requestStart | Should -BeGreaterThan -1 -Because 'sonst prueft dieser Test die falsche Stelle'
-        $check = $script:ImporterF27.IndexOf("Get-VsDistributionPointGroupState -GroupName `$dpGroupName) -eq 'empty') {", $requestStart)
-        $cause = $script:ImporterF27.IndexOf("-Cause 'package_content_group_empty'", $requestStart)
-        $request = $script:ImporterF27.IndexOf('Start-CMContentDistribution -ApplicationName $fullName', $requestStart)
-        $check | Should -BeGreaterThan $requestStart
+    # Verhalten: 'Autoimporter AV2: hoechstens ein angenommener Auftrag je
+    # Manifest' prueft leere und fehlende Gruppe samt angenommenem Erstauftrag.
+    It 'prueft die Gruppe in der Entscheidung vor jeder Erstanforderung' {
+        $common = Get-Content -LiteralPath $script:MecmCommon -Raw
+        $decision = [regex]::Match($common, '(?s)function Get-VsContentRequestDecision \{.*?^\}', [Text.RegularExpressions.RegexOptions]::Multiline).Value
+        $decision | Should -Not -BeNullOrEmpty
+        $check = $decision.LastIndexOf('Get-VsDistributionPointGroupState -GroupName $DpGroupName')
+        $cause = $decision.LastIndexOf("'package_content_group_empty'")
+        $request = $decision.IndexOf("'request' 'initial' 'initial'")
+        $check | Should -BeGreaterThan -1
         $cause | Should -BeGreaterThan $check
         $request | Should -BeGreaterThan $cause -Because 'die Anforderung darf nicht vor der Gruppenpruefung stehen'
-    }
-
-    It 'nennt den bestaetigten Erstauftrag ohne Ziel die Gruppe statt package_content_in_progress' {
-        $script:ImporterF27 | Should -Match "\`$intentCause = 'package_content_group_empty'"
-        $script:ImporterF27 | Should -Match 'Add-VsRunCause -Causes \$causes -Cause \$intentCause -Target \$fullName'
-    }
-
-    It 'der Scan hat fuer jeden Ausgang eine Ursache: der Standard bleibt package_content_in_progress' {
-        $script:ImporterF27 | Should -Match "\`$intentCause = 'package_content_in_progress'"
     }
 }
