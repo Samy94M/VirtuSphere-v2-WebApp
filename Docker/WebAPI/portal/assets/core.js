@@ -253,6 +253,13 @@
             return;
         }
         target.scrollIntoView({block: 'start'});
+        // After a hash change this runs one animation frame late, and the
+        // browser may already have focused a focusable target itself. Focus
+        // that sits on the target or inside it stays: moving it to the target
+        // again would take it from a field that is being filled in (WK1).
+        if (target.contains(document.activeElement)) {
+            return;
+        }
         if (!target.matches('a, button, input, select, textarea, [tabindex]')) {
             target.tabIndex = -1;
         }
