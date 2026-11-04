@@ -40,6 +40,11 @@ ist die Rückfallebene. `error.log` enthält den Block mit der Referenz-ID, die 
 Operator auf der Fehlerseite sieht, und die Audit-Zeile. Für eine gemeldete
 Referenz ist also `error.log` die richtige Datei.
 
+Tritt der Fehler erst auf, nachdem die Seite schon teilweise ausgeliefert ist,
+steht „VirtuSphere Fehler“ mit der Referenz unten auf der sonst geladenen Seite,
+und deren Breite kann sich ändern, weil der Fehlerrenderer seinen eigenen Stil
+mitschreibt. Die Referenz gilt genauso; was oberhalb steht, ist nicht vollständig.
+
 Unbehandelte Fehler werden je Fehlerklasse und Stunde einmal vollständig geschrieben
 und auditiert. Spätere Vorkommen derselben Klasse in derselben Stunde schreiben
 nichts; sie werden nur in `error-storm.json` gezählt. Die Referenz sieht der

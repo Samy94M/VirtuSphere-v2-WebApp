@@ -36,7 +36,6 @@ declare(strict_types=1);
 /** @var string $datacenterInheritLabel */
 /** @var bool $hideVmDatacenter */
 /** @var list<'host_choice'|'buckets'|'never_pulled'> $vmLocationNotes */
-/** @var array<string, array{value:string,source:string,parent:string}> $effectiveValues */
 /** @var array<int, array<string, mixed>> $interfaces */
 /** @var array<int, array<string, mixed>> $disks */
 /** @var string|null $progressWatchKind */
@@ -204,6 +203,11 @@ declare(strict_types=1);
                     <?php } ?>
                     <div class="form-grid-full" id="<?php echo h($locationHintId); ?>">
                         <p class="hint"><span class="hint-subject"><?php echo h(implode(' / ', $locationHintSubject)); ?>:</span> <?php echo h(__t('vm_edit.location_hint')); ?></p>
+                        <?php // Only case where the empty option names no value: the datacenter
+                              // then comes from the target host, not from the mission. ?>
+                        <?php if (!$hideVmDatacenter && $missionDatacenter === '') { ?>
+                            <p class="hint"><span class="hint-subject"><?php echo h(__t('vm_edit.label_datacenter')); ?>:</span> <?php echo h(__t('vm_edit.location_datacenter_host_hint')); ?></p>
+                        <?php } ?>
                         <?php if ($vmLocationNotes !== []) { ?>
                             <?php // Exhaustive match, no default: a new note token has to be
                                   // given a sentence rather than disappearing silently. ?>
@@ -298,11 +302,10 @@ declare(strict_types=1);
 
                 <?php $creatorValue = $vmId > 0 ? (string) ($vm['vm_creator'] ?? '') : (string) $user['name']; ?>
                 <label><?php echo h(__t('vm_edit.label_creator')); ?><input value="<?php echo h($creatorValue); ?>" placeholder="<?php echo h(__t('common.creator_unknown')); ?>" readonly></label>
+                <?php // Inside the grid, as in the mission editor: the row gap spaces it
+                      // like every other field instead of the textarea touching the row above. ?>
+                <label class="form-grid-span-2"><?php echo h(__t('vm_edit.label_notes')); ?><textarea name="vm_notes" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo h($vm['vm_notes'] ?? ''); ?></textarea></label>
             </div>
-
-            <?php portal_render_vm_effective_values($effectiveValues, $mission, $canWrite, $missionDetailsUrl); ?>
-
-            <label><?php echo h(__t('vm_edit.label_notes')); ?><textarea name="vm_notes" <?php echo $canWrite ? '' : 'readonly'; ?>><?php echo h($vm['vm_notes'] ?? ''); ?></textarea></label>
         </section>
 
         <section class="panel stack" id="interfaces" data-vm-network-editor data-row-label="<?php echo h(__t('vm_edit.interface_legend', ['number' => ':number'])); ?>" data-required-message="<?php echo h(__t('validate.interface_vlan_required')); ?>" data-duplicate-message="<?php echo h(__t('validate.interface_vlan_unique', ['vlan' => ':vlan'])); ?>" data-case-message="<?php echo h(__t('vm_edit.interface_case_hint')); ?>" data-added-message="<?php echo h(__t('vm_edit.interface_added')); ?>" data-removed-message="<?php echo h(__t('vm_edit.interface_removed')); ?>" data-restored-message="<?php echo h(__t('vm_edit.interface_restored')); ?>">
@@ -378,5 +381,7 @@ declare(strict_types=1);
         <?php } ?>
     </form>
 
-    <?php render_vm_status_history($timeline, $missionId, $vmId, $workContext); ?>
+    <?php // A VM that is being added has no history and no chronicle to link to;
+          // vm_history_url() refuses an id of 0 (VE1: "VM hinzufügen" ended in an error page). ?>
+    <?php if ($vmId > 0) { render_vm_status_history($timeline, $missionId, $vmId, $workContext); } ?>
 </div>

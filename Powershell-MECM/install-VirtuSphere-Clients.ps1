@@ -108,7 +108,7 @@ if (-not $preflight.CanApply) {
 # koennte aus Alt- und Zielgraph einen Zyklus erzeugen. Bis der read-only
 # Preflight und der freigegebene Cutover (MC02/MC03/MC07) existieren, darf
 # dieser Installer weder Content noch MECM-Objekte veraendern.
-if (@($specs | Where-Object { $_.PSObject.Properties['Role'] -and $_.Role -eq 'deployable_entry' }).Count -gt 0) {
+if (Test-VsClientApplyBlocked -Specs $specs) {
     throw 'MC01-Zielgraph ist noch nicht fuer Apply freigegeben: MC02-Preflight und geordneter Dependency-Cutover fehlen. Keine Content-/MECM-Aenderung ausgefuehrt.'
 }
 $serverLoggingVersion = Get-VsLoggingContractVersion

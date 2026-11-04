@@ -35,7 +35,7 @@ verknüpfen                  Rolloutnamen, weist
                             Collections zu)               --->  mecm_updateid.php (ResourceID)
                                                                                         getInfos (Registry füllen)
                                                           <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
-                                                                getDeviceInfos        VMDisksOnline (Platten online)
+                                                                getDeviceInfos        VMDisksOnline (Platten online, Namen aus getDeviceInfos)
                                                                                         staticip (Netz konfigurieren)
                                                           <---  mecm_client_ack.php (Client bereit, 5/5)
                      Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php
@@ -198,7 +198,7 @@ Beispiel ohne DNS:
 
 Die geplanten Aufgaben arbeiten über den SMS Provider auf dem Site-Server selbst
 (gemessen: lokaler Provider). `-ProviderMachine '<PROVIDER-HOST>'` wird nur für
-die Site-Health-Abfrage und die Prüfung der Verteilungskopien verwendet; liegt der
+die Site-Health-Abfrage und die Referenzprüfung alter Collections verwendet; liegt der
 Provider auf einem anderen Rechner, dafür angeben. Den Installer ohne
 `-ReportToken` starten und den vorbereiteten Token ausschließlich in der
 verdeckten Eingabe einfügen. Ein leerer Wert ist erlaubt. Der Installer ist
@@ -608,7 +608,7 @@ rein anzeigend und best effort bleiben.
 | `DeviceSyncIntervalSeconds` | Intervall Device-Sync (DWord, Standard 10, erlaubt 5–3600) |
 | `PackagesSyncIntervalSeconds` | Intervall Packages-Sync (DWord, Standard 60, erlaubt 10–3600) |
 | `ImporterIntervalSeconds` | Intervall Autoimporter (DWord, Standard 60, erlaubt 30–3600) |
-| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health und die Prüfung der Verteilungskopien (leer = lokale Ermittlung) |
+| `MECM_ProviderMachine` | SMS-Provider-Rechner für Site Health und die Referenzprüfung alter Collections (leer = lokale Ermittlung) |
 | `SiteHealthIntervalSeconds` | Intervall Site Health (DWord, neu, Standard 300, erlaubt 60–3600) |
 | `MECM_SiteCode` | erkannter Site-Code (nur wenn automatisch ermittelbar) |
 | `SetupCompleted` | Zeitstempel der erfolgreichen Erstinstallation |
@@ -861,13 +861,13 @@ nicht die breitere Anzeigeordnung des Portal-Katalogs.
 
 Der automatisch auszuführende Plan muss stabile Deployment-/Application-/Collection-IDs, die exakten
 versionierten Ownership-Marker, keine Referenzen und einen ausreichend bereiten
-Ersatz belegen. Bereit bedeutet: genau ein Deployment Type, ein bestätigter und
-an die exakte Content-ID gebundener Auftrag, eine bekannte sichere
-DP-Zielprojektion und ein geprüftes Deployment. `failed` oder `in_progress` auf
-einzelnen oder allen DPs sperrt den Plan nicht; 100 Prozent Verteilerfolg und
-mindestens ein erfolgreicher DP sind keine Voraussetzung. Ungebundene Intents,
-unbekannte Evidenz, Zielverlust, Löschzustände sowie unklare oder fremde Objekte
-bleiben gesperrt. Der Plan wird direkt vor einer Ausführung neu erhoben; nur ein
+Ersatz belegen. Bereit bedeutet seit AV2: genau ein Deployment Type, ein von
+MECM angenommener Contentauftrag (`requested`) für das aktuelle Manifest, eine
+sichtbar begonnene Verteilung (Aggregat `in_progress`, `succeeded` oder
+`failed`) und ein geprüftes Deployment. Der DP-Stand spielt keine Rolle;
+100 Prozent Verteilerfolg und mindestens ein erfolgreicher DP sind keine
+Voraussetzung. Ein stehender Intent, eine noch nicht sichtbare oder unlesbare
+Verteilung sowie unklare oder fremde Objekte bleiben gesperrt. Der Plan wird direkt vor einer Ausführung neu erhoben; nur ein
 identischer SHA-256-Fingerabdruck des aktuellen Schemas 3 ist gültig. Der
 Autoimporter liest den Plan unmittelbar zweimal und entfernt danach zuerst alte
 Application-Deployments, anschließend Applications und zuletzt Collections.
@@ -1028,15 +1028,15 @@ keine Portal-Settings:
 - `MECM_ProviderMachine`: SMS-Provider-Rechner. Leer lassen, wenn der Provider
   lokal auf dem Site-Server liegt (der Normalfall); die Aufgabe ermittelt ihn dann
   selbst. Die geplanten Aufgaben arbeiten über den Provider auf dem Site-Server;
-  dieser Wert wird nur für die Site-Health-Abfrage und die Prüfung der
-  Verteilungskopien gelesen.
+  dieser Wert wird nur für die Site-Health-Abfrage und die Referenzprüfung
+  alter Collections gelesen.
 - `SiteHealthIntervalSeconds`: Berichtsintervall, Standard 300, erlaubt 60–3600.
   Wie die drei Sync-Intervalle: außerhalb der Spanne lehnt der Installer ab, ein
   Registry-Wert von Hand wird beim Start geklemmt und protokolliert.
 
 **Remote-Provider.** Die Aufgaben sprechen den Provider auf dem Site-Server an.
 Nur wenn `MECM_ProviderMachine` auf einen anderen Rechner zeigt, gilt das Folgende
-für die Site-Health-Abfrage und die Prüfung der Verteilungskopien. Das
+für die Site-Health-Abfrage und die Referenzprüfung alter Collections. Das
 Computerkonto des Site-Servers ist standardmäßig Mitglied der SMS-Admins-Gruppe auf
 jedem Provider; liegt der Provider lokal und läuft die Aufgabe als SYSTEM, ist keine
 Zusatzkonfiguration nötig. Liegt der Provider auf
@@ -1310,13 +1310,13 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 | Fall | Verhalten | Log |
 |---|---|---|
 | 0 Devices von der WebApp | Leerlauf-Abkürzung, keine MECM-Abfragen | still |
-| Gesperrte VM (dauerhafte Ursache: Mission, MAC, Identität, Collection, Provenienz) | bleibt in der Warteschlange; neu geprüft nur bei geänderter Portalzeile oder alle 5 Minuten, ist keine VM fällig, unterbleibt die MECM-Inventur. Die Ursache bleibt im Lauf-Report | ERROR nur beim Wechsel des Sperrgrunds; unverändert INFO „Weiterhin gesperrt" im 5-Minuten-Takt |
+| Gesperrte VM (dauerhafte Ursache: Mission, MAC, Identität, Collection, Provenienz) | bleibt in der Warteschlange; neu geprüft nur bei geänderter Portalzeile oder alle 5 Minuten, ist keine VM fällig, unterbleibt die MECM-Inventur. Die Ursache bleibt im Lauf-Report und wird bei jedem Lauf gezählt, auch ohne neue Logzeile. Der Sperrzustand liegt in `device-block-state.json` neben den Serverskripten und übersteht `-Upgrade -ServerOnly`; nach einem Update mit gleichem Sperrgrund kommt deshalb kein neues ERROR | ERROR nur beim Wechsel des Sperrgrunds; unverändert INFO „Weiterhin gesperrt" im 5-Minuten-Takt, in derselben Tagesdatei `yyyy-MM-dd_device-sync.log` |
 | VM ohne Mission | übersprungen, nächste VM; Ursache `mission_missing` | WARN |
 | VM ohne PXE-MAC (keine Karte mit MAC auf der WDS-Portgruppe der Mission) | übersprungen, nächste VM; Ursache `mac_missing` | WARN |
 | Rolloutname ungültig (`device_name_invalid`) | kein Import; im VM-Editor korrigieren | ERROR |
-| Name mit fremder MAC oder MAC mit fremdem Namen (`mac_conflict`) | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet) | ERROR „Identitaet nicht aufloesbar" |
+| Name mit fremder MAC oder MAC mit fremdem Namen (`mac_conflict`) | nie automatisch ändern; VM **bleibt in der Warteschlange** (ResourceID wird nicht gemeldet). Die MACs eines MECM-Geräts liest der Sync als Liste oder als Text mit mehreren MACs, wie ihn `Get-CMDevice -Fast` liefert (MC-MAC1, 04.11.2026); bis 2026.11.3 fiel ein solcher Text durch, und jede VM, deren Gerät zwei Karten meldet, blockierte hier oder als `resource_mac_conflict`. Vor jedem Löschen in der MECM-Konsole die MACs des gleichnamigen Geräts mit den Karten der VM im Portal vergleichen: Trägt es die PXE-MAC der VM, gehört es zu ihr; nichts löschen, die Serverskripte aktualisieren | ERROR „Identitaet nicht aufloesbar" |
 | Gebundene ResourceID fehlt in MECM (`resource_id_missing`) | blockiert; kein Ersatzdatensatz wird adoptiert. „MECM-ID zurücksetzen" | ERROR |
-| Gebundene ResourceID mit fremder MAC (`resource_mac_conflict`) | blockiert; Handentscheidung. Fremd heißt ab `device-sync/2.1` (MECM-ID1, 15.10.2026): keine der MACs, die das Portal für diese VM kennt; vorher zählte nur die DHCP-Karte. Meldet dieselbe VM in MECM nur noch ihre statische Karte, weil die DHCP-Karte nach dem Betanken abgeschaltet wurde, läuft sie damit durch. Bleibt der Konflikt, ist das MECM-Gerät meist die alte Maschine einer neu erstellten VM: altes Gerät in MECM löschen, dann im Portal „MECM-ID zurücksetzen“. Vorher in der MECM-Konsole die MAC des Geräts mit allen Karten der VM im Portal vergleichen; das Log nennt die Portal-MACs. Die VM bleibt in der Warteschlange, die übrigen VMs laufen weiter | ERROR |
+| Gebundene ResourceID mit fremder MAC (`resource_mac_conflict`) | blockiert; Handentscheidung. Fremd heißt ab `device-sync/2.1` (MECM-ID1, 15.10.2026): keine der MACs, die das Portal für diese VM kennt; vorher zählte nur die DHCP-Karte. Meldet dieselbe VM in MECM nur noch ihre statische Karte, weil die DHCP-Karte nach dem Betanken abgeschaltet wurde, läuft sie damit durch. Vor jedem Löschen in der MECM-Konsole die MACs des Geräts mit allen Karten der VM im Portal vergleichen; das Log nennt die Portal-MACs. Trägt das Gerät eine davon, ist es die lebende Maschine und kein Altgerät: nicht löschen, nicht zurücksetzen, sondern die Serverskripte aktualisieren (bis 2026.11.3 erkannte der Sync ein Gerät mit zwei Karten nicht, MC-MAC1). Trägt es nur fremde MACs, ist es meist die alte Maschine einer neu erstellten VM: altes Gerät in MECM löschen, dann im Portal „MECM-ID zurücksetzen“. Die VM bleibt in der Warteschlange, die übrigen VMs laufen weiter | ERROR |
 | Mehrere Treffer nach Name, MAC oder ResourceID (`device_identity_ambiguous`) | blockiert; das Skript wählt bewusst keinen aus | ERROR |
 | Vorgängergerät noch vorhanden (`previous_resource_present`) | blockiert bis zum Löschen in der MECM-Konsole | ERROR |
 | Abweichender **Anzeigename** bei gültiger ResourceID und MAC | **kein Befund**: Windows/Discovery darf umbenennen; kein Reimport, kein Rename, keine Warnung | DEBUG |
@@ -1358,72 +1358,69 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 
 Ein offener Punkt hält den Manifest-Stamp zurück: der nächste Durchlauf scannt
 denselben Baum erneut, und der Lauf meldet `warning` mit `partial_failure` samt
-Ursachencodes im Detail (`package_content_failed target=…`), statt `ok`. Nur ein
-Durchlauf ohne offene Punkte merkt den Stamp.
+Ursachencodes im Detail, statt `ok`. Nur ein Durchlauf ohne offene Punkte merkt
+den Stamp. Verteilhinweise (`package_content_failed`,
+`package_content_in_progress`) sind keine offenen Punkte: Sie stehen im Detail
+hinter den offenen Punkten, der Lauf bleibt `ok`, und der Stamp wird gemerkt.
 
-Für jeden Paketordner wird ein eigener SHA-256-Manifeststand unter
-`HKLM:\SOFTWARE\VirtuSphere\MECM\ContentTracking` verfolgt. Vor
-`Start-CMContentDistribution` oder `Update-CMDistributionPoint` schreibt der
-Autoimporter `intent` samt Application-/Deployment-Type-Identität, bisheriger
-Content-ID und Kopierstand der konkreten Verteilungspunkte. Nur ein erfolgreich
-zurückgekehrter Aufruf wird als bestätigt gespeichert. Ein Crash oder Fehler
-in diesem Fenster löst keine blinde zweite Verteilung aus. Der bestätigte
-Auftrag wird an seine DT-Content-ID gebunden; bei einem Update muss sie sich
-gegenüber der Baseline ändern. Die Application-Packageversion darf dabei
-gleich bleiben. `complete` verlangt zusätzlich zum erfolgreichen Aggregat
-einen neueren erfolgreichen `LastCopied`-Nachweis für die bisherigen DP-Ziele;
-fehlende, ersetzte oder unbekannte Ziele erlauben keinen Abschluss.
-Ein Erstauftrag benötigt mindestens einen bestätigten Kopierstand. Dies ist
-kein separater Nachweis der konfigurierten DP-Gruppenmitgliedschaft.
-Unbestätigte oder beschädigte Trackingdaten brauchen manuelle Klärung. Diese
-Contentpflege läuft unabhängig von `generateOwnDeviceColletion`; eine eigene
-Collection ist keine Voraussetzung für eine aktuelle Paketquelle.
+**Verteilung an die DPs ist Sache von MECM (AV2, ADR-0034 Amendment 7).** Der
+Autoimporter fordert je neuem Dateimanifest höchstens einen Auftrag an: die
+Erstverteilung an die DP-Gruppe, solange MECM für die Application noch kein Ziel
+kennt, sonst `Update-CMDistributionPoint`. Der Auftrag ist nur an das Manifest
+und die Application-Identität (ModelName, PackageID) gebunden und liegt unter
+`HKLM:\SOFTWARE\VirtuSphere\MECM\ContentRequests`. Vor dem Aufruf schreibt der
+Autoimporter einen Intent, nach dem erfolgreich zurückgekehrten Aufruf
+`requested`. Bleibt ein Intent stehen (Fehler oder Abbruch), wiederholt der
+nächste Lauf den Aufruf nur, wenn MECM ihn nachweislich nicht angenommen hat:
+Bei einem Update ist die DT-ContentId unverändert, bei einer Erstverteilung ist
+kein Ziel sichtbar. Hat MECM ihn angenommen, wird der Intent ohne zweiten Aufruf
+bestätigt.
 
-**Offline-DPs und neue Quellstände.** Auftragsannahme und vollständiger
-Verteilnachweis sind ab `autoimporter/2.1` getrennt. Die Skriptversion in der
-Portalzeile bestätigt nach dem Upgrade, dass die neue Generation meldet.
-Vier erfolgreiche und zwei fehlerhafte DPs
-verhindern keinen neuen Updateaufruf für ein geändertes Manifest. Die zwei DPs
-bleiben Ziele; der Importer entfernt sie nicht und meldet nicht alle sechs als
-erfolgreich. Bei unverändertem Manifest wird der bestätigte Auftrag nur
-beobachtet, nicht jede Minute neu gestartet. Ein weiterer Quellstand darf
-einen an seine Content-ID gebundenen offenen Auftrag ersetzen. Unbestätigte
-Intents, fremde Identitätswechsel, fehlende oder ersetzte Ziele,
-widersprüchliche Zielzahlen und DP-Löschzustände bleiben gesperrt.
-Nach einem abgeschlossenen Auftrag werden zusätzliche aktuelle Ziele in die
-Baseline des nächsten Auftrags aufgenommen; der Verlust eines bisherigen Ziels
-bleibt gesperrt.
-Ab `autoimporter/2.2` sind auch Deploymentfreigabe und vollständiger
-Verteilnachweis getrennt: Nach einem von MECM bestätigten Erst- oder
-Updateauftrag zieht der Autoimporter die
-Collection sowie Required- und Available-Deployments idempotent nach, selbst
-wenn aktuell kein DP eine erfolgreiche Kopie meldet. Die Zuweisung bleibt
-bestehen; ein Gerät kann das Paket anwenden, sobald sein zugeordneter DP den
-Inhalt anbietet. `package_content_failed` beziehungsweise
-`package_content_in_progress` bleiben trotzdem sichtbare offene Punkte und
-verhindern weiterhin den vollständigen Manifest- und Ersatznachweis. Eine
-fehlende DP-Gruppe, unbekannte Evidenz, Zielverlust, Löschzustände oder ein
-unbestätigter MECM-Aufruf geben den Deploymentabgleich nicht frei.
-Die Anforderungskriterien gehören zu `Test-VsDistributionCopyBaselineReady`,
-die gemeinsame Zielprüfung zu `Test-VsDistributionCopyEvidence`; der
-Controller in `mecm_autoimporter.ps1` entscheidet einmal pro Manifest.
-Der Abschluss bleibt an vollständig erfolgreiche Aggregatzähler und neuere
-Kopien aller bisherigen Ziele gebunden. MECM verwaltet die ausstehenden
-Kopien; falls seine Wiederholungen erschöpft sind, ist der konkrete
-Verteilfehler nach Wiederkehr des DPs in der MECM-Konsole zu prüfen.
-Der grobe Wire-Code `package_content_failed` beweist dabei nicht zwingend einen
-DP-Fehler: Ohne konfigurierte DP-Gruppe bezeichnet er eine fehlende
-Voraussetzung. Eine unvollständige oder unbekannte Zielprojektion meldet dagegen
-`package_content_unknown` und bleibt vor Content- und Deploymentmutationen
-gesperrt. Die Anzeige bleibt bei der jeweils belegten Aussage und erfindet keine
-DP-Diagnose.
+Danach liest der Autoimporter nur das Aggregat von `Get-CMDistributionStatus`.
+Offline-DPs, ersetzte oder entfernte DPs, laufende Kopien, ein von Hand
+angestoßenes Contentupdate und ein neu angelegter Deployment Type sperren
+nichts: Collection, Required- und Available-Deployments werden immer
+idempotent nachgezogen, und die Zuweisung im Portal bleibt bestehen. Geräte
+können das Paket anwenden, sobald ihr DP den Inhalt anbietet. Gleiche Manifeste
+lösen keinen weiteren Auftrag aus, auch nicht bei `failed`. Diese Contentpflege
+läuft unabhängig von `generateOwnDeviceColletion`.
 
-**Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise beziehen sich auf den angezeigten letzten Abschluss, nicht auf den offenen Lauf. Der bestehende Bericht liefert keine vollständigen DP-Zahlen je Paket. Fehlende oder gekürzte Ursachen sind kein Erfolgsnachweis; offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben.
+Ruhige Läufe ohne Dateiänderung melden die Verteilhinweise des letzten Scans
+weiter und lesen ihren Stand höchstens alle 30 Minuten neu. Das ist kein
+Abgleich und ändert nichts in MECM; ein erledigter Hinweis verschwindet.
+
+**Neu angelegte Application gleichen Namens.** Wurde die Application in MECM
+gelöscht und neu angelegt, passt die gespeicherte Identität nicht mehr. Trägt
+die neue Application den VirtuSphere-Marker in der Beschreibung oder liegt sie
+im Ordner `VirtuSphere_Applications`, bindet der Autoimporter den Auftrag neu:
+bei gleichem Manifest ohne Auftrag, wenn MECM sie schon verteilt, sonst mit
+genau einer Erstverteilung. Eine fremde Application (ohne Marker, außerhalb des
+Ordners) übernimmt er nicht: kein Content, kein Deployment, offener Punkt
+`package_definition_drift`. Neu angelegt erkennt der Autoimporter nur an einem
+gespeicherten Auftrag mit anderer Identität. Ohne gespeicherten Auftrag verwendet
+er eine vorhandene namensgleiche Application wie bisher ohne Eigentumsprüfung
+weiter.
+
+**Übernahme alter Trackingstände.** Der Schema-1/2-Bestand unter
+`HKLM:\SOFTWARE\VirtuSphere\MECM\ContentTracking` wird beim ersten Lauf von
+`autoimporter/2.3` gelesen und übernommen, nie verändert oder gelöscht. Es
+zählen nur Manifest und Identität; die alte DP-Baseline und die gebundene
+ContentId spielen keine Rolle mehr. Ein bestätigter Altstand gilt als
+angenommener Auftrag für sein Manifest, ein unbestätigter Intent durchläuft den
+Annahmenachweis, ein Altstand ohne Identität die Eigentumsprüfung. Ein
+unlesbarer Altstand zählt als kein Auftrag (höchstens ein neuer). Ein Rückweg auf
+eine ältere Serverversion findet `ContentTracking` unverändert vor. Handarbeit
+ist nicht nötig.
+
+**Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise stammen aus dem letzten Scan und werden höchstens alle 30 Minuten aufgefrischt. Der Bericht liefert keine DP-Zahlen je Paket; den genauen Stand je DP zeigt die MECM-Konsole. Offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben. Jeder `package_`-Code aus der Tabelle oben hat auf der Karte eine Erklärung und in der Portalhilfe (Systemstatus, MECM) einen Eintrag mit Maßnahme.
 
 **Status lesen.** „Abschluss offen“ zeigt eine Startmeldung ohne Abschluss.
 Der Laufzustand bleibt neutral und beschreibt nur die empfangene Meldung; er beweist keinen laufenden oder gestoppten Prozess. Dauer, Zähler und
 Fehlerdetails gehören währenddessen zum letzten abgeschlossenen Lauf.
-Ein langer SHA-256-Dateiscan kann die Meldefrist überschreiten.
+Ein offener Lauf darf die feste Frist und, wenn das länger ist, bis zum Doppelten der Dauer brauchen, die sein letzter
+Abschluss gemeldet hat; ein normal langer SHA-256-Dateiscan bleibt deshalb in der
+Farbe des vorigen Ergebnisses. Erst ein Scan, der deutlich länger dauert als der
+letzte, überschreitet die Meldefrist.
 „Synchronisationslauf fehlgeschlagen“ kann auch einen abgebrochenen
 Dateiscan bezeichnen; der historische Wire-Code `mecm_unavailable` bleibt
 kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die bestehenden
@@ -1441,10 +1438,9 @@ importierbar, die Bereinigungsplanung verlangt kanonische Zahlen mit Punkten.
 `1` und `1.0` sind numerisch gleich und kein eindeutiger Zielstand.
 Weiterhin gelieferte Quellversionen und höhere vorhandene Versionen werden
 nicht als Altobjekt zur Bereinigung gemeldet. Tatsächliche Altobjekte bleiben
-bis zum geprüften Eigentums-, Referenz- und Ersatznachweis erhalten. Ein
-bestätigter, an die exakte Content-ID gebundener Ersatzauftrag mit sicherer
-Zielprojektion und geprüftem Deployment genügt auch bei null erfolgreichen DPs;
-unbekannte Evidenz, Zielverlust und Löschzustände bleiben gesperrt. Fordert
+bis zum geprüften Eigentums-, Referenz- und Ersatznachweis erhalten. Ein von
+MECM angenommener Ersatzauftrag mit begonnener Verteilung und geprüftem
+Deployment genügt; der DP-Stand spielt keine Rolle. Fordert
 mindestens eine Quelle des Produkts `removeOldVersion=true`, entfernt der
 Importlauf ausschließlich die durch den unmittelbar revalidierten Plan belegten
 Altobjekte in der Reihenfolge Deployment, Application, Collection.
@@ -1457,24 +1453,19 @@ oder nicht numerisch ordnungsfähiger Auswahl werden nur strikt belegbar ältere
 Bestände als erhaltene Altobjekte gemeldet; gleiche oder höhere Bestände erhalten
 keine Altklassifikation. Aus diesem Teilwissen folgt in keinem Fall eine Löschung.
 
-**Abnahme im MECM-Labor:** Bei sechs bestehenden Zielen zwei DPs offline
-lassen, eine Datei ändern und genau einen Updateaufruf nachweisen.
-Unverändert erneut scannen: kein weiterer Aufruf. Vor vollständiger
-Verteilung erneut ändern: neuer bestätigter Auftrag mit neuer Content-ID,
-kein falscher Abschluss des alten. Beide DPs zurückbringen und die
-Verteilung sowie die neueren Kopierzeiten aller sechs Ziele kontrollieren.
-Ein verschwundenes Ziel, eine externe Content-ID oder ein unbestätigter
-Aufruf muss weiterhin blockieren. Lokale Fixtures ersetzen diese Abnahme
-der realen Provider- und DP-Wirkung nicht.
-
-Alte Trackingdatensätze ohne den neuen Identitäts- und Kopiervertrag bleiben
-auch mit dem früheren Zustand `complete` zur manuellen Prüfung gesperrt. Sie
-belegen keine historische Content-ID und werden nicht automatisch auf das
-aktuell gleichnamige Objekt übertragen. Vor einer Freigabe den betreffenden
-Registrydatensatz und die Tageslogs sichern, Application-/DT-Identität,
-lokales Manifest und tatsächlichen DP-Inhalt abgleichen und ausschließen,
-dass noch eine alte Verteilung läuft. Die Entscheidung über den Altstand ist
-zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
+**Abnahme im MECM-Labor (AV2):** Nach `-Upgrade -ServerOnly` zeigt die
+Portalzeile `autoimporter/2.3`. Der erste Lauf übernimmt `ContentTracking` nach
+`ContentRequests`, ohne `ContentTracking` zu ändern; Pakete mit ersetztem DP,
+neu angelegter eigener Application oder offline DPs melden keinen offenen Punkt
+mehr. Im Tageslog steht ein Auftrag nur für Pakete mit neuem Manifest.
+Unverändert erneut scannen: kein Auftrag. Eine Datei ändern: genau ein Auftrag.
+Einen DP offline schalten: Hinweis, Lauf `ok`. Für eine namensgleich neu
+angelegte Application ohne Marker außerhalb des Ordners: kein Auftrag, offener
+Punkt `package_definition_drift`. Dabei einmal lesend prüfen, ob MECM für
+Applications `ObjectPath` liefert, etwa mit
+`Get-CMApplication -Name "<Name-Version>" | Select-Object LocalizedDisplayName, ObjectPath, LocalizedDescription`.
+Lokale Fixtures ersetzen diese Abnahme der realen Provider- und DP-Wirkung
+nicht.
 
 | Fall | Verhalten | Log |
 |---|---|---|
@@ -1483,14 +1474,16 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 | `PackagesShare` fehlt in Registry | wartet in 60-s-Schleife auf den Installer | ERROR einmalig |
 | files-Baum unverändert (SHA-256-Manifest) | kein Scan | still |
 | files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
-| Alt-Version erkannt und `removeOldVersion=true` | automatische Entfernung von altem Deployment, Application und Collection nach Eigentums-, vollständigem Referenz- und Ersatznachweis. Bestätigter gebundener Ersatzauftrag, sichere Zielevidenz und neues Deployment genügen; vollständiger DP-Erfolg ist nicht nötig. Eine gesperrte oder fehlgeschlagene Einheit meldet `package_cleanup_failed` | INFO je entfernter Einheit, WARN bei Sperre/Fehler |
+| Alt-Version erkannt und `removeOldVersion=true` | automatische Entfernung von altem Deployment, Application und Collection nach Eigentums-, vollständigem Referenz- und Ersatznachweis. Ein von MECM angenommener Ersatzauftrag, eine sichtbar begonnene Verteilung und das neue Deployment genügen; der DP-Stand spielt keine Rolle. Eine gesperrte oder fehlgeschlagene Einheit meldet `package_cleanup_failed` | INFO je entfernter Einheit, WARN bei Sperre/Fehler |
 | Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
 | Vorlagen-install.ps1 nicht kopierbar oder beide install.ps1-Dateien fehlen | Keine Application-/DT-/Contentmutation für dieses Paket; Kopie muss den SHA-256-Vergleich bestehen. Ein vorhandenes lesbares Paketskript bleibt auch ohne Vorlage zulässig. Retry im nächsten Durchlauf (`package_template_failed`). | WARN |
 | Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
-| DP-Gruppe der Erstverteilung hat keine Mitglieder | Keine Erstanforderung, solange die Gruppe leer ist; ein bereits bestätigter Erstauftrag wartet auf ein Ziel. Sobald ein Verteilungspunkt in der Gruppe ist, setzt der nächste Durchlauf die Verteilung fort (`package_content_group_empty`). | WARN |
+| DP-Gruppe der Erstverteilung hat keine Mitglieder | Keine Erstanforderung, solange die Gruppe leer ist; Collection und Deployments werden trotzdem nachgezogen. Sobald ein Verteilungspunkt in der Gruppe ist, fordert der nächste Durchlauf die Erstverteilung an (`package_content_group_empty`). | WARN |
+| DP-Gruppe nicht konfiguriert oder MECM nimmt den Contentauftrag nicht an | Kein Auftrag beziehungsweise Intent bleibt stehen; Collection und Deployments werden trotzdem nachgezogen. Der nächste Lauf wiederholt den Aufruf nur, wenn MECM ihn nachweislich nicht angenommen hat (`package_content_request_failed`). | WARN |
 | Neue Application lässt sich nicht in `VirtuSphere_Applications` verschieben | Die Application bleibt im Wurzelordner und funktioniert. Der Verschub wird im nächsten Durchlauf wiederholt (`package_folder_failed`); der Paket-Sync liest nur den Collection-Ordner. | WARN |
-| Content-Verteilung bleibt offen oder einzelne/alle DPs melden Fehler | Nach einem bestätigten Contentauftrag werden Collection und Deployments auch bei null erfolgreichen DPs nachgezogen; Geräte können das Paket verwenden, sobald ihr DP den Inhalt anbietet. Neue Manifeste dürfen einmal angefordert werden, gleiche Manifeste werden nur beobachtet. Vollständiger Abschluss verlangt Application-/DT-Contentidentität, erfolgreiche Aggregatzähler und neuere Kopien aller bisherigen DP-Ziele. Die Package-`SourceVersion` bleibt Diagnose. Unbekannte Identität/Projektion, Zielverlust, Löschzustände und unbestätigte Aufrufe blockieren. | INFO bei neuem Auftrag und weiterlaufendem Deploymentabgleich, WARN mit Paket/Ursachencode beim offenen Nachweis |
-| Tracking enthält einen unbestätigten `intent`, ist unvollständig oder stammt aus dem alten Schema | Keine automatische zweite Contentmutation; Tageslog, Trackingidentitäten und MECM-Verteilung manuell klären. Alte Trackingstände ohne Content-ID werden auch bei früherem `complete` nicht durch Vermutung übernommen. | WARN `package_content_unknown` |
+| DPs offline, ersetzt oder entfernt; Verteilung läuft noch oder meldet Fehler | Hinweis, kein offener Punkt: Lauf `ok`, Stamp gemerkt, Collection und Deployments nachgezogen. Gleiche Manifeste lösen keinen Auftrag aus, ein neues Manifest genau einen (`package_content_failed`, `package_content_in_progress` als Hinweis). | INFO |
+| Application oder Deployment Type nicht eindeutig lesbar, oder Verteilstand unlesbar, wenn ein Auftrag nötig wäre | Kein Auftrag in diesem Lauf; Collection und Deployments werden trotzdem nachgezogen, der nächste Lauf versucht es erneut (`package_content_unknown`). | WARN |
+| Namensgleich neu angelegte Application | Mit Marker oder im Ordner `VirtuSphere_Applications`: neu gebunden, bei gleichem Manifest ohne Auftrag. Fremd: kein Content, kein Deployment (`package_definition_drift`). | INFO beziehungsweise WARN |
 | `DeployTo`-Ziel-Collection fehlt | Offener Punkt mit Collection-Name; der Dateistand wird nicht gemerkt, der nächste Lauf versucht das Available-Deployment erneut, bis die Collection existiert | WARN `package_deploy_failed` |
 | Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |
 
@@ -1499,7 +1492,13 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 Erste Anlaufstelle ist immer der **Systemstatus** (Klartext-Ampel
 je Quelle mit Handlungsanweisung). Die Handlungsanweisung ist eine
 Reparaturanweisung und steht deshalb nur an einer Zeile, die nicht `ok` ist;
-verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. Hat sich
+verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. An einer
+Sync-Aufgabe folgt sie der Ursache von „Verzögert“: Ist die Meldung überfällig,
+nennt sie die Aufgabenplanung. Meldet die Aufgabe pünktlich und endet nur ihr
+Lauf mit offenen Punkten, sagt sie, dass ein Neustart nicht hilft, und zeigt,
+wo die Punkte stehen; beim Devices Sync sind das die Ursache je VM und die
+Handentscheidung aus den Fallzeilen unter „Edge Cases der Server-Skripte“
+(etwa `mac_conflict`, `resource_mac_conflict`). Hat sich
 noch nie eine Sync-Quelle gemeldet (Gruppe steht komplett auf „Noch keine
 Daten"), entfallen die Zeilenhinweise ganz: es gibt keine Aufgabe, die man neu
 starten könnte. Der Abschnitt nennt dann einmal den Einrichtungsweg (Skripte auf

@@ -80,7 +80,7 @@ git log --oneline "$ALT..$NEU" | wc -l
 git diff --stat "$ALT" "$NEU" -- Docker/php Docker/mysql Docker/nginx Docker/phpmyadmin docker-compose.yml
 git diff "$ALT" "$NEU" -- .env.example
 git diff --name-status "$ALT" "$NEU" -- Docker/WebAPI/lib/migrations
-git diff --stat "$ALT" "$NEU" -- Powershell-MECM Ansible/requirements.yml Ansible/host-cleanup Ansible/runner
+git diff --stat "$ALT" "$NEU" -- Powershell-MECM Ansible/requirements.yml Ansible/host-cleanup Ansible/runner Docker/qa-ansible/requirements.txt
 ```
 
 Was die Ausgaben bedeuten:
@@ -91,7 +91,7 @@ Was die Ausgaben bedeuten:
 | neue Schlüssel in `.env.example` | vor dem Start in die `.env` des Hosts übernehmen |
 | neue Dateien unter `Docker/WebAPI/lib/migrations` | Wartungsfenster mit Backup und Drill; die Rückkehrklasse jeder Migration steht in [Upgrade und Recovery](upgrade-recovery.md), Abschnitt „Migrationsklassen“. Steht eine neue Migration dort in keiner Klasse, gilt sie als Klasse C |
 | Änderungen unter `Powershell-MECM` | Schritt 4 (MECM) beachten; erst prüfen, ob der Installer dieses Stands überhaupt freigegeben ist |
-| Änderungen an `Ansible/requirements.yml`, `Ansible/host-cleanup` oder `Ansible/runner` | Schritt 4 (Ansible-Host) |
+| Änderungen an `Ansible/requirements.yml`, `Ansible/host-cleanup`, `Ansible/runner` oder `Docker/qa-ansible/requirements.txt` | Schritt 4 (Ansible-Host). Aus der letzten Datei leitet das Offline-Bundle die Wheel-Pins des Hosts ab (ansible-core, pyvmomi, requests); eine neue ansible-core-Version erreicht den Host nur über das neue Bundle |
 
 Das Ergebnis kurz notieren (Commits, neue Images ja oder nein, neue `.env`-Schlüssel,
 neue Migrationen mit Klasse, MECM-Teil, einmalige Aufgaben). Die Notiz gehört zur
@@ -412,7 +412,7 @@ Bindet der Webserver an eine LAN-Adresse, antwortet `localhost` nicht
 ## Schritt 4: Integrationen nachziehen
 
 **Ansible-Host.** Nur wenn Schritt 0 Änderungen unter `Ansible/requirements.yml`,
-`Ansible/host-cleanup` oder `Ansible/runner` zeigte:
+`Ansible/host-cleanup`, `Ansible/runner` oder `Docker/qa-ansible/requirements.txt` zeigte:
 
 - neue Python-Pakete und Collections offline aus dem Bundle installieren
   ([Offline-Installation](offline-install.md), Schritt 3, Abschnitt „Auf dem
@@ -456,6 +456,7 @@ Systemstatus, auf der Seite Zugangsdaten und in Schritt 0. Wiederkehrende Beispi
 | „Einträge ohne Rolle“ bei den IP-Freigaben | jedem Eintrag seine Rolle geben ([Go-Live](go-live.md), Schritt 4.4) |
 | „Backups unverschlüsselt“ | optional ein Zertifikat hinterlegen ([Backup](backup.md), „Verschlüsselung“) |
 | Ansible-Zugangstest meldet fehlenden Aufräum-Timer | Timer installieren wie in Schritt 4 |
+| HTTPS ist eingeschaltet und das Release ändert `Docker/nginx/default.conf` | die HTTPS-Konfiguration einmal neu erzeugen: unter Einstellungen, Reiter HTTPS, das aktuelle Zertifikat erneut hochladen. Die Datei in `Docker/nginx/conf.d` entsteht nur beim Hochladen oder Einschalten; bis dahin gelten für HTTPS die Grenzen und Sperrregeln des alten Stands, für HTTP schon die neuen. Prüfen: `grep client_max_body_size Docker/nginx/conf.d/virtusphere-https.conf` zeigt denselben Wert wie `Docker/nginx/default.conf` |
 
 ## Wenn etwas schiefgeht
 

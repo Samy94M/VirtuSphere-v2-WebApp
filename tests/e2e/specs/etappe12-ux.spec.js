@@ -1,6 +1,7 @@
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
+const { waitForLiveVerdict } = require('../lib/deploy-live');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -37,6 +38,9 @@ async function changeAndReadBlockerRequest(page, change) {
   const responsePromise = page.waitForResponse((response) => response.url().includes('deploy_blockers.php?'));
   await change();
   const response = await responsePromise;
+  // The response resolves before the page renders it; the next pointer action
+  // must not straddle that render (FL1).
+  await waitForLiveVerdict(page);
   return new URL(response.url()).searchParams;
 }
 
@@ -145,6 +149,8 @@ echo 'EMPTY';
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
   await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
   await form.locator('select[name="mode"]').selectOption('powercycle');
+  // The server render already shows this remedy; the live render replaces it.
+  await waitForLiveVerdict(page);
   const remedy = page.getByRole('button', { name: 'VMs der Mission öffnen' });
   await expect(remedy).toBeVisible();
   await Promise.all([
@@ -197,8 +203,10 @@ test('schedule-preview cancel returns to the unchanged editable queue form', asy
   const form = page.locator('#deploy-queue-form');
   await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
   await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
+  await waitForLiveVerdict(page);
   await form.locator('input[name="start_mode"][value="scheduled"]').check();
   await form.locator('input[name="scheduled_at"]').fill(scheduledAt);
+  await waitForLiveVerdict(page);
   await form.locator('[data-deploy-queue-button]').click();
   const preview = page.getByRole('heading', { name: 'Zeitplan-Vorschau' });
   await expect(preview).toBeVisible();

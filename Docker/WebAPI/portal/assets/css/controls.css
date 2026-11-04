@@ -339,21 +339,19 @@ button.button:disabled:hover,
     gap: 6px;
 }
 
+/* Value and unit share the first row, the preset list takes the second at every
+   width. A cell of the three- or four-track VM grid is only about 210px wide, and
+   all three controls in one row left the free value input about 20px (VE1). */
 .ram-field {
-    grid-template-columns: minmax(0, 1fr) 64px minmax(0, 116px);
+    grid-template-columns: minmax(0, 1fr) 64px;
+}
+
+.ram-field > select:last-child {
+    grid-column: 1 / -1;
 }
 
 .field-stack > .hint {
     margin: 0;
-}
-
-@media (max-width: 600px) {
-    .ram-field {
-        grid-template-columns: minmax(0, 1fr) 64px;
-    }
-    .ram-field > select:last-child {
-        grid-column: 1 / -1;
-    }
 }
 
 .narrow-form {

@@ -6,6 +6,7 @@ declare(strict_types=1);
 // The page size of the audit table is the one constant the logs text states.
 require_once __DIR__ . '/../device_sync_cause_constants.php';
 require_once __DIR__ . '/../log_filter.php';
+require_once __DIR__ . '/../system_status.php';
 
 // Uses $user from the page scope: the cross reference to the deploy help is
 // gated on the panel that reader may actually open, so a link never leads to a
@@ -78,19 +79,20 @@ require_once __DIR__ . '/../log_filter.php';
             <?php // Directly after the field explanation, because the cause line sits
                   // in the same card and is the only place a counter names a VM. ?>
             <p><?php echo h(__t('help_system_status.system_status_status_p3')); ?></p>
-            <?php // One entry per cause code the autoimporter writes into the cause line. ?>
+            <?php // One entry per cause code the autoimporter writes into the cause line,
+                  // from the same list the System status card reads. ?>
             <ul>
-                <?php foreach (['membership_operation_uncertain', 'package_content_in_progress', 'package_content_unknown', 'package_content_failed', 'package_content_group_empty', 'package_definition_drift', 'package_cleanup_failed', 'package_folder_failed'] as $statusCode) { ?>
+                <?php foreach (['membership_operation_uncertain', ...VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES] as $statusCode) { ?>
                     <li><code><?php echo h($statusCode); ?></code>: <?php echo h(__t('help_system_status.system_status_status_code_' . $statusCode)); ?></li>
                 <?php } ?>
             </ul>
-            <p><?php echo h(__t('help_system_status.system_status_status_counters')); ?></p>
+            <p><?php echo h(__t('help_system_status.system_status_status_counters', ['minutes' => (string) intdiv(VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS, 60)])); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_cleanup_p4')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_package_p5')); ?></p>
             <?php // Jeder Identitaetscode bekommt eine
                   // Massnahme. Der Grenzwert kommt aus der Konstante, nicht aus
                   // dem Satz, damit er nicht luegen kann, wenn er sich bewegt. ?>
-            <h3><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
+            <h3 id="help-status-device-causes" tabindex="-1"><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_identity_p1')); ?></p>
             <ul>
                 <?php for ($identityCause = 1; $identityCause <= 9; $identityCause++) { ?>

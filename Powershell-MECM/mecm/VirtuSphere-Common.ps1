@@ -24,7 +24,7 @@ Set-StrictMode -Version 1.0
 # Common-Funktionen benoetigen, pruefen diesen Wert direkt nach dem Dot-Sourcing.
 # Der Installer vergleicht die Literale zusaetzlich im Staging und nach der
 # Aktivierung, damit ein gemischter Satz gar nicht erst gestartet wird.
-$script:VsMecmServerContractVersion = 2
+$script:VsMecmServerContractVersion = 3
 
 $script:VsRegistryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 
@@ -772,9 +772,10 @@ $script:VsRunCauseVocabulary = @(
     'resource_id_pending',       # MECM hat noch keine ResourceID vergeben
     'resource_update_failed',    # ResourceID-Rueckmeldung ans Portal fehlgeschlagen
     'package_config_invalid',    # config.json unlesbar oder Pflichtfeld fehlt
-    'package_content_failed',    # Content-Verteilung fehlgeschlagen oder auf DPs mit Fehlern
-    'package_content_in_progress', # Verteilung laeuft noch; Stamp wartet (B7)
-    'package_content_unknown',   # Verteilstatus nicht abfragbar; Stamp wartet (B7)
+    'package_content_failed',    # Hinweis (AV2): mindestens ein DP meldet einen Verteilfehler; sperrt nichts
+    'package_content_in_progress', # Hinweis (AV2): MECM verteilt noch; sperrt nichts
+    'package_content_unknown',   # eigene Application-/Auftragsidentitaet oder Verteilart nicht lesbar: kein Auftrag in diesem Lauf
+    'package_content_request_failed', # Contentauftrag nicht moeglich (DP-Gruppe fehlt) oder von MECM nicht angenommen (AV2)
     'package_content_group_empty', # DP-Gruppe der Erstverteilung hat keine Mitglieder: kein Ziel fuer den Inhalt (AV-F27)
     'package_definition_drift',  # Application/Deployment-Type nicht eindeutig oder vertragswidrig
     'package_source_missing',    # files-Pfad des Paketordners fehlt
@@ -830,8 +831,9 @@ function New-VsRunCauseList {
 # als erledigt, und NumberErrors las niemand: eine Verteilung, die auf jedem DP
 # scheiterte, galt als fertig, der Autoimporter merkte den Stamp, die Karte
 # blieb gruen, und jede Client-Installation schlug fehl. Mehrwertig entscheidet
-# der Aufrufer selbst; nur `succeeded` heisst "nichts zu tun UND der Stamp darf
-# gemerkt werden".
+# der Aufrufer selbst. Seit AV2 (ADR-0034 Amendment 7) ist der Stand nur noch
+# Anzeige: failed und in_progress sind Hinweise, not_started waehlt die
+# Erstverteilung, und nichts davon haelt Dateistand oder Deployments auf.
 #
 # Adressierung ausschliesslich ueber das eindeutig aufgeloeste Application-
 # Objekt (-InputObject). Get-CMDistributionStatus -Id erwartet eine PackageID,
@@ -971,102 +973,11 @@ function Get-VsDeploymentTypeContentIdentity {
     }
 }
 
-function ConvertTo-VsProviderUtcTicks {
-    param([AllowNull()]$Value)
-    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) { return 0L }
-    try {
-        $date = if ($Value -is [datetime]) { [datetime]$Value } else {
-            [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$Value)
-        }
-        return $date.ToUniversalTime().Ticks
-    } catch {
-        Write-Debug $_
-        return -1L
-    }
-}
-
-# Per-DP successful-copy evidence. Unlike SMS_ObjectContentExtraInfo's package
-# aggregate, LastCopied identifies when the source files were last successfully
-# copied to each concrete DP. A content request stores this whole baseline and
-# completion requires every same target to report INSTALLED with a strictly
-# newer LastCopied value.
-function Get-VsDistributionCopySnapshot {
-    param(
-        [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]{8}$')][string]$PackageId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationModelName,
-        [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9]{3}$')][string]$SiteCode,
-        [string]$ProviderMachine = ''
-    )
-    try {
-        $cimParams = @{
-            Namespace = ('root\sms\site_{0}' -f $SiteCode)
-            ClassName = 'SMS_PackageStatusDistPointsSummarizer'
-            Filter = ("PackageID = '{0}'" -f $PackageId)
-            ErrorAction = 'Stop'
-        }
-        # Like site health, query the local provider without requiring WinRM.
-        if (-not [string]::IsNullOrWhiteSpace($ProviderMachine) -and $ProviderMachine.Trim() -ne $env:COMPUTERNAME) { $cimParams['ComputerName'] = $ProviderMachine.Trim() }
-        $rows = @(Get-CimInstance @cimParams)
-    } catch {
-        Write-Debug $_
-        return [pscustomobject]@{ State = 'unknown'; Targets = @() }
-    }
-    $targets = New-Object System.Collections.Generic.List[object]
-    $seen = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
-    foreach ($row in $rows) {
-        foreach ($field in @('PackageID', 'SecureObjectID', 'ServerNALPath', 'SiteCode', 'State', 'LastCopied')) {
-            if (-not $row.PSObject.Properties[$field]) { return [pscustomobject]@{ State = 'unknown'; Targets = @() } }
-        }
-        $nalPath = [string]$row.ServerNALPath
-        $rowSiteCode = [string]$row.SiteCode
-        $state = -1
-        $lastCopiedTicks = ConvertTo-VsProviderUtcTicks -Value $row.LastCopied
-        $targetKey = $rowSiteCode + "`n" + $nalPath
-        if ([string]$row.PackageID -cne $PackageId -or [string]$row.SecureObjectID -cne $ApplicationModelName -or
-            $rowSiteCode -cne $SiteCode -or [string]::IsNullOrWhiteSpace($nalPath) -or $seen.ContainsKey($targetKey) -or
-            -not [int]::TryParse([string]$row.State, [ref]$state) -or $state -lt 0 -or $state -gt 8 -or $lastCopiedTicks -lt 0) {
-            return [pscustomobject]@{ State = 'unknown'; Targets = @() }
-        }
-        $seen[$targetKey] = $row
-        [void]$targets.Add([pscustomobject]@{ SiteCode = $rowSiteCode; ServerNalPath = $nalPath; State = $state; LastCopiedTicks = $lastCopiedTicks })
-    }
-    return [pscustomobject]@{ State = 'known'; Targets = @($targets | Sort-Object SiteCode, ServerNalPath) }
-}
-
-function ConvertTo-VsDistributionBaselineJson {
-    param([Parameter(Mandatory)]$Snapshot, [switch]$ZeroCopyTicks)
-    if ([string]$Snapshot.State -ne 'known') { throw 'Verteilkopie-Baseline ist nicht sicher lesbar.' }
-    $baseline = @($Snapshot.Targets | Sort-Object SiteCode, ServerNalPath | ForEach-Object {
-        [ordered]@{
-            site_code = [string]$_.SiteCode
-            server_nal_path = [string]$_.ServerNalPath
-            last_copied_ticks = if ($ZeroCopyTicks) { 0L } else { [long]$_.LastCopiedTicks }
-        }
-    })
-    $json = ConvertTo-Json -InputObject @($baseline) -Compress
-    if ([Text.Encoding]::UTF8.GetByteCount($json) -gt 32768) { throw 'Verteilkopie-Baseline ist zu gross.' }
-    return $json
-}
-
-function Test-VsDistributionCopyBaselineReady {
-    param(
-        [Parameter(Mandatory)][ValidateSet('initial', 'update')][string]$RequestKind,
-        [Parameter(Mandatory)]$Snapshot
-    )
-    if ([string]$Snapshot.State -ne 'known') { return $false }
-    $targets = @($Snapshot.Targets)
-    if ($RequestKind -eq 'initial') { return $targets.Count -eq 0 }
-    if ($targets.Count -eq 0) { return $false }
-    # Install failures/retries and pending copies do not veto a new manifest.
-    # Removal states (4..6) belong to a conflicting operator action.
-    return @($targets | Where-Object { [int]$_.State -notin @(0, 1, 2, 3, 7, 8) -or [long]$_.LastCopiedTicks -lt 0 }).Count -eq 0
-}
-
 # Hat die DP-Gruppe der Erstverteilung Mitglieder? (AV-F27)
 #
-# Eine Gruppe ohne Verteilungspunkt bekommt nie ein Ziel im Kopiernachweis. Der
+# Eine Gruppe ohne Verteilungspunkt bekommt nie ein Verteilziel. Der
 # Erstauftrag blieb dann ohne Bindung dauerhaft "unterwegs", und die Ursache stand
-# nirgends. Die Antwort kommt aus der Gruppe selbst, nicht aus dem Nachweis, damit
+# nirgends. Die Antwort kommt aus der Gruppe selbst, nicht aus dem Verteilstand, damit
 # eine verzoegerte Projektion nicht als leere Gruppe gilt.
 #
 # Liefert 'empty' (Gruppe ohne Mitglieder), 'has_members' oder 'unknown'. Unsicherheit
@@ -1085,71 +996,6 @@ function Get-VsDistributionPointGroupState {
         Write-Debug $_
         return 'unknown'
     }
-}
-
-function Test-VsDistributionCopyAdvanced {
-    param([Parameter(Mandatory)][string]$BaselineJson, [Parameter(Mandatory)]$CurrentSnapshot)
-    return Test-VsDistributionCopyEvidence -BaselineJson $BaselineJson -CurrentSnapshot $CurrentSnapshot -Requirement complete
-}
-
-# One parser and exact target comparison for both request and completion gates.
-function Test-VsDistributionCopyEvidence {
-    param(
-        [Parameter(Mandatory)][string]$BaselineJson,
-        [Parameter(Mandatory)]$CurrentSnapshot,
-        [ValidateSet('targets', 'contains', 'complete')][string]$Requirement = 'complete'
-    )
-    if ([string]$CurrentSnapshot.State -ne 'known') { return $false }
-    if ($BaselineJson -notmatch '^\s*\[.*\]\s*$') { return $false }
-    $isEmptyBaseline = $BaselineJson -match '^\s*\[\s*\]\s*$'
-    try {
-        # Windows PowerShell 5.1 emits a JSON root array as one array object.
-        # Capturing that pipeline directly in @() nests it once, so a one-DP
-        # baseline looks like one item whose value is itself an array. Assign
-        # first, then materialize the parsed targets for the common PS5.1/PS7
-        # shape consumed below.
-        $parsedBaseline = $BaselineJson | ConvertFrom-Json -ErrorAction Stop
-    } catch { return $false }
-    if ($isEmptyBaseline) {
-        $baseline = @()
-    } else {
-        # `null`, `[null]` and nested empty arrays can all collapse to no
-        # pipeline value depending on the PowerShell engine. None of them is
-        # the explicit empty baseline written by our serializer.
-        if ($null -eq $parsedBaseline) { return $false }
-        $baseline = @($parsedBaseline)
-        if ($baseline.Count -eq 0) { return $false }
-    }
-    $current = @($CurrentSnapshot.Targets)
-    # An empty baseline cannot prove which initial targets existed. New initial
-    # requests bind their first visible target set with zero copy ticks.
-    if ($baseline.Count -eq 0) { return $false }
-    if (($Requirement -eq 'contains' -and $current.Count -lt $baseline.Count) -or
-        ($Requirement -ne 'contains' -and $current.Count -ne $baseline.Count)) { return $false }
-    $currentByPath = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
-    foreach ($target in $current) {
-        $path = [string]$target.ServerNalPath
-        $site = [string]$target.SiteCode
-        $key = $site + "`n" + $path
-        if ([string]::IsNullOrWhiteSpace($site) -or [string]::IsNullOrWhiteSpace($path) -or $currentByPath.ContainsKey($key)) { return $false }
-        $currentByPath[$key] = $target
-    }
-    $baselineKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-    foreach ($before in $baseline) {
-        if ($null -eq $before) { return $false }
-        if (-not $before.PSObject.Properties['site_code'] -or -not $before.PSObject.Properties['server_nal_path'] -or
-            -not $before.PSObject.Properties['last_copied_ticks']) { return $false }
-        $site = [string]$before.site_code
-        $path = [string]$before.server_nal_path
-        $ticks = 0L
-        $key = $site + "`n" + $path
-        if ([string]::IsNullOrWhiteSpace($site) -or [string]::IsNullOrWhiteSpace($path) -or
-            -not [long]::TryParse([string]$before.last_copied_ticks, [ref]$ticks) -or $ticks -lt 0 -or
-            -not $baselineKeys.Add($key) -or -not $currentByPath.ContainsKey($key)) { return $false }
-        $after = $currentByPath[$key]
-        if ($Requirement -eq 'complete' -and ([int]$after.State -ne 0 -or [long]$after.LastCopiedTicks -le $ticks)) { return $false }
-    }
-    return $true
 }
 
 # Liegt diese Collection schon im VirtuSphere-Ordner?
@@ -1499,117 +1345,336 @@ function Sync-VsPackageTemplateSet {
     }
 }
 
-function Get-VsPackageContentTrackingKey {
+# ---------------------------------------------------------------------------
+# Contentauftraege (AV2, ADR-0034 Amendment 7)
+# ---------------------------------------------------------------------------
+# Ein Auftrag ist nur an Manifest und Application-Identitaet (ModelName,
+# PackageID) gebunden. DP-Zustaende, DP-Zielmengen und Kopiernachweise sind
+# Sache von MECM und sperren nichts. Je Manifest und Application nimmt MECM
+# hoechstens einen Auftrag an: ein nicht bestaetigter Aufruf wird nur
+# wiederholt, wenn MECM ihn nachweislich nicht angenommen hat.
+#
+# Schema 3 liegt unter ContentRequests. Der Schema-1/2-Bestand unter
+# ContentTracking wird nur gelesen und uebernommen, nie veraendert: ein
+# Rueckweg auf eine aeltere Serverversion findet ihn unveraendert vor.
+
+# Hoechstens so oft liest ein ruhiger Lauf den Verteilstand der Pakete mit
+# Hinweis neu. Das ist kein Abgleich und aendert nichts in MECM (AV-R07).
+$script:VsDistributionHintRefreshSeconds = 1800
+
+function Get-VsApplicationNameHash {
     param([Parameter(Mandatory)][string]$ApplicationName)
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
-        $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ApplicationName))).Replace('-', ''))
+        return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ApplicationName))).Replace('-', ''))
     } finally { $sha.Dispose() }
-    return (Join-Path (Join-Path $script:VsRegistryPath 'ContentTracking') $hash)
 }
 
-function Get-VsPackageContentTracking {
+# Alter Trackingschluessel (Schema 1/2), nur noch Lesequelle der Uebernahme.
+function Get-VsPackageContentTrackingKey {
     param([Parameter(Mandatory)][string]$ApplicationName)
-    $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
-    try {
-        if (-not (Test-Path -LiteralPath $key -ErrorAction Stop)) { return $null }
-        $raw = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
-    } catch {
-        return [pscustomobject]@{ State = 'invalid'; Manifest = ''; BaselineSourceVersion = -1; SourceVersion = -1 }
+    return (Join-Path (Join-Path $script:VsRegistryPath 'ContentTracking') (Get-VsApplicationNameHash -ApplicationName $ApplicationName))
+}
+
+function Get-VsPackageContentRequestKey {
+    param([Parameter(Mandatory)][string]$ApplicationName)
+    return (Join-Path (Join-Path $script:VsRegistryPath 'ContentRequests') (Get-VsApplicationNameHash -ApplicationName $ApplicationName))
+}
+
+# State: none | intent | requested.
+# Origin: current (Schema 3), migrated (aus ContentTracking uebernommen),
+# invalid (Eintrag unvollstaendig, gilt als kein Auftrag), absent (kein
+# Eintrag), unreadable (Registry nicht lesbar: kein Auftrag in diesem Lauf).
+function New-VsContentRequestRecord {
+    param(
+        [Parameter(Mandatory)][ValidateSet('none', 'intent', 'requested')][string]$State,
+        [Parameter(Mandatory)][ValidateSet('current', 'migrated', 'invalid', 'absent', 'unreadable')][string]$Origin,
+        [string]$Manifest = '',
+        [string]$RequestKind = '',
+        [string]$ApplicationModelName = '',
+        [string]$ApplicationPackageId = '',
+        [string]$BaselineContentId = ''
+    )
+    return [pscustomobject]@{
+        State = $State; Origin = $Origin; Manifest = $Manifest; RequestKind = $RequestKind
+        ApplicationModelName = $ApplicationModelName; ApplicationPackageId = $ApplicationPackageId
+        BaselineContentId = $BaselineContentId
     }
-    $state = [string]$raw.State
-    $manifest = [string]$raw.Manifest
-    $baseline = -1
-    $sourceVersion = -1
-    if ([string]$raw.ApplicationName -cne $ApplicationName -or $state -notin @('intent', 'pending', 'complete') -or
-        $manifest -notmatch '^[A-F0-9]{64}$' -or
-        -not [int]::TryParse([string]$raw.BaselineSourceVersion, [ref]$baseline) -or $baseline -lt -1 -or
-        -not [int]::TryParse([string]$raw.SourceVersion, [ref]$sourceVersion) -or $sourceVersion -lt -1) {
-        return [pscustomobject]@{ State = 'invalid'; Manifest = ''; BaselineSourceVersion = -1; SourceVersion = -1 }
+}
+
+function Get-VsRegistryRecordText {
+    param([AllowNull()]$Raw, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Raw -or -not $Raw.PSObject.Properties[$Name]) { return '' }
+    return [string]$Raw.$Name
+}
+
+# Reiner Leser fuer Schema 3. $Raw ist das Ergebnis von Get-ItemProperty.
+function ConvertFrom-VsContentRequestRecord {
+    param([Parameter(Mandatory)][string]$ApplicationName, [AllowNull()]$Raw)
+    $invalid = New-VsContentRequestRecord -State none -Origin invalid
+    $schema = 0
+    if (-not [int]::TryParse((Get-VsRegistryRecordText -Raw $Raw -Name 'Schema'), [ref]$schema) -or $schema -ne 3) { return $invalid }
+    $state = Get-VsRegistryRecordText -Raw $Raw -Name 'State'
+    $manifest = Get-VsRegistryRecordText -Raw $Raw -Name 'Manifest'
+    $kind = Get-VsRegistryRecordText -Raw $Raw -Name 'RequestKind'
+    $model = Get-VsRegistryRecordText -Raw $Raw -Name 'ApplicationModelName'
+    $packageId = Get-VsRegistryRecordText -Raw $Raw -Name 'ApplicationPackageId'
+    $baseline = Get-VsRegistryRecordText -Raw $Raw -Name 'BaselineContentId'
+    if ((Get-VsRegistryRecordText -Raw $Raw -Name 'ApplicationName') -cne $ApplicationName -or
+        $state -cnotin @('intent', 'requested') -or $manifest -cnotmatch '^[A-F0-9]{64}$' -or
+        $kind -cnotin @('initial', 'update') -or [string]::IsNullOrWhiteSpace($model) -or
+        [string]::IsNullOrWhiteSpace($packageId) -or [string]::IsNullOrWhiteSpace($baseline)) {
+        return $invalid
+    }
+    return New-VsContentRequestRecord -State $state -Origin current -Manifest $manifest -RequestKind $kind `
+        -ApplicationModelName $model -ApplicationPackageId $packageId -BaselineContentId $baseline
+}
+
+# Reine Uebernahme des Schema-1/2-Bestands. Uebernommen werden nur Manifest und
+# Identitaet; die alte DP-Baseline (DistributionBaseline) und die gebundene
+# ContentId zaehlen nicht mehr: ein ersetzter DP sperrte sonst fuer immer.
+#  - Schema 2 pending/complete oder bestaetigter intent: requested
+#  - Schema 2 unbestaetigter intent: intent (der Annahmenachweis entscheidet)
+#  - Schema 1 pending/complete: requested ohne Identitaet; der Controller
+#    prueft dann das Eigentum der Application wie bei einer neu angelegten
+#  - alles andere: kein Auftrag (hoechstens ein neuer, dann Schema 3)
+function ConvertFrom-VsLegacyContentTracking {
+    param([Parameter(Mandatory)][string]$ApplicationName, [AllowNull()]$Raw)
+    $invalid = New-VsContentRequestRecord -State none -Origin invalid
+    $state = Get-VsRegistryRecordText -Raw $Raw -Name 'State'
+    $manifest = Get-VsRegistryRecordText -Raw $Raw -Name 'Manifest'
+    if ((Get-VsRegistryRecordText -Raw $Raw -Name 'ApplicationName') -cne $ApplicationName -or
+        $manifest -cnotmatch '^[A-F0-9]{64}$') {
+        return $invalid
     }
     $schema = 0
-    if (-not $raw.PSObject.Properties['Schema'] -or -not [int]::TryParse([string]$raw.Schema, [ref]$schema) -or $schema -ne 2) {
-        return [pscustomobject]@{
-            State = 'legacy'; LegacyState = $state; Manifest = $manifest
-            BaselineSourceVersion = $baseline; SourceVersion = $sourceVersion
+    [void][int]::TryParse((Get-VsRegistryRecordText -Raw $Raw -Name 'Schema'), [ref]$schema)
+    if ($schema -ne 2) {
+        if ($state -cin @('pending', 'complete')) {
+            return New-VsContentRequestRecord -State requested -Origin migrated -Manifest $manifest -RequestKind update
         }
+        return $invalid
     }
-    $requestKind = [string]$raw.RequestKind
-    $applicationModelName = [string]$raw.ApplicationModelName
-    $applicationPackageId = [string]$raw.ApplicationPackageId
-    $deploymentTypeId = [string]$raw.DeploymentTypeId
-    $deploymentTypeModelName = [string]$raw.DeploymentTypeModelName
-    $baselineContentId = [string]$raw.BaselineContentId
-    $contentId = [string]$raw.ContentId
-    $requestConfirmed = 0
-    $distributionBaseline = [string]$raw.DistributionBaseline
-    if ($requestKind -notin @('initial', 'update') -or
-        [string]::IsNullOrWhiteSpace($applicationModelName) -or [string]::IsNullOrWhiteSpace($applicationPackageId) -or
-        [string]::IsNullOrWhiteSpace($deploymentTypeModelName) -or [string]::IsNullOrWhiteSpace($deploymentTypeId) -or
-        [string]::IsNullOrWhiteSpace($baselineContentId) -or
-        ($state -in @('pending', 'complete') -and [string]::IsNullOrWhiteSpace($contentId)) -or
-        -not [int]::TryParse([string]$raw.RequestConfirmed, [ref]$requestConfirmed) -or $requestConfirmed -notin @(0, 1) -or
-        ($state -in @('pending', 'complete') -and $requestConfirmed -ne 1) -or
-        [string]::IsNullOrWhiteSpace($distributionBaseline) -or [Text.Encoding]::UTF8.GetByteCount($distributionBaseline) -gt 32768) {
-        return [pscustomobject]@{ State = 'invalid'; Manifest = ''; BaselineSourceVersion = -1; SourceVersion = -1 }
+    $kind = Get-VsRegistryRecordText -Raw $Raw -Name 'RequestKind'
+    $model = Get-VsRegistryRecordText -Raw $Raw -Name 'ApplicationModelName'
+    $packageId = Get-VsRegistryRecordText -Raw $Raw -Name 'ApplicationPackageId'
+    $baseline = Get-VsRegistryRecordText -Raw $Raw -Name 'BaselineContentId'
+    $confirmed = Get-VsRegistryRecordText -Raw $Raw -Name 'RequestConfirmed'
+    if ($kind -cnotin @('initial', 'update') -or [string]::IsNullOrWhiteSpace($model) -or
+        [string]::IsNullOrWhiteSpace($packageId) -or [string]::IsNullOrWhiteSpace($baseline)) {
+        return $invalid
     }
-    return [pscustomobject]@{
-        State = $state; Manifest = $manifest; BaselineSourceVersion = $baseline; SourceVersion = $sourceVersion
-        RequestKind = $requestKind; ApplicationModelName = $applicationModelName; ApplicationPackageId = $applicationPackageId
-        DeploymentTypeModelName = $deploymentTypeModelName; DeploymentTypeId = $deploymentTypeId
-        BaselineContentId = $baselineContentId; ContentId = $contentId
-        RequestConfirmed = ($requestConfirmed -eq 1); DistributionBaseline = $distributionBaseline
-    }
+    $migratedState = if ($state -cin @('pending', 'complete') -or ($state -ceq 'intent' -and $confirmed -eq '1')) {
+        'requested'
+    } elseif ($state -ceq 'intent' -and $confirmed -eq '0') { 'intent' } else { '' }
+    if ($migratedState -eq '') { return $invalid }
+    return New-VsContentRequestRecord -State $migratedState -Origin migrated -Manifest $manifest -RequestKind $kind `
+        -ApplicationModelName $model -ApplicationPackageId $packageId -BaselineContentId $baseline
 }
 
-function Set-VsPackageContentTracking {
+function Read-VsRegistryKeyProperties {
+    param([Parameter(Mandatory)][string]$Key)
+    if (-not (Test-Path -LiteralPath $Key -ErrorAction Stop)) { return $null }
+    return Get-ItemProperty -LiteralPath $Key -ErrorAction Stop
+}
+
+function Get-VsPackageContentRequest {
+    param([Parameter(Mandatory)][string]$ApplicationName)
+    try {
+        $current = Read-VsRegistryKeyProperties -Key (Get-VsPackageContentRequestKey -ApplicationName $ApplicationName)
+        if ($null -ne $current) { return ConvertFrom-VsContentRequestRecord -ApplicationName $ApplicationName -Raw $current }
+        $legacy = Read-VsRegistryKeyProperties -Key (Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName)
+    } catch {
+        Write-Debug $_
+        return New-VsContentRequestRecord -State none -Origin unreadable
+    }
+    if ($null -eq $legacy) { return New-VsContentRequestRecord -State none -Origin absent }
+    return ConvertFrom-VsLegacyContentTracking -ApplicationName $ApplicationName -Raw $legacy
+}
+
+function Set-VsPackageContentRequest {
     param(
         [Parameter(Mandatory)][string]$ApplicationName,
-        [Parameter(Mandatory)][ValidateSet('intent', 'pending', 'complete')][string]$State,
+        [Parameter(Mandatory)][ValidateSet('intent', 'requested')][string]$State,
         [Parameter(Mandatory)][ValidatePattern('^[A-F0-9]{64}$')][string]$Manifest,
-        [ValidateRange(-1, [int]::MaxValue)][int]$BaselineSourceVersion = -1,
-        [ValidateRange(-1, [int]::MaxValue)][int]$SourceVersion = -1,
         [Parameter(Mandatory)][ValidateSet('initial', 'update')][string]$RequestKind,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationModelName,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationPackageId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeploymentTypeModelName,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DeploymentTypeId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$BaselineContentId,
-        [AllowEmptyString()][string]$ContentId = '',
-        [bool]$RequestConfirmed = $false,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$DistributionBaseline
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$BaselineContentId
     )
-    if ($State -in @('pending', 'complete') -and -not $RequestConfirmed) {
-        throw ("Content-Tracking-State '{0}' erfordert einen bestaetigten MECM-Aufruf." -f $State)
-    }
-    $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
+    $key = Get-VsPackageContentRequestKey -ApplicationName $ApplicationName
     if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force -ErrorAction Stop | Out-Null }
-    # State ist der Commit-Marker. Ein Abbruch waehrend der Einzelwrites ist
-    # unlesbar/unknown und darf nie einen Contentstand als komplett ausgeben.
+    # State ist der Commit-Marker. Ein Abbruch waehrend der Einzelwrites bleibt
+    # unlesbar und wird nie als angenommener Auftrag gelesen.
     New-ItemProperty -LiteralPath $key -Name State -Value 'invalid' -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name ApplicationName -Value $ApplicationName -PropertyType String -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name Schema -Value 2 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name Schema -Value 3 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name Manifest -Value $Manifest -PropertyType String -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name BaselineSourceVersion -Value ([string]$BaselineSourceVersion) -PropertyType String -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name SourceVersion -Value ([string]$SourceVersion) -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name RequestKind -Value $RequestKind -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name ApplicationModelName -Value $ApplicationModelName -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name ApplicationPackageId -Value $ApplicationPackageId -PropertyType String -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name DeploymentTypeModelName -Value $DeploymentTypeModelName -PropertyType String -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name DeploymentTypeId -Value $DeploymentTypeId -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name BaselineContentId -Value $BaselineContentId -PropertyType String -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name ContentId -Value $ContentId -PropertyType String -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name RequestConfirmed -Value ([int]$RequestConfirmed) -PropertyType DWord -Force -ErrorAction Stop | Out-Null
-    New-ItemProperty -LiteralPath $key -Name DistributionBaseline -Value $DistributionBaseline -PropertyType String -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -LiteralPath $key -Name RequestedAtUtc -Value ((Get-Date).ToUniversalTime().ToString('o')) -PropertyType String -Force -ErrorAction Stop | Out-Null
     New-ItemProperty -LiteralPath $key -Name State -Value $State -PropertyType String -Force -ErrorAction Stop | Out-Null
 }
 
+# Nach einem von MECM erfolgreich zurueckgekehrten Aufruf: nur der Commit-Marker
+# wechselt von intent auf requested, die uebrigen Felder bleiben die des Intents.
+function Confirm-VsPackageContentRequest {
+    param([Parameter(Mandatory)][string]$ApplicationName)
+    $key = Get-VsPackageContentRequestKey -ApplicationName $ApplicationName
+    New-ItemProperty -LiteralPath $key -Name State -Value 'requested' -PropertyType String -Force -ErrorAction Stop | Out-Null
+}
+
+# Entfernt beim Bereinigen einer Application beide Trackingschluessel.
 function Remove-VsPackageContentTracking {
     param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$ApplicationName)
-    $key = Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName
-    if (Test-Path -LiteralPath $key) {
-        Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop
+    foreach ($key in @((Get-VsPackageContentRequestKey -ApplicationName $ApplicationName),
+        (Get-VsPackageContentTrackingKey -ApplicationName $ApplicationName))) {
+        if (Test-Path -LiteralPath $key) {
+            Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction Stop
+        }
     }
+}
+
+# Gehoert eine Application VirtuSphere? Marker in der Beschreibung oder Lage im
+# Ordner VirtuSphere_Applications. Unsicherheit heisst "nein": eine namensgleiche
+# fremde Application wird nie uebernommen (ADR-0034 Amendment 1).
+function Test-VsManagedPackageApplication {
+    param([Parameter(Mandatory)]$Application)
+    if ($Application.PSObject.Properties['LocalizedDescription'] -and
+        [string]$Application.LocalizedDescription -ceq $script:VsManagedPackageApplicationMarker) {
+        return $true
+    }
+    if (-not $Application.PSObject.Properties['ObjectPath']) { return $false }
+    $segments = @(([string]$Application.ObjectPath).Trim() -split '[\\/]' | Where-Object { $_ -ne '' })
+    return ($segments.Count -gt 0 -and $segments[-1] -ceq $script:VsApplicationsFolderName)
+}
+
+# Reine Entscheidung je Paket und Scan (AV2). Action:
+#  none     Auftrag fuer dieses Manifest liegt vor, nichts anzufordern
+#  adopt    ohne MECM-Aufruf als angenommen speichern: ein Intent ist durch
+#           MECM belegt, oder eine neu angelegte eigene Application mit
+#           gleichem Manifest ist schon verteilt
+#  request  genau einen Auftrag stellen (RequestKind initial oder update)
+#  blocked  kein Auftrag moeglich; Cause nennt den offenen Punkt
+#  foreign  Identitaet gewechselt, Application gehoert nicht VirtuSphere
+# Confirmed sagt, ob fuer die aktuelle Identitaet und das aktuelle Manifest
+# danach ein angenommener Auftrag besteht (Voraussetzung der Bereinigung).
+# Der DP-Stand (DistributionState) waehlt nur die Auftragsart und belegt die
+# Annahme einer Erstverteilung; er sperrt nie.
+function Get-VsContentRequestDecision {
+    param(
+        [Parameter(Mandatory)]$Request,
+        [Parameter(Mandatory)][string]$Manifest,
+        [Parameter(Mandatory)][string]$ApplicationModelName,
+        [Parameter(Mandatory)][string]$ApplicationPackageId,
+        [Parameter(Mandatory)][string]$DeploymentTypeContentId,
+        [Parameter(Mandatory)][bool]$ApplicationOwned,
+        [Parameter(Mandatory)][ValidateSet('not_started', 'in_progress', 'succeeded', 'failed', 'unknown')][string]$DistributionState,
+        [AllowEmptyString()][string]$DpGroupName = ''
+    )
+    $decision = {
+        param([string]$Action, [string]$Reason, [string]$RequestKind = '', [string]$Cause = '', [bool]$Confirmed = $false)
+        [pscustomobject]@{ Action = $Action; Reason = $Reason; RequestKind = $RequestKind; Cause = $Cause; Confirmed = $Confirmed }
+    }
+    if ([string]$Request.Origin -eq 'unreadable') {
+        return (& $decision 'blocked' 'request_unreadable' '' 'package_content_unknown')
+    }
+    $hasRecord = [string]$Request.State -in @('intent', 'requested')
+    $sameIdentity = $hasRecord -and [string]$Request.ApplicationModelName -ceq $ApplicationModelName -and
+        [string]$Request.ApplicationPackageId -ceq $ApplicationPackageId
+    if ($hasRecord -and -not $sameIdentity -and -not $ApplicationOwned) {
+        return (& $decision 'foreign' 'application_not_owned' '' 'package_definition_drift')
+    }
+    $distributed = $DistributionState -in @('in_progress', 'succeeded', 'failed')
+
+    # Das Manifest, das MECM fuer diese Application nachweislich angenommen hat.
+    $acceptedManifest = ''
+    $adoptReason = ''
+    if ([string]$Request.State -eq 'requested') {
+        $acceptedManifest = [string]$Request.Manifest
+        if (-not $sameIdentity) { $adoptReason = 'identity_rebound' }
+    } elseif ([string]$Request.State -eq 'intent' -and $sameIdentity) {
+        $accepted = if ([string]$Request.RequestKind -eq 'update') {
+            $DeploymentTypeContentId -cne [string]$Request.BaselineContentId
+        } else { $distributed }
+        if ($accepted) {
+            $acceptedManifest = [string]$Request.Manifest
+            $adoptReason = 'intent_accepted'
+        }
+    }
+
+    if ($acceptedManifest -ne '' -and $acceptedManifest -ceq $Manifest) {
+        if ($sameIdentity -and $adoptReason -eq '') {
+            # Erstauftrag angenommen, aber noch kein Ziel: liegt es an einer
+            # leeren DP-Gruppe, wird das genannt (AV-F27). Kein neuer Aufruf.
+            if ($DistributionState -eq 'not_started' -and (Get-VsDistributionPointGroupState -GroupName $DpGroupName) -eq 'empty') {
+                return (& $decision 'blocked' 'dp_group_empty' '' 'package_content_group_empty' $true)
+            }
+            return (& $decision 'none' 'already_requested' '' '' $true)
+        }
+        if ($sameIdentity) {
+            return (& $decision 'adopt' $adoptReason ([string]$Request.RequestKind) '' $true)
+        }
+        # Neu angelegte eigene Application mit unveraendertem Inhalt: ohne
+        # Auftrag uebernehmen, wenn MECM sie bereits verteilt. Sonst braucht sie
+        # genau eine Erstverteilung.
+        if ($distributed) {
+            return (& $decision 'adopt' $adoptReason 'update' '' $true)
+        }
+    }
+
+    # Ein Auftrag ist noetig.
+    if ($DistributionState -eq 'not_started') {
+        if ([string]::IsNullOrWhiteSpace($DpGroupName)) {
+            return (& $decision 'blocked' 'dp_group_missing' '' 'package_content_request_failed')
+        }
+        if ((Get-VsDistributionPointGroupState -GroupName $DpGroupName) -eq 'empty') {
+            return (& $decision 'blocked' 'dp_group_empty' '' 'package_content_group_empty')
+        }
+        return (& $decision 'request' 'initial' 'initial')
+    }
+    if ($DistributionState -eq 'unknown' -and -not ($sameIdentity -and [string]$Request.State -eq 'requested')) {
+        # Ohne lesbaren Verteilstand ist nicht entscheidbar, ob Erst- oder
+        # Updateauftrag; der naechste Lauf versucht es erneut.
+        return (& $decision 'blocked' 'distribution_unknown' '' 'package_content_unknown')
+    }
+    return (& $decision 'request' 'update' 'update')
+}
+
+# Ruhiger Lauf: Verteilstand der Pakete mit Hinweis neu lesen (nur lesen).
+# succeeded streicht den Hinweis, failed/in_progress ersetzt ihn; alles andere
+# und jeder Lesefehler behaelt den bisherigen Hinweis.
+function Update-VsDistributionHints {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.Dictionary[string, string]]$Hints)
+    $result = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+    foreach ($name in @($Hints.Keys | Sort-Object)) {
+        $previous = $Hints[$name]
+        $next = $previous
+        try {
+            $applications = @(Get-CMApplication -Name $name -ErrorAction Stop)
+            if ($applications.Count -eq 1) {
+                $state = (Get-VsContentDistributionSnapshot -ApplicationName $name -Application $applications[0]).State
+                if ($state -eq 'succeeded') { $next = '' }
+                elseif ($state -eq 'failed') { $next = 'package_content_failed' }
+                elseif ($state -eq 'in_progress') { $next = 'package_content_in_progress' }
+            }
+        } catch {
+            Write-Debug $_
+        }
+        if ($next -ne '') { $result[$name] = $next }
+    }
+    return , $result
+}
+
+# Hinweiscode fuer den Verteilstand eines Pakets; '' heisst kein Hinweis.
+function Get-VsDistributionHintCause {
+    param([AllowEmptyString()][string]$DistributionState, [bool]$RequestedNow = $false)
+    if ($RequestedNow) { return 'package_content_in_progress' }
+    if ($DistributionState -eq 'failed') { return 'package_content_failed' }
+    if ($DistributionState -eq 'in_progress') { return 'package_content_in_progress' }
+    return ''
 }
 
 # ---------------------------------------------------------------------------
@@ -1659,7 +1724,7 @@ function Test-VsRolloutHostname {
 # bleiben.
 #
 # Der Name wird normalisiert abgelegt (MECM vergleicht Geraetenamen selbst
-# case-insensitiv), die MAC ueber ConvertTo-VsNormalizedMac. Ein Datensatz kann
+# case-insensitiv), die MACs ueber ConvertTo-VsNormalizedMacList. Ein Datensatz kann
 # mehrere MACs tragen; jede zaehlt.
 function New-VsMecmDeviceIndex {
     param($Devices)
@@ -1684,12 +1749,11 @@ function New-VsMecmDeviceIndex {
             $index.ByName[$nameKey] += $device
         }
 
-        # MACAddress ist je nach Abfrage ein Einzelwert oder eine Liste. Beides
-        # ueber denselben Pfad, damit ein Datensatz mit zwei NICs nicht nur unter
-        # der ersten auffindbar ist.
-        foreach ($rawMac in @($device.MACAddress)) {
-            $mac = ConvertTo-VsNormalizedMac ([string]$rawMac)
-            if (-not $mac) { continue }
+        # MACAddress ist je nach Abfrage ein Einzelwert, eine Liste oder ein
+        # Text mit mehreren MACs (Get-CMDevice -Fast). Alle drei ueber
+        # ConvertTo-VsNormalizedMacList, damit ein Datensatz mit zwei NICs unter
+        # jeder seiner MACs auffindbar ist.
+        foreach ($mac in @(ConvertTo-VsNormalizedMacList $device.MACAddress)) {
             if (-not $index.ByMac.ContainsKey($mac)) { $index.ByMac[$mac] = @() }
             $index.ByMac[$mac] += $device
         }
@@ -1772,9 +1836,8 @@ function Resolve-VsDeviceIdentity {
             if ($normalizedKnown) { $vmMacs[$normalizedKnown] = $true }
         }
         $found = $false
-        foreach ($rawMac in @($hits[0].MACAddress)) {
-            $normalizedRecordMac = ConvertTo-VsNormalizedMac ([string]$rawMac)
-            if ($normalizedRecordMac -and $vmMacs.ContainsKey($normalizedRecordMac)) { $found = $true; break }
+        foreach ($normalizedRecordMac in @(ConvertTo-VsNormalizedMacList $hits[0].MACAddress)) {
+            if ($vmMacs.ContainsKey($normalizedRecordMac)) { $found = $true; break }
         }
         if (-not $found) { return (& $block 'resource_mac_conflict') }
 
@@ -1911,7 +1974,7 @@ function Add-VsRunCause {
             'membership_query_failed', 'membership_operation_uncertain', 'membership_report_pending', 'membership_report_failed',
             'resource_id_pending', 'resource_update_failed',
             'package_config_invalid', 'package_content_failed', 'package_content_in_progress',
-            'package_content_unknown', 'package_content_group_empty', 'package_definition_drift', 'package_source_missing',
+            'package_content_unknown', 'package_content_request_failed', 'package_content_group_empty', 'package_definition_drift', 'package_source_missing',
             'package_deploy_failed', 'package_cleanup_failed', 'package_folder_failed', 'package_template_failed')]
         [string]$Cause,
         [string]$Target = '',
@@ -2550,6 +2613,35 @@ function ConvertTo-VsNormalizedMac {
     return ($hex -split '(?<=\G..)(?=.)') -join ':'
 }
 
+# Zerlegt eine MAC-Angabe eines MECM-Datensatzes in einzelne, normalisierte MACs.
+# Die einzige Stelle dafuer: Index und Identitaetspruefung lesen MECM-MACs nur
+# hierueber.
+#
+# Dieselbe Eigenschaft kommt in zwei Formen: SMS_R_System.MACAddresses liefert
+# eine Liste, `Get-CMDevice -Fast` dagegen MACAddress als EINEN Text
+# ("00:50:56:AA:BB:21, 00:50:56:AA:BB:22"). Der Text als Ganzes hat 24
+# Hexzeichen und faellt in ConvertTo-VsNormalizedMac durch; ein Geraet mit zwei
+# NICs war damit unter keiner MAC auffindbar und blockierte als mac_conflict
+# bzw. resource_mac_conflict (MC-MAC1, 04.11.2026).
+#
+# Getrennt wird an Komma, Semikolon und Leerraum; jedes Teil geht einzeln durch
+# die strenge ConvertTo-VsNormalizedMac, ein unbrauchbares Teil faellt weg. Eine
+# MAC, die der Datensatz doppelt nennt, zaehlt einmal: sonst laege er zweimal
+# unter derselben MAC im Index und waere mit sich selbst mehrdeutig.
+# Rueckgabe ohne `,`-Verpackung; jeder Aufrufer klammert in `@(...)`.
+function ConvertTo-VsNormalizedMacList {
+    param($Value)
+    $macs = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Value)) {
+        if ($null -eq $item) { continue }
+        foreach ($part in ([string]$item -split '[,;\s]+')) {
+            $mac = ConvertTo-VsNormalizedMac $part
+            if ($mac -and -not $macs.Contains($mac)) { $macs.Add($mac) }
+        }
+    }
+    return $macs.ToArray()
+}
+
 # ---------------------------------------------------------------------------
 # Paket-Konfiguration (config.json der Paketordner)
 # ---------------------------------------------------------------------------
@@ -2775,20 +2867,20 @@ function Get-VsPackageRetirementPlan {
         foreach ($reason in @($Selection.Blockers)) { $blockers.Add([string]$reason) }
     }
     if (-not $ReferenceScanComplete) { $blockers.Add('reference_scan_incomplete') }
-    # Retirement readiness follows the same boundary as deployment readiness:
-    # an acknowledged, bound content request is enough. Full success on every
-    # DP remains a distribution warning, not a veto for the removeOldVersion
-    # retirement plan. Unknown/unsafe target evidence and an unconfirmed request
-    # remain fail-closed. Requiring pending/complete keeps an unbound intent from
-    # retiring the previous usable generation.
+    # Retirement readiness follows the same boundary as deployment readiness
+    # (AV2, ADR-0034 Amendment 7): a content request MECM accepted for the
+    # current application identity and manifest is enough. DP success, DP
+    # target sets and copy evidence are MECM's business and never veto the
+    # removeOldVersion plan. MECM must show that a distribution exists at all
+    # (failed, in_progress or succeeded), so an unaccepted intent or a not yet
+    # started distribution never retires the previous usable generation.
     $replacementContentState = [string]$Replacement.ContentState
     $replacementDistributionState = [string]$Replacement.DistributionState
     if ([string]$Replacement.Name -cne [string]$Selection.TargetName -or
         -not [bool]$Replacement.Owned -or [int]$Replacement.DeploymentTypeCount -ne 1 -or
         -not [bool]$Replacement.RequestConfirmed -or
-        $replacementContentState -notin @('pending', 'complete') -or
+        $replacementContentState -cne 'requested' -or
         $replacementDistributionState -notin @('failed', 'in_progress', 'succeeded') -or
-        -not [bool]$Replacement.DistributionEvidenceSafe -or
         -not [bool]$Replacement.DeploymentReady) {
         $blockers.Add('replacement_not_ready')
     }

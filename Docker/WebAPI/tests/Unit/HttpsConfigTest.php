@@ -188,6 +188,18 @@ final class HttpsConfigTest extends TestCase
         foreach ($httpRules[1] as $rule) {
             self::assertStringContainsString(trim($rule), $generated, 'deny rule missing from the generated HTTPS block: ' . trim($rule));
         }
+
+        // SEC1 (C-03): dot files (.env, .git, .phpunit.result.cache) and the
+        // tracked *.dist tool configs are never served. The dot rule must come
+        // before the PHP location, because nginx takes the first matching
+        // regex location and a script in a dot directory would otherwise run.
+        $dotRule = 'location ~ /\.(?!well-known/) { deny all; }';
+        foreach (['Docker/nginx/default.conf' => $httpConf, 'generated HTTPS block' => $generated] as $label => $conf) {
+            $dot = strpos($conf, $dotRule);
+            self::assertNotFalse($dot, $label . ' has no dot-file deny rule');
+            self::assertLessThan((int) strpos($conf, 'location ~ \.php$ {'), $dot, $label . ': dot rule after the PHP location');
+            self::assertStringContainsString('|.*\.(dist|lock))$ { deny all; }', $conf, $label . ': *.dist is not denied');
+        }
     }
 
     /**
@@ -277,6 +289,36 @@ final class HttpsConfigTest extends TestCase
             );
             self::assertStringContainsString($variable, $httpConf);
         }
+    }
+
+    /**
+     * SEC1 (C-02/C-08): the sign-in page is rate limited in both server
+     * blocks, and only the sign-in page. The zone lives once in the http
+     * context of default.conf; its key is empty for every other URI, which
+     * nginx does not count, so machine endpoints and pollers are never
+     * answered with 429.
+     */
+    public function testHttpAndHttpsShareTheSignInRateLimitAndOnlyForLogin(): void
+    {
+        $path = dirname(__DIR__, 3) . '/nginx/default.conf';
+        if (!is_file($path)) {
+            self::markTestSkipped('Docker/nginx/default.conf is not visible from this runtime');
+        }
+        $httpConf = (string) file_get_contents($path);
+        $generated = https_render_nginx_conf();
+
+        foreach (['limit_req zone=virtusphere_login burst=20 nodelay;', 'limit_req_status 429;', 'fastcgi_param HTTP_PROXY "";'] as $directive) {
+            self::assertSame(1, substr_count($httpConf, $directive), 'HTTP block: ' . $directive);
+            self::assertSame(1, substr_count($generated, $directive), 'generated HTTPS block: ' . $directive);
+        }
+        self::assertStringNotContainsString('limit_req_zone', $generated, 'the zone belongs to the http context of default.conf');
+        self::assertSame(1, preg_match_all('/^limit_req_zone\s+\$virtusphere_login_limit_key\s+zone=virtusphere_login:/m', $httpConf));
+
+        self::assertSame(
+            1,
+            preg_match('/map \$uri \$virtusphere_login_limit_key \{\s*default \'\';\s*\/portal\/login\.php \$binary_remote_addr;\s*\}/', $httpConf),
+            'the limit key must be empty for every URI except /portal/login.php'
+        );
     }
 
     public function testHttpAndHttpsAssetDeliveryStayInSync(): void

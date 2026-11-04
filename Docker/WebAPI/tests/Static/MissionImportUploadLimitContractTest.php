@@ -190,6 +190,34 @@ final class MissionImportUploadLimitContractTest extends TestCase
         );
     }
 
+    /**
+     * The other side of the ladder (SEC1, C-01). nginx buffers a request body
+     * to its tmpfs before PHP runs, for any client and without a sign-in, and
+     * post_max_size already discards everything above it. Each byte the nginx
+     * limit sits above post_max_size is therefore memory an anonymous client can
+     * occupy for nothing. It used to be 100m against a 20M PHP limit; three
+     * parallel uploads were enough to push the web server over its memory limit.
+     * Raising post_max_size moves the allowed nginx value with it.
+     */
+    public function testNginxStaysCloseAbovePostMaxSize(): void
+    {
+        $php = $this->phpIniLimits();
+        $headroom = 4 * 1024 * 1024;
+        foreach ($this->nginxLimits() as $label => $limit) {
+            self::assertLessThanOrEqual(
+                $php['post_max_size'] + $headroom,
+                $limit,
+                sprintf(
+                    'client_max_body_size in %s (%d B) is more than 4 MiB above post_max_size (%d B); PHP rejects '
+                        . 'that body anyway, so nginx only buffers it for an anonymous sender',
+                    $label,
+                    $limit,
+                    $php['post_max_size']
+                )
+            );
+        }
+    }
+
     public function testBothNginxSourcesAgree(): void
     {
         $limits = $this->nginxLimits();

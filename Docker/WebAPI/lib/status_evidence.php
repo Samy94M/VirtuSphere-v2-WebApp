@@ -40,6 +40,64 @@ function virtusphere_run_completed_state(array $row, ?int $now = null): string
     };
 }
 
+// A normal autoimporter scan of many folders takes 15-20 min, longer than the
+// fixed run grace, so every run turned red and back on completion (AI1). A run
+// therefore also gets this multiple of the duration its last `completed`
+// reported; no per-source number. The duration part is capped, so one run that
+// hung and still completed late cannot hide the next hang for a day.
+const VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR = 2;
+const VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS = 21600;
+
+/**
+ * How long a run in progress may take before it counts as overdue:
+ * max(3x interval, 60s, RUN_GRACE, FACTOR x last completed duration). A
+ * `started` report keeps last_duration_ms, so it is the previous run's length.
+ * Without one (first run, legacy history) only the fixed floors apply.
+ */
+function virtusphere_run_grace_seconds(array $row): int
+{
+    $grace = max(
+        (int) ($row['interval_seconds'] ?? 0) * VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER,
+        VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS,
+        VIRTUSPHERE_RUN_GRACE_SECONDS
+    );
+    $durationMs = $row['last_duration_ms'] ?? null;
+    if (!is_numeric($durationMs) || (int) $durationMs <= 0) {
+        return $grace;
+    }
+    $expected = (int) ceil(((int) $durationMs / 1000) * VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR);
+
+    return max($grace, min($expected, VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS));
+}
+
+/**
+ * Whether a sync reporter itself is late, as opposed to reporting on time with a
+ * non-green outcome. Both read "warning", and they need opposite instructions: a
+ * late reporter points at Task Scheduler, a punctual run with open points does
+ * not, because restarting a task that reports every few seconds clears nothing.
+ * Late means no in-time evidence: the completed result (or, for a legacy
+ * reporter, its heartbeat) is past the warn threshold, or a reported start has
+ * outlived its grace. A missing row or unreadable timestamp is late as well:
+ * nothing proves the task is alive.
+ */
+function virtusphere_run_report_overdue(?array $row, ?int $now = null): bool
+{
+    if ($row === null) {
+        return true;
+    }
+    $current = $now ?? time();
+    $interval = (int) ($row['interval_seconds'] ?? 0);
+    $event = (string) ($row['last_event'] ?? VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT);
+    if ($event === VIRTUSPHERE_RUN_EVENT_STARTED) {
+        $attemptTs = virtusphere_evidence_timestamp(isset($row['last_attempt_at']) ? (string) $row['last_attempt_at'] : null, $current);
+
+        return $attemptTs === null || ($current - $attemptTs) > virtusphere_run_grace_seconds($row);
+    }
+    $evidenceAt = $event === VIRTUSPHERE_RUN_EVENT_COMPLETED ? ($row['last_result_at'] ?? null) : ($row['last_seen_at'] ?? null);
+
+    return virtusphere_heartbeat_staleness($evidenceAt !== null ? (string) $evidenceAt : null, $interval, null, $current) !== 'ok';
+}
+
 /** Freshness of the completed site report, independent of its verdict. */
 function virtusphere_site_evidence_freshness(array $row, ?int $now = null): string
 {

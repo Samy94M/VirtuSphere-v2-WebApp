@@ -39,6 +39,22 @@ reports. The reader shows a stored cause only while its revision is the VM's
 current one, so a row from before a reset disappears without a writer touching
 it.
 
+## Amendment 3 (04.11.2026): the MACs a record carries are read through one splitter
+
+Finding MC-MAC1: two VMs blocked with `mac_conflict` and `resource_mac_conflict`
+although their MECM devices carried exactly the portal MACs. `Get-CMDevice -Fast`
+returns `MACAddress` as one comma-separated text, `SMS_R_System.MACAddresses` as
+a list; the sync read the text as a single invalid MAC, so a record with two
+NICs was found under none of them.
+
+"The record carries a MAC" now means: the MAC is one of the parts that
+`ConvertTo-VsNormalizedMacList` yields for the record (list or text, split at
+comma, semicolon and whitespace, each part normalised strictly, a repeated MAC
+counted once). The index and the bound-ResourceID check read record MACs only
+through it. The decision itself is unchanged: import and first binding stay on
+the DHCP MAC, a bound record must carry any portal MAC of the VM, and an
+ambiguity stays an error. No wire change; ships with the server-only update.
+
 ## Context
 
 MECM imported `vm_name`. That is the ESXi/portal VM name, typically something

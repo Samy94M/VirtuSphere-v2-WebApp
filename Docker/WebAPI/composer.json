@@ -6,7 +6,7 @@
   "require": {
     "php": ">=8.4",
     "ext-ldap": "*",
-    "phpseclib/phpseclib": "^3.0.57"
+    "phpseclib/phpseclib": "^3.0.58"
   },
   "require-dev": {
     "phpstan/phpstan": "^2.2",

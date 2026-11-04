@@ -216,4 +216,9 @@ sowie einmal die Erholung. Daraus entstehen keine weiteren Portalaufrufe.
   Offline-Platte vor dem Onlineschalten auf und liest ihn danach nach. Nur wenn weder
   eine offene eigene Operation noch eine optionale Zusatzplatte existiert, ist
   `optional: no disk work required` ein erfolgreicher Leerlauf. Ein exklusiver
-  Prozesslock verhindert zwei parallele Storage-Läufe.
+  Prozesslock verhindert zwei parallele Storage-Läufe. Eine neue Platte bekommt
+  ihren Namen aus dem VM-Editor als Laufwerksbezeichnung, wenn ihr SCSI-Target
+  und ihre Größe eindeutig zu einer Portalplatte passen (Feld `disks` von
+  `getDeviceInfos`); sonst bleibt `VM_Disk_<Nummer>` mit einem Grund im Detail
+  (DN1, `docs/operations/client-flows.md`). Bestehende Platten werden nie
+  umbenannt.

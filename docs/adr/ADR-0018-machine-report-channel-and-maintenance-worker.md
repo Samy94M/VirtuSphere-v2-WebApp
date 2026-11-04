@@ -194,7 +194,8 @@ Reihenfolge. Dedup greift einzig bei identischer `run_id` mit
 `last_event='completed'` (idempotentes `200 {deduplicated:true}` ohne Zähler-
 oder Zeitstempeländerung). Ein laufender Lauf behält den letzten Abschluss als
 Badge und zeigt zusätzlich „läuft seit X"; stale greift erst nach
-`max(3 × Intervall, 60 s, VIRTUSPHERE_RUN_GRACE_SECONDS = 600)`. Providerfehler
+`max(3 × Intervall, 60 s, VIRTUSPHERE_RUN_GRACE_SECONDS = 600)` (seit dem Amendment
+2026-11-04 das Doppelte der zuletzt gemeldeten Laufdauer, falls das größer ist; dieser Anteil ist gedeckelt). Providerfehler
 sind grau (unbekannt); Rot ist exklusiv dem MECM-bestätigten kritischen Status 2
 vorbehalten. `failure_streak` zählt nur aufeinanderfolgende `fail`-Abschlüsse.
 Provider, Site-Code und Berichtsintervall (`MECM_ProviderMachine`,
@@ -311,3 +312,22 @@ after their last observation through the maintenance retention. Like every
 routine report it writes no audit row; the fence decides per entry (ADR-0043
 Amendment 2). Portal first: an older portal answers the new script with 400 or
 413, and the script pauses its reports instead of turning every run yellow.
+
+## Amendment (2026-11-04, AI1): run grace follows the last measured duration
+
+The fixed run grace `max(3 × interval, 60 s, VIRTUSPHERE_RUN_GRACE_SECONDS = 600)`
+was shorter than a normal autoimporter scan on the target (906 to 1181 s for
+23 folders at a 60 s interval). Every scan turned red after 10 minutes and yellow
+again on completion; the maintenance worker logged both transitions, about 160
+`integration.state_changed` rows a day in an 11/7-minute rhythm.
+
+A started run is now overdue only after
+`max(3 × interval, 60 s, RUN_GRACE, VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR × last completed duration)`,
+owned by `virtusphere_run_grace_seconds()` in `lib/status_evidence.php`. The duration is
+the `duration_ms` the reporter already sends with `completed`; a `started` report
+keeps it, so it is the previous run's length. No per-source number exists, and no
+wire field changes. The duration part is capped at
+`VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS` (6 h), so one run that hung and
+still completed late cannot hide the next hang for most of a day. Without a
+reported duration only the fixed floors apply. Beyond the grace a run ages out
+exactly as before: the danger threshold decides between yellow and red.
