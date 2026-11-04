@@ -780,7 +780,7 @@ Describe 'Installer melden keinen Erfolg fuer nicht geleistete Arbeit' {
     # steht und hier geprueft wird.
     BeforeAll {
         $script:InstallerFiles = @(
-            @{ name = 'install-VirtuSphere-MECM.ps1';    path = (Join-Path $script:PsRoot 'install-VirtuSphere-MECM.ps1');    success = 'Erstinstallation abgeschlossen' }
+            @{ name = 'install-VirtuSphere-MECM.ps1';    path = (Join-Path $script:PsRoot 'install-VirtuSphere-MECM.ps1');    success = "'{0} abgeschlossen.'" }
             @{ name = 'install-VirtuSphere-Clients.ps1'; path = (Join-Path $script:PsRoot 'install-VirtuSphere-Clients.ps1'); success = 'Client-Applikationen bereit' }
         )
 
@@ -792,7 +792,7 @@ Describe 'Installer melden keinen Erfolg fuer nicht geleistete Arbeit' {
     }
 
     It '<name>: die Erfolgszeile haengt an einer Bedingung, die den Blockerzaehler liest' -ForEach @(
-        @{ name = 'install-VirtuSphere-MECM.ps1';    success = 'Erstinstallation abgeschlossen' }
+        @{ name = 'install-VirtuSphere-MECM.ps1';    success = "'{0} abgeschlossen.'" }
         @{ name = 'install-VirtuSphere-Clients.ps1'; success = 'Client-Applikationen bereit' }
     ) {
         $ast = Get-InstallerAst -Path (Join-Path $script:PsRoot $name)
@@ -861,6 +861,113 @@ Describe 'Installer melden keinen Erfolg fuer nicht geleistete Arbeit' {
             param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-Warn'
         }, $true))
         $warn[0].Body.Extent.Text | Should -Match 'Write-VsLog'
+    }
+}
+
+Describe 'MECM-Installer: Abschlusstext folgt dem Modus (MI1)' {
+
+    # Beim Server-Update am 04.11.2026 meldete ein gruenes -Upgrade -ServerOnly
+    # "Erstinstallation abgeschlossen" und empfahl als naechsten Schritt den
+    # Client-Installer, der laut MC01 gesperrt ist. Der Text kommt jetzt aus
+    # Get-VsInstallerClosingText; die Funktion wird aus dem Installer-AST geladen,
+    # weil der Installer selbst nicht dot-sourcebar ist.
+    BeforeAll {
+        $script:ClientPackaging = Join-Path (Join-Path $script:PsRoot 'mecm') 'VirtuSphere-ClientPackaging.ps1'
+        $script:ClientInstaller = Join-Path $script:PsRoot 'install-VirtuSphere-Clients.ps1'
+        $script:MecmInstallerAst = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
+        $closingFn = @($script:MecmInstallerAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-VsInstallerClosingText'
+        }, $true))
+        if ($closingFn.Count -ne 1) { throw "Get-VsInstallerClosingText nicht eindeutig ($($closingFn.Count))." }
+        . $script:ClientPackaging
+        . ([scriptblock]::Create($closingFn[0].Extent.Text))
+        $script:ClientConfigPath = (Get-VsClientPackagingPolicy).ConfigPath
+
+        function Get-Closing {
+            param([string]$Mode, [bool]$Blocked, [string]$WebApiHost = 'virtusphere.lan', [bool]$IsIp = $false)
+            Get-VsInstallerClosingText -Mode $Mode -ClientApplyBlocked $Blocked -WebApiHost $WebApiHost -WebApiIsIp $IsIp
+        }
+    }
+
+    It 'kennt genau die Modi, die $installMode aus den Schaltern ableitet' {
+        # Keine zweite Modusliste: die Zweige der Funktion muessen dieselben
+        # Werte sein wie die eine Ableitung im Installer.
+        $assignment = @($script:MecmInstallerAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$installMode'
+        }, $true))
+        $assignment.Count | Should -Be 1
+        $derived = @($assignment[0].Right.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.StringConstantType -eq 'SingleQuoted'
+        }, $true) | ForEach-Object { $_.Value } | Sort-Object)
+        $derived.Count | Should -Be 3 -Because 'Erstinstallation, Upgrade und Serverupdate'
+        $switch = @($script:MecmInstallerAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-VsInstallerClosingText'
+        }, $true))[0].Body.Find({ param($n) $n -is [System.Management.Automation.Language.SwitchStatementAst] }, $true)
+        @($switch.Clauses | ForEach-Object { $_.Item1.Value } | Sort-Object) | Should -Be $derived
+        { Get-Closing -Mode 'repair' -Blocked $true } | Should -Throw '*Unbekannter Installationsmodus*'
+    }
+
+    It 'Serverupdate (-Upgrade -ServerOnly) nennt sich nicht Erstinstallation und empfiehlt keinen Client-Schritt' -ForEach @(
+        @{ blocked = $true }
+        @{ blocked = $false }
+    ) {
+        $closing = Get-Closing -Mode 'server-only' -Blocked $blocked
+        $closing.Action | Should -Be 'Serverupdate (-Upgrade -ServerOnly)'
+        ($closing.Steps -join ' | ') | Should -Not -Match 'install-VirtuSphere-Clients'
+        ($closing.Steps -join ' | ') | Should -Not -Match 'freischalten|DNS-Eintrag' -Because 'die Registry-Konfiguration und ihre Freigaben bestehen schon'
+        ($closing.Notes -join ' | ') | Should -Match 'Paketvorlage, Pakete und Clients bleiben unveraendert'
+        $closing.Steps[-1] | Should -Match 'Systemstatus'
+    }
+
+    It 'Upgrade nennt sich Upgrade und wiederholt keine Erstfreigaben' {
+        $closing = Get-Closing -Mode 'upgrade' -Blocked $false
+        $closing.Action | Should -Be 'Upgrade'
+        ($closing.Steps -join ' | ') | Should -Not -Match 'freischalten|DNS-Eintrag'
+        ($closing.Steps -join ' | ') | Should -Match ([regex]::Escape($script:ClientConfigPath))
+    }
+
+    It 'Erstinstallation nennt Freigaben, DNS nur fuer einen Namen, und den Client-Schritt nur ohne Sperre' {
+        $named = Get-Closing -Mode 'install' -Blocked $false
+        $named.Action | Should -Be 'Erstinstallation'
+        @($named.Steps | Where-Object { $_ -match 'freischalten' }).Count | Should -Be 2
+        @($named.Steps | Where-Object { $_ -match 'DNS-Eintrag "virtusphere\.lan"' }).Count | Should -Be 1
+        @($named.Steps | Where-Object { $_ -match 'install-VirtuSphere-Clients\.ps1' -and $_ -match [regex]::Escape($script:ClientConfigPath) }).Count | Should -Be 1
+        $named.Notes.Count | Should -Be 0
+
+        $ip = Get-Closing -Mode 'install' -Blocked $false -WebApiHost '10.0.0.5' -IsIp $true
+        ($ip.Steps -join ' | ') | Should -Not -Match 'DNS-Eintrag'
+    }
+
+    It '<mode>: bei gesperrtem Client-Installer steht der Client nur als Hinweis, nie als Schritt' -ForEach @(
+        @{ mode = 'install' }
+        @{ mode = 'upgrade' }
+        @{ mode = 'server-only' }
+    ) {
+        $closing = Get-Closing -Mode $mode -Blocked $true
+        ($closing.Steps -join ' | ') | Should -Not -Match 'install-VirtuSphere-Clients'
+        ($closing.Notes -join ' | ') | Should -Match 'Kein Client-Schritt: install-VirtuSphere-Clients\.ps1 ist .*gesperrt \(MC01\)'
+    }
+
+    It 'beide Installer lesen die Client-Sperre aus Test-VsClientApplyBlocked' {
+        # Die Pruefung lebt nur in ClientPackaging: der Client-Installer bricht
+        # daran ab, der Serverinstaller leitet daraus seinen Abschlusstext ab.
+        $clientAst = [System.Management.Automation.Language.Parser]::ParseFile($script:ClientInstaller, [ref]$null, [ref]$null)
+        $lock = $clientAst.Find({ param($n)
+            $n -is [System.Management.Automation.Language.ThrowStatementAst] -and $n.Extent.Text -match 'MC01-Zielgraph'
+        }, $true)
+        $lock | Should -Not -BeNullOrEmpty
+        $lock.Parent.Parent.Clauses[0].Item1.Extent.Text | Should -BeExactly 'Test-VsClientApplyBlocked -Specs $specs'
+
+        $call = @($script:MecmInstallerAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Get-VsInstallerClosingText'
+        }, $true))
+        $call.Count | Should -Be 1
+        $call[0].Extent.Text | Should -Match '-Mode \$installMode\b'
+        $call[0].Extent.Text | Should -Match '-ClientApplyBlocked \(Test-VsClientApplyBlocked -Specs \(Get-VsClientAppSpecs\)\)'
+
+        # Stand bis zum Cutover. Faellt die Sperre, faellt dieser Satz mit und
+        # der Abschlusstext nimmt den Client-Schritt von selbst wieder auf.
+        Test-VsClientApplyBlocked -Specs (Get-VsClientAppSpecs) | Should -BeTrue -Because 'MC01 ist noch nicht freigegeben'
     }
 }
 
@@ -1040,7 +1147,7 @@ Describe 'Waechter 2: keine gelesene Variable ohne Zuweisung' {
 Describe 'Waechter 3: kein unbedingter Erfolgssatz' {
 
     It '<name>: die abschliessende Erfolgsmeldung haengt an einer Bedingung' -ForEach @(
-        @{ name = 'install-VirtuSphere-MECM.ps1';    success = 'Erstinstallation abgeschlossen' }
+        @{ name = 'install-VirtuSphere-MECM.ps1';    success = "'{0} abgeschlossen.'" }
         @{ name = 'install-VirtuSphere-Clients.ps1'; success = 'Client-Applikationen bereit' }
     ) {
         # Dieselbe Frage wie in der Installer-Describe oben, hier aber als

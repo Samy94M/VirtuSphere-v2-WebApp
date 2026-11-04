@@ -81,6 +81,9 @@ function Import-VsClientPackagingConfig {
     }
 }
 function Assert-VsClientAppSpecGraph { param($Specs) }
+# Die Fixture-Specs tragen keine Rolle, die MC01-Sperre greift also nicht;
+# so erreicht der Lauf die Manifestabnahme.
+function Test-VsClientApplyBlocked { param($Specs) $false }
 function Get-VsClientLoggingPackageVersion { param($SourceDir) 1 }
 function Copy-VsClientContent {
     param($Spec, $SourceDir, $PackagesBase, $Bootstrap)
