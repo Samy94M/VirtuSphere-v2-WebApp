@@ -263,7 +263,7 @@ function virtusphere_integration_source_kind(string $source): string
 
 // A run in progress (two-clock model): the badge keeps the last completed
 // result, and the row is not treated as stale until the run itself exceeds
-// max(3x interval, 60s, RUN_GRACE). Beyond that the reporter is stuck and ages
+// virtusphere_run_grace_seconds(). Beyond that the reporter is stuck and ages
 // out normally.
 function virtusphere_run_running_state(array $row, ?int $now = null): string
 {
@@ -275,7 +275,7 @@ function virtusphere_run_running_state(array $row, ?int $now = null): string
         return 'unknown';
     }
     $age = $current - $attemptTs;
-    if ($age > virtusphere_run_start_grace_seconds($interval)) {
+    if ($age > virtusphere_run_grace_seconds($row)) {
         $dangerAfter = max(
             $interval * VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER,
             VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS

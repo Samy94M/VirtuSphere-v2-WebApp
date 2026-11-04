@@ -940,7 +940,8 @@ languages that carry the contract:
 - **Status derivation and repository (PHPUnit).** `last_event` drives the badge:
   fresh V2 `ok`/`warning`/`fail`/`unknown`, a fresh V1 heartbeat yellow as Legacy
   (again after a script rollback), the two-clock running run with "läuft seit" and
-  stale only after `max(3 × interval, 60 s, RUN_GRACE)`, group-scoped `missing` (site
+  stale only after `max(3 × interval, 60 s, RUN_GRACE, 2 × last completed duration capped)`
+  (a normal long autoimporter scan keeps its colour, a hang still turns red), group-scoped `missing` (site
   health does not make a sync red), and `failure_streak` counting consecutive `fail`
   only.
 - **Pester (`VirtuSphere-Common`, `mecm_site-health`).** `Send-VsRunReport` payload,

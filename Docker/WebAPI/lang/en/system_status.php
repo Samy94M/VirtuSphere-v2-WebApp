@@ -140,7 +140,7 @@ return [
     'run_distribution_scope' => 'Distribution findings from the last completed scan, not a live query. The report does not contain complete DP counts per package; a ratio such as 4/6 cannot be derived. Open items are not a count of failed DPs.',
     'run_distribution_unknown' => 'No separate distribution evidence is available. An absence of distribution findings does not confirm complete distribution.',
     'run_completion_open' => 'Completion pending',
-    'run_completion_hint' => 'A start was reported, but no completion yet. This is not direct evidence that the process is still working. Long file scans can exceed the reporting threshold; the current daily log shows whether the process is making progress.',
+    'run_completion_hint' => 'A start was reported, but no completion yet. This is not direct evidence that the process is still working. A run that takes much longer than the last completed one can exceed the reporting threshold; the current daily log shows whether the process is making progress.',
     'autoimporter_help' => 'Help with package imports and pending distribution',
     'finding_package_config_invalid' => 'Invalid package configuration: ProjectName and version must be strings, ErrorAction must be Stop or Continue, and InstallationBehaviorType is empty, InstallForSystem or InstallForUser. Hyphens are allowed in ProjectName, but not in version. Numeric versions such as 0.2 can be compared unambiguously. Changing a version can create a new MECM application.',
     'finding_package_content_failed' => 'The content run could not establish successful distribution. This coarse cause code does not distinguish a missing DP group from an error reported by at least one DP. Check the daily autoimporter log first. If the DP group is missing there, configure that prerequisite. Once MECM has confirmed the content request, collections and deployments are still reconciled despite DP errors, and devices can apply the package through reachable DPs. Inspect the reported DP error under Monitoring → Distribution Status → Content Status in the MECM console.',
@@ -183,7 +183,7 @@ return [
     'legend_group_heartbeat' => 'Traffic light per source (MECM and internal services)',
     'legend_ok' => 'Source reports within the expected interval.',
     'legend_legacy' => 'A fresh heartbeat from an old script version; its result is not confirmed. Update the installer and scripts.',
-    'legend_warning' => 'Last run has open items or a report is overdue (more than :multiplier times the interval; started runs have an additional grace period).',
+    'legend_warning' => 'Last run has open items or a report is overdue (more than :multiplier times the interval; a started run may also take up to :factor times the duration of its last run).',
     'legend_danger' => 'Last run failed or a report is substantially overdue. This alone does not prove the process stopped. During an open run, result, duration and errors belong to the previous completion.',
     'legend_missing' => 'Other sources already report, this one never has. Check its setup.',
     // Named exactly one cause ("probably not set up") for a state that three

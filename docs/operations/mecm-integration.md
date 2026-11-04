@@ -1423,7 +1423,10 @@ DP-Diagnose.
 **Status lesen.** „Abschluss offen“ zeigt eine Startmeldung ohne Abschluss.
 Der Laufzustand bleibt neutral und beschreibt nur die empfangene Meldung; er beweist keinen laufenden oder gestoppten Prozess. Dauer, Zähler und
 Fehlerdetails gehören währenddessen zum letzten abgeschlossenen Lauf.
-Ein langer SHA-256-Dateiscan kann die Meldefrist überschreiten.
+Ein offener Lauf darf bis zum Doppelten der Dauer brauchen, die sein letzter
+Abschluss gemeldet hat; ein normal langer SHA-256-Dateiscan bleibt deshalb in der
+Farbe des vorigen Ergebnisses. Erst ein Scan, der deutlich länger dauert als der
+letzte, überschreitet die Meldefrist.
 „Synchronisationslauf fehlgeschlagen“ kann auch einen abgebrochenen
 Dateiscan bezeichnen; der historische Wire-Code `mecm_unavailable` bleibt
 kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die bestehenden

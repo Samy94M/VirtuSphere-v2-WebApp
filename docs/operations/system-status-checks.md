@@ -75,7 +75,7 @@ flowchart TD
   CO -->|sonst| UK
   L -->|started| SZ{"Startzeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
   SZ -->|nein| UK
-  SZ -->|ja| ST{"Lauf länger offen als die Laufschonfrist?"}
+  SZ -->|ja| ST{"Lauf länger offen als die Laufschonfrist (auch das Doppelte der zuletzt gemeldeten Laufdauer)?"}
   ST -->|nein| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses; ohne lesbares Ergebnis Noch keine Daten"]
   ST -->|ja| SD{"Auch über der Gefahrschwelle?"}
   SD -->|ja| RD
@@ -100,7 +100,7 @@ flowchart TD
   SC -->|Provider nicht lesbar oder Abfrage gescheitert| UK
 ```
 
-Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle und `VIRTUSPHERE_RUN_GRACE_SECONDS`. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Verzögert und Ausgefallen. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
+Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle, `VIRTUSPHERE_RUN_GRACE_SECONDS` und dem `VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR`-fachen der Dauer, die der Reporter mit seinem letzten Abschluss gemeldet hat (dieser Anteil höchstens `VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS`). Ein Autoimporter-Scan von 15 bis 20 Minuten bleibt so in der Farbe des vorigen Ergebnisses, statt in jedem Lauf nach 10 Minuten rot und beim Abschluss wieder gelb zu werden; ein Lauf, der deutlich länger braucht als der letzte, wird weiterhin rot. Ohne gemeldete Dauer (erster Lauf, Legacy-Vorgeschichte) gelten nur die festen Werte. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Verzögert und Ausgefallen. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
 
 ## Ansible-Test
 

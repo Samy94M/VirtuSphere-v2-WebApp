@@ -126,7 +126,7 @@ final class IntegrationHealthGroupTest extends TestCase
         $completed['last_result_at'] = 'not-a-time';
         self::assertTrue(virtusphere_run_report_overdue($completed, $now));
 
-        $grace = virtusphere_run_start_grace_seconds(10);
+        $grace = virtusphere_run_grace_seconds(['interval_seconds' => 10]);
         $started = [
             'last_event' => VIRTUSPHERE_RUN_EVENT_STARTED,
             'last_status' => VIRTUSPHERE_RUN_OUTCOME_WARNING,
@@ -137,6 +137,14 @@ final class IntegrationHealthGroupTest extends TestCase
         self::assertSame('warning', virtusphere_run_running_state($started, $now));
         self::assertFalse(virtusphere_run_report_overdue($started, $now));
         $started['last_attempt_at'] = $at($grace + 1);
+        self::assertTrue(virtusphere_run_report_overdue($started, $now));
+
+        // A long scan whose last run took 20 min is still on time after the fixed
+        // grace: the overdue hint and the running state share one deadline.
+        $started['last_duration_ms'] = 1200 * 1000;
+        self::assertFalse(virtusphere_run_report_overdue($started, $now));
+        self::assertSame('warning', virtusphere_run_running_state($started, $now));
+        $started['last_attempt_at'] = $at(2400 + 1);
         self::assertTrue(virtusphere_run_report_overdue($started, $now));
 
         $legacy = ['last_event' => VIRTUSPHERE_INTEGRATION_EVENT_HEARTBEAT, 'interval_seconds' => 10, 'last_seen_at' => $at(5)];
