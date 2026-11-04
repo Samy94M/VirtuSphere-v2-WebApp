@@ -6,6 +6,8 @@
 
 Arbeitsstand 20.10.2026 (Session s38, Worktree `vs-s38`, noch nicht committet): AV-F25 (PS-10: `Read-VsPackageConfig` prüft `ErrorAction` wie der Wrapper; der Zwillingstest leitet die Pflichtfelder aus beiden ASTs ab), AV-F26 (`Get-VsFilesManifestStamp` zählt versteckte Dateien mit `-Force`), AV-F27 (leere DP-Gruppe als eigene Ursache `package_content_group_empty`, vor der Erstanforderung geprüft) und AV-F28 (PS-09: Verschub einer neuen Application wird wiederholt und als `package_folder_failed` gezählt) sind im Code umgesetzt und per Pester geprüft (T-05: eigene Suite für den Sende-Guard des Packages-Sync). Die neuen Ursachen sind portal-first (Labels, Hilfe, Findings). Wirkung auf dem MECM-Server erst mit dem nächsten Serverupdate; der Portalteil wirkt sofort. Offen: Lauf gegen einen echten MECM-Stack (Laborprobe der Verteilung und des Ordnerverschubs) und Commit.
 
+Nachtrag 04.11.2026 (AV2, [Plan](2026-11-04-av2-dp-check-relaxation-plan.md), ADR-0034 Amendment 7): DP-Zustände sind keine offenen Punkte mehr. `package_content_failed` und `package_content_in_progress` sind Hinweise, der Lauf bleibt `ok` und merkt den Dateistand. Damit ist AV-F15 für DP-Zustände gelöst; ruhige Läufe melden die gemerkten Hinweise weiter und frischen sie höchstens alle 30 Minuten lesend auf (AV-R07 bleibt: kein Abgleich ohne Dateiänderung). AV-R01 und AV-R04 (AV-B) bleiben offen; sie würden Contentaufträge weiter einschränken und widersprechen AV2 nicht.
+
 Einstieg und Reihenfolge stehen im [Register](2026-09-12-consolidated-session-backlog.md), Abschnitt „Entscheidungen 28.09.2026“. Dieser Plan ersetzt die dortige offene Frage M03-Q03 und besitzt Entscheidungen, Befunde, Randfälle und Arbeitspakete dieses Strangs.
 
 ## 1. Ziel

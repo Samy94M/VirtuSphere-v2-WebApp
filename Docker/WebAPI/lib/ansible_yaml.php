@@ -6,6 +6,7 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/repo/esxi_inventory.php';
 require_once __DIR__ . '/ansible_paths.php';
+require_once __DIR__ . '/vm_disk_layout.php';
 
 /**
  * Deploy artifact content: the accounts.yml and serverlist.yml the playbooks
@@ -297,21 +298,12 @@ function ansible_autostart_delay(mixed $value, bool $allowInherit): int
 
 function ansible_vm_disks(array $vm): array
 {
-    $disks = [];
-    foreach (($vm['disks'] ?? []) as $disk) {
-        $size = ansible_positive_int($disk['disk_size'] ?? null, (int) VIRTUSPHERE_VM_DEFAULTS['disk_size_gb']);
-        $type = strtolower(trim((string) ($disk['disk_type'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_type'])));
-        $disks[] = ['size_gb' => $size, 'type' => $type !== '' ? $type : VIRTUSPHERE_VM_DEFAULTS['disk_type']];
-    }
-
-    if ($disks === []) {
-        $disks[] = [
-            'size_gb' => (int) VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'],
-            'type' => VIRTUSPHERE_VM_DEFAULTS['disk_type'],
-        ];
-    }
-
-    return $disks;
+    // Only size and type go to vmware_guest. The rows, their order and the
+    // default disk belong to vm_disk_rows(), which getDeviceInfos reads too (DN1).
+    return array_map(
+        static fn (array $row): array => ['size_gb' => $row['size_gb'], 'type' => $row['type']],
+        vm_disk_rows($vm)
+    );
 }
 
 /**

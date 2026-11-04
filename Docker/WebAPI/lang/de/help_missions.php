@@ -89,7 +89,7 @@ return [
     'vm_steps_3' => '3. Pflichtfelder: „VM-Name in ESXi“ (höchstens :max Zeichen, nur Buchstaben, Zahlen und Bindestriche im Inneren) und „OS“.',
     'vm_steps_4' => '4. „Windows-Hostname“ nach den Namensregeln oben (keine Punkte). Bleibt das Feld leer, übernimmt die VM den VM-Namen.',
     'vm_steps_5' => '5. Netzwerkkarten unter „Schnittstellen“: Mindestens eine ist Pflicht. „Schnittstelle hinzufügen“ legt eine an. Beim Speichern braucht jede Karte ein VLAN, und zwei Karten derselben VM dürfen nicht dasselbe VLAN haben.',
-    'vm_steps_6' => '6. Festplatten unter „Datenträger“ sind optional. Ohne eigene Festplatte erhält die VM die Standard-Festplatte.',
+    'vm_steps_6' => '6. Festplatten unter „Datenträger“ sind optional. Ohne eigene Festplatte erhält die VM die Standard-Festplatte. Den Namen einer Platte übernimmt Windows als Laufwerksbezeichnung, wenn es eine neue Datenplatte einrichtet; Grenzen und Ersatzzeichen nennt der Hinweis unter der Liste. Weicht die Bezeichnung vom Namen ab, etwa weil er zu lang ist, oder bleibt ein Feld leer, zeigt der Editor die Bezeichnung direkt am Namensfeld. Eine bereits eingerichtete Platte benennt VirtuSphere nicht um, und wo die Zuordnung nicht eindeutig ist, bleibt die Bezeichnung VM_Disk_ mit der Windows-Datenträgernummer.',
     'vm_steps_7' => '7. Pakete unter „Pakete“ sind optional. Zurückgezogene Pakete bietet der Editor nicht an; bereits verknüpfte bleiben sichtbar.',
     'vm_steps_8' => '8. „VM speichern“ wählen. Erst danach sind die Änderungen gespeichert.',
     'vm_steps_note' => 'Die Netzwerkkarten einer VM lassen sich nicht ändern, solange ein laufender Bereitstellungsauftrag dieser Mission die VM umfasst. Ist Datastore oder Datacenter leer, übernimmt die VM den Wert der Mission.',

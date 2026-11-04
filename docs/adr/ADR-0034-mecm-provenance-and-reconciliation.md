@@ -1,6 +1,57 @@
 # ADR-0034: MECM-Provenienz und sichere Reconciliation
 
-## Amendment 6 (15.09.2026): Retirement wartet nicht auf 100 Prozent der DPs
+## Amendment 7 (04.11.2026): DP-Verteilung nur anfordern und anzeigen (AV2)
+
+Ersetzt die DP-Grenzen aus Amendment 5 und 6 sowie die Verteilwahrheit (B7),
+soweit sie Kopiernachweise, DP-Zielmengen und Contentidentitäten verlangen.
+Nutzerentscheidung vom 04.11.2026: VirtuSphere und die Serverskripte lesen die
+Pakete aus MECM, zeigen sie an und machen sie zuweisbar; die Verteilung an die
+Distribution Points ist Sache von MECM.
+
+Der Autoimporter bindet einen Contentauftrag nur noch an das Dateimanifest und
+die Application-Identität (ModelName, PackageID). Je neuem Manifest fordert er
+höchstens einen von MECM angenommenen Auftrag an: die Erstverteilung an die
+DP-Gruppe, wenn MECM noch kein Ziel kennt, sonst `Update-CMDistributionPoint`.
+Vor dem Aufruf steht ein Intent; ein nicht bestätigter Aufruf wird nur
+wiederholt, wenn MECM ihn nachweislich nicht angenommen hat (Update: die
+DT-ContentId ist unverändert; Erstverteilung: kein Ziel sichtbar). Danach liest
+er nur das Aggregat von `Get-CMDistributionStatus`. `failed` und
+`in_progress` sind Hinweise im Laufdetail, keine offenen Punkte: Sie halten
+weder Collection, Deployments, Bereinigung, Dateistand noch Ampel auf. Ruhige
+Läufe melden die Hinweise weiter und lesen ihren Stand höchstens alle
+30 Minuten neu, ohne Abgleich (AV-R07).
+
+Entfallen sind Kopiernachweise je DP (`LastCopied`), der Vergleich gespeicherter
+DP-Zielmengen, DP-Löschzustände und die Bindung an eine ContentId als Sperre.
+Ein ersetzter oder entfernter DP, ein von Hand angestoßenes Contentupdate und ein
+neu angelegter Deployment Type sperren nichts mehr. Die Bereinigung über
+`removeOldVersion` setzt nur einen angenommenen Auftrag für die aktuelle
+Identität, eine sichtbar begonnene Verteilung und das geprüfte Deployment
+voraus.
+
+Bestehen bleiben: keine Doppelanlage (Anlage nur nach exakter Namenssuche),
+Mehrdeutigkeit als Fehler (zwei Applications oder Deployment Types gleichen
+Namens, fremder Deployment Type), keine Übernahme einer namensgleich neu
+angelegten Application ohne Marker außerhalb von `VirtuSphere_Applications`
+(Amendment 1) und keine Auftragsschleife. Eine eigene neu angelegte Application
+wird neu gebunden; bei gleichem Manifest ohne Auftrag, wenn MECM sie schon
+verteilt, sonst mit genau einer Erstverteilung. Neu angelegt erkennt der
+Autoimporter nur an einem gespeicherten Auftrag mit anderer Identität. Ohne
+gespeicherten Auftrag verwendet er eine vorhandene namensgleiche Application wie
+vor AV2 ohne Eigentumsprüfung weiter; eine solche Prüfung ist nicht Teil dieses
+Amendments.
+
+Das Trackingschema 3 liegt unter `HKLM:\SOFTWARE\VirtuSphere\MECM\ContentRequests`.
+Der Schema-1/2-Bestand unter `ContentTracking` wird nur gelesen und übernommen
+(Manifest und Identität, nie die alte DP-Baseline) und bleibt unverändert, damit
+ein Rückweg auf eine ältere Serverversion seinen Stand vorfindet. Der
+Common-Vertrag steigt auf 3, der Autoimporter meldet `autoimporter/2.3`. Neuer
+Ursachencode `package_content_request_failed` (DP-Gruppe fehlt oder MECM hat den
+Auftrag nicht angenommen); `package_content_failed` bezeichnet nur noch einen
+gemeldeten DP-Fehler. Plan und Messung:
+[AV2-Plan](../audits/2026-11-04-av2-dp-check-relaxation-plan.md).
+
+## Amendment 6 (15.09.2026, DP-Grenzen durch Amendment 7 ersetzt): Retirement wartet nicht auf 100 Prozent der DPs
 
 Der von `removeOldVersion=true` angeforderte automatische Retirement-Plan verwendet dieselbe
 Ersatzbereitschaft wie das Deployment: Der Contentauftrag muss bestätigt und an
@@ -21,7 +72,7 @@ bei identischem Hash aus; Deployment, Application und Collection sind explizite
 Einheiten in dieser Reihenfolge. Das Retirement-Plan-Schema steigt auf 3;
 Schema-1/2-Pläne sind unter der automatischen Semantik ungültig.
 
-## Amendment 5 (15.09.2026): Deploymentfreigabe nach bestätigtem Contentauftrag
+## Amendment 5 (15.09.2026, DP-Grenzen durch Amendment 7 ersetzt): Deploymentfreigabe nach bestätigtem Contentauftrag
 
 Auftragsannahme, Deploymentfreigabe und vollständiger Verteilnachweis sind drei
 getrennte Grenzen. Sobald `Start-CMContentDistribution` oder

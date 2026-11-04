@@ -8,6 +8,35 @@ require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/status_evidence.php';
 require_once __DIR__ . '/system_status_urls.php';
 
+// The package codes the autoimporter writes into its cause line, in the order of
+// `$script:VsRunCauseVocabulary` (Powershell-MECM/mecm/VirtuSphere-Common.ps1),
+// which owns the code set. The System status card and the help list both read
+// this one list; AutoimporterStatusPresentationTest derives the package codes
+// from the PowerShell vocabulary and fails when this list, a card label or a
+// help entry in either locale is missing one. A `package_content_` prefix makes
+// a code a distribution note, everything else is a configuration finding.
+const VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES = [
+    'package_config_invalid',
+    'package_content_failed',
+    'package_content_in_progress',
+    'package_content_unknown',
+    'package_content_request_failed',
+    'package_content_group_empty',
+    'package_definition_drift',
+    'package_source_missing',
+    'package_deploy_failed',
+    'package_cleanup_failed',
+    'package_folder_failed',
+    'package_template_failed',
+];
+
+// How often a quiet autoimporter run rereads the distribution state of packages
+// with a note (AV2). The PowerShell side owns the value
+// (`$script:VsDistributionHintRefreshSeconds` in VirtuSphere-Common.ps1); the
+// card and the help state it from here, and AutoimporterStatusPresentationTest
+// fails when the two differ.
+const VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS = 1800;
+
 /**
  * How many mission/VM deviations the scan found, or null when it could not run.
  *

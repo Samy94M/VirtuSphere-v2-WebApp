@@ -52,11 +52,9 @@ function system_status_autoimporter_findings(string $detail, ?bool $distribution
 {
     $findings = [];
     // package_content_group_empty (AV-F27) is a distribution finding by its prefix:
-    // a DP group without members is the reason no copy record can ever arrive.
+    // a DP group without members gives the initial request no target (AV2).
     // package_folder_failed (PS-09) is a placement finding and stays configuration.
-    foreach (['package_config_invalid', 'package_content_failed', 'package_content_in_progress',
-        'package_content_unknown', 'package_content_group_empty', 'package_definition_drift',
-        'package_cleanup_failed', 'package_folder_failed'] as $code) {
+    foreach (VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES as $code) {
         if ($distribution !== null && str_starts_with($code, 'package_content_') !== $distribution) {
             continue;
         }
@@ -301,7 +299,7 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false,
                 } ?>
                 <?php if ($isAutoimporter) { ?>
                     <h4><?php echo h(__t('system_status.run_distribution_heading')); ?></h4>
-                    <p class="muted"><?php echo h(__t('system_status.run_distribution_scope')); ?></p>
+                    <p class="muted"><?php echo h(__t('system_status.run_distribution_scope', ['minutes' => (string) intdiv(VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS, 60)])); ?></p>
                     <?php echo system_status_fact_list([
                         ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time($hasCompletedResult ? ($row['last_result_at'] ?? null) : null)],
                     ]);

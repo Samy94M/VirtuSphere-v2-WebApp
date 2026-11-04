@@ -17,9 +17,9 @@ MECM-Software-Center auf die PXE-installierten Clients verteilt (`clients/`).
 `removeOldVersion: "true"` fordert die automatische Entfernung ersetzter
 Altversionen an. Der Autoimporter plant und revalidiert dafür eindeutigen
 numerischen Zielstand, stabile IDs, VirtuSphere-Ownership, fehlende Referenzen
-sowie bestätigten und an die exakte Content-ID gebundenen Ersatzauftrag mit
-sicherer Zielprojektion und Deployment. Danach entfernt er alte Deployments,
-Applications und Collections in dieser Reihenfolge. Vollständiger DP-Erfolg ist
+sowie einen von MECM angenommenen Ersatzauftrag mit sichtbar begonnener
+Verteilung und Deployment. Danach entfernt er alte Deployments,
+Applications und Collections in dieser Reihenfolge. Der DP-Stand ist
 keine Voraussetzung.
 Freie oder doppelte Versionsstrings, parallele Quellversionen und Altobjekte
 ohne Marker bleiben erhalten. Ein Portal-Retirement ist kein MECM-Löschauftrag.
@@ -470,31 +470,29 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   ausgefilterten temporären Dateien. Auch geänderte Nutzlast unter derselben
   Version löst deshalb einen Abgleich aus; reguläre Paketänderungen sollen
   weiterhin eine neue `version` erhalten.
-- **Neue Quelle bei offenen DPs:** Ein Fehler oder eine laufende Kopie auf
-  einzelnen DPs blockiert kein neues Inhaltsmanifest. Pro Manifest wird genau
-  ein bestätigter Updateaufruf gespeichert. Ein neuer Quellstand darf einen
-  bestätigten, an seine Content-ID gebundenen offenen Auftrag ersetzen; der alte
-  Stand wird dabei nicht als vollständig verteilt markiert. Ein unverändertes
-  Manifest löst keine automatische Redistribution pro Scan aus. Alle bisherigen
-  DP-Ziele bleiben erhalten. Fehlende Ziele, widersprüchliche Zielzahlen,
-  Löschzustände und unbekannte Identitäten blockieren weiterhin. Nach einem
-  abgeschlossenen Auftrag werden zusätzliche aktuelle Ziele in die Baseline
-  des nächsten Auftrags aufgenommen.
-- **Deployment trotz offener DPs:** Sobald MECM den Erst- oder Updateauftrag
-  bestätigt hat, werden Collection sowie Required- und Available-Deployments
-  idempotent nachgezogen. Dafür muss noch kein DP erfolgreich sein. Geräte
-  können das Paket verwenden, sobald der ihnen zugeordnete DP den Inhalt
-  anbietet. Der offene Verteilzustand bleibt trotzdem Warnung und verhindert
-  den Manifestabschluss. Eine fehlende DP-Gruppe, unbestätigte Aufrufe,
-  Identitäts-/Projektionsunsicherheit, Zielverlust und DP-Löschzustände bleiben
-  harte Sperren.
-- **Contentabschluss:** Der Auftrag bindet Application und Deployment Type
-  an die konkrete Content-ID. Bei Updates muss eine neue Content-ID sichtbar
-  werden; eine steigende Application-Packageversion wird nicht vorausgesetzt.
-  Zusätzlich müssen die Verteilungspunkte einen gegenüber der gespeicherten
-  Baseline neueren erfolgreichen Kopierstand melden. Unbestätigte Aufrufe,
-  unbekannte Identitäten und beschädigte Trackingdaten erlauben keine blinde
-  Wiederholung. Die tatsächliche Verteilung ist im MECM-Labor abzunehmen.
+- **DP-Verteilung ist Sache von MECM (AV2, ADR-0034 Amendment 7):** Je neuem
+  Dateimanifest fordert der Autoimporter höchstens einen Auftrag an: die
+  Erstverteilung an die DP-Gruppe, solange MECM für die Application noch kein
+  Ziel kennt, sonst `Update-CMDistributionPoint`. Gleiche Manifeste lösen keinen
+  weiteren Auftrag aus, auch nicht bei Verteilfehlern. Der Auftrag ist nur an
+  Manifest und Application-Identität gebunden (`ContentRequests`); vor dem
+  Aufruf steht ein Intent, nach dem Aufruf `requested`. Ein stehender Intent
+  wird nur wiederholt, wenn MECM ihn nachweislich nicht angenommen hat.
+- **Deployment unabhängig vom DP-Stand:** Collection sowie Required- und
+  Available-Deployments werden immer idempotent nachgezogen. Offline, ersetzte
+  oder entfernte DPs, laufende Kopien und Verteilfehler sind Hinweise
+  (`package_content_failed`, `package_content_in_progress`), kein offener
+  Punkt: Der Lauf bleibt `ok` und merkt den Manifest-Stamp. Geräte können das
+  Paket verwenden, sobald der ihnen zugeordnete DP den Inhalt anbietet. Eine
+  fehlende DP-Gruppe oder ein von MECM nicht angenommener Aufruf meldet
+  `package_content_request_failed`.
+- **Neu angelegte Application gleichen Namens** (der gespeicherte Auftrag nennt
+  eine andere Identität): Mit VirtuSphere-Marker oder im Ordner
+  `VirtuSphere_Applications` wird sie neu gebunden, bei gleichem Manifest ohne
+  Auftrag, wenn MECM sie schon verteilt. Eine fremde Application
+  erhält weder Content noch Deployment (`package_definition_drift`). Der
+  frühere Trackingbestand unter `ContentTracking` wird beim ersten Lauf
+  übernommen und nie verändert.
 - **Validierung:** `ProjectName` und `version` sind nichtleere JSON-Zeichenketten,
   keine Zahlen, Listen oder Objekte. Wildcards und Rand-Leerraum sind ungültig;
   die Version enthält keinen Leerraum oder Bindestrich. Bindestriche im
@@ -509,10 +507,10 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     Applications und Collections. Name und Ordner allein beweisen weder Eigentum
     noch Ersatzbereitschaft. Parallele Quellversionen und höhere Versionen sind
     keine Löschkandidaten; numerisch gleiche Quellen wie `1` und `1.0` blockieren
-    eine eindeutige Zielauswahl. Fehlendes Eigentum, Referenzen, ein unbestätigter
-    oder noch ungebundener Ersatzauftrag sowie unsichere Zielprojektion melden
-    `package_cleanup_failed` und sperren die Entfernung.
-    Ein bestätigter und gebundener Ersatzauftrag mit geprüftem Deployment genügt
+    eine eindeutige Zielauswahl. Fehlendes Eigentum, Referenzen, ein noch nicht
+    von MECM angenommener Ersatzauftrag oder eine noch nicht sichtbare
+    Verteilung melden `package_cleanup_failed` und sperren die Entfernung.
+    Ein angenommener Ersatzauftrag mit geprüftem Deployment genügt
     dagegen auch bei null erfolgreichen DPs; 100 Prozent Verteilerfolg sind
     nicht erforderlich.
     Kann die optionale Collection-/Application-Inventur nicht vollständig
@@ -537,12 +535,11 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     Ursache nicht als `package_deploy_failed` erscheint.
   - **Content-Verteilung unabhängig von der eigenen Collection:** Der
     Distribution-Pfad läuft auch bei
-    `generateOwnDeviceColletion: "false"`. Abschluss verlangt die gebundene
-    Application-/Deployment-Type-Content-ID, vollständig erfolgreiche
-    Aggregatzähler und einen neueren erfolgreichen Kopiernachweis der bisherigen
-    DP-Ziele. Das ist kein eigener Nachweis der aktuellen Mitgliedschaft einer
-    konfigurierten DP-Gruppe. Unbekannte Evidenz bleibt ein offener Punkt und
-    autorisiert keine blinde erneute Verteilung.
+    `generateOwnDeviceColletion: "false"`. Er fordert je Manifest höchstens
+    einen Auftrag an und liest danach nur das Aggregat von
+    `Get-CMDistributionStatus` als Hinweis. Unlesbare Identität oder
+    Verteilstand meldet `package_content_unknown` und autorisiert keine blinde
+    erneute Verteilung.
   - Optionales Available-Deployment an die Collection aus `DeployTo`. Fehlt die
     Ziel-Collection oder scheitert das Deployment, ist das ein offener Punkt
     (`package_deploy_failed` mit Collection-Name); der nächste Durchlauf
@@ -576,14 +573,14 @@ ist entfernt, ADR-0018 Amendment 2026-07-23):
   `-ProviderMachine`). Leer lassen, wenn der Provider lokal auf dem Site-Server
   liegt; die Aufgabe ermittelt ihn dann selbst. Die geplanten Aufgaben arbeiten
   über den Provider auf dem Site-Server (gemessen: lokaler Provider); dieser Wert
-  wird nur für die Site-Health-Abfrage und die Prüfung der Verteilungskopien
+  wird nur für die Site-Health-Abfrage und die Referenzprüfung alter Collections
   gelesen.
 - `SiteHealthIntervalSeconds`: Berichtsintervall (Installerparameter
   `-SiteHealthIntervalSeconds`), Standard 300, erlaubt 60–3600.
 
 **Berechtigungen (Remote-Provider):** Die Aufgaben sprechen den Provider auf dem
 Site-Server an. Nur wenn `MECM_ProviderMachine` auf einen anderen Rechner zeigt,
-gilt Folgendes für die Site-Health-Abfrage und die Prüfung der Verteilungskopien.
+gilt Folgendes für die Site-Health-Abfrage und die Referenzprüfung alter Collections.
 Das Computerkonto des Site-Servers ist standardmäßig Mitglied der SMS-Admins-Gruppe
 auf jedem Provider; liegt der Provider lokal und läuft die Aufgabe als SYSTEM, ist
 keine Zusatzkonfiguration nötig. Liegt der Provider entfernt, braucht das

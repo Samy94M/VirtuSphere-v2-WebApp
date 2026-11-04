@@ -170,6 +170,7 @@ function layout_script_registry(): array
         'assets/deploy_blockers.js' => ['deploy.php'],
         'assets/deploy_storage.js' => ['deploy.php'],
         'assets/vm-network.js' => ['vm_edit.php'],
+        'assets/vm-disk-label.js' => ['vm_edit.php'],
     ];
 }
 
