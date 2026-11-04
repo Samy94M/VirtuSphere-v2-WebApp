@@ -212,7 +212,9 @@ Describe 'QA stack reads only the verified copy' {
             $qaTargets = @()
             if ($qaServices.ContainsKey($service)) {
                 foreach ($line in ($qaServices[$service] -split "`n")) {
-                    if ($line -match '^      - \*([a-z-]+)\s*$') { $qaTargets += $anchors[$Matches[1]] }
+                    # An anchor may be used as-is or merged with extra keys
+                    # ("- <<: *qa-code" plus "read_only: true" on the webserver).
+                    if ($line -match '^      - (?:<<: )?\*([a-z-]+)\s*$') { $qaTargets += $anchors[$Matches[1]] }
                     elseif ($line -match '^      - [a-z][a-z0-9-]*:(/[^:\s]+)') { $qaTargets += $Matches[1] }
                     elseif ($line -match '^        target: (\S+)$') { $qaTargets += $Matches[1] }
                 }
