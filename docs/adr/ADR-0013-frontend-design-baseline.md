@@ -144,17 +144,14 @@ own submit is never labelled saved before the server accepts it. No URL,
 session, localStorage or sessionStorage carries a form snapshot, and no-JS
 operation keeps the ordinary server contracts without promising the warning.
 
-Effective-value summaries are projections of existing deploy owners, not a new
-configuration layer. The VM editor names whether Datastore, Datacenter and
-autostart come from the VM, the mission or a later target-host resolution, and
-calls them intended values rather than an observed ESXi state. A missing
-Datacenter may remain unresolved until a credential is chosen; a missing
-Datastore has no host fallback. Mission-off autostart remains effectively off
-while its VM preference is preserved, and blank delay differs from explicit
-zero. The server renders the complete truth for no-JavaScript operation; a
-page-specific module only reflects live controls. Its reset accelerator clears
-an already-inheritable control and emits normal change events, never writes or
-submits on its own.
+Inherited values are shown at the field that edits them, not in a separate
+summary (revised 04.11.2026, VE1: the earlier effective-value box repeated the
+fields and was removed). The empty Datastore and Datacenter option names the
+mission value, a blank delay shows the mission delay as placeholder, and locked
+autostart controls carry the mission-off hint. Only a Datacenter the mission
+leaves open gets a field hint: if the VM field stays empty too, deployment takes
+it from the chosen credential; a missing Datastore has no host fallback. These are intended values,
+never an observed ESXi state, and blank delay differs from explicit zero.
 
 Action outcomes reuse the one-shot structured flash surface rather than adding
 toasts or a second status model. A successful portal write names only the local

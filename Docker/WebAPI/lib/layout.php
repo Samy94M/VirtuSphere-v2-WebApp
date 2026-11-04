@@ -163,7 +163,6 @@ function layout_script_registry(): array
     return [
         'assets/core.js' => ['*'],
         'assets/unsaved_changes.js' => ['mission_details.php', 'vm_edit.php'],
-        'assets/effective_values.js' => ['vm_edit.php'],
         'assets/forms.js' => ['credentials.php', 'vm_edit.php', 'vms.php'],
         'assets/deploy_log.js' => ['deploy_log.php'],
         'assets/deploy_form.js' => ['deploy.php'],

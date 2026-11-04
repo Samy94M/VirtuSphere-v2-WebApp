@@ -16,7 +16,7 @@ final class PortalPageAssetSelectionTest extends TestCase
         }
         $expected['mission_details.php'][] = 'assets/unsaved_changes.js';
         $expected['credentials.php'][] = 'assets/forms.js';
-        $expected['vm_edit.php'] = ['assets/core.js', 'assets/unsaved_changes.js', 'assets/effective_values.js', 'assets/forms.js', 'assets/vm-network.js'];
+        $expected['vm_edit.php'] = ['assets/core.js', 'assets/unsaved_changes.js', 'assets/forms.js', 'assets/vm-network.js'];
         $expected['vms.php'][] = 'assets/forms.js';
         $expected['deploy_log.php'][] = 'assets/deploy_log.js';
         $expected['deploy.php'] = [
