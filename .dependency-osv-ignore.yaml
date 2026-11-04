@@ -1,0 +1,28 @@
+# Ausnahme-Vertrag fuer das Gate dependency-osv (scripts/check.ps1, Release-Lane;
+# Pruefung in scripts/check-dependency-osv.ps1). Gleiche Regeln wie
+# .trivyignore.yaml fuer image-cve.
+#
+# Das Gate blockiert critical, high und unbewertete Advisories aus OSV und
+# GitHub (globale Datenbank, Repository-Advisories der ausgelieferten
+# Composer-Pakete). Eine Ausnahme hier braucht alle drei Angaben und ist immer
+# befristet:
+#   - id:         GHSA-/PYSEC-/CVE-ID; ein Alias derselben Luecke genuegt
+#   - statement:  Begruendung UND Owner ("warum vertretbar; Owner: <wer>")
+#   - expired_at: Ablaufdatum (YYYY-MM-DD), gilt bis einschliesslich dieses Tages.
+#                 Danach zaehlt der Fund wieder; eine abgelaufene Ausnahme
+#                 bricht den Build wie eine fehlende.
+# Andere Schluessel, ein Eintrag ohne Owner oder ohne gueltiges Datum machen die
+# Datei ungueltig (infrastructure_error), nie stillschweigend wirkungslos.
+#
+# Ein Eintrag hier ist immer die ZWEITE Wahl: gibt es eine gefixte Version,
+# gehoert sie in die Lockdatei.
+#
+# Beispiel (nicht aktiv):
+#   vulnerabilities:
+#     - id: GHSA-xxxx-xxxx-xxxx
+#       statement: "Funktion im Produkt ungenutzt, Update braucht eigenes Paket; Owner: Betrieb"
+#       expired_at: 2026-12-31
+#
+# Diese Datei bleibt bestehen, auch wenn sie leer ist: das Gate wertet ihr
+# Fehlen als Infrastrukturfehler.
+vulnerabilities: []

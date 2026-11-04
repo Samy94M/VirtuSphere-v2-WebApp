@@ -276,6 +276,16 @@ Describe 'Visible progress reporting contract' {
         $script:NetworkPreflight | Should -Match '\$position.+\$total.+FAIL network/WDS preflight'
     }
 
+    It 'reports every dependency-osv source and GitHub request before and after it and streams the gate live' {
+        $library = Get-Content -Raw -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'dependency-osv.ps1')
+        $releaseGates = Get-Content -Raw -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib/check') 'gates-release.ps1')
+        $library | Should -Match '\$total = \$units\.Count'
+        $library | Should -Match "'\[\{0\}/\{1\}\] RUN \{2\}' -f \`$position, \`$total, \`$unit\.Name"
+        $library | Should -Match "'\[\{0\}/\{1\}\] \{2\} \{3\}' -f \`$position, \`$total, \`$state, \`$unit\.Name"
+        $releaseGates | Should -Match "check-dependency-osv\.ps1'\)"
+        $releaseGates | Should -Match 'Invoke-Tool \$hostExe \$arguments -Live'
+    }
+
     It 'reports every pinned Ansible collection before and after lock verification' {
         $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] RUN collection-lock-'
         $script:CollectionLock | Should -Match '\[\{position\}/\{total\}\] PASS collection-lock-'

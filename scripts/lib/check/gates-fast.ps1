@@ -154,6 +154,20 @@ function Register-FastCheckGates {
         New-PassResult ("{0} Portal-Skript(e) syntaktisch sauber" -f $files.Count)
     }
 
+    Add-Gate -Name 'portal-assets-vendor-free' -Lanes $allLanes -Kind 'native' -Body {
+        # Die Advisory-Gates sehen nur Pakete mit Lockdatei. Eine in
+        # portal/assets abgelegte Bibliothek waere fuer composer-audit,
+        # npm-audit und dependency-osv unsichtbar (DG1, Bericht F9.4); der Guard
+        # haelt die Annahme "kein Fremd-JS/CSS" als Vertrag fest.
+        $hostExe = 'powershell'
+        if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
+        $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-File', (Join-Path $scriptDir 'check-portal-assets-vendor-free.ps1'))
+        if ($r.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $r) $r.Output }
+        if ($r.ExitCode -eq 2) { return New-InfraResult 'portal/assets fehlt oder ohne JS/CSS (Zero-Match)' $r.Output }
+        Format-ToolResult $r 'Portal-Assets ohne Fremdbibliothek' 'Fremdcode unter portal/assets ohne Lock und Advisory-Pruefung'
+    }
+
     Add-Gate -Name 'powershell-syntax' -Lanes $allLanes -Kind 'native' -Body {
         $files = Get-CheckFiles @('*.ps1', '*.psm1', '*.psd1')
         if ($files.Count -eq 0) { return New-InfraResult 'keine PowerShell-Dateien gefunden (Zero-Match)' }

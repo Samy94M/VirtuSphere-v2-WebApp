@@ -228,4 +228,30 @@ function Register-ReleaseCheckGates {
         if ($r.ExitCode -eq 0) { return New-PassResult ('keine high/critical-Advisories; Bericht: ' + $reportPath) }
         New-FailResult ('npm audit meldet Advisories ab high (Bericht: ' + $reportPath + ')') @($r.Output | Select-Object -First 40)
     }
+
+    Add-Gate -Name 'dependency-osv' -Lanes @('Release') -Kind 'native' -Network $true -Body {
+        # Zweite Advisory-Sicht ueber alle Locks (DG1): composer-audit fragt nur
+        # Packagist, und Packagist wie OSV kannten phpseclib GHSA-w3p9-g4p2-h3rr
+        # zwei Tage nach der Veroeffentlichung noch nicht; Python-Locks und das
+        # Wheelhouse des Offline-Bundles prueft sonst niemand. Die Lockdateien
+        # leitet das Skript selbst aus dem Pruef-Root ab. Release-Lane, weil das
+        # Wheelhouse nur hier entsteht (offline-bundle laeuft vorher) und eine
+        # neu veroeffentlichte Advisory die Auslieferung anhalten soll, nicht
+        # jeden PR; composer-audit bleibt das schnelle Signal der Fast-Lane.
+        $hostExe = 'powershell'
+        if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
+        $reportPath = Join-Path $artifactDir 'dependency-osv.json'
+        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'check-dependency-osv.ps1'),
+            '-ReportPath', $reportPath)
+        # Hat dieser Lauf das Bundle gebaut, ist sein Wheelhouse Pflicht: was der
+        # Ansible-Host installiert, umfasst Pakete, die keine Lock pinnt.
+        if (@($selected | Where-Object { $_.Name -eq 'offline-bundle' }).Count -gt 0) {
+            $arguments += @('-Wheelhouse', (Join-Path (Join-Path (Join-Path $artifactDir 'offline-bundle') 'deps') 'wheels'), '-RequireWheelhouse')
+        }
+        $r = Invoke-Tool $hostExe $arguments -Live
+        if ($r.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $r) $r.Output }
+        if ($r.ExitCode -eq 0) { return New-PassResult ('keine blockierenden Advisories (OSV, GitHub); Bericht: ' + $reportPath) $r.Output }
+        if ($r.ExitCode -eq 1) { return New-FailResult ('blockierende Advisories oder ungepruefte Locks (Bericht: ' + $reportPath + '; Ausnahmen nur befristet via .dependency-osv-ignore.yaml)') $r.Output }
+        New-InfraResult ('Advisory-Pruefung ohne Ergebnis (Netz, Ratenlimit, Lock oder Ausnahmedatei; exit ' + $r.ExitCode + ')') $r.Output
+    }
 }
