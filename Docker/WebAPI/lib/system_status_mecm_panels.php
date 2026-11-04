@@ -201,7 +201,7 @@ function system_status_render_mecm(array $snapshot, array $user): void
         <div class="status-subgroup">
             <h3><?php echo h(__t('system_status.mecm_sync_heading')); ?> <?php echo heartbeat_badge($syncState); ?></h3>
             <p class="muted"><?php echo h(__t('system_status.mecm_sync_hint')); ?></p>
-            <?php system_status_render_run_rows($snapshot['mecm_sync']['rows'], $setupPending); ?>
+            <?php system_status_render_run_rows($snapshot['mecm_sync']['rows'], $setupPending, $user); ?>
         </div>
 
         <div class="status-subgroup">
@@ -220,9 +220,10 @@ function system_status_render_mecm(array $snapshot, array $user): void
  * note, the attempt/result/success/failure timestamps, interval, duration,
  * source-specific counters and the sanitized technical detail.
  *
- * @param list<array{source:string,row:array|null,state:string}> $rows
+ * @param list<array{source:string,row:array|null,state:string,report_overdue?:bool}> $rows
+ * @param array<string,mixed>|null $user gates the settings link of a rejected catalog
  */
-function system_status_render_run_rows(array $rows, bool $suppressHints = false): void
+function system_status_render_run_rows(array $rows, bool $suppressHints = false, ?array $user = null): void
 {
     ?>
     <div class="status-list">
@@ -283,8 +284,16 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false)
                 <?php
                 if ($state === 'legacy') { ?><p class="status-action"><?php echo h(__t('system_status.run_legacy_hint')); ?></p><?php
                 } elseif (!$suppressHints && $state !== 'ok') {
-                    $actionHint = integration_action_hint($entry['source']);
+                    // Yellow on time is the run's own outcome, not a stuck task.
+                    // An entry without the flag (no snapshot) keeps the old hint.
+                    $openPoints = $state === 'warning' && !($entry['report_overdue'] ?? true);
+                    $actionHint = integration_action_hint($entry['source'], $openPoints);
                     if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php }
+                    if ($openPoints && $entry['source'] === VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC) {
+                        ?><p><a href="<?php echo h(help_url('system-status', 'help-status-device-causes')); ?>"><?php echo h(__t('system_status.device_sync_causes_help')); ?></a></p><?php
+                    } elseif ($openPoints && (string) ($row['last_error_category'] ?? '') === VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT && $user !== null && can('system.config', $user)) {
+                        ?><p><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG)); ?>"><?php echo h(__t('settings.retire_threshold_title')); ?></a></p><?php
+                    }
                 } ?>
                 <?php if ($errorLabel !== '') { ?><p class="alert-inline"><?php echo h($errorLabel); ?></p><?php } ?>
                 <?php if ($isAutoimporter && !$suppressHints) {

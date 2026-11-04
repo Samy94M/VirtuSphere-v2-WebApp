@@ -168,6 +168,10 @@ return [
     'source_deploy_worker' => 'Bereitstellungsdienst (Portal)',
     'action_device_sync' => 'Prüfen Sie auf dem MECM-Server die Aufgabenplanung: Der Task „VirtuSphere MECM Devices Sync“ muss laufen. Hängt er, beenden Sie ihn zuerst und starten ihn danach erneut.',
     'action_packages_sync' => 'Prüfen Sie auf dem MECM-Server die Aufgabenplanung: Der Task „VirtuSphere MECM Packages Sync“ muss laufen. Hängt er, beenden Sie ihn zuerst und starten ihn danach erneut.',
+    // Pünktlich gemeldeter Lauf mit offenen Punkten: der Task läuft, ein Neustart hilft nicht.
+    'action_device_sync_open_points' => 'Der Task läuft und meldet pünktlich; ein Neustart löst diese Punkte nicht. Welche VMs betroffen sind und warum, nennen „Technische Details“ und der Befund „Wartet auf MECM“ an der VM. Konflikte bei Name, MAC oder MECM-Gerät entscheiden Sie von Hand in der MECM-Konsole.',
+    'action_packages_sync_open_points' => 'Der Task läuft und meldet pünktlich; ein Neustart behebt das nicht. Der letzte Lauf hat den Katalog nicht übernommen, den Grund nennt die Meldung darunter. Fehlt die Quelle, prüfen Sie in der MECM-Konsole den Collections-Ordner VirtuSphere_Applications; wurde der Katalog abgelehnt, die Paket-Sync-Schutzschwelle.',
+    'device_sync_causes_help' => 'Hilfe zu den Ursachen je VM',
     'action_autoimporter' => 'Letzten Abschluss und Autoimporter-Tageslog prüfen. Eine offene DP-Verteilung kann trotz laufender Aufgabe bestehen; ein Neustart behebt sie nicht. Fehlen neue Logeinträge, die Aufgabe „VirtuSphere MECM Package Import“ auf dem MECM-Server prüfen.',
     'action_maintenance_worker' => 'Interner Wartungsdienst läuft nicht: auf dem Portal-Server „docker compose ps“ prüfen und den Dienst maintenance-worker neu starten.',
     // Ohne diesen Dienst bleibt jeder Auftrag auf „Wartend" stehen, auch der

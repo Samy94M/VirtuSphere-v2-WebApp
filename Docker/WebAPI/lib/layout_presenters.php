@@ -347,11 +347,12 @@ function integration_source_label(string $source): string
     };
 }
 
-function integration_action_hint(string $source): string
+// $openPoints: reported on time, the run itself had open points; Task Scheduler is not the cause.
+function integration_action_hint(string $source, bool $openPoints = false): string
 {
     return match ($source) {
-        VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => __t('system_status.action_device_sync'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => __t('system_status.action_packages_sync'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => $openPoints ? __t('system_status.action_device_sync_open_points') : __t('system_status.action_device_sync'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => $openPoints ? __t('system_status.action_packages_sync_open_points') : __t('system_status.action_packages_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.action_autoimporter'),
         VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.action_maintenance_worker'),
         VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER => __t('system_status.action_deploy_worker'),

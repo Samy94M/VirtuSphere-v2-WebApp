@@ -1499,7 +1499,13 @@ zu dokumentieren; keine pauschale Löschung des Trackingbaums als Reparatur.
 Erste Anlaufstelle ist immer der **Systemstatus** (Klartext-Ampel
 je Quelle mit Handlungsanweisung). Die Handlungsanweisung ist eine
 Reparaturanweisung und steht deshalb nur an einer Zeile, die nicht `ok` ist;
-verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. Hat sich
+verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. An einer
+Sync-Aufgabe folgt sie der Ursache von „Verzögert“: Ist die Meldung überfällig,
+nennt sie die Aufgabenplanung. Meldet die Aufgabe pünktlich und endet nur ihr
+Lauf mit offenen Punkten, sagt sie, dass ein Neustart nicht hilft, und zeigt,
+wo die Punkte stehen; beim Devices Sync sind das die Ursache je VM und die
+Handentscheidung aus den Fallzeilen unter „Edge Cases der Server-Skripte“
+(etwa `mac_conflict`, `resource_mac_conflict`). Hat sich
 noch nie eine Sync-Quelle gemeldet (Gruppe steht komplett auf „Noch keine
 Daten"), entfallen die Zeilenhinweise ganz: es gibt keine Aufgabe, die man neu
 starten könnte. Der Abschnitt nennt dann einmal den Einrichtungsweg (Skripte auf
