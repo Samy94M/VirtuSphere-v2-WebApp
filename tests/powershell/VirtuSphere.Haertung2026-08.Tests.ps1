@@ -461,7 +461,7 @@ Describe 'E4 - Beide Installer melden Erfolg ohne auf das Ergebnis zu schauen' -
         $ast = Get-PsAst -Path $script:InstMecm
         $ifs = Find-Ast -Ast $ast `
             -Type ([System.Management.Automation.Language.IfStatementAst]) `
-            -Where { $_.Extent.Text -match 'Erstinstallation abgeschlossen' }
+            -Where { $_.Extent.Text -match [regex]::Escape("'{0} abgeschlossen.'") }
         $ifs.Count | Should -BeGreaterThan 0 -Because 'sonst prueft dieser Test die falsche Stelle'
         $ifs[0].Clauses[0].Item1.Extent.Text | Should -Match '(?i)blocker'
     }

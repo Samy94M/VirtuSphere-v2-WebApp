@@ -13,6 +13,7 @@ require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/defaults.php'; // mission_name_is_template(), the one template predicate (MA-13)
 require_once __DIR__ . '/lib/status.php';
 require_once __DIR__ . '/lib/repo/mecm_provenance.php';
+require_once __DIR__ . '/lib/vm_disk_layout.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -55,6 +56,21 @@ function machine_client_interfaces(mysqli $db, int $vmId): array
     $stmt->execute();
 
     return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
+
+/**
+ * DN1: the client's disk layout, built from the same rows in the same id order
+ * as the serverlist (vm_disk_client_layout()). Read-only like the rest of
+ * getDeviceInfos; the current portal names, not a rollout snapshot, because a
+ * label is display data and the client confirms each match by SCSI target and size.
+ */
+function machine_client_disks(mysqli $db, int $vmId): array
+{
+    $stmt = $db->prepare('SELECT disk_name, disk_size, disk_type FROM deploy_disks WHERE vm_id = ? ORDER BY id');
+    $stmt->bind_param('i', $vmId);
+    $stmt->execute();
+
+    return vm_disk_client_layout(['disks' => $stmt->get_result()->fetch_all(MYSQLI_ASSOC)]);
 }
 
 function machine_vm_mission(mysqli $db, int $missionId): ?array
@@ -108,12 +124,13 @@ try {
         // Read only (ADR-0019/E3): downloading configuration proves neither
         // that the registry write finished nor that the client can acknowledge
         // it. The explicit POST to mecm_client_ack.php owns the 5/5 transition.
-        // Still the exact minimal contract: the same five base fields plus the
-        // interfaces, with `vm_hostname` aliased onto the frozen rollout
-        // snapshot (Etappe 14D), the rollout fence and the two ADR-0044 report
-        // generations. The client
-        // renames Windows to what it reads here, so it has to read the name this
-        // rollout was handed, not a desired value that may have moved since.
+        // Still the exact minimal contract (MachineApiWireTest pins it): the five
+        // base fields vm_name, vm_hostname, vm_domain, vm_os and mission_id, the
+        // rollout fence and the two ADR-0044 report generations from the query
+        // below, then `interfaces` and, additively since DN1, `disks`.
+        // `vm_hostname` is aliased onto the frozen rollout snapshot (Etappe 14D):
+        // the client renames Windows to what it reads here, so it has to read the
+        // name this rollout was handed, not a desired value that may have moved since.
         $stmt = $connection->prepare('SELECT v.vm_name, v.mecm_rollout_hostname AS vm_hostname, v.vm_domain, v.vm_os, v.mission_id,
             v.mecm_rollout_revision AS rollout_revision,
             LOWER(BIN_TO_UUID(v.package_report_generation)) AS device_generation,
@@ -124,6 +141,9 @@ try {
         $data = $stmt->get_result()->fetch_assoc() ?: [];
         if ($data !== []) {
             $data['interfaces'] = machine_client_interfaces($connection, $vmId);
+            // Additive (DN1): read only by client_VMDisksOnline; client_getInfos
+            // persists its whitelist and ignores the field.
+            $data['disks'] = machine_client_disks($connection, $vmId);
         }
 
         machine_api_json($data);

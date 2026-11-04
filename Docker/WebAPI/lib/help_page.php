@@ -30,6 +30,9 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     'help-status-deploy' => 'system-status',
     'help-status-directory' => 'system-status',
     'help-status-mecm' => 'system-status',
+    // The per-cause steps of the device sync. A punctual run with open points
+    // links here from its card instead of repeating the cause list there.
+    'help-status-device-causes' => 'system-status',
     'help-status-esxi' => 'system-status',
     // The deploy service is explained ONCE, in the deploy help, although its
     // card lives on System status and its expectation sentence on the deploy

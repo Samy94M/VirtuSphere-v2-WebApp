@@ -150,28 +150,27 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
     $user = $stmt->get_result()->fetch_assoc();
 
     if ($user && !empty($user['locked_until']) && strtotime((string) $user['locked_until']) > time()) {
+        // Same comparison cost as every other answer; the result is irrelevant.
+        auth_password_verify_constant_cost($password, null);
         auth_finish_failed_login($db, $attemptId, $username, $source);
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
             'reason' => VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_LOCKED,
             ...virtusphere_login_name_audit_context($username, true),
         ], (int) $user['id']);
-        return ['ok' => false, 'reason' => 'locked'];
+        return ['ok' => false, 'reason' => 'rate_limited'];
     }
 
-    if ($user) {
-        $valid = (int) $user['is_active'] === 1
-            && is_string($user['password'])
-            && password_verify($password, $user['password']);
-    } else {
-        // Burn a hash comparison for unknown local usernames too.
-        password_verify($password, '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsA.ztMG');
-        $valid = false;
-    }
+    // One full-cost comparison for known, deactivated and unknown names (C-04).
+    $passwordMatches = auth_password_verify_constant_cost($password, $user['password'] ?? null);
+    $valid = $user && (int) $user['is_active'] === 1 && $passwordMatches;
 
     if (!$valid) {
         auth_finish_failed_login($db, $attemptId, $username, $source);
-        if ($user && auth_failed_attempt_count($db, $username, $source) >= VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT) {
+        // Counted for every name: the failure that trips the limit answers alike
+        // whether or not the account exists; the audit row keeps the cause.
+        $limitReached = auth_failed_attempt_count($db, $username, $source) >= VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT;
+        if ($user && $limitReached) {
             $lockSql = auth_user_source_schema_available($db)
                 ? 'UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ? AND auth_source = ?'
                 : 'UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ?';
@@ -188,7 +187,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
                 'duration_minutes' => VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES,
                 'failure_count' => VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT,
             ], $userId);
-            return ['ok' => false, 'reason' => 'locked'];
+            return ['ok' => false, 'reason' => 'rate_limited'];
         }
 
         $reason = $user && (int) $user['is_active'] !== 1 ? VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_DEACTIVATED : VIRTUSPHERE_AUDIT_LOGIN_REASON_INVALID_CREDENTIALS;
@@ -198,7 +197,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
             ...virtusphere_login_name_audit_context($username, is_array($user)),
         ], $user ? (int) $user['id'] : null);
 
-        return ['ok' => false, 'reason' => 'invalid'];
+        return ['ok' => false, 'reason' => $limitReached ? 'rate_limited' : 'invalid'];
     }
 
     repo_transaction($db, function () use ($db, $attemptId, $username, $source, $user, $password): void {

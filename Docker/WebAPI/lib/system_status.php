@@ -5,7 +5,37 @@ declare(strict_types=1);
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/directory_constants.php';
+require_once __DIR__ . '/status_evidence.php';
 require_once __DIR__ . '/system_status_urls.php';
+
+// The package codes the autoimporter writes into its cause line, in the order of
+// `$script:VsRunCauseVocabulary` (Powershell-MECM/mecm/VirtuSphere-Common.ps1),
+// which owns the code set. The System status card and the help list both read
+// this one list; AutoimporterStatusPresentationTest derives the package codes
+// from the PowerShell vocabulary and fails when this list, a card label or a
+// help entry in either locale is missing one. A `package_content_` prefix makes
+// a code a distribution note, everything else is a configuration finding.
+const VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES = [
+    'package_config_invalid',
+    'package_content_failed',
+    'package_content_in_progress',
+    'package_content_unknown',
+    'package_content_request_failed',
+    'package_content_group_empty',
+    'package_definition_drift',
+    'package_source_missing',
+    'package_deploy_failed',
+    'package_cleanup_failed',
+    'package_folder_failed',
+    'package_template_failed',
+];
+
+// How often a quiet autoimporter run rereads the distribution state of packages
+// with a note (AV2). The PowerShell side owns the value
+// (`$script:VsDistributionHintRefreshSeconds` in VirtuSphere-Common.ps1); the
+// card and the help state it from here, and AutoimporterStatusPresentationTest
+// fails when the two differ.
+const VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS = 1800;
 
 /**
  * How many mission/VM deviations the scan found, or null when it could not run.
@@ -60,7 +90,7 @@ function system_status_legend_items(string $kind): void
     // enforces them, so the sentence cannot keep its number after the constant
     // moves (CLAUDE.md bounds rule).
     $params = [
-        'legend_warning' => ['multiplier' => VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER],
+        'legend_warning' => ['multiplier' => VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER, 'factor' => VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR],
         'esxi_legend_danger' => ['streak' => VIRTUSPHERE_ESXI_INVENTORY_FAILURE_STREAK_DANGER],
         'esxi_legend_stale' => ['days' => VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS, 'factor' => VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR],
         'ansible_legend_stale' => ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS],

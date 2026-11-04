@@ -49,7 +49,7 @@ flowchart TD
   QE -->|ja| R
   QE -->|nein| DUE{"Eine VM fällig? Gesperrte VMs nur bei geänderter Portalzeile oder nach dem Wiederholungstakt $script:VsDeviceRecheckSeconds"}
   DUE -->|nein| DUE1["Keine MECM-Abfrage; die Ursachen der gesperrten VMs gehen in den Laufbericht"] --> R
-  DUE -->|ja| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; je Task Sequence eine Collection anlegen"]
+  DUE -->|ja| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; ein Gerät gilt unter jeder seiner MACs, auch wenn MECM sie als einen Text liefert; je Task Sequence eine Collection anlegen"]
   M --> V
   subgraph JE["Je VM in der Warteschlange"]
     V{"Mission und genau eine Netzwerkkarte auf der WDS-Portgruppe mit MAC?"}
@@ -113,7 +113,7 @@ flowchart TD
 
 ## Package Import (Autoimporter)
 
-Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type und Verteilung, mit `generateOwnDeviceColletion` auch Collection und Deployments. Gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben oder der letzte Lauf offene Punkte hatte.
+Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type, mit `generateOwnDeviceColletion` auch Collection und Deployments. Die Verteilung an die DPs übernimmt MECM: Der Autoimporter fordert sie je neuem Dateimanifest höchstens einmal an und zeigt den Stand nur an (AV2). Gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben oder der letzte Lauf offene Punkte hatte.
 
 ```mermaid
 flowchart TD
@@ -125,7 +125,7 @@ flowchart TD
   M --> H["Prüfsumme über files und Package_Vorlage bilden"]
   H -.->|Datei ändert sich währenddessen| HX["Lauf „warning“ (source_changing), Dateistand verwerfen, MECM-Verbindung bleibt, nächster Lauf prüft erneut"]
   H --> C{"Dateien geändert oder offene Punkte im letzten Lauf?"}
-  C -->|nein| C1["Ergebnis „ok“ ohne Scan (unverändert)"] --> R
+  C -->|nein| C1["Ergebnis „ok“ ohne Scan (unverändert); Verteilhinweise des letzten Scans weiter melden, ihren Stand höchstens alle 30 Minuten lesend auffrischen"] --> R
   C -->|ja| B{"Ordner files vorhanden?"}
   B -->|nein| B1["Warnung source_missing"] --> R
   B -->|ja| RC["Alle config.json lesen (ungültige sind offene Punkte), je Produkt die höchste Version bestimmen"]
@@ -140,15 +140,17 @@ flowchart TD
     A1 -.->|Deployment Type scheitert| A2["Application wieder entfernen; der ganze Lauf endet mit „fail“"]
     A -->|ja| DT{"Genau ein Deployment Type, Identität lesbar?"}
     DT -->|nein| DT1["Paket übersprungen, offener Punkt"]
-    DT -->|ja| CR{"Dateien anders als beim letzten Auftrag, oder noch keiner?"}
-    CR -->|ja| CR1["Erstverteilung an die DP-Gruppe oder neue Contentversion anfordern"] --> TR
-    CR -->|nein| TR["Auftrag binden, Verteilung verfolgen; offen oder fehlerhaft ist ein offener Punkt"]
+    DT -->|ja| FA{"Gespeicherter Auftrag nennt eine andere Identität (Application neu angelegt), und sie hat weder VirtuSphere-Marker noch liegt sie in VirtuSphere_Applications?"}
+    FA -->|ja, fremd| FA1["Paket übersprungen: kein Content, kein Deployment, offener Punkt package_definition_drift"]
+    FA -->|nein| CR{"Neues Dateimanifest, oder noch kein von MECM angenommener Auftrag?"}
+    CR -->|ja| CR1["Höchstens ein Auftrag je Manifest: Erstverteilung an die DP-Gruppe oder neue Contentversion; nicht angenommen oder keine DP-Gruppe: offener Punkt package_content_request_failed"] --> TR
+    CR -->|nein| TR["Verteilstand nur lesen: Fehler oder laufende Kopie auf DPs ist ein Hinweis, kein offener Punkt; DPs sperren nichts"]
     TR --> CO["Nur mit generateOwnDeviceColletion: Collection Name-Version und Deployment „Erforderlich“ anlegen, bei DeployTo zusätzlich „Verfügbar“; Fehlendes nachziehen. Ohne das Feld entsteht keine Collection, und das Paket fehlt im Portalkatalog, weil der Packages Sync nur Collections liest"]
     CO --> RO{"removeOldVersion und höchste Version?"}
-    RO -->|ja| RO1["Bereinigungsplan zweimal lesen; bereit: Deployments, Applications und Collections älterer Versionen löschen; gesperrt: offener Punkt"]
+    RO -->|ja| RO1["Bereinigungsplan zweimal lesen; bereit (Ersatzauftrag angenommen, Verteilung begonnen, Deployment geprüft; DP-Stand egal): Deployments, Applications und Collections älterer Versionen löschen; gesperrt: offener Punkt"]
   end
   RO -->|nein| OP
-  RO1 --> OP{"Lauf ohne offene Punkte?"}
+  RO1 --> OP{"Lauf ohne offene Punkte? Verteilhinweise zählen nicht"}
   OP -->|ja| OP1["Dateistand merken: der nächste Lauf ohne Änderung bleibt ruhig"] --> R
   OP -->|nein| R["„completed“ melden (Ordner, angelegt, entfernt, offene Punkte; mit offenen Punkten „warning“); Pause = Takt (Standard 60 s)"]
   R -.->|nächster Lauf| S

@@ -58,6 +58,10 @@ final class AuthAuditTest extends TestCase
         $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND log_message LIKE '%" . self::PREFIX . "%'");
         // The rate-limit onset line carries neither username nor user id.
         $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND log_message LIKE 'ip rate limited%'");
+        // F1: a rejected sign-in for a name without an account keeps only its
+        // length, so the prefix match above cannot find it; this test's client
+        // IP is its own.
+        $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND ip = '" . self::CLIENT_IP . "'");
         if ($this->userId > 0) {
             $this->db->query('DELETE FROM deploy_logs WHERE user_id = ' . $this->userId);
         }
@@ -179,6 +183,31 @@ final class AuthAuditTest extends TestCase
         $messages = array_column($this->authLogsForUser(), 'log_message');
         $locked = array_filter($messages, static fn (string $m): bool => str_contains($m, 'account locked'));
         self::assertNotEmpty($locked, 'the lockout transition is not audited');
+    }
+
+    /**
+     * SEC1 (C-04): the failure that trips the per-name limit used to answer
+     * `locked` for an existing account and `invalid` for an unknown name, so
+     * five guesses told an anonymous caller which names exist. Every attempt
+     * now answers alike for both, and the next one (account locked or name
+     * over budget) does too. The audit row still records the lockout.
+     */
+    public function testTheLimitAnswersAlikeForAKnownAndAnUnknownName(): void
+    {
+        $unknown = self::PREFIX . 'nobody_' . bin2hex(random_bytes(3));
+        for ($i = 1; $i <= VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT + 1; $i++) {
+            $known = login($this->userName, 'wrong-password', $this->db)['reason'] ?? '';
+            $other = login($unknown, 'wrong-password', $this->db)['reason'] ?? '';
+            self::assertSame($other, $known, 'attempt ' . $i . ' tells a known name from an unknown one');
+            $expected = $i < VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT ? 'invalid' : 'rate_limited';
+            self::assertSame($expected, $known, 'attempt ' . $i);
+        }
+
+        $messages = array_column($this->authLogsForUser(), 'log_message');
+        self::assertNotEmpty(
+            array_filter($messages, static fn (string $m): bool => str_contains($m, 'account locked')),
+            'the lockout is still audited with its exact cause'
+        );
     }
 
     public function testChangingOwnPasswordIsAudited(): void

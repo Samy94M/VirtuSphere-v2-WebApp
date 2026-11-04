@@ -17,3 +17,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 ## A25 The reviewed target PNGs under tests/e2e/visual/baselines/ are the pass criterion at zero toler
 
 - The reviewed target PNGs under `tests/e2e/visual/baselines/` are the pass criterion at zero tolerance, and `scripts/update-visual-baselines.ps1` is their only writer: a person invokes it with a reason, it refuses on a runner mismatch, and every lane clears its enabling variables. A mask covers only a control the portal does not style and must still match something; a capture that mismatches is retried within the contract's attempt bound and the retry is reported, never silent.
+
+## A26 The QA stack and phpunit-full read the volume qa-repo, a verified copy of the checkout, never
+
+- The QA stack and `phpunit-full` read the volume `qa-repo`, a verified copy of the checkout, never a bind mount of the working tree (OV1; over 9p on Docker Desktop a full read took 40 to 50 s against 0.25 s and every archived `errno=12` came from it). `qa-stack` fills it first through the one-shot `qa-source` service from the runner's selection (git tracked plus untracked-not-ignored, plus `Docker/WebAPI/vendor`) and compares every file by SHA-256; a difference is `infrastructure_error`. A gate meeting a stack it did not build in the same run compares the checkout with `qa-repo/meta/` before it tests or captures. A new QA service or base-file bind must mount from `qa-repo`; the only working-tree bind in the QA project is the read-only source of `qa-source`.

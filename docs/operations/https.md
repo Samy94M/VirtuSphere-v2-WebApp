@@ -46,6 +46,11 @@ Neues Zertifikat einfach über denselben Upload installieren (Überschreiben
 wird bestätigt). Ein aktiver HTTPS-Listener übernimmt es beim nächsten
 Watcher-Durchlauf; kein Container-Neustart nötig.
 
+Dieselbe Aktion schreibt auch die generierte Konfiguration neu. Ein Update,
+das die nginx-Vorlage ändert (Body-Grenze, Sperrregeln, Anmeldedrossel), wirkt
+auf HTTPS deshalb erst nach einem erneuten Hochladen des aktuellen Zertifikats;
+HTTP nutzt sofort den neuen Stand ([Update-Runbook](update.md), Schritt 5).
+
 ## Störungsbilder
 
 - **Portal wirkt nach Redirect-Aktivierung unerreichbar** (Browser vertraut

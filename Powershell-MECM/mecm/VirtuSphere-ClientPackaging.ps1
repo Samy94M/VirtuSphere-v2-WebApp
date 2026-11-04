@@ -280,6 +280,16 @@ function Get-VsDetectionClausePropertyType {
     }
 }
 
+# MC01-Sperre des Client-Apply: solange der Graph einen deployable_entry traegt,
+# fehlen MC02-Preflight und geordneter Dependency-Cutover (MC03/MC07), und ein
+# Apply koennte aus Alt- und Zielgraph einen Zyklus bauen. Einzige Quelle der
+# Sperre: install-VirtuSphere-Clients.ps1 bricht daran ab, und der
+# Serverinstaller empfiehlt den Client-Schritt nur, wenn sie nicht greift.
+function Test-VsClientApplyBlocked {
+    param([Parameter(Mandatory)][object[]]$Specs)
+    @($Specs | Where-Object { $_.PSObject.Properties['Role'] -and $_.Role -eq 'deployable_entry' }).Count -gt 0
+}
+
 function Assert-VsClientAppSpecGraph {
     param([Parameter(Mandatory)][object[]]$Specs)
     $byName = @{}

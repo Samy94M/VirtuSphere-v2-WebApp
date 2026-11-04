@@ -11,8 +11,18 @@
 # - ssl/ und virtusphere-conf.d/ sind Named Volumes, die php und webserver
 #   teilen: ein HTTPS-Zertifikats-Test im QA-Stack darf niemals die
 #   nginx-Konfiguration des Dev-Stacks anfassen.
-# - Der Code-Mount (Docker/WebAPI, Ansible) bleibt der Arbeitsbaum, denn genau
-#   dieser Stand soll bewiesen werden.
+# - Code, Playbooks, LDAP-Fixture und MySQL-Init kommen aus dem Volume qa-repo,
+#   nicht per Bind-Mount aus dem Arbeitsbaum (OV1, 03.11.2026; vorher "der Code-Mount
+#   bleibt der Arbeitsbaum"). Auf Docker Desktop ist der Bind-Mount eine
+#   9p-Freigabe des Windows-Laufwerks: alle Repo-Dateien lesen dauerte dort
+#   40 bis 50 s statt 0,25 s, die Unit-Suite 884 statt 119 s, und jedes
+#   archivierte errno=12 (ENOMEM bei read()) lag auf diesem Weg (KB2). Das
+#   Gate qa-stack fuellt qa-repo vor dem Start ueber den Einmal-Dienst
+#   qa-source mit genau dem Pruefstand (git: getrackt plus nicht ignoriert,
+#   dazu der Composer-Baum Docker/WebAPI/vendor) und vergleicht jede Datei per
+#   SHA-256 mit dem Checkout. Bewiesen wird damit der Stand beim Start von
+#   qa-stack; eine spaetere Aenderung im Arbeitsbaum erreicht den Stack erst
+#   mit einem neuen qa-stack.
 # - Ports/Namen und die gesamte App-Umgebung kommen ausschliesslich aus qa.env.
 # - Laufzeitdateien und App-Logs teilen keine Hostdaten mit dem Dev-Stack.
 # - restart "no": ein crashender Service soll im QA-Lauf sichtbar rot sein,
@@ -30,13 +40,52 @@ x-qa-logs: &qa-logs
   target: /var/www/html/logs
   volume:
     nocopy: true
+# Der Pruefstand aus qa-repo ersetzt jeden Bind-Mount aus dem Arbeitsbaum:
+# Code, Playbooks, LDAP-Fixture und das MySQL-Init-Schema. Compose fuehrt
+# Volumes nach dem Zielpfad zusammen. subpath verlangt, dass der Ordner im
+# Volume schon existiert, deshalb fuellt qa-stack qa-repo vor jedem Start.
+x-qa-code: &qa-code
+  type: volume
+  source: qa-repo
+  target: /var/www/html
+  volume:
+    nocopy: true
+    subpath: tree/Docker/WebAPI
+x-qa-ansible: &qa-ansible
+  type: volume
+  source: qa-repo
+  target: /var/www/ansible-src
+  read_only: true
+  volume:
+    nocopy: true
+    subpath: tree/Ansible
+x-qa-ldap-fixtures: &qa-ldap-fixtures
+  type: volume
+  source: qa-repo
+  target: /fixtures/ldap
+  read_only: true
+  volume:
+    nocopy: true
+    subpath: tree/Docker/WebAPI/tests/fixtures/ldap
+x-qa-mysql-init: &qa-mysql-init
+  type: volume
+  source: qa-repo
+  target: /docker-entrypoint-initdb.d
+  read_only: true
+  volume:
+    nocopy: true
+    subpath: tree/Docker/mysql/mysql-init
 services:
   webserver:
     # Kein env_file, wie im Hauptcompose: das nginx-Image liest keinen dieser
     # Werte, und die Ports kommen aus der Host-seitigen Interpolation von qa.env
     # (--env-file), nicht aus der Container-Umgebung.
     volumes:
-      - qa-ssl:/etc/nginx/ssl
+      # Read-only like the base file (SEC1, C-05a); these entries replace the
+      # base mounts for the same targets, so they must repeat read-only.
+      - <<: *qa-code
+        read_only: true
+      - qa-ssl:/etc/nginx/ssl:ro
       - qa-conf:/etc/nginx/virtusphere-conf.d
       - *qa-runtime
       - *qa-logs
@@ -44,6 +93,8 @@ services:
 
   php:
     volumes:
+      - *qa-code
+      - *qa-ansible
       - qa-ssl:/etc/nginx/ssl
       - qa-conf:/etc/nginx/virtusphere-conf.d
       - *qa-runtime
@@ -65,12 +116,15 @@ services:
 
   deploy-worker:
     volumes:
+      - *qa-code
+      - *qa-ansible
       - *qa-runtime
       - *qa-logs
     restart: "no"
 
   maintenance-worker:
     volumes:
+      - *qa-code
       - *qa-runtime
       - *qa-logs
     restart: "no"
@@ -78,6 +132,43 @@ services:
   mysql:
     volumes:
       - qa-mysql-data:/var/lib/mysql
+      - *qa-mysql-init
+    restart: "no"
+
+  # Einmal-Dienst des Gates qa-stack, nie Teil von up: leert qa-repo, kopiert
+  # die Dateiliste des Runners aus dem Checkout hinein und schreibt die
+  # SHA-256-Liste des Volumes zurueck, die der Runner mit dem Checkout
+  # vergleicht. Ohne Netz, Checkout nur lesend; /qa-evidence haengt der Runner
+  # beim run an (Laufverzeichnis mit Dateiliste und Ergebnis).
+  qa-source:
+    image: virtusphere-php:8.4-runtime
+    pull_policy: never
+    profiles: ["qa-source"]
+    entrypoint: ["sh", "/qa-source/Docker/qa/qa-source-sync.sh"]
+    network_mode: none
+    volumes:
+      - type: bind
+        source: .
+        target: /qa-source
+        read_only: true
+      - type: volume
+        source: qa-repo
+        target: /qa-repo
+        volume:
+          nocopy: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    # tar stellt als root Besitz und Modus der Quelle wieder her, und das Leeren
+    # muss fremde Besitzer (Linux-Runner) loeschen koennen.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
     restart: "no"
 
 # Hermetic LDAP-Fixture (Plan-Abschnitt 18.3, Etappe 7): eine gepinnte
@@ -86,7 +177,7 @@ services:
 # Referral, Monitor-Bind-Zaehler); die badcert-*-Dienste und ldap-blackhole
 # sind ein schlanker socat-TLS-/TCP-Stub, weil ein Zertifikatsfehler den
 # Handshake beendet, bevor je ein LDAP-PDU gesendet wird. Zertifikate/CAs in
-# Docker/WebAPI/tests/fixtures/ldap/ (README dort), Rollenlogik in
+# Docker/WebAPI/tests/fixtures/ldap/ (README dort, gelesen aus qa-repo), Rollenlogik in
 # Docker/ldap-fixture/entrypoint.sh. DirectoryLdapFixtureTest.php beweist
 # den nativen PHP/ext-ldap-Pfad dagegen; ausserhalb der Integrationslane
 # (keine dieser Hostnamen aufloesbar) skippt die Suite dynamisch.
@@ -97,7 +188,7 @@ services:
       FIXTURE_ROLE: dc
       CERT_NAME: root-a
     volumes:
-      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+      - *qa-ldap-fixtures
     networks:
       default:
         aliases:
@@ -117,7 +208,7 @@ services:
       FIXTURE_ROLE: dc
       CERT_NAME: dc2
     volumes:
-      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+      - *qa-ldap-fixtures
     networks:
       default:
         aliases:
@@ -137,7 +228,7 @@ services:
       FIXTURE_ROLE: tls-stub
       CERT_NAME: root-b
     volumes:
-      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+      - *qa-ldap-fixtures
     networks:
       default:
         aliases:
@@ -157,7 +248,7 @@ services:
       FIXTURE_ROLE: tls-stub
       CERT_NAME: expired
     volumes:
-      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+      - *qa-ldap-fixtures
     networks:
       default:
         aliases:
@@ -177,7 +268,7 @@ services:
       FIXTURE_ROLE: tls-stub
       CERT_NAME: wrongname
     volumes:
-      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+      - *qa-ldap-fixtures
     networks:
       default:
         aliases:
@@ -199,7 +290,7 @@ services:
       FIXTURE_ROLE: dc
       CERT_NAME: root-c
     volumes:
-      - ./Docker/WebAPI/tests/fixtures/ldap:/fixtures/ldap:ro
+      - *qa-ldap-fixtures
     networks:
       default:
         aliases:
@@ -230,6 +321,7 @@ services:
     restart: "no"
 
 volumes:
+  qa-repo:
   qa-mysql-data:
   qa-ssl:
   qa-conf:

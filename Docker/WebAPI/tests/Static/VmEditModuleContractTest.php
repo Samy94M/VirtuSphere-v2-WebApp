@@ -22,6 +22,9 @@ final class VmEditModuleContractTest extends TestCase
         'render_interface_row',
         'render_disk_row',
         'render_disk_type_hint',
+        'render_disk_label_hint',
+        'vm_disk_label_notice_text',
+        'render_disk_label_island',
         'render_interface_gateway_hint',
         'vm_field_error',
         'vm_guest_os_options_for_value',
@@ -101,6 +104,28 @@ final class VmEditModuleContractTest extends TestCase
         self::assertStringContainsString('layout_footer();', $source);
         self::assertStringNotContainsString("REQUEST_METHOD", $source);
         self::assertStringNotContainsString('<form', $source);
+    }
+
+    /**
+     * VE1: the timeline links the chronicle, and vm_history_url() refuses an
+     * unsaved VM (id 0). Unguarded, "VM hinzufügen" ended in the error renderer
+     * below the form. Every render call in lib/ must carry the saved-VM guard.
+     */
+    public function testTimelineRendersOnlyForASavedVm(): void
+    {
+        $calls = [];
+        foreach (glob(dirname(__DIR__, 2) . '/lib/*.php') ?: [] as $file) {
+            foreach (file($file) ?: [] as $number => $line) {
+                if (str_contains($line, 'render_vm_status_history(') && !str_contains($line, 'function render_vm_status_history(')) {
+                    $calls[basename($file) . ':' . ($number + 1)] = $line;
+                }
+            }
+        }
+
+        self::assertNotSame([], $calls);
+        foreach ($calls as $where => $line) {
+            self::assertStringContainsString('if ($vmId > 0)', $line, $where);
+        }
     }
 
     /** @param list<string> $values @return list<string> */

@@ -17,9 +17,9 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 |---|---|---|
 | Passwort-Policy konfigurierbar, Minimum serverseitig erzwungen | automatisiert | `PasswordPolicyTest`, `users.php`-Handler; E2E `crud-users.spec.js` (create/reset erzwingen Policy-Länge) |
 | Kein Klartext-Passwort in DB (password_hash/PASSWORD_DEFAULT) | automatisiert | `crud-users.spec.js` (Hash-Wechsel-Beweis), Repo-Grep-Verbot roher Passwortspalten (GROK Forbidden Patterns) |
-| Lockout: per-Benutzer-Sperre + IP-weite Drossel (15 min) | automatisiert | `AuthAuditTest` (Integration, login_attempt/ip_locked-Pfade); Entsperr-Flow E2E `crud-users.spec.js` clear_lock |
+| Lockout: per-Benutzer-Sperre + IP-weite Drossel (15 min) + nginx-Drossel nur auf `login.php` (5 r/s, Burst 20, SEC1) | automatisiert | `AuthAuditTest` (Integration, login_attempt/ip_locked-Pfade); `HttpsConfigTest` (Drossel in beiden nginx-Blöcken, nur Login); Entsperr-Flow E2E `crud-users.spec.js` clear_lock |
 | Erstanmeldung erzwingt Passwortwechsel | automatisiert | `crud-users.spec.js` (must_change_password nach create/reset) |
-| Generische Fehlermeldung bei Login-Fehlschlag (kein User-Enumeration-Orakel) | automatisiert | `AuthAuditTest` + `PhaseCContractTest` (generische Envelope) |
+| Generische Fehlermeldung bei Login-Fehlschlag (kein User-Enumeration-Orakel), auch beim Fehlversuch, der die Sperre auslöst, und bei gleicher Vergleichszeit (SEC1) | automatisiert | `AuthAuditTest` (`testTheLimitAnswersAlikeForAKnownAndAnUnknownName`), `AuthBlindHashTest` (Blind-Hash mit Kosten von `PASSWORD_DEFAULT`), `PhaseCContractTest` (generische Envelope) |
 | Credential-Rotation des kompromittierten Alt-Kontos (functions.psm1-Fund) | **offen (Go-live-Blocker)** | `docs/operations/go-live.md`; Historie dokumentiert in `.gitleaks.toml` |
 
 ## V3 Session-Management
