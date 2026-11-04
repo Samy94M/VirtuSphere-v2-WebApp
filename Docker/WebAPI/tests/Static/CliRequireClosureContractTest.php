@@ -69,6 +69,8 @@ final class CliRequireClosureContractTest extends TestCase
         // errors.php calls it inside `if (function_exists(...))`.
         'virtusphere_csp_nonce' => 'guarded by function_exists() in lib/errors.php',
         'virtusphere_start_session' => 'guarded by function_exists() in lib/auth.php; session_start_secure() has its own fallback when the portal bootstrap is absent',
+        // SEC2 (C-02): a flash creates the session the portal no longer opens for anonymous requests.
+        'virtusphere_create_session' => 'guarded by function_exists() in lib/layout_response.php; without the portal bootstrap flash_set() writes $_SESSION as before',
         // https_config.php short-circuits on `PHP_SAPI === 'cli' ||` first.
         'virtusphere_is_request_secure' => 'unreachable under CLI: https_redirect_if_required() returns on PHP_SAPI === cli',
         // deploy_parse_schedule() parses $_POST, so only a request can call it.

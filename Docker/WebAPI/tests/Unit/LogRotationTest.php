@@ -119,4 +119,29 @@ final class LogRotationTest extends TestCase
         self::assertSame(1, virtusphere_rotate_logs(100, 3, $this->dir), 'after the lock is released the rotation runs');
         self::assertFileExists($this->path('error.log.1'));
     }
+
+    /**
+     * SEC2 (C-06): the worker that rotates may change its uid between releases. A
+     * new lock file is shared like the logs (0666), and a read-only handle, the
+     * fallback for a lock file another uid left behind, still excludes a second
+     * rotation, because flock() does not need write access.
+     */
+    public function testTheLockSurvivesAnOwnerChange(): void
+    {
+        file_put_contents($this->path('error.log'), str_repeat('x', 200));
+        self::assertSame(1, virtusphere_rotate_logs(100, 3, $this->dir));
+        clearstatcache();
+        self::assertSame(0666, fileperms($this->path('.rotation.lock')) & 0777, 'a new lock file is shared like the logs');
+
+        file_put_contents($this->path('error.log'), str_repeat('x', 200));
+        $readOnly = fopen($this->path('.rotation.lock'), 'r');
+        self::assertIsResource($readOnly);
+        self::assertTrue(flock($readOnly, LOCK_EX));
+        try {
+            self::assertSame(0, virtusphere_rotate_logs(100, 3, $this->dir), 'a lock held through a read-only handle must read as idle');
+        } finally {
+            flock($readOnly, LOCK_UN);
+            fclose($readOnly);
+        }
+    }
 }

@@ -56,7 +56,10 @@ the wait does not come back and retry immediately.
 The authoritative restart state is local JSON below
 `WebAPI/var/deploy-supervisor`, which is part of the bind-mounted application
 tree. It is never stored in `/tmp`, because `/tmp` is tmpfs in this container.
-The directory is restricted to mode 0700 and its files to 0600. One separate
+The directory is restricted to mode 0700 and its files to 0600; since SEC2
+(C-06, 2026-11-04) the worker container runs as uid 33, so the directory belongs
+to uid 33, and a state left by an older root worker is unreadable until it is
+handed over (`docs/operations/update.md`, "Worker ohne root"). One separate
 close-on-exec lock file is held with nonblocking exclusive ownership for the
 supervisor lifetime; atomic JSON replacement never replaces that lock inode.
 The JSON has a fixed schema and byte bound. A corrupt, oversized, unreadable or

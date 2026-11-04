@@ -48,7 +48,9 @@ Worker vor der Migration).
 1. **Nichts im Projektordner mit `sudo` entpacken oder bearbeiten.** Der
    Projektordner gehört dem Betriebskonto. Wer dort mit `sudo` entpackt, legt
    Dateien als `root` an, und das nächste Update scheitert daran. Ausnahmen sind
-   nur `Docker/WebAPI/logs` (Modus 0777), `Docker/mysql/mysql-data` (gehört dem
+   nur `Docker/WebAPI/logs` (Modus 0777, Inhalt gehört uid 33),
+   `Docker/WebAPI/var` (nur wo der überwachte Prozess genutzt wird, gehört uid 33),
+   `Docker/mysql/mysql-data` (gehört dem
    MySQL-Container), `Docker/backups` (gehört `root`, weil der Backup-Zeitplan
    als `root` läuft) sowie `Docker/nginx/ssl` und `Docker/nginx/conf.d`, die bei
    eingerichtetem HTTPS uid 33 gehören ([HTTPS](https.md)). Diese Ordner nie dem
@@ -337,6 +339,25 @@ Bei Git **nicht** `deps/vendor.tar.gz` entpacken: `vendor/` ist versioniert und
 kommt mit dem Pull. Das Archiv würde den Git-Stand verändern und das nächste
 Update blockieren.
 
+**Worker ohne root (ab dem Release mit SEC2, C-06).** Beide Worker laufen ab
+diesem Stand als uid 33 (`user: "33:33"`), wie der PHP-Pool. Was ein älterer
+Worker als `root` angelegt hat, gehört weiter `root`. Solange die Worker gestoppt
+sind, einmal übertragen:
+
+```bash
+sudo chown -R 33:33 Docker/WebAPI/logs
+[ -d Docker/WebAPI/var ] && sudo chown -R 33:33 Docker/WebAPI/var
+sudo find Docker/WebAPI/logs Docker/WebAPI/var -not -user 33 2>/dev/null
+```
+
+Erwartet: die letzte Zeile gibt nichts aus. Für `logs/` ist der Schritt Hygiene:
+Die Logdateien sind ohnehin für alle schreibbar, und die Logrotation öffnet eine
+alte `root`-Sperrdatei auch lesend. Für `var/deploy-supervisor` ist er Pflicht,
+wo der überwachte Prozess (`docker-compose.supervisor.yml`) läuft: Sein Zustand
+ist `0700`/`0600`, ein Supervisor unter uid 33 kann einen `root`-Zustand nicht
+lesen und startet dann bewusst keinen Worker (ADR-0042, „fail closed“). Ohne
+`var/` ist nichts zu tun. Der Modus 0777 von `logs/` bleibt.
+
 ### 3.6 Neuen Stand prüfen
 
 ```bash
@@ -476,6 +497,14 @@ Erwartet: alle Dienste `healthy` auf den alten Image-IDs
 Der Projektordner steht danach ohne Branch auf dem alten Commit. Vor dem nächsten
 Update zuerst `git checkout main`, sonst lehnt `git pull --ff-only` in Schritt 3.5
 ab.
+
+Führt der Rückweg auf einen Stand mit Workern als `root` zurück (vor SEC2) und
+läuft dort der überwachte Prozess, vor dem Start `sudo chown -R 0:0
+Docker/WebAPI/var/deploy-supervisor`: Auch `root` ohne Capabilities liest den
+`0700`-Zustand von uid 33 nicht. In `logs/` zusätzlich `sudo chmod 0666
+Docker/WebAPI/logs/.rotation.lock`, falls die Datei nicht schon `0666` ist (der
+neue Stand setzt das bei der ersten Logrotation selbst, der alte öffnet sie nur
+schreibend).
 
 Bei einem Archiv statt `git checkout` das alte `source.tar.gz` (und sein
 `deps/vendor.tar.gz`) wie in Schritt 3.5 über den Projektordner entpacken und die

@@ -41,9 +41,15 @@ if [ ! -f .env ]; then
     replace_env_value APP_KEY "base64:$(random_b64)" .env
     replace_env_value DB_PASS "$(random_b64)" .env
     replace_env_value MYSQL_ROOT_PASSWORD "$(random_b64)" .env
-    echo "setup: created .env with fresh local secrets"
+    # The file holds the MySQL root password and APP_KEY (SEC2, C-10): readable
+    # by its owner only. docker compose runs as that owner and still reads it.
+    chmod 600 .env
+    echo "setup: created .env with fresh local secrets (mode 600)"
 else
     echo "setup: keeping existing .env"
+    if [ -n "$(find .env -perm /077 2>/dev/null)" ]; then
+        echo "setup: note: .env is readable by group or others; consider: chmod 600 .env" >&2
+    fi
 fi
 
 docker compose config --quiet
@@ -58,6 +64,13 @@ docker compose exec -T php php /var/www/html/lib/migrate.php
 
 if grep -q '^SEED_ADMIN_USER=' .env && grep -q '^SEED_ADMIN_PASSWORD=' .env; then
     docker compose exec -T php php /var/www/html/lib/seed.php
+    # The seeded password is one-time (must_change_password), but it would stay
+    # in .env, in the PHP container environment and in every config archive of
+    # scripts/backup.sh (SEC2, C-10). Remove it and recreate the stack (all of
+    # it: a recreated php alone answers 502 behind the old nginx).
+    sed -i '/^SEED_ADMIN_PASSWORD=/d' .env
+    docker compose up -d --force-recreate --wait
+    echo "setup: first admin seeded; SEED_ADMIN_PASSWORD removed from .env (change it at the first sign-in)"
 else
     echo "setup: SEED_ADMIN_USER and SEED_ADMIN_PASSWORD are not set; skipping first-admin seed"
 fi

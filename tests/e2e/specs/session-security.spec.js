@@ -38,11 +38,15 @@ test('login rotates the session id (fixation defence)', async ({ browser }) => {
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
-    // Visiting the login page first establishes an anonymous session cookie;
-    // its id is the one an attacker would try to fixate.
+    // The login page no longer opens a session (SEC2, C-02): an anonymous
+    // request leaves no session file behind. The id an attacker would try to
+    // fixate is therefore one they plant themselves.
     await page.goto('login.php');
-    const before = await sessionCookie(context);
-    expect(before, 'the login page sets a session cookie').not.toBeNull();
+    expect(await sessionCookie(context), 'the login page sets no session cookie').toBeNull();
+    const before = 'sec2fixation0123456789abcdef';
+    const origin = new URL(page.url()).origin;
+    await context.addCookies([{ name: 'PHPSESSID', value: before, url: origin + '/' }]);
+    expect(await sessionCookie(context), 'the planted id is in place').toBe(before);
 
     await page.locator('#username').fill(ADMIN.username);
     await page.locator('#password').fill(ADMIN.password);

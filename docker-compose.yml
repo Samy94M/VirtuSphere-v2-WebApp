@@ -165,6 +165,11 @@ services:
 
   deploy-worker:
     <<: *php-runtime
+    # Not root (SEC2, C-06): the worker needs no capability, so root would only
+    # add ownership of root's files. 33:33 is the FPM pool user, so logs/ keeps
+    # one owner. An update from a root worker needs `chown -R 33:33` on logs/
+    # (and var/, if it exists); docs/operations/update.md, "Worker ohne root".
+    user: "33:33"
     command: ["php", "/var/www/html/lib/deploy_worker.php", "--loop", "--sleep=5"]
     volumes:
       - ./Docker/WebAPI:/var/www/html
@@ -210,6 +215,8 @@ services:
 
   maintenance-worker:
     <<: *php-runtime
+    # Same reason and same owner as deploy-worker (SEC2, C-06).
+    user: "33:33"
     command: ["php", "/var/www/html/lib/maintenance_worker.php", "--loop", "--sleep=15"]
     volumes:
       - ./Docker/WebAPI:/var/www/html

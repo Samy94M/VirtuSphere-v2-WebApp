@@ -302,7 +302,10 @@ nicht in die Lebensentscheidung ein.
 Das Neustartfenster, der Zähler, die Abkühlfrist und der nächste Versuch liegen
 als begrenztes JSON unter `Docker/WebAPI/var/deploy-supervisor`. Dieses
 gitignorierte Verzeichnis liegt im bind-gemounteten WebAPI-Baum; `/tmp` ist
-tmpfs und eignet sich dafür nicht. Verzeichnis und Dateien sind restriktiv. Ein
+tmpfs und eignet sich dafür nicht. Verzeichnis und Dateien sind restriktiv und
+gehören uid 33, unter der beide Worker seit SEC2 laufen (ein Zustand eines
+älteren `root`-Workers wird beim Update übergeben, [Update](update.md),
+„Worker ohne root“). Ein
 separates exklusives, nicht blockierendes Lock bleibt über die gesamte Laufzeit
 auf demselben Inode, während JSON im selben Verzeichnis atomar ersetzt wird.
 Vor jedem Kindstart ist der vollständige Zustand dauerhaft reserviert. Schlägt

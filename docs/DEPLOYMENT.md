@@ -242,7 +242,7 @@ For a reported error page, use this order:
 
 Expected behavior:
 
-- A portal exception, warning promoted to `ErrorException`, or parse error returns HTTP 500 with a generic error page plus reference ID and writes the full detail to `error.log`. Set `VIRTUSPHERE_DEBUG=1` only in a local/debug environment to include message, file and stack details in the browser response.
+- A portal exception, warning promoted to `ErrorException`, or parse error returns HTTP 500 with a generic error page plus reference ID and writes the full detail to `error.log`. Set `VIRTUSPHERE_DEBUG=1` only in a local/debug environment to include message, file and stack details in the browser response; even then only a CLI run or a client on the loopback address gets them (SEC2, C-13), so a flag left on in production shows LAN clients nothing beyond the reference ID.
 - A CLI exception returns exit code `1`, writes STDERR, and writes `error.log`.
 - EnvBoot failures still render/log through the handler; database audit may be skipped because the same broken environment can block DB boot.
 - Real log files are ignored by Git. Only `.gitkeep` files keep the log directories present in fresh checkouts.
@@ -349,7 +349,7 @@ The check is non-mutating. It verifies EnvBoot, database connectivity, data pref
 docker compose exec -T php php /var/www/html/lib/migrate.php
 ```
 
-`Docker/scripts/setup.sh` wraps the local bootstrap flow: create log/data directories, create `.env` when missing with random local secrets from `openssl`, run compose validation, build/start containers, execute `migrate.php --check`, then apply migrations. It skips first-admin seeding unless `SEED_ADMIN_USER` and `SEED_ADMIN_PASSWORD` are set in `.env`.
+`Docker/scripts/setup.sh` wraps the local bootstrap flow: create log/data directories, create `.env` when missing with random local secrets from `openssl`, run compose validation, build/start containers, execute `migrate.php --check`, then apply migrations. It skips first-admin seeding unless `SEED_ADMIN_USER` and `SEED_ADMIN_PASSWORD` are set in `.env`; after seeding it removes `SEED_ADMIN_PASSWORD` from `.env` and recreates the stack, and a `.env` it creates gets mode 600 (SEC2, C-10).
 
 ## Health endpoint
 

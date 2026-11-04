@@ -62,6 +62,7 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 ## R15 Open a POST handler with portal_guard_post($connection, $user) instead of an inline csrf_verify
 
 - Open a POST handler with `portal_guard_post($connection, $user)` instead of an inline `csrf_verify()`; it runs the CSRF check and names the page in the audit. Keep the per-action permission gate local. `login.php`/`logout.php`/`session_ping.php` are the exempt exceptions. Enforced by `tests/Static/PortalPostGuardContractTest.php`.
+- An anonymous request never creates a session file (SEC2, C-02). The bootstrap's `virtusphere_start_session()` (reached by `session_start_secure()` and `current_user()`) only resumes a session whose cookie the request carries and discards one that holds no data; `virtusphere_create_session()` is the one creator, called by `login.php` after its token check, by `flash_set()` and by `logout.php`. The sign-in form therefore takes its CSRF token from `lib/login_csrf.php` (signed double submit: nonce cookie on `/portal/login.php` only, field = HMAC under a key derived from `APP_KEY`), never from `csrf_field()`; a failed attempt discards the session again. Pinned by `SessionHardeningContractTest::testAnonymousRequestsOpenNoSession`, `LoginCsrfTest` and `session-security.spec.js`.
 
 ## R16 The catalog status filter (os.php, packages.php, vlans.php) reads its tokens from VIRTUSPHERE_C
 
