@@ -72,7 +72,7 @@ test('RAM unit changes preserve MB and remain contained on narrow screens', asyn
   await value.fill('invalid');
   await unit.selectOption('mb');
   await expect(value).toHaveValue('invalid');
-  for (const width of [1280, 600, 360]) {
+  for (const width of [1600, 1280, 1200, 800, 600, 360]) {
     await page.setViewportSize({ width, height: 800 });
     const overflow = await page.locator('[data-ram-field]').evaluate((root) => {
       const bounds = root.getBoundingClientRect();
@@ -82,6 +82,10 @@ test('RAM unit changes preserve MB and remain contained on narrow screens', asyn
       });
     });
     expect(overflow).toBe(false);
+    // VE1: in a three- or four-track grid the value input once shrank to about
+    // 20px next to unit and preset; it has to stay wide enough to type into.
+    const valueWidth = await value.evaluate((input) => input.getBoundingClientRect().width);
+    expect(valueWidth, `RAM value input at ${width}px`).toBeGreaterThanOrEqual(64);
   }
   await expectReferenceIntegrity(page, 'RAM units');
 });

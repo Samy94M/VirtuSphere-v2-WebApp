@@ -103,6 +103,28 @@ final class VmEditModuleContractTest extends TestCase
         self::assertStringNotContainsString('<form', $source);
     }
 
+    /**
+     * VE1: the timeline links the chronicle, and vm_history_url() refuses an
+     * unsaved VM (id 0). Unguarded, "VM hinzufügen" ended in the error renderer
+     * below the form. Every render call in lib/ must carry the saved-VM guard.
+     */
+    public function testTimelineRendersOnlyForASavedVm(): void
+    {
+        $calls = [];
+        foreach (glob(dirname(__DIR__, 2) . '/lib/*.php') ?: [] as $file) {
+            foreach (file($file) ?: [] as $number => $line) {
+                if (str_contains($line, 'render_vm_status_history(') && !str_contains($line, 'function render_vm_status_history(')) {
+                    $calls[basename($file) . ':' . ($number + 1)] = $line;
+                }
+            }
+        }
+
+        self::assertNotSame([], $calls);
+        foreach ($calls as $where => $line) {
+            self::assertStringContainsString('if ($vmId > 0)', $line, $where);
+        }
+    }
+
     /** @param list<string> $values @return list<string> */
     private function sorted(array $values): array
     {

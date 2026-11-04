@@ -98,7 +98,7 @@ Das Seiteninventar liegt in `tests/e2e/lib/pages.js`. Eine Seite, die ohne Param
 | index/dashboard | Redirect je Auth-Zustand, Aggregate, Live-Deploy-Badge | `health-matrix.spec.js`, `session-security.spec.js` |
 | missions | CRUD, Template-Erkennung, Confirm-Zweige | `crud-mission.spec.js` |
 | mission_details | Bulk-Aktionen, Transfer-Export/-Import-Round-Trip | `mission-transfer.spec.js` |
-| vms / vm_edit | Bulk mit Confirm; dynamische Disk/NIC-Zeilen, vNIC-Enum, Overrides, Hotplug, Bearbeitungskonflikt | `crud-vm.spec.js` |
+| vms / vm_edit | Bulk mit Confirm; dynamische Disk/NIC-Zeilen, vNIC-Enum, Overrides, Hotplug, Bearbeitungskonflikt; „VM hinzufügen“ bis Seitenende wie „VM bearbeiten“, Geerbtes nur am Feld | `crud-vm.spec.js`, `vm-edit-layout.spec.js` |
 | deploy / deploy_log | Enqueue, Scheduling, Cancel (`data-confirm-action`), Retry inkl. partial-Zweig, Live-Status bis Terminal inkl. `partial` | `deploy-actions.spec.js` |
 | os / packages / vlans | Geteilter Statusfilter, Status-Normalisierung sichtbar, MECM-owned read-only (UI und POST) | `crud-catalog.spec.js` |
 | credentials | Nie Klartext-Rendering, Verbindungstest-Kategorien, Referenzschutz lokalisiert | `crud-credential.spec.js`, `crud-negative.spec.js` |

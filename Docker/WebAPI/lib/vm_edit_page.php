@@ -142,7 +142,6 @@ $vm ??= [];
 $canWrite = can('vms.write', $user);
 // AV-R12: the MECM state of this VM (two save buttons, or the single one).
 $mecmView = vm_mecm_save_view($connection, $vmId, $isTemplate, $vm);
-$effectiveValues = portal_vm_effective_values($mission, $vm);
 $selectedPackages = array_map(static fn (array $row): int => (int) ($row['id'] ?? $row['package_id'] ?? 0), $vm['packages'] ?? []);
 // Pickers exclude retired catalog entries but keep values this VM already
 // uses (retired entries render with a suffix, E3).
