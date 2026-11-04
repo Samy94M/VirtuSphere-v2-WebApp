@@ -70,7 +70,7 @@ flowchart TD
   CA -->|über Gefahrschwelle| RD
   CA -->|über Warnschwelle| YL["Verzögert (gelb)"]
   CA -->|frisch| CO{"Ergebnis?"}
-  CO -->|ok| GR["OK (grün)"]
+  CO -->|ok, auch mit Verteilhinweis| GR["OK (grün)"]
   CO -->|warning| YL
   CO -->|sonst| UK
   L -->|started| SZ{"Startzeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
@@ -85,6 +85,8 @@ flowchart TD
   LG -->|über Warnschwelle| YL
   LG -->|über Gefahrschwelle oder Status fail| RD
 ```
+
+Verteilhinweise des Package Import (`package_content_failed`, `package_content_in_progress`) erscheinen auf der Karte, ändern aber das Ergebnis nicht: Die Verteilung an die DPs ist Sache von MECM (AV2), ein Lauf mit nur solchen Hinweisen bleibt grün.
 
 Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt den Reporter gelb. Der letzte Site-Befund bleibt getrennt sichtbar, grau als „Veraltet“ und historisch markiert. Sein Alter behauptet keinen aktuellen kritischen MECM-Zustand. Dashboard und Systemstatus lesen beide Achsen aus demselben Snapshot.
 

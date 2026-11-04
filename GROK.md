@@ -114,21 +114,16 @@ See `docs/adr/README.md`, the sole ADR index. Read the ADR a contract cites.
   Activity is neutral and describes only the received run event, never process
   liveness or the severity of the previous result. Distribution findings carry
   the last completion timestamp and are not live DP telemetry. Missing or
-  truncated causes never prove complete distribution; open items never become
+  truncated hints never prove complete distribution; open items never become
   DP counts or ratios. Configuration and cleanup findings stay with the scan
   result. The existing machine report contract remains unchanged.
 
-- Autoimporter content admission and completion are separate: failed or pending
-  DP copies do not veto a changed source manifest. One acknowledged request is
-  issued per manifest; a bound pending request may be superseded by a new
-  manifest on the same exact targets. Unknown identities, unacknowledged
-  intents, target loss and removal states remain blocked. After a completed
-  request, additional current targets join the next request baseline.
-  Completion still requires the bound content ID and fresh successful copies on every previous
-  DP. The importer never removes offline DPs or automatically deletes old
-  applications. The owners are the content controller in
-  `mecm_autoimporter.ps1` and its shared evidence helpers in
-  `VirtuSphere-Common.ps1`.
+- Autoimporter DP distribution is MECM's business (AV2, ADR-0034 Amendment 7):
+  at most one accepted content request per manifest and application identity.
+  DP states are hints and never veto reconciliation, the manifest stamp or
+  `removeOldVersion`. A recreated application is adopted only when owned.
+  Owners: the content controller in `mecm_autoimporter.ps1` and its decision
+  helpers in `VirtuSphere-Common.ps1`.
 
 - Legacy status strings remain exact: `1/5 Initializing`, `2/5 Registered`, `3/5 Deployed`, `4/5 OS Installing`, `5/5 OS Installed`.
 - `updated=1` means MECM pickup eligibility; `mecm_updateid.php` clears it after registration.
