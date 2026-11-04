@@ -16,6 +16,8 @@ function Invoke-PlaywrightSuite {
         if ($ci.ExitCode -ne 0) { return New-InfraResult 'npm ci fuer tests/e2e rot' $ci.Output }
     }
     if (-not (Test-PlaywrightChromium)) { return New-InfraResult 'kein Chromium fuer Playwright: gemeinsamer Browserresolver meldet die lockfile-gepinnte Revision als fehlend' }
+    $current = Confirm-QaSourceCurrent
+    if ($null -ne $current) { return $current }
 
     $prevEnv = @{}
     $e2eEnv = @{
@@ -146,6 +148,10 @@ function Register-IntegrationCheckGates {
         }
         # Ab hier aufraeumen, auch wenn up nur halb durchkommt.
         $script:qaStackStarted = $true
+        # Zuerst der Pruefstand: alle Dienste lesen Code, Playbooks, LDAP-Fixture
+        # und MySQL-Init aus dem Volume qa-repo statt ueber die 9p-Freigabe (OV1).
+        $source = Sync-QaSourceVolume
+        if ($source.class -ne 'pass') { return $source }
         # Fresh, non-copying QA log storage: FPM owns it, root workers use group 0
         # without DAC_OVERRIDE. Never chmod or rotate the host's development logs.
         $logInit = Invoke-QaCompose @('run', '--rm', '--no-deps', '--build',
@@ -186,7 +192,7 @@ function Register-IntegrationCheckGates {
             }
             Start-Sleep -Seconds 2
         }
-        New-PassResult ('QA-Stack laeuft ({0}, Portal {1})' -f $qaProject, $qaPortalBase)
+        New-PassResult ('QA-Stack laeuft ({0}, Portal {1}); {2}' -f $qaProject, $qaPortalBase, $source.detail)
     }
 
     Add-Gate -Name 'migrate-check' -Lanes $intRel -Kind 'container' -Body {
@@ -198,6 +204,8 @@ function Register-IntegrationCheckGates {
     Add-Gate -Name 'phpunit-full' -Lanes $intRel -Kind 'container' -Body {
         if (-not (Test-Container $qaPhpContainer)) { return New-InfraResult 'QA-Stack laeuft nicht (Gate qa-stack zuerst)' }
         if (-not (Test-DockerImage $toolImages.php)) { return New-InfraResult ('Projekt-Image {0} fehlt' -f $toolImages.php) }
+        $current = Confirm-QaSourceCurrent
+        if ($null -ne $current) { return $current }
         # Die Suite erzeugt absichtlich queued/running/stale Jobs und loescht ihre
         # Fixtures wieder. Ein gleichzeitig claimender Deploy-Worker oder reapender
         # Maintenance-Worker macht daraus keine Integrationspruefung, sondern zwei
@@ -211,8 +219,10 @@ function Register-IntegrationCheckGates {
             return New-InfraResult 'QA-Worker vor phpunit-full nicht quieszierbar' $stopped.Output
         }
 
-        # docker run mit Repo-Mount im QA-Netz statt exec in den App-Container:
-        # die Repo-Level-Contract-Tests sehen ihre Dateien, die Integrationstests
+        # docker run mit dem Pruefstand aus qa-repo (tree/ als /repo, OV1) im
+        # QA-Netz statt exec in den App-Container: dieselben Dateien wie der Stack,
+        # ohne 9p-Freigabe (KB2: Unit-Suite 884 s ueber 9p, 119 s aus dem Volume;
+        # die errno=12 dieses Gates lagen dort). Die Repo-Level-Contract-Tests sehen ihre Dateien, die Integrationstests
         # erreichen mysql und webserver:8080 des QA-Projekts, und --fail-on-skipped
         # macht jeden dynamischen Skip rot (ADR-0015-Ergaenzung: in dieser Lane
         # ist ein Skip nie legitim).
@@ -221,7 +231,8 @@ function Register-IntegrationCheckGates {
         try {
             $qaAppEnvFile = Get-QaAppEnvFile
             $r = Invoke-Tool 'docker' @('run', '--rm',
-                '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+                '--mount', ('type=volume,source={0},target=/repo,volume-subpath=tree,volume-nocopy=true' -f $qaIdentity.SourceVolume),
+                '-w', '/repo/Docker/WebAPI',
                 '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'),
                 '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
                 '-v', ($qaAppEnvFile + ':/repo/.env:ro'), '-v', ($qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
