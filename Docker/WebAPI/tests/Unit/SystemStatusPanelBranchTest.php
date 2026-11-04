@@ -572,6 +572,64 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString('P01', $html);
     }
 
+    public function testAPunctualSyncWithOpenPointsDoesNotBlameTaskScheduler(): void
+    {
+        // DS1, the prod shape: the device sync reports every 10 s, in 35 ms,
+        // with outcome warning because two VMs are blocked by MAC conflicts.
+        // "Restart the task" sent the operator to a task that was fine.
+        $device = ['last_event' => 'completed', 'last_status' => 'warning', 'last_result_at' => '2026-11-04 11:59:55', 'last_success_at' => '2026-11-04 08:00:00', 'interval_seconds' => 10, 'last_duration_ms' => 35, 'last_detail' => 'VM-A mac_conflict; VM-B resource_mac_conflict', 'last_error_category' => 'partial_failure', 'last_summary' => '{"received":2,"imported":0,"item_failures":2,"data_warnings":0,"resource_update_failures":0}'];
+        $packages = ['last_event' => 'completed', 'last_status' => 'warning', 'last_result_at' => '2026-11-04 11:59:30', 'interval_seconds' => 60, 'last_duration_ms' => 120, 'last_detail' => '', 'last_error_category' => 'source_missing'];
+        $html = $this->renderMecm(
+            ['state' => 'warning', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => $device, 'state' => 'warning', 'report_overdue' => false],
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC, 'row' => $packages, 'state' => 'warning', 'report_overdue' => false],
+            ]],
+            self::EMPTY_SITE
+        );
+
+        self::assertStringNotContainsString(h(__t('system_status.action_device_sync')), $html);
+        self::assertStringNotContainsString(h(__t('system_status.action_packages_sync')), $html);
+        self::assertStringContainsString(h(__t('system_status.action_device_sync_open_points')), $html);
+        self::assertStringContainsString(h(__t('system_status.action_packages_sync_open_points')), $html);
+        // The causes are explained once, in help; the card links there.
+        self::assertSame(1, substr_count($html, h(help_url('system-status', 'help-status-device-causes'))));
+        self::assertStringContainsString(h(__t('system_status.err_partial_failure')), $html);
+        self::assertStringContainsString(h(__t('system_status.err_source_missing')), $html);
+        // A missing source is fixed in MECM; only a rejected catalog links the threshold.
+        $thresholdLink = h(settings_url(VIRTUSPHERE_SETTINGS_TAB_CATALOG));
+        self::assertStringNotContainsString($thresholdLink, $html);
+
+        $packages['last_error_category'] = 'catalog_conflict';
+        $rejected = [['source' => VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC, 'row' => $packages, 'state' => 'warning', 'report_overdue' => false]];
+        $html = $this->renderMecm(['state' => 'warning', 'rows' => $rejected], self::EMPTY_SITE);
+        self::assertStringContainsString(h(__t('system_status.action_packages_sync_open_points')), $html);
+        self::assertStringContainsString($thresholdLink, $html);
+        ob_start();
+        system_status_render_run_rows($rejected);
+        self::assertStringNotContainsString($thresholdLink, (string) ob_get_clean(), 'without a user the link is not offered');
+    }
+
+    public function testAnOverdueOrFailedSyncKeepsTheTaskSchedulerHint(): void
+    {
+        // Overdue: yellow because the reporter is late, whatever its last outcome.
+        $late = ['last_event' => 'completed', 'last_status' => 'warning', 'last_result_at' => '2026-11-04 09:00:00', 'interval_seconds' => 10, 'last_duration_ms' => 35, 'last_detail' => '', 'last_error_category' => 'partial_failure'];
+        // Failed on time: the open-points text says nothing about a failed run.
+        $failed = ['last_event' => 'completed', 'last_status' => 'fail', 'last_result_at' => '2026-11-04 11:59:30', 'interval_seconds' => 60, 'last_duration_ms' => null, 'last_detail' => '', 'last_error_category' => 'mecm_unavailable'];
+        $html = $this->renderMecm(
+            ['state' => 'danger', 'rows' => [
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC, 'row' => $late, 'state' => 'warning', 'report_overdue' => true],
+                ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC, 'row' => $failed, 'state' => 'danger', 'report_overdue' => false],
+            ]],
+            self::EMPTY_SITE
+        );
+
+        self::assertStringContainsString(h(__t('system_status.action_device_sync')), $html);
+        self::assertStringContainsString(h(__t('system_status.action_packages_sync')), $html);
+        self::assertStringNotContainsString(h(__t('system_status.action_device_sync_open_points')), $html);
+        self::assertStringNotContainsString(h(__t('system_status.action_packages_sync_open_points')), $html);
+        self::assertStringNotContainsString('help-status-device-causes', $html);
+    }
+
     public function testARunningSyncShowsRunningSinceAndKeepsTheLastResult(): void
     {
         $row = ['last_event' => 'started', 'last_status' => 'ok', 'last_result_at' => '2026-07-23 11:00:00', 'last_success_at' => '2026-07-23 11:00:00', 'last_attempt_at' => '2026-07-23 11:59:30', 'interval_seconds' => 60, 'last_duration_ms' => null, 'last_detail' => ''];

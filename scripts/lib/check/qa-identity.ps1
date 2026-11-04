@@ -27,6 +27,9 @@ function Get-QaStackIdentity {
         WebContainer   = 'virtusphere-qa-webserver-1'
         MysqlContainer = 'virtusphere-qa-mysql-1'
         Network        = 'virtusphere-qa_default'
+        # Volume qa-repo des Projekts (Docker/qa/docker-compose.qa.yml): der
+        # gepruefte Quellstand, aus dem der Stack und phpunit-full lesen (OV1).
+        SourceVolume   = 'virtusphere-qa_qa-repo'
         PortalBase     = 'http://127.0.0.1:8031'
         Dir            = $qaDir
         EnvFile        = Join-Path $qaDir 'qa.env'

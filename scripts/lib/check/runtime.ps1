@@ -37,6 +37,197 @@ function Get-QaEnvValue {
     return ''
 }
 
+# --- Pruefstand im Volume qa-repo (OV1, 03.11.2026) ---------------------------
+# Docker Desktop reicht einen Bind-Mount von C:\ als 9p-Freigabe in die
+# Docker-VM: alle Repo-Dateien zu lesen dauerte dort 40 bis 50 s statt 0,25 s
+# aus einem Volume, die Unit-Suite 884 statt 119 s, und jedes archivierte
+# errno=12 lag auf diesem Weg (KB2). Der QA-Stack liest seinen Stand deshalb aus
+# dem Volume qa-repo (Docker/qa/docker-compose.qa.yml). Diese Funktionen
+# bestimmen den Pruefstand, lassen ihn vom Einmal-Dienst qa-source kopieren und
+# belegen per SHA-256 je Datei, dass das Volume genau dem Checkout entspricht.
+
+# Pruefstand = was git als Stand dieses Checkouts fuehrt (getrackt samt
+# Aenderungen, dazu neue, nicht ignorierte Dateien) plus der Composer-Baum
+# Docker/WebAPI/vendor, ohne dessen ignoriertes vendor/bin weder phpunit noch
+# die App laufen. Alles uebrige Ignorierte bleibt draussen (qa-artifacts,
+# node_modules, .env, var/, logs/), ebenso geloeschte Dateien und Unterordner
+# mit eigenem .git, die git als 'pfad/' meldet (andere Arbeitsbaeume). Die
+# Ordner kommen mit, damit ihr Modus erhalten bleibt.
+function Get-QaSourceSelection {
+    param([string]$Root)
+    $previousEncoding = $null
+    try {
+        $previousEncoding = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    } catch { $previousEncoding = $null }
+    try {
+        $listed = Invoke-Tool 'git' @('-C', $Root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard')
+    } finally {
+        if ($null -ne $previousEncoding) { try { [Console]::OutputEncoding = $previousEncoding } catch { Write-Debug $_ } }
+    }
+    if ($listed.StartFailed -or ($listed.ExitCode -ne 0)) {
+        return @{ Ok = $false; Detail = 'git ls-files fuer den Pruefstand nicht ausfuehrbar'; Output = $listed.Output }
+    }
+    $files = New-Object 'System.Collections.Generic.SortedSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($entry in ((@($listed.Output) -join "`n").Split([char]0))) {
+        $relative = $entry.Trim("`r", "`n")
+        if ((-not $relative) -or $relative.EndsWith('/')) { continue }
+        if (Test-Path -LiteralPath (Join-Path $Root $relative) -PathType Leaf) { [void]$files.Add($relative) }
+    }
+    $vendor = Join-Path (Join-Path (Join-Path $Root 'Docker') 'WebAPI') 'vendor'
+    if (Test-Path -LiteralPath $vendor -PathType Container) {
+        $rootFull = (Get-Item -LiteralPath $Root -Force).FullName.TrimEnd('\', '/')
+        foreach ($file in @(Get-ChildItem -LiteralPath $vendor -Recurse -File -Force)) {
+            [void]$files.Add(($file.FullName.Substring($rootFull.Length + 1) -replace '\\', '/'))
+        }
+    }
+    $directories = New-Object 'System.Collections.Generic.SortedSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($relative in $files) {
+        $parent = $relative
+        $slash = $parent.LastIndexOf('/')
+        while ($slash -gt 0) {
+            $parent = $parent.Substring(0, $slash)
+            if (-not $directories.Add($parent)) { break }
+            $slash = $parent.LastIndexOf('/')
+        }
+    }
+    return @{ Ok = $true; Files = @($files); Directories = @($directories); Output = @() }
+}
+
+# Dasselbe Zeilenformat wie sha256sum im Container: "<hex>  <pfad>".
+function Get-QaSourceHashLines {
+    param([string]$Root, [string[]]$Files)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    try {
+        foreach ($relative in $Files) {
+            $stream = [System.IO.File]::OpenRead((Join-Path $Root $relative))
+            try { $digest = $sha.ComputeHash($stream) } finally { $stream.Dispose() }
+            $lines.Add((([System.BitConverter]::ToString($digest) -replace '-', '').ToLowerInvariant() + '  ' + $relative))
+        }
+    } finally { $sha.Dispose() }
+    return ,($lines.ToArray())
+}
+
+# Ein Digest ueber die sortierte Liste: dieselbe Zahl heisst dieselben Pfade mit
+# denselben Inhalten.
+function Get-QaSourceDigest {
+    param([string[]]$HashLines)
+    $sorted = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($line in $HashLines) { $sorted.Add($line) }
+    $sorted.Sort([System.StringComparer]::Ordinal)
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes((($sorted.ToArray() -join "`n") + "`n"))
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return (([System.BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()) } finally { $sha.Dispose() }
+}
+
+# Vergleicht Checkout und Volume Datei fuer Datei. Zeilen, die kein
+# sha256sum-Ergebnis sind (Meldungen von compose run), zaehlen nicht mit; eine
+# fehlende Datei faellt trotzdem auf, weil die Checkout-Seite sie nennt.
+function Compare-QaSourceHashes {
+    param([string[]]$Expected, [string[]]$Actual)
+    $want = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
+    $have = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
+    foreach ($pair in @(@{ Lines = $Expected; Map = $want }, @{ Lines = $Actual; Map = $have })) {
+        foreach ($line in @($pair.Lines)) {
+            if ("$line" -match '^([0-9a-f]{64})  (?:\./)?(.+?)\r?$') { $pair.Map[$Matches[2]] = $Matches[1] }
+        }
+    }
+    $differences = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($path in $want.Keys) {
+        if (-not $have.ContainsKey($path)) { $differences.Add('fehlt im Volume: ' + $path) }
+        elseif ($have[$path] -ne $want[$path]) { $differences.Add('Inhalt weicht ab: ' + $path) }
+    }
+    foreach ($path in $have.Keys) {
+        if (-not $want.ContainsKey($path)) { $differences.Add('nur im Volume: ' + $path) }
+    }
+    if ($want.Count -eq 0) { $differences.Add('Checkout-Liste leer') }
+    return ,($differences.ToArray())
+}
+
+# Herkunft fuer die Metadaten: Commit, geaenderte Dateien (git status) und der
+# Digest. Sie liegt im Laufverzeichnis und im Volume (meta/).
+function Get-QaSourceOrigin {
+    param([string]$Root, [string[]]$HashLines)
+    $head = Invoke-Tool 'git' @('-C', $Root, 'rev-parse', 'HEAD')
+    $status = Invoke-Tool 'git' @('-C', $Root, 'status', '--porcelain=v1', '--untracked-files=all')
+    if ($head.StartFailed -or ($head.ExitCode -ne 0) -or $status.StartFailed -or ($status.ExitCode -ne 0)) {
+        return @{ Ok = $false; Output = (@($head.Output) + @($status.Output)) }
+    }
+    $changed = @(@($status.Output) | Where-Object { "$_".Trim() } | ForEach-Object { "$_" })
+    $origin = [ordered]@{
+        commit         = ((@($head.Output) -join '').Trim())
+        changed        = $changed
+        files          = @($HashLines).Count
+        manifestSha256 = (Get-QaSourceDigest $HashLines)
+        createdAt      = (Get-Date).ToString('o')
+    }
+    return @{ Ok = $true; Origin = $origin; Json = (ConvertTo-Json -InputObject $origin -Depth 3); Output = @() }
+}
+
+function Format-QaSourceOrigin {
+    param($Origin)
+    $commit = [string]$Origin.commit
+    if ($commit.Length -gt 12) { $commit = $commit.Substring(0, 12) }
+    return ('Pruefstand {0} mit {1} geaenderten/neuen Dateien, {2} Dateien, Manifest sha256:{3}' -f
+        $commit, @($Origin.changed).Count, $Origin.files, ([string]$Origin.manifestSha256).Substring(0, 16))
+}
+
+# Erster Schritt von qa-stack: Pruefstand bestimmen, kopieren, Volume gegen
+# den Checkout pruefen. Jede Abweichung ist infrastructure_error, denn dann
+# wuerde der Stack etwas anderes beweisen als diesen Checkout.
+function Sync-QaSourceVolume {
+    $selection = Get-QaSourceSelection $repoRoot
+    if (-not $selection.Ok) { return New-InfraResult $selection.Detail $selection.Output }
+    $hostLines = Get-QaSourceHashLines $repoRoot $selection.Files
+    $origin = Get-QaSourceOrigin $repoRoot $hostLines
+    if (-not $origin.Ok) { return New-InfraResult 'Commit oder git status fuer den Pruefstand nicht lesbar' $origin.Output }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $entries = @($selection.Directories) + @($selection.Files)
+    [System.IO.File]::WriteAllText((Join-Path $artifactDir 'qa-source.files'), (($entries -join [string][char]0) + [string][char]0), $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $artifactDir 'qa-source.origin.json'), $origin.Json, $utf8NoBom)
+    [System.IO.File]::WriteAllLines((Join-Path $artifactDir 'qa-source.checkout.sha256'), [string[]]$hostLines, $utf8NoBom)
+
+    # qa-source nutzt das Runtime-Image des php-Dienstes; vor dem ersten Lauf
+    # existiert es noch nicht.
+    $build = Invoke-QaCompose @('build', 'php')
+    if ($build.ExitCode -ne 0) { return New-InfraResult 'PHP-Runtime-Image fuer qa-source nicht baubar' $build.Output }
+    $copy = Invoke-QaCompose @('run', '--rm', '--no-deps', '-T',
+        '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'), 'qa-source')
+    if ($copy.ExitCode -ne 0) { return New-InfraResult 'qa-source hat qa-repo nicht gefuellt' $copy.Output }
+    $volumeList = Join-Path $artifactDir 'qa-source.volume.sha256'
+    if (-not (Test-Path -LiteralPath $volumeList)) { return New-InfraResult 'qa-source hat keine Pruefsummen des Volumes geschrieben' $copy.Output }
+    $differences = Compare-QaSourceHashes $hostLines @(Get-Content -LiteralPath $volumeList -Encoding UTF8)
+    if ($differences.Count -gt 0) {
+        return New-InfraResult ('qa-repo weicht vom Checkout ab ({0} Dateien)' -f $differences.Count) @($differences | Select-Object -First 20)
+    }
+    $script:qaSourceManifest = $origin.Origin.manifestSha256
+    return New-PassResult ((Format-QaSourceOrigin $origin.Origin) + '; qa-repo Datei fuer Datei identisch') @($copy.Output)
+}
+
+# Vor einem Gate gegen einen Stack, den nicht dieser Lauf aufgebaut hat (etwa
+# nach -KeepArtifacts oder im Baseline-Writer): Ist der Arbeitsbaum noch der
+# Stand in qa-repo? Bis OV1 sah der Stack jede Aenderung sofort; jetzt fiele
+# sie still unter den Tisch. $null heisst weiter, sonst infrastructure_error.
+function Confirm-QaSourceCurrent {
+    if ((Test-Path variable:script:qaSourceManifest) -and $script:qaSourceManifest) { return $null }
+    $selection = Get-QaSourceSelection $repoRoot
+    if (-not $selection.Ok) { return New-InfraResult $selection.Detail $selection.Output }
+    $hostLines = Get-QaSourceHashLines $repoRoot $selection.Files
+    $stored = Invoke-QaCompose @('run', '--rm', '--no-deps', '-T', '--entrypoint', 'cat', 'qa-source', '/qa-repo/meta/qa-source.sha256')
+    if ($stored.StartFailed -or ($stored.ExitCode -ne 0)) {
+        return New-InfraResult 'stehender QA-Stack ohne gepruefte Quellliste in qa-repo; zuerst -Gate qa-stack' $stored.Output
+    }
+    $differences = Compare-QaSourceHashes $hostLines @($stored.Output)
+    if ($differences.Count -gt 0) {
+        $detail = ('Arbeitsbaum weicht vom Stand des stehenden QA-Stacks ab ({0} Dateien seit qa-stack); zuerst -Gate qa-stack neu laufen lassen' -f $differences.Count)
+        return New-InfraResult $detail @($differences | Select-Object -First 20)
+    }
+    $script:qaSourceManifest = Get-QaSourceDigest $hostLines
+    return $null
+}
+
 # Snapshot and pause only workers carrying the exact throwaway QA Compose
 # labels. A similarly named shared/dev container is refused before any stop.
 function Get-QaWorkerSnapshot {
@@ -138,6 +329,10 @@ function Confirm-QaPauseKeptServiceState {
 
 function Invoke-WithPausedQaWorkers {
     param([scriptblock]$Body)
+    # Der Visual-Gate und der Baseline-Writer nehmen Bilder vom Stand in qa-repo;
+    # er muss der Arbeitsbaum sein, sonst entstehen Sollbilder von altem Code.
+    $current = Confirm-QaSourceCurrent
+    if ($null -ne $current) { return $current }
     $before = Get-QaWorkerSnapshot
     if (-not $before.Ok) { return New-InfraResult $before.Detail $before.Output }
     $activeJobs = Get-QaActiveJobCount

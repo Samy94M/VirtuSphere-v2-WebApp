@@ -114,21 +114,16 @@ See `docs/adr/README.md`, the sole ADR index. Read the ADR a contract cites.
   Activity is neutral and describes only the received run event, never process
   liveness or the severity of the previous result. Distribution findings carry
   the last completion timestamp and are not live DP telemetry. Missing or
-  truncated causes never prove complete distribution; open items never become
+  truncated hints never prove complete distribution; open items never become
   DP counts or ratios. Configuration and cleanup findings stay with the scan
   result. The existing machine report contract remains unchanged.
 
-- Autoimporter content admission and completion are separate: failed or pending
-  DP copies do not veto a changed source manifest. One acknowledged request is
-  issued per manifest; a bound pending request may be superseded by a new
-  manifest on the same exact targets. Unknown identities, unacknowledged
-  intents, target loss and removal states remain blocked. After a completed
-  request, additional current targets join the next request baseline.
-  Completion still requires the bound content ID and fresh successful copies on every previous
-  DP. The importer never removes offline DPs or automatically deletes old
-  applications. The owners are the content controller in
-  `mecm_autoimporter.ps1` and its shared evidence helpers in
-  `VirtuSphere-Common.ps1`.
+- Autoimporter DP distribution is MECM's business (AV2, ADR-0034 Amendment 7):
+  at most one accepted content request per manifest and application identity.
+  DP states are hints and never veto reconciliation, the manifest stamp or
+  `removeOldVersion`. A recreated application is adopted only when owned.
+  Owners: the content controller in `mecm_autoimporter.ps1` and its decision
+  helpers in `VirtuSphere-Common.ps1`.
 
 - Legacy status strings remain exact: `1/5 Initializing`, `2/5 Registered`, `3/5 Deployed`, `4/5 OS Installing`, `5/5 OS Installed`.
 - `updated=1` means MECM pickup eligibility; `mecm_updateid.php` clears it after registration.
@@ -136,7 +131,7 @@ See `docs/adr/README.md`, the sole ADR index. Read the ADR a contract cites.
 - Template clone resets runtime data: new IDs, empty MACs, `mecm_id=NULL`, `ready/not_ready`, `2/5 Registered`, `updated=0`. It also initialises the rollout snapshot and revision fresh from the clone's own `vm_hostname` and claims it; a template itself holds no snapshot, revision, tombstone or hostname claim.
 - Mission and template names must not contain whitespace; templates are distinguished by the `_` prefix. Enforced centrally in `repo_validate_mission_values()` (create/update/clone/save-as-template all route through it); `mission_name_is_template()` (`lib/defaults.php`) is the single predicate that reads the prefix.
 - `upload_mac_list.py` sends payload `{ "mission_id": 123, "job_id": 45, "results": [...] }`; `job_id` is required by `db_importMAC.php` (ADR-0035). The legacy array *shape* is still normalized (`legacy_payload` wire flag), but it cannot import without a job scope.
-- `mecm_report.php` (ADR-0018) is display-only telemetry: it never mutates `deploy_vms` lifecycle/sync state. Client phase events live in `deploy_client_events` (VM-cascade, 30-day retention), sync/site results in `deploy_integration_heartbeats` (one upsert row per source). `action=reportRun` carries per-run `started`/`completed` from the three sync tasks and `completed`-only site health from `mecm-site-health` (`SMS_SummarizerSiteStatus`: 0=ok, 1=warning, 2=fail/critical, else unknown). `last_event` drives the badge, arrival order is truth (sequential client, dedup only on an identical completed `run_id`, RUN_GRACE 600s while a run is in progress); provider faults are grey and red is reserved for the MECM-confirmed critical status 2. The optional report token is stored only as SHA-256 hash (`deploy_settings.machine_report_token_hash`).
+- `mecm_report.php` (ADR-0018) is display-only telemetry: it never mutates `deploy_vms` lifecycle/sync state. Client phase events live in `deploy_client_events` (VM-cascade, 30-day retention), sync/site results in `deploy_integration_heartbeats` (one upsert row per source). `action=reportRun` carries per-run `started`/`completed` from the three sync tasks and `completed`-only site health from `mecm-site-health` (`SMS_SummarizerSiteStatus`: 0=ok, 1=warning, 2=fail/critical, else unknown). `last_event` drives the badge, arrival order is truth (sequential client, dedup only on an identical completed `run_id`, run grace `virtusphere_run_grace_seconds()`); provider faults are grey and red is reserved for the MECM-confirmed critical status 2. The optional report token is stored only as SHA-256 hash (`deploy_settings.machine_report_token_hash`).
 - `action=reportPackageRun` is the separate ADR-0044 package-wrapper evidence channel: POST-only, IP-allowlist only (never the server report token), strict self-describing V1 JSON capped at 64 KiB, unique MAC-set resolution, rollout/device/restore-generation fences and atomic replay handling. It owns its diagnostic tables and run markers (`database.md` R7); it never mutates VM lifecycle, integration heartbeat or package catalog state and never emits one audit row per report.
 - `action=reportDeviceCauses`: per-VM display cause, fence per entry, no 409 (ADR-0043 Amendment 2, `machine.md` A67).
 - Heartbeats and client phase events are never duplicated into `deploy_logs`; only throttled `mecm`-category audits (token/flood/sync rejections, state transitions) go there.

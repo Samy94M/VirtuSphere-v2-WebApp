@@ -25,6 +25,10 @@ const PHP_ERROR_MARKERS = [
   'Stack trace',
   'mysqli',
   '/var/www/html',
+  // The portal's own error renderer (lib/errors.php) hides every PHP marker
+  // above. After a partial render it is appended below the page, which still
+  // answers 200 (VE1: "VM hinzufügen" ended like that), so its title counts too.
+  'VirtuSphere Fehler',
 ];
 
 // A missing translation renders the bare key as an element's ENTIRE text (a

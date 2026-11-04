@@ -50,7 +50,7 @@ Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
 
 | Gate | Beweist | Form | Rot heißt meist |
 |---|---|---|---|
-| `qa-stack` | Eigener Compose-Stack (`virtusphere-qa`) aus `struktur.sql`, Migrationen, Seed, Health; berührt nie den Dev-Stack | containerisiert | Fresh-Install-Pfad gebrochen; vor allen DB-Gates fixen |
+| `qa-stack` | Eigener Compose-Stack (`virtusphere-qa`) aus `struktur.sql`, Migrationen, Seed, Health; liest den Code aus einer geprüften Kopie des Checkouts (`qa-repo`, Prüfsumme je Datei), nicht aus dem Arbeitsbaum; berührt nie den Dev-Stack | containerisiert | Fresh-Install-Pfad gebrochen; vor allen DB-Gates fixen |
 | `migrate-check` | Migrations-Preflight `pending=0` gegen den QA-Stack | containerisiert | Migration fehlt oder ist nicht idempotent |
 | `phpunit-full` | Volle Suite inkl. Integrationstests, `--fail-on-skipped`; Allowlist-/Credential-Zustände arrangieren die Tests selbst | containerisiert | Ein dynamischer Skip oder eine echte Integrations-Regression |
 | `schema-convergence` | `struktur.sql` allein == `struktur.sql` + alle Migrationen, inkl. der 0019/0020-Edge-Cases | containerisiert | Schema-Änderung nur auf einer Seite |
@@ -98,7 +98,7 @@ Das Seiteninventar liegt in `tests/e2e/lib/pages.js`. Eine Seite, die ohne Param
 | index/dashboard | Redirect je Auth-Zustand, Aggregate, Live-Deploy-Badge | `health-matrix.spec.js`, `session-security.spec.js` |
 | missions | CRUD, Template-Erkennung, Confirm-Zweige | `crud-mission.spec.js` |
 | mission_details | Bulk-Aktionen, Transfer-Export/-Import-Round-Trip | `mission-transfer.spec.js` |
-| vms / vm_edit | Bulk mit Confirm; dynamische Disk/NIC-Zeilen, vNIC-Enum, Overrides, Hotplug, Bearbeitungskonflikt | `crud-vm.spec.js` |
+| vms / vm_edit | Bulk mit Confirm; dynamische Disk/NIC-Zeilen, vNIC-Enum, Overrides, Hotplug, Bearbeitungskonflikt; „VM hinzufügen“ bis Seitenende wie „VM bearbeiten“, Geerbtes nur am Feld | `crud-vm.spec.js`, `vm-edit-layout.spec.js` |
 | deploy / deploy_log | Enqueue, Scheduling, Cancel (`data-confirm-action`), Retry inkl. partial-Zweig, Live-Status bis Terminal inkl. `partial` | `deploy-actions.spec.js` |
 | os / packages / vlans | Geteilter Statusfilter, Status-Normalisierung sichtbar, MECM-owned read-only (UI und POST) | `crud-catalog.spec.js` |
 | credentials | Nie Klartext-Rendering, Verbindungstest-Kategorien, Referenzschutz lokalisiert | `crud-credential.spec.js`, `crud-negative.spec.js` |

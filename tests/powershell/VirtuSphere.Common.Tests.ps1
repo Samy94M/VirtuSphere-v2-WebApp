@@ -394,7 +394,7 @@ Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
             [pscustomobject]@{ ProjectName = 'Agent'; version = '1.10' },
             [pscustomobject]@{ ProjectName = 'Agent'; version = '1.9' }
         ))[0]
-        $replacement = [pscustomobject]@{ Name = 'Agent-1.10'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'complete'; DistributionState = 'succeeded'; DistributionEvidenceSafe = $true; DeploymentReady = $true }
+        $replacement = [pscustomobject]@{ Name = 'Agent-1.10'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'requested'; DistributionState = 'succeeded'; DeploymentReady = $true }
         $plan = Get-VsPackageRetirementPlan -Selection $selection -Applications @(
             [pscustomobject]@{ LocalizedDisplayName = 'Agent-1.8'; CI_ID = '101'; LocalizedDescription = $script:VsManagedPackageApplicationMarker },
             [pscustomobject]@{ LocalizedDisplayName = 'Agent-1.7'; CI_ID = '102'; LocalizedDescription = 'foreign' },
@@ -413,13 +413,13 @@ Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
         $plan.PlanHash | Should -Match '^[0-9a-f]{64}$'
     }
 
-    It 'gibt einen bestaetigten gebundenen Ersatz trotz null erfolgreicher DPs frei' {
+    It 'gibt einen von MECM angenommenen Ersatz trotz null erfolgreicher DPs frei (AV2)' {
         $selection = (Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))[0]
         foreach ($distributionState in @('failed', 'in_progress', 'succeeded')) {
             $replacement = [pscustomobject]@{
                 Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1
-                RequestConfirmed = $true; ContentState = 'pending'
-                DistributionState = $distributionState; DistributionEvidenceSafe = $true
+                RequestConfirmed = $true; ContentState = 'requested'
+                DistributionState = $distributionState
                 DeploymentReady = $true
             }
             $plan = Get-VsPackageRetirementPlan -Selection $selection -Applications @() -Collections @() `
@@ -429,18 +429,18 @@ Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
         }
     }
 
-    It 'blockiert unbestaetigten ungebundenen oder unsicher projizierten Ersatz' {
+    It 'blockiert einen nicht angenommenen Ersatz oder einen ohne sichtbare Verteilung' {
         $selection = (Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))[0]
         foreach ($case in @(
-            @{ confirmed = $false; content = 'pending'; distribution = 'failed'; safe = $true },
-            @{ confirmed = $true; content = 'intent'; distribution = 'in_progress'; safe = $true },
-            @{ confirmed = $true; content = 'pending'; distribution = 'unknown'; safe = $true },
-            @{ confirmed = $true; content = 'pending'; distribution = 'failed'; safe = $false }
+            @{ confirmed = $false; content = 'none'; distribution = 'failed' },
+            @{ confirmed = $true; content = 'intent'; distribution = 'in_progress' },
+            @{ confirmed = $true; content = 'requested'; distribution = 'unknown' },
+            @{ confirmed = $true; content = 'requested'; distribution = 'not_started' }
         )) {
             $replacement = [pscustomobject]@{
                 Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1
                 RequestConfirmed = $case.confirmed; ContentState = $case.content
-                DistributionState = $case.distribution; DistributionEvidenceSafe = $case.safe
+                DistributionState = $case.distribution
                 DeploymentReady = $true
             }
             $plan = Get-VsPackageRetirementPlan -Selection $selection -Applications @() -Collections @() `
@@ -452,7 +452,7 @@ Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
 
     It 'blockiert einen unvollstaendigen Referenzscan auch bei leerer Fundliste' {
         $selection = (Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))[0]
-        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'complete'; DistributionState = 'succeeded'; DistributionEvidenceSafe = $true; DeploymentReady = $true }
+        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'requested'; DistributionState = 'succeeded'; DeploymentReady = $true }
         $plan = Get-VsPackageRetirementPlan -Selection $selection -Applications @() -Collections @() -Replacement $replacement -References @() -ReferenceScanComplete $false
         $plan.State | Should -Be 'blocked'
         $plan.Blockers | Should -Contain 'reference_scan_incomplete'
@@ -492,7 +492,7 @@ Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
 
     It 'plant Deployment vor Application und Collection und bindet es in den Hash' {
         $selection = (Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))[0]
-        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'pending'; DistributionState = 'failed'; DistributionEvidenceSafe = $true; DeploymentReady = $true }
+        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'requested'; DistributionState = 'failed'; DeploymentReady = $true }
         $plan = Get-VsPackageRetirementPlan -Selection $selection -Applications @(
             [pscustomobject]@{ LocalizedDisplayName = 'Agent-1'; CI_ID = '101'; LocalizedDescription = $script:VsManagedPackageApplicationMarker }
         ) -Collections @(
@@ -508,7 +508,7 @@ Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
 
     It 'blockiert referenzierte Altobjekte und eine unvollstaendige Deploymentidentitaet' {
         $selection = (Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))[0]
-        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'pending'; DistributionState = 'failed'; DistributionEvidenceSafe = $true; DeploymentReady = $true }
+        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'requested'; DistributionState = 'failed'; DeploymentReady = $true }
         $applications = @([pscustomobject]@{ LocalizedDisplayName = 'Agent-1'; CI_ID = '101'; LocalizedDescription = $script:VsManagedPackageApplicationMarker })
         $collections = @([pscustomobject]@{ Name = 'Agent-1'; CollectionID = 'ABC00001'; Comment = $script:VsManagedPackageCollectionMarker })
 
@@ -530,7 +530,7 @@ Describe 'A14b sichere Paketversions- und Bereinigungsplanung' {
 
     It 'bindet jede Deploymentidentitaet an den Planhash' {
         $selection = (Get-VsPackageSourceSelections -Packages @([pscustomobject]@{ ProjectName = 'Agent'; version = '2' }))[0]
-        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'pending'; DistributionState = 'failed'; DistributionEvidenceSafe = $true; DeploymentReady = $true }
+        $replacement = [pscustomobject]@{ Name = 'Agent-2'; Owned = $true; DeploymentTypeCount = 1; RequestConfirmed = $true; ContentState = 'requested'; DistributionState = 'failed'; DeploymentReady = $true }
         $applications = @([pscustomobject]@{ LocalizedDisplayName = 'Agent-1'; CI_ID = '101'; LocalizedDescription = $script:VsManagedPackageApplicationMarker })
         $collections = @([pscustomobject]@{ Name = 'Agent-1'; CollectionID = 'ABC00001'; Comment = $script:VsManagedPackageCollectionMarker })
         $first = Get-VsPackageRetirementPlan -Selection $selection -Applications $applications -Collections $collections `

@@ -186,3 +186,34 @@ Consequences:
 - The wire alias must not collide with a stored value.
   `MecmSyncDeployFailedContractTest` turns red if a real `failed` state is
   reintroduced; a real MECM failure value decides its wire name on purpose.
+
+## Amendment 6 (2026-11-04): getDeviceInfos carries the disk layout (DN1)
+
+The name of a disk in the VM editor becomes the Windows volume label of a NEW
+data disk. The disk phase needs the names and a safe way to match a portal row
+to a Windows disk, so `getDeviceInfos` gains one additive field, `disks`: one
+entry per row of `deploy_disks` in id order (the order of the serverlist), or
+one default disk for a VM without rows, each `{position, scsi_unit, size_gb,
+volume_label}`. `lib/vm_disk_layout.php` owns the rows, the unit rule and the
+label rule. The unit is what community.vmware 6.2.0 `vmware_guest` gives a
+new disk at that list position on the single SCSI controller (unit 7 skipped,
+`null` past unit 15); the label has control, format and file-name-forbidden
+characters replaced by a space and is cut to 32 UTF-16 code units, `null` when
+nothing is left.
+
+The names are the current portal values, not a rollout snapshot: a label is
+display data, and the client confirms each match independently (SCSI target id
+equal to the unit, exact size, one controller, LUN 0, boot disk on target 0).
+`client_getInfos.ps1` persists only its whitelist and ignores the field;
+`client_VMDisksOnline.ps1` reads it itself with the MAC and rollout revision of
+the published snapshot. A portal without the field, an unreachable portal or an
+uncertain match keep the old label `VM_Disk_<number>` and name a closed reason;
+the phase still succeeds. Disks already set up are never renamed.
+
+Consequences:
+
+- Additive and backward compatible: older clients ignore the field, the new
+  client works against an older portal with the old labels.
+  `MachineApiWireTest` pins the key list and the layout.
+- `disk.EnableUUID` stays unset: switching it on would change the `UniqueId`
+  of existing disks, which the disk journal uses as identity.

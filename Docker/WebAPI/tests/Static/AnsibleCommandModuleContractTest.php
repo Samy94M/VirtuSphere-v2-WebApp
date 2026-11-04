@@ -169,6 +169,11 @@ final class AnsibleCommandModuleContractTest extends TestCase
                 }
             }
         }
+        // The directory iterator returns entries in filesystem order: hash order
+        // on ext4, name order over the Docker Desktop 9p share (KB2, 02.11.2026).
+        // Sorting by path keeps assertSame exact on files and counts while the
+        // order no longer depends on the filesystem the suite reads.
+        ksort($references, SORT_STRING);
 
         self::assertSame(
             [

@@ -38,11 +38,14 @@ const PORTAL_PAGES = [
   // scan, no i18n check, no console-error or off-host proof, while help.php in
   // this same list renders help_system_status.* keys.
   { path: 'mission_details.php', access: 'user', query: (ids) => `id=${ids.missionId}` },
-  // vm_edit.php needs BOTH ids: it redirects to the mission list without a
-  // mission_id and to the VM list without a vm_id, and a redirect still answers
-  // 200 from the page it lands on, so a wrong parameter name would leave the
-  // matrix scanning missions.php under this page's name.
+  // vm_edit.php needs a mission_id: without one it redirects to the mission list,
+  // and a redirect still answers 200 from the page it lands on, so a wrong
+  // parameter name would leave the matrix scanning missions.php under this
+  // page's name. With a vm_id it edits that VM; without one it is "VM
+  // hinzufügen", a page state of its own (VE1: only this state ended in the
+  // error renderer below the form, and the matrix never opened it).
   { path: 'vm_edit.php', access: 'user', query: (ids) => `mission_id=${ids.missionId}&vm_id=${ids.vmId}` },
+  { path: 'vm_edit.php', label: 'vm_edit.php (add)', access: 'user', query: (ids) => `mission_id=${ids.missionId}` },
 
   // The two dashboard VM tiles open this read-only list. Both filters are scanned:
   // the MECM one is the only view that renders template rows, with their marker.
