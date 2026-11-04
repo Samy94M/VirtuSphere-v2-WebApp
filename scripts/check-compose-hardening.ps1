@@ -7,7 +7,9 @@
 .DESCRIPTION
     Prueft die kanonisch aufgeloeste Compose-Konfiguration semantisch (docker
     compose config --format json, inklusive tools-Profil), nie per Regex ueber
-    das YAML: gepinnt werden read_only+tmpfs, cap_drop ALL, die exakt
+    das YAML: gepinnt werden read_only+tmpfs (jede Flaeche mit size, Summe
+    unter mem_limit), read-only Webserver-Mounts ausser virtusphere-conf.d,
+    cap_drop ALL, die exakt
     dokumentierten cap_add-Sets, no-new-privileges, PID-/Memory-Limits,
     Healthchecks, service_healthy-Startordnung, restart- und Logging-Policy, die
     Loopback-Bindung und das tools-Profil von phpMyAdmin, feste Tags und
@@ -252,9 +254,43 @@ if ($findings.Count -eq 0) {
         if (-not [bool](Get-Prop $svc 'read_only')) {
             Add-Finding 'read-only' ('{0}: read_only muss true sein' -f $name)
         }
-        $tmpfs = @(@(Get-Prop $svc 'tmpfs') | ForEach-Object { "$_" })
-        if ($tmpfs -notcontains '/tmp') {
+        $tmpfs = @(@(Get-Prop $svc 'tmpfs') | ForEach-Object { "$_" } | Where-Object { $_ })
+        $tmpfsPaths = @($tmpfs | ForEach-Object { ($_ -split ':', 2)[0] })
+        if ($tmpfsPaths -notcontains '/tmp') {
             Add-Finding 'tmpfs' ('{0}: read_only ohne tmpfs /tmp' -f $name)
+        }
+        # SEC1 (C-01/C-02): tmpfs-Seiten zaehlen gegen mem_limit. Ohne size kann
+        # ein anonymer Client (Request-Bodies, Sessiondateien) den Container
+        # ueber sein Speicherlimit fuellen. Abgeleitet statt gelistet: jede
+        # tmpfs-Flaeche jedes read_only-Dienstes traegt size, und ihre Summe
+        # bleibt unter dem mem_limit desselben Dienstes.
+        $tmpfsBytes = [long]0
+        foreach ($entry in $tmpfs) {
+            $options = @()
+            if ($entry.Contains(':')) { $options = @((($entry -split ':', 2)[1]) -split ',') }
+            $sizeOption = @($options | Where-Object { $_ -match '^size=' })
+            if ($sizeOption.Count -ne 1 -or -not ($sizeOption[0] -match '^size=(\d+)([kmg]?)$')) {
+                Add-Finding 'tmpfs-size' ('{0}: tmpfs {1} ohne eindeutige size=<n>[k|m|g]' -f $name, ($entry -split ':', 2)[0])
+                continue
+            }
+            $factor = switch ($Matches[2]) { 'k' { 1024 } 'm' { 1048576 } 'g' { 1073741824 } default { 1 } }
+            $tmpfsBytes += [long]$Matches[1] * $factor
+        }
+        $memLimit = Get-Prop $svc 'mem_limit'
+        if ($null -ne $memLimit -and [long]$memLimit -gt 0 -and $tmpfsBytes -ge [long]$memLimit) {
+            Add-Finding 'tmpfs-size' ('{0}: tmpfs-Summe {1} B erreicht mem_limit {2} B' -f $name, $tmpfsBytes, $memLimit)
+        }
+    }
+
+    # SEC1 (C-05a): nginx liest Code und TLS-Material nur. Jeder Mount des
+    # Webservers ist read_only, ausser dem Verzeichnis der generierten
+    # HTTPS-Konfiguration (init.sh benennt eine abgelehnte Datei in *.bad um).
+    foreach ($vol in @(Get-Prop (Get-Prop $servicesNode 'webserver') 'volumes')) {
+        if ($null -eq $vol) { continue }
+        $target = "$(Get-Prop $vol 'target')"
+        if ($target -eq '/etc/nginx/virtusphere-conf.d') { continue }
+        if (-not [bool](Get-Prop $vol 'read_only')) {
+            Add-Finding 'webserver-ro' ('webserver: Mount {0} muss read_only sein' -f $target)
         }
     }
 

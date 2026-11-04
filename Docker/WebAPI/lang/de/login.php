@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 return [
     'page_title' => 'VirtuSphere - Anmeldung',
-    'error_locked' => 'Konto nach zu vielen Fehlversuchen vorübergehend gesperrt.',
     'error_ip_locked' => 'Diese IP wurde nach zu vielen Fehlversuchen vorübergehend gesperrt.',
     'error_rate_limited' => 'Zu viele Anmeldeversuche. Bitte warten Sie und versuchen Sie es später erneut.',
     'error_directory_unavailable' => 'Active Directory ist vorübergehend nicht erreichbar. Verwenden Sie bei Bedarf ein lokales Notfallkonto.',

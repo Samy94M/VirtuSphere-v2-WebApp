@@ -34,8 +34,11 @@ services:
       # server block in virtusphere-conf.d; inert until a cert is uploaded.
       - "${APP_BIND_IP}:${WEB_HTTPS_PORT}:8443"
     volumes:
-      - ./Docker/WebAPI:/var/www/html
-      - ./Docker/nginx/ssl:/etc/nginx/ssl
+      # nginx only reads the code and the TLS material (SEC1, C-05a); PHP
+      # writes both through its own mounts. Only virtusphere-conf.d stays
+      # writable: init.sh renames a rejected generated config to *.bad.
+      - ./Docker/WebAPI:/var/www/html:ro
+      - ./Docker/nginx/ssl:/etc/nginx/ssl:ro
       - ./Docker/nginx/conf.d:/etc/nginx/virtusphere-conf.d
     logging: *container-logging
     # Bewusst KEIN env_file und keine environment-Sektion. Der Container las mit
@@ -65,9 +68,14 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs:
-      - /var/cache/nginx
-      - /var/run
-      - /tmp
+      # Sized (SEC1, C-01): nginx buffers request bodies and large upstream
+      # answers in /var/cache/nginx, and tmpfs pages count against mem_limit.
+      # 128m holds five bodies at client_max_body_size (24m); a fuller cache
+      # fails that one request instead of the whole container. /var/run only
+      # holds the pid file; nginx writes nothing to /tmp.
+      - /var/cache/nginx:size=128m
+      - /var/run:size=1m
+      - /tmp:size=8m
     cap_drop:
       - ALL
     cap_add:
@@ -134,7 +142,12 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs:
-      - /tmp
+      # Sized so a full /tmp fails a write instead of taking the container's
+      # memory (SEC1, C-02); tmpfs pages count against mem_limit. Holds the
+      # sessions (one 4 KiB page each, also for anonymous login forms), the
+      # spooled request bodies (5 FPM children x post_max_size 20M = 100M) and
+      # the small LDAPS CA cache. 60M left for sessions is about 15,000 of them.
+      - /tmp:size=160m
     cap_drop:
       - ALL
     cap_add:
@@ -177,7 +190,10 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs:
-      - /tmp
+      # VIRTUSPHERE_DEPLOY_WORKDIR lives here: one job at a time, a copy of the
+      # Ansible artifacts (well under 1 MiB) plus its inventory, and the
+      # heartbeat files. 64m is ample and stays far below mem_limit.
+      - /tmp:size=64m
     cap_drop:
       - ALL
     security_opt:
@@ -212,7 +228,8 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs:
-      - /tmp
+      # Only the worker heartbeat file.
+      - /tmp:size=16m
     cap_drop:
       - ALL
     security_opt:

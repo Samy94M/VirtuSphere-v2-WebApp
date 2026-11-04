@@ -210,7 +210,8 @@ server {
     access_log /dev/stdout virtusphere;
     error_log stderr error;
     sendfile off;
-    client_max_body_size 100m;
+    # Same body ceiling as the HTTP block: just above PHP's post_max_size.
+    client_max_body_size 24m;
 
     # Same fallback headers as the HTTP block; the maps live in default.conf,
     # which nginx loads first. Only fills in what PHP did not already send, so a
@@ -234,23 +235,26 @@ server {
 
     # Keep in sync with Docker/nginx/default.conf (the HTTP block).
     location ~ ^/(lib|vendor|var|logs|tests)/ { deny all; }
-    location ~* /(composer\.(json|lock)|phpstan.*\.(neon|dist)|.*\.lock)$ { deny all; }
+    location ~* /(composer\.(json|lock)|phpstan.*\.neon|.*\.(dist|lock))$ { deny all; }
+    location ~ /\.(?!well-known/) { deny all; }
 
     location ~ \.php$ {
+        # Sign-in rate limit; zone and URI key live in default.conf (http context).
+        limit_req zone=virtusphere_login burst=20 nodelay;
+        limit_req_status 429;
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
         fastcgi_pass php:9000;
         fastcgi_index index.php;
         include fastcgi_params;
+        # httpoxy (CVE-2016-5385): a client "Proxy" header must never become
+        # HTTP_PROXY for PHP. The portal makes no outbound HTTP call today.
+        fastcgi_param HTTP_PROXY "";
         fastcgi_read_timeout 300;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param HTTPS on;
         fastcgi_intercept_errors off;
         fastcgi_buffer_size 16k;
         fastcgi_buffers 4 16k;
-    }
-
-    location ~ /\.ht {
-        deny all;
     }
 }
 CONF;
