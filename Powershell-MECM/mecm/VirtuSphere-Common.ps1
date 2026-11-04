@@ -1659,7 +1659,7 @@ function Test-VsRolloutHostname {
 # bleiben.
 #
 # Der Name wird normalisiert abgelegt (MECM vergleicht Geraetenamen selbst
-# case-insensitiv), die MAC ueber ConvertTo-VsNormalizedMac. Ein Datensatz kann
+# case-insensitiv), die MACs ueber ConvertTo-VsNormalizedMacList. Ein Datensatz kann
 # mehrere MACs tragen; jede zaehlt.
 function New-VsMecmDeviceIndex {
     param($Devices)
@@ -1684,12 +1684,11 @@ function New-VsMecmDeviceIndex {
             $index.ByName[$nameKey] += $device
         }
 
-        # MACAddress ist je nach Abfrage ein Einzelwert oder eine Liste. Beides
-        # ueber denselben Pfad, damit ein Datensatz mit zwei NICs nicht nur unter
-        # der ersten auffindbar ist.
-        foreach ($rawMac in @($device.MACAddress)) {
-            $mac = ConvertTo-VsNormalizedMac ([string]$rawMac)
-            if (-not $mac) { continue }
+        # MACAddress ist je nach Abfrage ein Einzelwert, eine Liste oder ein
+        # Text mit mehreren MACs (Get-CMDevice -Fast). Alle drei ueber
+        # ConvertTo-VsNormalizedMacList, damit ein Datensatz mit zwei NICs unter
+        # jeder seiner MACs auffindbar ist.
+        foreach ($mac in @(ConvertTo-VsNormalizedMacList $device.MACAddress)) {
             if (-not $index.ByMac.ContainsKey($mac)) { $index.ByMac[$mac] = @() }
             $index.ByMac[$mac] += $device
         }
@@ -1772,9 +1771,8 @@ function Resolve-VsDeviceIdentity {
             if ($normalizedKnown) { $vmMacs[$normalizedKnown] = $true }
         }
         $found = $false
-        foreach ($rawMac in @($hits[0].MACAddress)) {
-            $normalizedRecordMac = ConvertTo-VsNormalizedMac ([string]$rawMac)
-            if ($normalizedRecordMac -and $vmMacs.ContainsKey($normalizedRecordMac)) { $found = $true; break }
+        foreach ($normalizedRecordMac in @(ConvertTo-VsNormalizedMacList $hits[0].MACAddress)) {
+            if ($vmMacs.ContainsKey($normalizedRecordMac)) { $found = $true; break }
         }
         if (-not $found) { return (& $block 'resource_mac_conflict') }
 
@@ -2548,6 +2546,35 @@ function ConvertTo-VsNormalizedMac {
     $hex = ($Mac -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
     if ($hex.Length -ne 12) { return $null }
     return ($hex -split '(?<=\G..)(?=.)') -join ':'
+}
+
+# Zerlegt eine MAC-Angabe eines MECM-Datensatzes in einzelne, normalisierte MACs.
+# Die einzige Stelle dafuer: Index und Identitaetspruefung lesen MECM-MACs nur
+# hierueber.
+#
+# Dieselbe Eigenschaft kommt in zwei Formen: SMS_R_System.MACAddresses liefert
+# eine Liste, `Get-CMDevice -Fast` dagegen MACAddress als EINEN Text
+# ("00:50:56:AA:BB:21, 00:50:56:AA:BB:22"). Der Text als Ganzes hat 24
+# Hexzeichen und faellt in ConvertTo-VsNormalizedMac durch; ein Geraet mit zwei
+# NICs war damit unter keiner MAC auffindbar und blockierte als mac_conflict
+# bzw. resource_mac_conflict (MC-MAC1, 04.11.2026).
+#
+# Getrennt wird an Komma, Semikolon und Leerraum; jedes Teil geht einzeln durch
+# die strenge ConvertTo-VsNormalizedMac, ein unbrauchbares Teil faellt weg. Eine
+# MAC, die der Datensatz doppelt nennt, zaehlt einmal: sonst laege er zweimal
+# unter derselben MAC im Index und waere mit sich selbst mehrdeutig.
+# Rueckgabe ohne `,`-Verpackung; jeder Aufrufer klammert in `@(...)`.
+function ConvertTo-VsNormalizedMacList {
+    param($Value)
+    $macs = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Value)) {
+        if ($null -eq $item) { continue }
+        foreach ($part in ([string]$item -split '[,;\s]+')) {
+            $mac = ConvertTo-VsNormalizedMac $part
+            if ($mac -and -not $macs.Contains($mac)) { $macs.Add($mac) }
+        }
+    }
+    return $macs.ToArray()
 }
 
 # ---------------------------------------------------------------------------

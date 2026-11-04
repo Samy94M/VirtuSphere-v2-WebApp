@@ -49,7 +49,7 @@ flowchart TD
   QE -->|ja| R
   QE -->|nein| DUE{"Eine VM fällig? Gesperrte VMs nur bei geänderter Portalzeile oder nach dem Wiederholungstakt $script:VsDeviceRecheckSeconds"}
   DUE -->|nein| DUE1["Keine MECM-Abfrage; die Ursachen der gesperrten VMs gehen in den Laufbericht"] --> R
-  DUE -->|ja| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; je Task Sequence eine Collection anlegen"]
+  DUE -->|ja| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; ein Gerät gilt unter jeder seiner MACs, auch wenn MECM sie als einen Text liefert; je Task Sequence eine Collection anlegen"]
   M --> V
   subgraph JE["Je VM in der Warteschlange"]
     V{"Mission und genau eine Netzwerkkarte auf der WDS-Portgruppe mit MAC?"}

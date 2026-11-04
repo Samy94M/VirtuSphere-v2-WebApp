@@ -389,7 +389,9 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
    (Etappe 14D): sie löste Duplikate still nach „last wins" auf, und welcher von
    zwei gleichnamigen Datensätzen gewann, entschied die Reihenfolge der
    Providerantwort. Eine Mehrdeutigkeit muss ein Fehler bleiben und darf keine
-   Auswahlheuristik werden.
+   Auswahlheuristik werden. Die MACs eines Geräts zerlegt
+   `ConvertTo-VsNormalizedMacList`: `Get-CMDevice -Fast` liefert sie als einen
+   Text mit Komma, `SMS_R_System.MACAddresses` als Liste.
 3. Ordner `VirtuSphere_OS` und `VirtuSphere_Missions` sicherstellen; für jede
    Task Sequence eine gleichnamige Collection im OS-Ordner anlegen.
 4. Je Device:

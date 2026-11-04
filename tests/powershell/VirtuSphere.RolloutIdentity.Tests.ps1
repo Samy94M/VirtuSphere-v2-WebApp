@@ -188,6 +188,193 @@ Describe 'Identitaetsentscheidung' {
     }
 }
 
+Describe 'MAC-Angaben aus MECM: Liste oder Text (MC-MAC1)' {
+    # Gemessen am 04.11.2026 auf dem MECM-Server: `Get-CMDevice -Fast` liefert
+    # MACAddress als EINEN Text, Komma und Leerzeichen zwischen den MACs;
+    # SMS_R_System.MACAddresses dieselben MACs als Liste. Der Index iterierte den
+    # Text als ein Element, ConvertTo-VsNormalizedMac verwarf ihn (24 Hexzeichen),
+    # und zwei VMs mit zwei NICs hingen in mac_conflict bzw.
+    # resource_mac_conflict, obwohl ihr MECM-Geraet genau die Portal-MACs trug.
+    # Die MACs hier sind synthetisch, das Format ist das gemessene.
+    BeforeAll {
+        $script:MeasuredText = '00:50:56:AA:BB:21, 00:50:56:AA:BB:22'
+        $script:MacFleet = @(
+            (New-TestDevice -Name 'TEXT-NIC' -Mac $script:MeasuredText -ResourceId 16777101),
+            (New-TestDevice -Name 'LIST-NIC' -Mac @('00:50:56:AA:BB:31', '00:50:56:AA:BB:32') -ResourceId 16777102),
+            (New-TestDevice -Name 'TWICE-NIC' -Mac '00:50:56:AA:BB:41; 00-50-56-aa-bb-41' -ResourceId 16777103),
+            (New-TestDevice -Name 'THREE-NIC' -Mac '00:50:56:AA:BB:61, 00-50-56-aa-bb-62 00:50:56:AA:BB:63' -ResourceId 16777104),
+            (New-TestDevice -Name 'HALF-NIC' -Mac '00:50:56:AA:BB:71, kaputt' -ResourceId 16777105),
+            (New-TestDevice -Name 'NO-NIC' -Mac '' -ResourceId 16777106)
+        )
+        $script:MacIndex = New-VsMecmDeviceIndex -Devices $script:MacFleet
+
+        function Get-MacDecision {
+            param([hashtable]$Arguments)
+            $withIndex = @{ Index = $script:MacIndex }
+            foreach ($key in $Arguments.Keys) { $withIndex[$key] = $Arguments[$key] }
+            $decision = Resolve-VsDeviceIdentity @withIndex
+            return (("{0} {1} {2}" -f $decision.Action, $decision.ResourceId, $decision.Cause) -replace '\s+', ' ').Trim()
+        }
+    }
+
+    Context 'Zerlegung an einer Stelle' {
+        It '<why>' -ForEach @(
+            @{ why = 'gemessenes Format: Text mit Komma und Leerzeichen'; value = '00:50:56:AA:BB:21, 00:50:56:AA:BB:22'; expect = @('00:50:56:AA:BB:21', '00:50:56:AA:BB:22') }
+            @{ why = 'Liste wie SMS_R_System.MACAddresses'; value = @('00:50:56:AA:BB:21', '00-50-56-aa-bb-22'); expect = @('00:50:56:AA:BB:21', '00:50:56:AA:BB:22') }
+            @{ why = 'Semikolon, Leerraum und Zeilenumbruch trennen ebenfalls'; value = "00:50:56:AA:BB:21;00:50:56:AA:BB:22 00:50:56:AA:BB:23`r`n00:50:56:AA:BB:24"; expect = @('00:50:56:AA:BB:21', '00:50:56:AA:BB:22', '00:50:56:AA:BB:23', '00:50:56:AA:BB:24') }
+            @{ why = 'Einzelwert bleibt ein Element'; value = '00:50:56:AA:BB:21'; expect = @('00:50:56:AA:BB:21') }
+            @{ why = 'Liste, deren Element selbst ein Text mit zwei MACs ist'; value = @('00:50:56:AA:BB:21, 00:50:56:AA:BB:22', '00:50:56:AA:BB:23'); expect = @('00:50:56:AA:BB:21', '00:50:56:AA:BB:22', '00:50:56:AA:BB:23') }
+            @{ why = 'unbrauchbares Teil faellt weg, die gueltigen bleiben'; value = '00:50:56:AA:BB:21, kaputt, 00:50:56:AA:BB'; expect = @('00:50:56:AA:BB:21') }
+            @{ why = 'doppelt genannte MAC zaehlt einmal'; value = '00:50:56:AA:BB:21, 00-50-56-aa-bb-21'; expect = @('00:50:56:AA:BB:21') }
+        ) {
+            $actual = @(ConvertTo-VsNormalizedMacList $value)
+            ($actual -join '|') | Should -BeExactly ($expect -join '|')
+        }
+
+        It 'liefert fuer leere Angaben ein LEERES Array' {
+            @(ConvertTo-VsNormalizedMacList $null) | Should -HaveCount 0
+            @(ConvertTo-VsNormalizedMacList '') | Should -HaveCount 0
+            @(ConvertTo-VsNormalizedMacList @()) | Should -HaveCount 0
+            @(ConvertTo-VsNormalizedMacList @($null, ' ')) | Should -HaveCount 0
+        }
+
+        It 'zerlegt nicht ohne Trenner: 24 Hexzeichen am Stueck bleiben unbrauchbar' {
+            @(ConvertTo-VsNormalizedMacList '005056AABB21005056AABB22') | Should -HaveCount 0
+        }
+
+        It 'laesst ConvertTo-VsNormalizedMac fuer Einzelwerte streng' {
+            ConvertTo-VsNormalizedMac $script:MeasuredText | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Index' {
+        It 'findet das Geraet mit Kommatext unter jeder seiner MACs' {
+            @(Get-VsIndexHits -Map $script:MacIndex.ByMac -Key '00:50:56:AA:BB:21') | Should -HaveCount 1
+            @(Get-VsIndexHits -Map $script:MacIndex.ByMac -Key '00:50:56:AA:BB:22') | Should -HaveCount 1
+        }
+
+        It 'findet das Geraet mit Liste unter jeder seiner MACs' {
+            @(Get-VsIndexHits -Map $script:MacIndex.ByMac -Key '00:50:56:AA:BB:31') | Should -HaveCount 1
+            @(Get-VsIndexHits -Map $script:MacIndex.ByMac -Key '00:50:56:AA:BB:32') | Should -HaveCount 1
+        }
+
+        It 'findet das Geraet mit drei NICs und gemischten Trennern unter jeder seiner MACs' {
+            foreach ($mac in @('00:50:56:AA:BB:61', '00:50:56:AA:BB:62', '00:50:56:AA:BB:63')) {
+                @(Get-VsIndexHits -Map $script:MacIndex.ByMac -Key $mac) | Should -HaveCount 1
+            }
+        }
+
+        It 'legt den Kommatext nicht als eigenen Schluessel ab' {
+            $script:MacIndex.ByMac.ContainsKey($script:MeasuredText) | Should -BeFalse
+            @($script:MacIndex.ByMac.Keys | Where-Object { $_.Length -ne 17 }) | Should -HaveCount 0
+        }
+
+        It 'macht einen Datensatz, der dieselbe MAC zweimal nennt, nicht mit sich selbst mehrdeutig' {
+            @(Get-VsIndexHits -Map $script:MacIndex.ByMac -Key '00:50:56:AA:BB:41') | Should -HaveCount 1
+            Get-MacDecision -Arguments @{ RolloutHostname = 'TWICE-NIC'; Mac = '00:50:56:AA:BB:41' } | Should -BeExactly 'use 16777103'
+        }
+    }
+
+    Context 'Identitaet' {
+        It '<why>' -ForEach @(
+            @{ why = 'gebundene ResourceID, Kommatext, DHCP-MAC ist die erste'
+               given = @{ RolloutHostname = 'TEXT-NIC'; Mac = '00:50:56:AA:BB:21'; BoundResourceId = '16777101' }
+               expect = 'use 16777101' }
+            @{ why = 'gebundene ResourceID, Kommatext, DHCP-MAC ist die zweite'
+               given = @{ RolloutHostname = 'TEXT-NIC'; Mac = '00:50:56:AA:BB:22'; BoundResourceId = '16777101' }
+               expect = 'use 16777101' }
+            @{ why = 'gebundene ResourceID, Kommatext, nur eine bekannte statische MAC passt (MECM-ID1)'
+               given = @{ RolloutHostname = 'TEXT-NIC'; Mac = '00:50:56:AA:BB:99'; BoundResourceId = '16777101'; KnownMacs = @('00:50:56:AA:BB:99', '00-50-56-aa-bb-22') }
+               expect = 'use 16777101' }
+            @{ why = 'gebundene ResourceID, Kommatext, keine Portal-MAC passt'
+               given = @{ RolloutHostname = 'TEXT-NIC'; Mac = '00:50:56:AA:BB:99'; BoundResourceId = '16777101'; KnownMacs = @('00:50:56:AA:BB:98') }
+               expect = 'block resource_mac_conflict' }
+            @{ why = 'gebundene ResourceID, Liste, DHCP-MAC ist die zweite'
+               given = @{ RolloutHostname = 'LIST-NIC'; Mac = '00:50:56:AA:BB:32'; BoundResourceId = '16777102' }
+               expect = 'use 16777102' }
+            @{ why = 'gebundene ResourceID, Liste, keine Portal-MAC passt'
+               given = @{ RolloutHostname = 'LIST-NIC'; Mac = '00:50:56:AA:BB:99'; BoundResourceId = '16777102' }
+               expect = 'block resource_mac_conflict' }
+            @{ why = 'ungebunden, Kommatext: Name und DHCP-MAC auf denselben Datensatz'
+               given = @{ RolloutHostname = 'TEXT-NIC'; Mac = '00:50:56:AA:BB:22' }
+               expect = 'use 16777101' }
+            @{ why = 'ungebunden, Liste: Name und DHCP-MAC auf denselben Datensatz'
+               given = @{ RolloutHostname = 'LIST-NIC'; Mac = '00:50:56:AA:BB:31' }
+               expect = 'use 16777102' }
+            @{ why = 'ungebunden, Kommatext: DHCP-MAC eines fremden Datensatzes unter neuem Namen bleibt mac_conflict'
+               given = @{ RolloutHostname = 'FRESH-NAME'; Mac = '00:50:56:AA:BB:22' }
+               expect = 'block mac_conflict' }
+            @{ why = 'ungebunden, Kommatext: Name passt, DHCP-MAC fehlt im Datensatz, Portal-MACs binden nicht'
+               given = @{ RolloutHostname = 'TEXT-NIC'; Mac = '00:50:56:AA:BB:99'; KnownMacs = @('00:50:56:AA:BB:21', '00:50:56:AA:BB:22') }
+               expect = 'block mac_conflict' }
+            @{ why = 'drei NICs, gemischte Trenner und Schreibweisen: ungebunden ueber die dritte MAC'
+               given = @{ RolloutHostname = 'THREE-NIC'; Mac = '00:50:56:AA:BB:63' }
+               expect = 'use 16777104' }
+            @{ why = 'drei NICs: gebunden, nur die mittlere (klein mit Bindestrich notierte) MAC ist dem Portal bekannt'
+               given = @{ RolloutHostname = 'THREE-NIC'; Mac = '00:50:56:AA:BB:99'; BoundResourceId = '16777104'; KnownMacs = @('00:50:56:AA:BB:62') }
+               expect = 'use 16777104' }
+            @{ why = 'ein ungueltiges Teil im Text: die gueltige MAC traegt die Erstbindung weiter'
+               given = @{ RolloutHostname = 'HALF-NIC'; Mac = '00:50:56:AA:BB:71' }
+               expect = 'use 16777105' }
+            @{ why = 'leerer MAC-Text: gebundener Datensatz traegt keine MAC und blockiert'
+               given = @{ RolloutHostname = 'NO-NIC'; Mac = '00:50:56:AA:BB:99'; BoundResourceId = '16777106'; KnownMacs = @('00:50:56:AA:BB:99') }
+               expect = 'block resource_mac_conflict' }
+            @{ why = 'leerer MAC-Text: Name passt, aber ohne MAC keine Erstbindung'
+               given = @{ RolloutHostname = 'NO-NIC'; Mac = '00:50:56:AA:BB:99' }
+               expect = 'block mac_conflict' }
+        ) {
+            Get-MacDecision -Arguments $given | Should -BeExactly $expect
+        }
+
+        It 'Regression: gemessenes Get-CMDevice-Format blockiert weder gebunden noch bei der Erstbindung' {
+            # Genau die Form, die Select-Object Name, MACAddress, ResourceID aus
+            # `Get-CMDevice -Fast` liefert: ein Objekt, MACAddress als ein Text.
+            $record = [pscustomobject]@{ Name = 'MAC1-VM'; MACAddress = '00:50:56:AA:BB:51, 00:50:56:AA:BB:52'; ResourceID = 16777151 }
+            $index = New-VsMecmDeviceIndex -Devices @($record)
+
+            $bound = Resolve-VsDeviceIdentity -Index $index -RolloutHostname 'MAC1-VM' -Mac '00:50:56:AA:BB:51' -BoundResourceId '16777151' -KnownMacs @('00:50:56:AA:BB:51', '00:50:56:AA:BB:52')
+            $bound.Action | Should -BeExactly 'use'
+            $bound.ResourceId | Should -BeExactly '16777151'
+
+            $unbound = Resolve-VsDeviceIdentity -Index $index -RolloutHostname 'MAC1-VM' -Mac '00:50:56:AA:BB:51'
+            $unbound.Action | Should -BeExactly 'use'
+            $unbound.ResourceId | Should -BeExactly '16777151'
+        }
+    }
+
+    Context 'Quelltext' {
+        It 'liest jede MAC-Eigenschaft eines MECM-Datensatzes nur ueber ConvertTo-VsNormalizedMacList' {
+            # Abgeleitet statt aufgelistet: jeder Zugriff `.MACAddress` oder
+            # `.MACAddresses` in einem MECM-Serverskript muss das direkte Argument
+            # der Zerlegung sein. Ein neuer Leser, der den Text selbst iteriert,
+            # wiederholt den MC-MAC1-Fehler und faellt hier auf.
+            $mecmDir = Join-Path $script:PsRoot 'mecm'
+            $offenders = @()
+            $readers = 0
+            foreach ($file in @(Get-ChildItem -Path $mecmDir -Filter '*.ps1' -File)) {
+                $tokens = $null
+                $errors = $null
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+                $members = $ast.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                        $node.Member -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                        @('MACAddress', 'MACAddresses') -contains $node.Member.Value
+                    }, $true)
+                foreach ($member in @($members)) {
+                    $readers++
+                    $parent = $member.Parent
+                    $ok = $parent -is [System.Management.Automation.Language.CommandAst] -and
+                        $parent.GetCommandName() -eq 'ConvertTo-VsNormalizedMacList'
+                    if (-not $ok) { $offenders += ('{0}:{1} {2}' -f $file.Name, $member.Extent.StartLineNumber, $member.Extent.Text) }
+                }
+            }
+            $readers | Should -BeGreaterThan 0
+            $offenders | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Geschlossene Ursachensprache' {
     BeforeAll {
         # Das Vokabular und der ValidateSet werden aus dem QUELLTEXT gelesen, in
