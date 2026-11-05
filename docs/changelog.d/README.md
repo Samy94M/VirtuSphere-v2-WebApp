@@ -6,7 +6,7 @@ Jedes Paket schreibt seine CHANGELOG-Einträge in eine eigene Datei in diesem Or
 
 - Dateiname ist die Paketkennung in Großbuchstaben: `SEC2.md`, `RL1-D7.md`, `B1.md`. Ein Paket, das später weiterarbeitet, ergänzt seine Datei.
 - Jeder Eintrag ist eine Zeile `- **Titel (PAKET, TT.MM.JJJJ).** Text`, wie bisher im CHANGELOG. Eingerückte Fortsetzungszeilen sind erlaubt, Überschriften und freie Absätze nicht.
-- UTF-8 ohne BOM, LF-Zeilenenden, echte Umlaute. Keine Servernamen, FQDNs, Prod-IPs, DP-Namen, Site-Code, echte MACs oder Konten.
+- UTF-8 ohne BOM, echte Umlaute. Keine Servernamen, FQDNs, Prod-IPs, DP-Namen, Site-Code, echte MACs oder Konten.
 - Der Update-Absatz („Update von …, Migration …, neue Images …“) gehört nicht in ein Fragment; ihn schreibt der Release-Commit.
 
 ## Release-Commit

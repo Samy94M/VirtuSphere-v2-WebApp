@@ -42,17 +42,15 @@ doc_fragment_problem() {
     echo "Fragment ist leer"
     return 0
   fi
-  # Byteweise statt grep: Git Bashs grep entfernt CR vor dem Vergleich.
-  if [ "$(tr -d '\r' < "$file" | wc -c)" -ne "$(wc -c < "$file")" ]; then
-    echo "Fragment hat CRLF-Zeilenenden; LF verwenden"
-    return 0
-  fi
+  # CRLF ist kein Befund: `* text=auto` checkt .md unter Windows mit CRLF aus,
+  # und Git speichert LF. Die Pruefung liest deshalb ohne CR, und das
+  # Zusammenfuehrskript schreibt die Eintraege ohne CR.
   if [ "$(head -c 3 "$file" | od -An -tx1 | tr -d ' \n')" = efbbbf ]; then
     echo "Fragment beginnt mit einer UTF-8-BOM"
     return 0
   fi
   if [ "$kind" = changelog ]; then
-    first=$(grep -m 1 '[^[:space:]]' "$file")
+    first=$(tr -d '\r' < "$file" | grep -m 1 '[^[:space:]]')
     case "$first" in
       '- **'*) ;;
       *) echo "erste Zeile ist kein Eintrag der Form '- **Titel.** Text'"; return 0 ;;
@@ -60,14 +58,14 @@ doc_fragment_problem() {
     # Ein Eintrag ist eine Zeile '- **...'; Fortsetzungszeilen sind eingerueckt.
     # Ueberschriften, Absaetze und andere Listenformen gehoeren nicht hinein:
     # das Skript setzt die Zeilen unveraendert unter die Release-Ueberschrift.
-    bad=$(grep -n '[^[:space:]]' "$file" | grep -vE '^[0-9]+:(- \*\*|  )' | head -n 1 || true)
+    bad=$(tr -d '\r' < "$file" | grep -n '[^[:space:]]' | grep -vE '^[0-9]+:(- \*\*|  )' | head -n 1 || true)
     if [ -n "$bad" ]; then
       echo "Zeile ${bad%%:*} ist weder ein Eintrag '- **...' noch eine eingerueckte Fortsetzung"
       return 0
     fi
   else
     id=$(printf '%s\n' "$name" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//; s/\.md$//')
-    first=$(head -n 1 "$file")
+    first=$(head -n 1 "$file" | tr -d '\r')
     case "$first" in
       "# $id" | "# $id "* | "# $id:"* | "# $id,"*) ;;
       *) echo "erste Zeile muss die Ueberschrift '# $id ...' sein"; return 0 ;;

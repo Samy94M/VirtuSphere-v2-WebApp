@@ -120,8 +120,9 @@ elif [ -f "$changelog" ]; then
   if ! git show "$release_commit:./$changelog" > "$tmp/released.md" 2>/dev/null; then
     fail no-ssot "$changelog ist im Release-Commit $short nicht lesbar."
   else
-    changelog_body < "$tmp/released.md" > "$tmp/released-body.md"
-    changelog_body < "$changelog" > "$tmp/current-body.md"
+    # Ohne CR: ein Windows-Checkout liefert CRLF, git show den LF-Stand.
+    tr -d '\r' < "$tmp/released.md" | changelog_body > "$tmp/released-body.md"
+    tr -d '\r' < "$changelog" | changelog_body > "$tmp/current-body.md"
     released_entries=$(grep -c '^- ' "$tmp/released-body.md" || true)
     current_entries=$(grep -c '^- ' "$tmp/current-body.md" || true)
     if [ "$current_entries" -gt "$released_entries" ]; then

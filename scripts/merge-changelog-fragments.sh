@@ -75,8 +75,7 @@ printf '%s\n' "$release_date" | grep -qE '^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[0
   || die date "Datum '$release_date' hat nicht die Form TT.MM.JJJJ." 2
 if [ -n "$intro" ]; then
   [ -f "$intro" ] || die intro "Update-Absatz '$intro' fehlt." 2
-  grep -q '[^[:space:]]' "$intro" || die intro "Update-Absatz '$intro' ist leer." 2
-  if [ "$(tr -d '\r' < "$intro" | wc -c)" -ne "$(wc -c < "$intro")" ]; then die intro "Update-Absatz '$intro' hat CRLF-Zeilenenden." 2; fi
+  tr -d '\r' < "$intro" | grep -q '[^[:space:]]' || die intro "Update-Absatz '$intro' ist leer." 2
 fi
 
 [ -f "$changelog" ] || die no-changelog "$changelog fehlt."
@@ -111,7 +110,8 @@ while IFS= read -r fragment; do
     broken=$((broken + 1))
     continue
   fi
-  grep '[^[:space:]]' "$fragment" >> "$tmp/entries"
+  # Ohne CR: ein Windows-Checkout liefert CRLF, der CHANGELOG im Objektspeicher LF.
+  tr -d '\r' < "$fragment" | grep '[^[:space:]]' >> "$tmp/entries"
   echo "[$index/$total] pass merge-changelog $name"
 done < "$tmp/list"
 [ "$broken" -eq 0 ] || die fragment-format "$broken Fragment(e) kaputt; nichts geschrieben."
@@ -119,7 +119,8 @@ done < "$tmp/list"
 {
   printf '%s\n\n' "$heading"
   if [ -n "$intro" ]; then
-    awk 'NF { last = NR } { line[NR] = $0 } END { for (i = 1; i <= last; i++) if (started || line[i] ~ /[^[:space:]]/) { started = 1; print line[i] } }' "$intro"
+    tr -d '\r' < "$intro" \
+      | awk 'NF { last = NR } { line[NR] = $0 } END { for (i = 1; i <= last; i++) if (started || line[i] ~ /[^[:space:]]/) { started = 1; print line[i] } }'
     printf '\n'
   fi
   cat "$tmp/entries"

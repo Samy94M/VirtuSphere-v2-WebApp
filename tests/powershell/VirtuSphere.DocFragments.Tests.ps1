@@ -260,7 +260,6 @@ Describe 'check-doc-fragments.sh' {
             @{ Path = 'docs/changelog.d/b1.md'; Text = "- **x (B1).** y`n"; Pattern = 'PAKET>\.md' }
             @{ Path = 'docs/changelog.d/B1.txt'; Text = "- **x (B1).** y`n"; Pattern = 'PAKET>\.md' }
             @{ Path = 'docs/changelog.d/B1.md'; Text = "`n  `n"; Pattern = 'leer' }
-            @{ Path = 'docs/changelog.d/B1.md'; Text = "- **x (B1).** y`r`n"; Pattern = 'CRLF' }
             @{ Path = 'docs/changelog.d/B1.md'; Text = "## B1`n`n- **x (B1).** y`n"; Pattern = 'erste Zeile' }
             @{ Path = 'docs/changelog.d/B1.md'; Text = "- **x (B1).** y`nfree paragraph`n"; Pattern = 'Zeile 2' }
             @{ Path = 'docs/register/B1.md'; Text = "# B1`n`ntext`n"; Pattern = 'JJJJ-MM-TT' }
@@ -275,6 +274,17 @@ Describe 'check-doc-fragments.sh' {
             $r.Output | Should -Match '\[doc-fragments\.fragment-format\]'
             $r.Output | Should -Match $case.Pattern -Because $case.Path
         }
+    }
+
+    # `* text=auto` checks .md out with CRLF on Windows; Git stores LF. A
+    # fresh Windows clone must stay green (found by the B1 counterprobe).
+    It 'accepts fragments and a changelog checked out with CRLF' {
+        $repo = New-FragmentRepo
+        Set-RepoFile $repo 'docs/CHANGELOG.md' ($script:Preamble + $script:Released).Replace("`n", "`r`n")
+        Set-RepoFile $repo 'docs/changelog.d/B1.md' "- **x (B1).** y`r`n  continued.`r`n"
+        Set-RepoFile $repo 'docs/register/2026-11-05-B1.md' "# B1`r`n`r`ntext`r`n"
+        $r = Invoke-Guard $repo
+        $r.ExitCode | Should -Be 0 -Because $r.Output
     }
 
     It 'rejects a fragment with a UTF-8 BOM' {
@@ -377,7 +387,7 @@ Describe 'merge-changelog-fragments.sh' {
         $bad.Output | Should -Match '\[changelog-merge\.version\]'
     }
 
-    It 'reads a relative --intro from the caller directory and refuses a CRLF one' {
+    It 'reads a relative --intro from the caller directory' {
         $repo = New-FragmentRepo
         Set-RepoFile $repo 'docs/changelog.d/B1.md' "- **x (B1).** y`n"
         [IO.File]::WriteAllText((Join-Path $script:Work 'intro-rel.txt'), "Relative intro.`n", (New-Object Text.UTF8Encoding $false))
@@ -385,10 +395,20 @@ Describe 'merge-changelog-fragments.sh' {
         $r.ExitCode | Should -Be 0 -Because $r.Output
         $r.Stdout | Should -Match 'Relative intro\.'
 
-        [IO.File]::WriteAllText((Join-Path $script:Work 'intro-crlf.txt'), "CRLF intro.`r`n", (New-Object Text.UTF8Encoding $false))
-        $crlf = Invoke-Merge $repo @('--dry-run', '--version', '2026.11.6', '--intro', 'intro-crlf.txt')
-        $crlf.ExitCode | Should -Be 2
-        $crlf.Output | Should -Match '\[changelog-merge\.intro\]'
+        $missing = Invoke-Merge $repo @('--dry-run', '--version', '2026.11.6', '--intro', 'no-such-intro.txt')
+        $missing.ExitCode | Should -Be 2
+        $missing.Output | Should -Match '\[changelog-merge\.intro\]'
+    }
+
+    It 'writes CRLF fragments and a CRLF intro without CR' {
+        $repo = New-FragmentRepo
+        Set-RepoFile $repo 'docs/changelog.d/B1.md' "- **Crlf (B1).** y`r`n  continued.`r`n"
+        Set-RepoFile $repo 'intro.txt' "Crlf intro.`r`n"
+        $r = Invoke-Merge $repo @('--version', '2026.11.6', '--date', '06.11.2026', '--intro', ((Join-Path $repo 'intro.txt') -replace '\\', '/'))
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $text = Get-RepoFile $repo 'docs/CHANGELOG.md'
+        $text | Should -Not -Match "`r"
+        $text | Should -Match "## 2026\.11\.6 \(06\.11\.2026\)`n`nCrlf intro\.`n`n- \*\*Crlf \(B1\)\.\*\* y`n  continued\.`n`n## 2026\.11\.5"
     }
 
     It 'refuses a changelog that still has the old unreleased section' {
