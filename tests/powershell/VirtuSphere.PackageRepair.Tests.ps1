@@ -97,100 +97,39 @@ function Get-VsPackageReportApiConfiguration {
         [IO.File]::WriteAllText((Join-Path $bundleRoot 'manifest.json'), (($manifest | ConvertTo-Json -Depth 5) + "`n"), (New-Object Text.UTF8Encoding($false)))
         [IO.File]::WriteAllText((Join-Path $reporting 'current.json'), (($descriptor | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
     }
+    # The synthetic loopback endpoint of the reporter cases (test scaffolding, compiled
+    # once per process in the type block below). KB3 (05.11.2026), measured: the old
+    # receiver was a Start-Job powershell.exe that polled every 25 ms, read the request
+    # byte by byte in script and answered through ConvertFrom-Json/ConvertTo-Json. Its
+    # first answer took about 170 ms at idle, inside the product's 2000 ms per-exchange
+    # deadline, which left about 300 ms of slack: a receiver delayed by 1.5 s already
+    # ended reporting with ipc_unconfirmed, the DG1 red "event 1 did not arrive".
+    # The stall case slept a fixed 8 s and the test then waited a fixed 10 s for the
+    # job; 4.5 s of job overhead reproduced the DG1 red with the product's own
+    # numbers fulfilled. This receiver records every request before it answers (so a
+    # confirmation the product logged implies the record), answers from a warmed
+    # thread, and in stall mode never answers while the run lasts. No case waits on a
+    # clock for it any more. The product budgets and every assertion are unchanged.
     function Start-RepairReportServer {
         param([ValidateSet('ack', 'backpressure', 'stall')][string]$Mode = 'ack')
-        $reservation = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, 0)
-        $reservation.Start()
-        try { $port = ([Net.IPEndPoint]$reservation.LocalEndpoint).Port } finally { $reservation.Stop() }
-        $ready = Join-Path $script:PackageRoot 'report-server.ready'
-        $job = Start-Job -ArgumentList @($port, $ready, $Mode) -ScriptBlock {
-            param([int]$Port, [string]$Ready, [string]$Mode)
-            $listener = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, $Port)
-            $listener.Start()
-            $received = New-Object 'System.Collections.Generic.List[object]'
-            try {
-                [IO.File]::WriteAllText($Ready, 'ready')
-                $expectedCount = if ($Mode -eq 'ack') { 4 } else { 1 }
-                for ($requestIndex = 0; $requestIndex -lt $expectedCount; $requestIndex++) {
-                    $pending = [Diagnostics.Stopwatch]::StartNew()
-                    while (-not $listener.Pending() -and $pending.ElapsedMilliseconds -lt 12000) {
-                        Start-Sleep -Milliseconds 25
-                    }
-                    if (-not $listener.Pending()) { throw "Synthetic HTTP event $requestIndex did not arrive." }
-                    $client = $listener.AcceptTcpClient()
-                    try {
-                        $client.ReceiveTimeout = 3000
-                        $client.SendTimeout = 3000
-                        $stream = $client.GetStream()
-                        $headerBytes = New-Object 'System.Collections.Generic.List[byte]'
-                        while ($headerBytes.Count -lt 8192) {
-                            $next = $stream.ReadByte()
-                            if ($next -lt 0) { throw 'Request header ended early.' }
-                            $headerBytes.Add([byte]$next)
-                            $count = $headerBytes.Count
-                            if ($count -ge 4 -and $headerBytes[$count - 4] -eq 13 -and
-                                $headerBytes[$count - 3] -eq 10 -and $headerBytes[$count - 2] -eq 13 -and
-                                $headerBytes[$count - 1] -eq 10) { break }
-                        }
-                        $headers = [Text.Encoding]::ASCII.GetString($headerBytes.ToArray())
-                        $match = [regex]::Match($headers, '(?im)^Content-Length:\s*(\d+)\s*$')
-                        if (-not $match.Success) { throw 'Missing Content-Length.' }
-                        $length = [int]$match.Groups[1].Value
-                        if ($length -lt 1 -or $length -gt 65536) { throw 'Request size out of bounds.' }
-                        $payload = New-Object byte[] $length
-                        $offset = 0
-                        while ($offset -lt $length) {
-                            $read = $stream.Read($payload, $offset, $length - $offset)
-                            if ($read -le 0) { throw 'Request body ended early.' }
-                            $offset += $read
-                        }
-                        $body = [Text.Encoding]::UTF8.GetString($payload) | ConvertFrom-Json
-                        [void]$received.Add([pscustomobject]@{ event = $body.event; seq = $body.event_seq; body = $body })
-                        if ($Mode -eq 'stall') {
-                            Start-Sleep -Seconds 8
-                            continue
-                        }
-                        if ($Mode -eq 'ack') {
-                            $ack = [ordered]@{ schema_version = 1; run_id = $body.run_id; event = $body.event;
-                                event_seq = $body.event_seq; accepted = $true; deduplicated = $false }
-                            $response = [Text.Encoding]::UTF8.GetBytes(($ack | ConvertTo-Json -Compress))
-                            $status = '200 OK'
-                            $extra = ''
-                        } else {
-                            $response = [Text.Encoding]::UTF8.GetBytes('{}')
-                            $status = '503 Service Unavailable'
-                            $extra = "Retry-After: 30`r`n"
-                        }
-                        $head = [Text.Encoding]::ASCII.GetBytes(
-                            "HTTP/1.1 $status`r`nContent-Type: application/json; charset=utf-8`r`nContent-Length: $($response.Length)`r`n$extra" +
-                            "Connection: close`r`n`r`n")
-                        $stream.Write($head, 0, $head.Length)
-                        $stream.Write($response, 0, $response.Length)
-                        $stream.Flush()
-                    } finally {
-                        $client.Dispose()
-                    }
-                }
-                return $received.ToArray()
-            } finally {
-                $listener.Stop()
-            }
-        }
-        # Start-Job launches its own powershell.exe; a bare start took 4.3 to 6.2 s
-        # under 48 busy loops (KB1, 31.10.2026). The receiver is test scaffolding, so
-        # waiting for it longer cannot hide a product failure; a 3 s wait reported
-        # "not ready" and hid the product's own reason.
-        $readyClock = [Diagnostics.Stopwatch]::StartNew()
-        while ($readyClock.ElapsedMilliseconds -lt 15000 -and -not (Test-Path -LiteralPath $ready) -and
-            $job.State -notin @('Completed', 'Failed', 'Stopped')) {
-            Start-Sleep -Milliseconds 25
-        }
-        if (-not (Test-Path -LiteralPath $ready)) {
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-            throw 'Synthetic report server did not become ready.'
-        }
-        return [pscustomobject]@{ Port = $port; Job = $job }
+        $receiver = New-Object VirtuSphereTests.RepairReportReceiver -ArgumentList $Mode
+        return [pscustomobject]@{ Port = $receiver.Port; Receiver = $receiver }
+    }
+    function Stop-RepairReportServer {
+        param($Server)
+        if ($null -ne $Server) { $Server.Receiver.Dispose() }
+    }
+    # What reached the receiver during the run. Called after the wrapper returned: its
+    # reporter child is gone with the job object then, so nothing can arrive later.
+    function Get-RepairReportEvents {
+        param([Parameter(Mandatory)]$Server, [string]$Because = '')
+        $Server.Receiver.Stop()
+        $errors = @($Server.Receiver.Errors)
+        if ($errors.Count -gt 0) { throw ('Synthetic report receiver failed: {0} ({1})' -f ($errors -join '; '), $Because) }
+        return @($Server.Receiver.Bodies | ForEach-Object {
+            $body = $_ | ConvertFrom-Json
+            [pscustomobject]@{ event = $body.event; seq = $body.event_seq; body = $body }
+        })
     }
     function Get-RepairReportingDiagnostic {
         param([long]$WrapperWallMs)
@@ -264,6 +203,172 @@ function Get-VsPackageReportApiConfiguration {
             throw 'Add-Type -TypeDefinition der Vorlage ist kein konstanter Text.'
         }
         Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition $elements[$definitionIndex].Value
+    }
+
+    # The receiver behind Start-RepairReportServer, compiled here like the job type
+    # above: outside every timed case.
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+            -not ('VirtuSphereTests.RepairReportReceiver' -as [type])) {
+        Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+
+namespace VirtuSphereTests
+{
+    public sealed class RepairReportReceiver : IDisposable
+    {
+        private readonly TcpListener listener;
+        private readonly string mode;
+        private readonly Thread thread;
+        private readonly List<string> bodies = new List<string>();
+        private readonly List<string> errors = new List<string>();
+        private readonly List<TcpClient> held = new List<TcpClient>();
+        private int stopped;
+
+        public RepairReportReceiver(string mode)
+        {
+            if (mode != "ack" && mode != "backpressure" && mode != "stall") { throw new ArgumentException("Unknown receiver mode " + mode); }
+            this.mode = mode;
+            // Pays JIT and regex setup once, before the product's deadlines start.
+            string warm = "{\"run_id\":\"warmup\",\"event\":\"started\",\"event_seq\":1}";
+            string request = "POST /warmup HTTP/1.1\r\nContent-Length: " + Encoding.UTF8.GetByteCount(warm) + "\r\n\r\n" + warm;
+            Answer(new MemoryStream(Encoding.UTF8.GetBytes(request)), Stream.Null, false);
+            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            thread = new Thread(Run);
+            thread.IsBackground = true;
+            thread.Priority = ThreadPriority.Highest;
+            thread.Start();
+        }
+
+        public int Port { get; private set; }
+        public string[] Bodies { get { lock (bodies) { return bodies.ToArray(); } } }
+        public string[] Errors { get { lock (errors) { return errors.ToArray(); } } }
+
+        private void Run()
+        {
+            while (true)
+            {
+                TcpClient client;
+                try { client = listener.AcceptTcpClient(); }
+                catch (SocketException) { return; }
+                catch (ObjectDisposedException) { return; }
+                catch (InvalidOperationException) { return; }
+                bool hold = false;
+                try
+                {
+                    // Safety bounds only; no case waits for them.
+                    client.ReceiveTimeout = 30000;
+                    client.SendTimeout = 30000;
+                    NetworkStream stream = client.GetStream();
+                    hold = Answer(stream, stream, true);
+                }
+                catch (Exception error)
+                {
+                    lock (errors) { errors.Add(error.GetType().Name + ": " + error.Message); }
+                }
+                if (hold)
+                {
+                    lock (held)
+                    {
+                        if (Thread.VolatileRead(ref stopped) == 0) { held.Add(client); client = null; }
+                    }
+                }
+                if (client != null) { client.Close(); }
+            }
+        }
+
+        // Returns true when the connection is held open without an answer (stall).
+        private bool Answer(Stream input, Stream output, bool record)
+        {
+            List<byte> header = new List<byte>();
+            while (true)
+            {
+                int next = input.ReadByte();
+                if (next < 0) { throw new IOException("Request header ended early."); }
+                header.Add((byte)next);
+                int count = header.Count;
+                if (count >= 4 && header[count - 4] == 13 && header[count - 3] == 10 &&
+                    header[count - 2] == 13 && header[count - 1] == 10) { break; }
+                if (count >= 8192) { throw new IOException("Request header too large."); }
+            }
+            Match length = Regex.Match(Encoding.ASCII.GetString(header.ToArray()), @"(?im)^Content-Length:\s*(\d+)\s*$");
+            if (!length.Success) { throw new IOException("Missing Content-Length."); }
+            int size = int.Parse(length.Groups[1].Value);
+            if (size < 1 || size > 65536) { throw new IOException("Request size out of bounds."); }
+            byte[] payload = new byte[size];
+            int offset = 0;
+            while (offset < size)
+            {
+                int read = input.Read(payload, offset, size - offset);
+                if (read <= 0) { throw new IOException("Request body ended early."); }
+                offset += read;
+            }
+            string body = Encoding.UTF8.GetString(payload);
+            // Recorded before any answer: a confirmation the product logged implies this record.
+            if (record) { lock (bodies) { bodies.Add(body); } }
+            if (mode == "stall") { return true; }
+            string status;
+            string extra = "";
+            string response;
+            if (mode == "ack")
+            {
+                response = "{\"schema_version\":1,\"run_id\":\"" + Field(body, "run_id", true) +
+                    "\",\"event\":\"" + Field(body, "event", true) +
+                    "\",\"event_seq\":" + Field(body, "event_seq", false) +
+                    ",\"accepted\":true,\"deduplicated\":false}";
+                status = "200 OK";
+            }
+            else
+            {
+                response = "{}";
+                status = "503 Service Unavailable";
+                extra = "Retry-After: 30\r\n";
+            }
+            byte[] responseBytes = Encoding.UTF8.GetBytes(response);
+            byte[] head = Encoding.ASCII.GetBytes("HTTP/1.1 " + status +
+                "\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: " + responseBytes.Length +
+                "\r\n" + extra + "Connection: close\r\n\r\n");
+            output.Write(head, 0, head.Length);
+            output.Write(responseBytes, 0, responseBytes.Length);
+            output.Flush();
+            return false;
+        }
+
+        // The ack echoes three fields of the product's JSON as sent. A wrong echo is
+        // refused by the product, so it can only turn a case red. The cases read the
+        // whole body with ConvertFrom-Json after the run.
+        private static string Field(string body, string name, bool quoted)
+        {
+            string value = quoted ? "\"((?:[^\"\\\\]|\\\\.)*)\"" : "(-?\\d+)";
+            Match match = Regex.Match(body, "\"" + Regex.Escape(name) + "\"\\s*:\\s*" + value);
+            if (!match.Success) { throw new InvalidDataException("Report body has no " + name + "."); }
+            return match.Groups[1].Value;
+        }
+
+        public void Stop()
+        {
+            if (Interlocked.Exchange(ref stopped, 1) != 0) { return; }
+            listener.Stop();
+            lock (held)
+            {
+                foreach (TcpClient client in held) { client.Close(); }
+                held.Clear();
+            }
+            thread.Join(5000);
+        }
+
+        public void Dispose() { Stop(); }
+    }
+}
+'@
     }
 }
 
@@ -423,20 +528,13 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
             $server = Start-RepairReportServer
             try {
                 Add-RepairReporterBundle -LoopbackPort $server.Port
+                $watch = [Diagnostics.Stopwatch]::StartNew()
                 Invoke-RepairWrapper
+                $watch.Stop()
+                $diag = Get-RepairReportingDiagnostic -WrapperWallMs $watch.ElapsedMilliseconds
                 $script:WrapperExit | Should -Be 0
-                $done = Wait-Job -Job $server.Job -Timeout 10
-                if ($null -eq $done) {
-                    $diagnosticLog = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
-                        -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
-                    $diagnosticRecords = @(Get-Content -LiteralPath $diagnosticLog.FullName | ForEach-Object { $_ | ConvertFrom-Json })
-                    Write-Host ('Synthetic receiver incomplete: state={0}, attempts={1}, reasons={2}' -f
-                        $server.Job.State, @($diagnosticRecords | Where-Object event -eq 'report_attempt').Count,
-                        (@($diagnosticRecords | Where-Object event -eq 'report_attempt' | ForEach-Object reason) -join ','))
-                }
-                $done | Should -Not -BeNullOrEmpty
-                $events = @(Receive-Job -Job $server.Job -ErrorAction Stop)
-                @($events.event) | Should -Be @('started', 'step_result', 'step_result', 'completed')
+                $events = @(Get-RepairReportEvents -Server $server -Because $diag)
+                @($events.event) | Should -Be @('started', 'step_result', 'step_result', 'completed') -Because $diag
                 @($events.seq) | Should -Be @(1, 2, 3, 4)
                 $events[1].body.result | Should -Be 'skip'
                 $events[2].body.result | Should -Be 'skip'
@@ -451,8 +549,7 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
                 @($records | Where-Object event -eq 'report_attempt' | ForEach-Object confirmed) | Should -Be @($true, $true, $true, $true)
                 ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
             } finally {
-                Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
-                Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+                Stop-RepairReportServer -Server $server
             }
         }
 
@@ -460,11 +557,13 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
             $server = Start-RepairReportServer -Mode backpressure
             try {
                 Add-RepairReporterBundle -LoopbackPort $server.Port
+                $watch = [Diagnostics.Stopwatch]::StartNew()
                 Invoke-RepairWrapper
+                $watch.Stop()
+                $diag = Get-RepairReportingDiagnostic -WrapperWallMs $watch.ElapsedMilliseconds
                 $script:WrapperExit | Should -Be 0
-                (Wait-Job -Job $server.Job -Timeout 5) | Should -Not -BeNullOrEmpty
-                $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
-                @($received.event) | Should -Be @('started')
+                $received = @(Get-RepairReportEvents -Server $server -Because $diag)
+                @($received.event) | Should -Be @('started') -Because $diag
                 $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
                     -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
                 $records = @(Get-Content -LiteralPath $reporting.FullName | ForEach-Object { $_ | ConvertFrom-Json })
@@ -474,11 +573,13 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
                 @($attempts.attempted) | Should -Be @($true, $false, $false, $false)
                 ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
             } finally {
-                Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
-                Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+                Stop-RepairReportServer -Server $server
             }
         }
 
+        # The receiver holds the request open without any answer until the run is
+        # over, so the response is late by construction, not by a sleep that has to
+        # outlast the deadline on a busy host.
         It 'keeps package success when a report response stalls beyond the IPC deadline' {
             $server = Start-RepairReportServer -Mode stall
             try {
@@ -490,12 +591,7 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
                 $diag = Get-RepairReportingDiagnostic -WrapperWallMs $watch.ElapsedMilliseconds
                 $script:WrapperExit | Should -Be 0
                 $watch.ElapsedMilliseconds | Should -BeLessThan 10000 -Because $diag
-                (Wait-Job -Job $server.Job -Timeout 10) | Should -Not -BeNullOrEmpty -Because $diag
-                try {
-                    $received = @(Receive-Job -Job $server.Job -ErrorAction Stop)
-                } catch {
-                    throw ("{0} ({1})" -f $_.Exception.Message, $diag)
-                }
+                $received = @(Get-RepairReportEvents -Server $server -Because $diag)
                 @($received.event) | Should -Be @('started') -Because $diag
                 $reporting = Get-ChildItem -LiteralPath (Join-Path $script:PackageRoot 'VirtuSphere\Logs\PackageWrapper') `
                     -Filter 'reporting_*.log' -File -Recurse | Select-Object -First 1
@@ -503,8 +599,7 @@ Describe 'Package repair invalidates only an actual hash-miss before child execu
                 ($records | Where-Object event -eq 'reporting_disabled').reason | Should -Be 'ipc_unconfirmed'
                 ($records | Where-Object event -eq 'reporting_budget').active_ms | Should -BeLessThan 10000
             } finally {
-                Stop-Job -Job $server.Job -ErrorAction SilentlyContinue
-                Remove-Job -Job $server.Job -Force -ErrorAction SilentlyContinue
+                Stop-RepairReportServer -Server $server
             }
         }
 
