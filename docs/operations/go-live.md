@@ -299,7 +299,7 @@ Hostzustand, den kein Archiv trägt, und deshalb steht er in
    `172.17.0.0/16` an. Liegt die IP, über die du per SSH verbunden bist, in
    diesem Bereich, routet der Host die Antwortpakete in die Docker-Bridge und die
    SSH-Sitzung friert ein. In der Override ein unbenutztes Subnetz pinnen
-   (`networks.default.ipam.config.subnet`, z. B. `10.89.7.0/24`). Recovery bei
+   (`networks.default.ipam.config.subnet`, z. B. `10.250.0.0/24`). Recovery bei
    bereits eingefrorener Sitzung: neu verbinden, `docker compose --profile tools down`
    (entfernt das Netz; ohne das Profil hält ein gestartetes phpMyAdmin das Netz
    fest), Override anlegen, neu hoch.

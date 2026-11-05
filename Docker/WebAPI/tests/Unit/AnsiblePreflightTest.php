@@ -294,8 +294,8 @@ final class AnsiblePreflightTest extends TestCase
             ansible_preflight_allowlist_verdict($chain . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' ok')
         );
         self::assertSame(
-            ['status' => 'denied', 'ip' => '10.89.7.4'],
-            ansible_preflight_allowlist_verdict($chain . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' denied 10.89.7.4')
+            ['status' => 'denied', 'ip' => '192.0.2.4'],
+            ansible_preflight_allowlist_verdict($chain . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' denied 192.0.2.4')
         );
         self::assertSame(
             ['status' => 'unknown', 'ip' => ''],
@@ -329,7 +329,7 @@ final class AnsiblePreflightTest extends TestCase
     public function testStripMarkersRemovesTheAllowlistVerdictLineToo(): void
     {
         $output = VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . " allowlist\n"
-            . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . " denied 10.89.7.4\nreal remote output";
+            . VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . " denied 192.0.2.4\nreal remote output";
         self::assertSame('real remote output', ansible_preflight_strip_markers($output));
     }
 
