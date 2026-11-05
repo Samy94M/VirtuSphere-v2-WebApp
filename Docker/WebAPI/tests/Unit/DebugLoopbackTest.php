@@ -32,7 +32,7 @@ final class DebugLoopbackTest extends TestCase
 
     public function testTheDebugGateAsksForLoopbackOutsideTheCli(): void
     {
-        $source = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/errors.php');
+        $source = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/error_debug.php');
         self::assertStringContainsString(
             "return PHP_SAPI === 'cli' || virtusphere_is_loopback_address((string) (\$_SERVER['REMOTE_ADDR'] ?? ''));",
             $source
