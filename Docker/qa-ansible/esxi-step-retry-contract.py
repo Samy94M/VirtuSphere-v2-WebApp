@@ -7,6 +7,7 @@ lines per VM (AGENTS.md). Nothing here contacts ESXi: the vmware modules are
 replaced by a local action plugin with a scripted host, the portal callback
 and the touch marker by stubs.
 """
+import functools
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,8 @@ import subprocess
 import tempfile
 
 import yaml
+
+from contract_cases import run_cases
 
 ROOT = Path('/repo')
 FILES = (
@@ -195,11 +198,5 @@ CASES = [
       '1 of 3 VMs did not receive their autostart entry: vm2 after 4 attempt(s)')),
 ]
 
-for position, case in enumerate(CASES, 1):
-    print(f'[{position}/{len(CASES)}] RUN {case[0]}', flush=True)
-    try:
-        run_case(*case)
-    except Exception:
-        print(f'[{position}/{len(CASES)}] fail {case[0]}', flush=True)
-        raise
-    print(f'[{position}/{len(CASES)}] pass {case[0]}', flush=True)
+# QL2: the cases share nothing and run on a bounded pool (contract_cases.py).
+raise SystemExit(run_cases([(case[0], functools.partial(run_case, *case)) for case in CASES]))

@@ -13,8 +13,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
+
+from contract_cases import run_cases
 
 
 MARKER = "::virtusphere-create::"
@@ -38,7 +41,9 @@ def decode_marker(line: str) -> dict[str, object]:
 DEFAULT_INVENTORY = [{"guest_name": "fixture-vm", "moid": "vm-42", "instance_uuid": "fixture-uuid"}]
 
 
-@functools.lru_cache(maxsize=None)
+_SWITCHES_LOCK = threading.Lock()
+
+
 def vm_info_detail_switches() -> tuple[tuple[str, bool], ...]:
     """The show_* switches of the PINNED vmware_vm_info, with their defaults.
 
@@ -46,7 +51,15 @@ def vm_info_detail_switches() -> tuple[tuple[str, bool], ...]:
     collection that adds a switch which defaults to on would pass a written
     list while the identity read quietly grew slow again. ansible-doc runs
     without the stub on the collection path, so it answers for the real module.
+    Samples run side by side (QL2); the lock makes the first one ask and the
+    others wait for its answer.
     """
+    with _SWITCHES_LOCK:
+        return _read_vm_info_detail_switches()
+
+
+@functools.lru_cache(maxsize=None)
+def _read_vm_info_detail_switches() -> tuple[tuple[str, bool], ...]:
     completed = subprocess.run(
         ["ansible-doc", "--json", "community.vmware.vmware_vm_info"],
         text=True,
@@ -545,40 +558,40 @@ def main(argv: list[str]) -> int:
               ("prepare-identity-read-transient", ("prepare-read-retry", "identity-first")),
               ("prepare-identity-read-persistent", ("prepare-read-retry", "identity"))]
 
-    for index, (label, case) in enumerate(cases, start=1):
-        print(f"[{index}/{len(cases)}] RUN {label}", flush=True)
-        try:
-            if case is not None and case[0] == "prepare":
-                _, stored, inventory, expected = case
-                run_prepare_case(repo, label, stored, inventory, expected)
-            elif case is not None and case[0] == "launch":
-                run_launch_case(repo, label, case[1])
-            elif case is not None and case[0] == "identity-read":
-                run_identity_read_case(repo, label)
-            elif case is not None and case[0] == "prepare-read-retry":
-                run_prepare_read_retry_case(repo, label, case[1])
-            elif case is not None and case[0] == "vm-info-fields":
-                run_vm_info_fields_case(label)
-            elif case is not None and case[0] == "read-failure":
-                run_status_case(repo, label, '{"failed":false,"changed":true}',
-                                {"event": "succeeded", "changed": True, "power_state": "unknown"}, read_failure=case[1])
-            elif case is None:
-                completed = subprocess.run(
-                    ["ansible-playbook", str(repo / "Docker" / "qa-ansible" / "create-async-fixtures.yml")],
-                    cwd=repo,
-                    text=True,
-                    capture_output=True,
-                )
-                if completed.returncode != 0:
-                    raise AssertionError(completed.stdout + completed.stderr)
-            else:
-                source, expected, remove_after_snapshot = case
-                run_status_case(repo, label, source, expected, remove_after_snapshot)
-        except Exception as exc:
-            print(f"[{index}/{len(cases)}] FAIL {label}: {exc}", flush=True)
-            return 1
-        print(f"[{index}/{len(cases)}] PASS {label}", flush=True)
-    return 0
+    # QL2: every sample owns its temporary directory and environment and runs
+    # on a bounded pool (contract_cases.py); the fixture sample alone uses its
+    # fixed directory, and no other sample touches it.
+    return run_cases([(label, functools.partial(run_sample, repo, label, case)) for label, case in cases],
+                     passed="PASS", failed="FAIL", error_on_fail_line=True)
+
+
+def run_sample(repo: Path, label: str, case: tuple[object, ...] | None) -> None:
+    if case is not None and case[0] == "prepare":
+        _, stored, inventory, expected = case
+        run_prepare_case(repo, label, stored, inventory, expected)
+    elif case is not None and case[0] == "launch":
+        run_launch_case(repo, label, case[1])
+    elif case is not None and case[0] == "identity-read":
+        run_identity_read_case(repo, label)
+    elif case is not None and case[0] == "prepare-read-retry":
+        run_prepare_read_retry_case(repo, label, case[1])
+    elif case is not None and case[0] == "vm-info-fields":
+        run_vm_info_fields_case(label)
+    elif case is not None and case[0] == "read-failure":
+        run_status_case(repo, label, '{"failed":false,"changed":true}',
+                        {"event": "succeeded", "changed": True, "power_state": "unknown"}, read_failure=case[1])
+    elif case is None:
+        completed = subprocess.run(
+            ["ansible-playbook", str(repo / "Docker" / "qa-ansible" / "create-async-fixtures.yml")],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            raise AssertionError(completed.stdout + completed.stderr)
+    else:
+        source, expected, remove_after_snapshot = case
+        run_status_case(repo, label, source, expected, remove_after_snapshot)
 
 
 if __name__ == "__main__":

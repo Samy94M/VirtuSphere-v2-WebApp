@@ -1,5 +1,82 @@
 # Dot-sourced check module. Importing defines functions only.
 
+# QL2: Die Ansible-Vertragsskripte fuehren ihre Faelle auf einem begrenzten
+# Pool aus (Docker/qa-ansible/contract_cases.py); die Zeilen verschiedener
+# Faelle verschraenken sich, und die Ergebnisnummern laufen nicht in Ordnung.
+# Ein gruener Schritt muss trotzdem jeden Fall 1..total genau einmal mit RUN
+# und genau einmal mit seiner pass-Zeile zeigen, RUN zuerst (A22). Sonst ist
+# der Schritt rot: ein Pool, der einen Fall verschluckt, sieht nicht gruen aus.
+function Get-ContractCaseProgress {
+    param([string[]]$Output = @(), [string]$ResultWord)
+    $headerPattern = '^contract cases: (\d+), workers: (\d+)$'
+    $header = @(@($Output) | Where-Object { $_ -match $headerPattern })
+    if ($header.Count -ne 1) { return @{ Problem = ('{0} Kopfzeilen "contract cases: N, workers: W" statt einer' -f $header.Count) } }
+    $null = $header[0] -match $headerPattern
+    $total = [int]$Matches[1]
+    $workers = [int]$Matches[2]
+    if ($total -lt 1) { return @{ Problem = 'keine Faelle (Zero-Match)' } }
+    $runAt = @{}
+    $doneAt = @{}
+    $index = 0
+    foreach ($line in @($Output)) {
+        $index++
+        if (-not ($line -cmatch '^\[(\d+)/(\d+)\] (\S+) ')) { continue }
+        $number = [int]$Matches[1]
+        $word = $Matches[3]
+        if (([int]$Matches[2] -ne $total) -or ($number -lt 1) -or ($number -gt $total)) {
+            return @{ Problem = ('Zeile ausserhalb von 1..{0}: {1}' -f $total, $line) }
+        }
+        if ($word -ceq 'RUN') {
+            if ($runAt.ContainsKey($number)) { return @{ Problem = ('Fall {0}/{1} hat zwei RUN-Zeilen' -f $number, $total) } }
+            $runAt[$number] = $index
+        } elseif ($word -ceq $ResultWord) {
+            if ($doneAt.ContainsKey($number)) { return @{ Problem = ('Fall {0}/{1} hat zwei Ergebniszeilen' -f $number, $total) } }
+            if (-not $runAt.ContainsKey($number)) { return @{ Problem = ('Fall {0}/{1} meldet sein Ergebnis vor RUN' -f $number, $total) } }
+            $doneAt[$number] = $index
+        } else {
+            return @{ Problem = ('Fall {0}/{1} endet mit "{2}" in einem gruenen Lauf' -f $number, $total, $word) }
+        }
+    }
+    foreach ($number in 1..$total) {
+        if (-not ($runAt.ContainsKey($number) -and $doneAt.ContainsKey($number))) {
+            return @{ Problem = ('Fall {0}/{1} ohne RUN- und {2}-Zeile' -f $number, $total, $ResultWord) }
+        }
+    }
+    return @{ Problem = $null; Total = $total; Workers = $workers }
+}
+
+# QL2: Ein Gate aus mehreren Werkzeugschritten legt die Ausgabe ALLER Schritte
+# im Gate-Log ab und nennt im Detail die Dauer je Schritt; vorher landete nur
+# das letzte Werkzeugergebnis im Log. Der erste rote Schritt beendet das Gate.
+function Invoke-ContractSteps {
+    param([object[]]$Steps, [string]$OkDetail)
+    $output = @()
+    $timings = @()
+    foreach ($step in $Steps) {
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        $r = Invoke-Tool 'docker' $step.Arguments -Live:([bool]$step.Live)
+        $watch.Stop()
+        $seconds = ([math]::Round($watch.Elapsed.TotalSeconds, 1)).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        $output += ('== {0}: exit {1}, {2}s ==' -f $step.Label, $r.ExitCode, $seconds)
+        $output += @($r.Output)
+        $timing = '{0} {1}s' -f $step.Label, $seconds
+        if (($r.ExitCode -eq 0) -and (-not $r.StartFailed) -and $step.ResultWord) {
+            $progress = Get-ContractCaseProgress -Output $r.Output -ResultWord $step.ResultWord
+            if ($progress.Problem) {
+                return New-FailResult ('{0}: Fortschrittszeilen verletzen A22: {1}' -f $step.Label, $progress.Problem) $output
+            }
+            $timing = '{0} {1} Faelle {2}s ({3} Arbeiter)' -f $step.Label, $progress.Total, $seconds, $progress.Workers
+        }
+        $timings += $timing
+        $stepOutcome = Format-ToolResult @{ ExitCode = $r.ExitCode; Output = $output; StartFailed = $r.StartFailed } $OkDetail $step.FailDetail
+        if ($stepOutcome.class -ne 'pass') {
+            $stepOutcome.detail = '{0} [{1}]' -f $stepOutcome.detail, ($timings -join '; ')
+            return $stepOutcome
+        }
+    }
+    return New-PassResult ('{0} [{1}]' -f $OkDetail, ($timings -join '; ')) $output
+}
+
 function Register-FastCheckGates {
     Add-Gate -Name 'compose-config' -Lanes $allLanes -Kind 'container' -Body {
         $r = Invoke-Tool 'docker' @('compose', '--project-directory', $repoRoot, 'config', '--quiet')
@@ -291,28 +368,26 @@ function Register-FastCheckGates {
         # Auswahl.
         $fixture = Join-Path $repoRoot 'Docker/qa-ansible/powercycle-selection-fixtures.yml'
         if (-not (Test-Path $fixture)) { return New-InfraResult 'powercycle-selection-fixtures.yml fehlt unter dem Pruef-Root (Zero-Match)' }
-        if (-not (Test-DockerImage $toolImages.ansible)) {
-            return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
-        }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'ansible-playbook', '/repo/Docker/qa-ansible/powercycle-selection-fixtures.yml')
-        if ($r.ExitCode -ne 0) {
-            return Format-ToolResult $r 'Powercycle-Auswahl bewiesen' 'Powercycle-Auswahl weicht vom Vertrag ab'
-        }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'python', '/repo/Docker/qa-ansible/powercycle-sequence-contract.py') -Live
-        if ($r.ExitCode -ne 0) {
-            return Format-ToolResult $r 'Powercycle-Ablauf bewiesen' 'Powercycle-Ablauf weicht vom Vertrag ab'
-        }
         # K4a: Export, Start und Autostart ueberstehen einen kurzen ESXi-Aussetzer
         # (bis zu drei Wiederholungen je Aufruf, RETRY-Zeile mit Ursache) und
         # schreiben je VM ihre [n/total]-Zeilen. Dieselbe Stellvertreter-Technik
-        # wie oben: die Produktions-Playbooks laufen gegen einen geskripteten Host.
+        # wie beim Ablauf: die Produktions-Playbooks laufen gegen einen geskripteten Host.
         $retry = Join-Path $repoRoot 'Docker/qa-ansible/esxi-step-retry-contract.py'
         if (-not (Test-Path $retry)) { return New-InfraResult 'esxi-step-retry-contract.py fehlt unter dem Pruef-Root (Zero-Match)' }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'python', '/repo/Docker/qa-ansible/esxi-step-retry-contract.py') -Live
-        Format-ToolResult $r 'Powercycle-Auswahl, Powercycle-Ablauf und Wiederholung von Export, Start und Autostart bewiesen' 'Powercycle-, Export-, Start- oder Autostart-Ablauf weicht vom Vertrag ab'
+        if (-not (Test-DockerImage $toolImages.ansible)) {
+            return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
+        }
+        # Die Arbeiterzahl der Vertragsskripte (QL2) reicht der Runner aus der
+        # Host-Umgebung durch; ungesetzt gilt der Standard des Skripts.
+        $container = @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo', '-e', 'VIRTUSPHERE_QA_CONTRACT_WORKERS', $toolImages.ansible)
+        Invoke-ContractSteps -OkDetail 'Powercycle-Auswahl, Powercycle-Ablauf und Wiederholung von Export, Start und Autostart bewiesen' -Steps @(
+            @{ Label = 'Auswahl'; FailDetail = 'Powercycle-Auswahl weicht vom Vertrag ab'
+               Arguments = $container + @('ansible-playbook', '/repo/Docker/qa-ansible/powercycle-selection-fixtures.yml') },
+            @{ Label = 'Ablauf'; FailDetail = 'Powercycle-Ablauf weicht vom Vertrag ab'; Live = $true; ResultWord = 'pass'
+               Arguments = $container + @('python', '/repo/Docker/qa-ansible/powercycle-sequence-contract.py') },
+            @{ Label = 'Wiederholung'; FailDetail = 'Export-, Start- oder Autostart-Wiederholung weicht vom Vertrag ab'; Live = $true; ResultWord = 'pass'
+               Arguments = $container + @('python', '/repo/Docker/qa-ansible/esxi-step-retry-contract.py') }
+        )
     }
 
     Add-Gate -Name 'ansible-create-async' -Lanes $allLanes -Kind 'container' -Body {
@@ -335,9 +410,11 @@ function Register-FastCheckGates {
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/create-async-contract.py', '/repo') -Live
-        Format-ToolResult $r 'Async-Start, Produktionsstatus, Ergebniswahrheit und Cleanup bewiesen' 'Async-Vertrag des per-VM-Create verletzt'
+        $container = @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo', '-e', 'VIRTUSPHERE_QA_CONTRACT_WORKERS', $toolImages.ansible)
+        Invoke-ContractSteps -OkDetail 'Async-Start, Produktionsstatus, Ergebniswahrheit und Cleanup bewiesen' -Steps @(
+            @{ Label = 'Create-Async'; FailDetail = 'Async-Vertrag des per-VM-Create verletzt'; Live = $true; ResultWord = 'PASS'
+               Arguments = $container + @('python3', '/repo/Docker/qa-ansible/create-async-contract.py', '/repo') }
+        )
     }
 
     Add-Gate -Name 'ansible-output-buffering' -Lanes $allLanes -Kind 'container' -Body {

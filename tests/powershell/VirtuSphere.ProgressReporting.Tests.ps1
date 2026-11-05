@@ -92,11 +92,53 @@ Describe 'Visible progress reporting contract' {
 
     It 'streams the powercycle production-flow cases with bounded progress' {
         $source = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/powercycle-sequence-contract.py') -Raw
-        $source | Should -Match 'enumerate\(CASES, 1\)'
-        $source | Should -Match '\] RUN '
-        $source | Should -Match '\] pass '
-        $source | Should -Match '\] fail '
-        $script:FastGates | Should -Match "powercycle-sequence-contract\.py'\) -Live"
+        # QL2: the counted loop moved into the shared case runner; the script
+        # hands it every case and prints no progress line of its own.
+        $source | Should -Match 'from contract_cases import run_cases'
+        $source | Should -Match 'raise SystemExit\(run_cases\(\[\(case\[0\], functools\.partial\(run_case, \*case\)\) for case in CASES\]\)\)'
+        $source | Should -Not -Match "print\(f'\["
+        $script:FastGates | Should -Match "Live = \`$true; ResultWord = 'pass'\s+Arguments = \`$container \+ @\('python', '/repo/Docker/qa-ansible/powercycle-sequence-contract\.py'\)"
+    }
+
+    It 'runs the Ansible contract cases on a bounded pool with one RUN and one result line per case (QL2)' {
+        $runner = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/contract_cases.py') -Raw
+        $runner | Should -Match "WORKERS_ENV = 'VIRTUSPHERE_QA_CONTRACT_WORKERS'"
+        $runner | Should -Match 'DEFAULT_WORKERS = 4\b'
+        $runner | Should -Match 'MAX_WORKERS = 8\b'
+        $runner | Should -Match 'ThreadPoolExecutor\(max_workers=count\)'
+        $runner | Should -Match 'if count == 1:'
+        $runner | Should -Match "emit\(f'contract cases: \{total\}, workers: \{count\}'\)"
+        # One whole line per print, under one lock.
+        $runner | Should -Match 'def emit\(text: str\) -> None:\s+with lock:\s+print\(text, flush=True\)'
+        $unit = $runner.Substring($runner.IndexOf('def unit('))
+        $unit = $unit.Substring(0, $unit.IndexOf("emit(f'contract cases"))
+        $run = $unit.IndexOf("emit(f'[{position}/{total}] RUN {label}')")
+        $body = $unit.IndexOf('body()')
+        $pass = $unit.IndexOf("emit(f'[{position}/{total}] {passed} {label}')")
+        $run | Should -BeGreaterOrEqual 0
+        $body | Should -BeGreaterThan $run
+        $pass | Should -BeGreaterThan $body
+        $unit | Should -Match "emit\(f'\[\{position\}/\{total\}\] \{failed\} \{label\}: \{exc\}'\)"
+        $unit | Should -Match "emit\(f'\[\{position\}/\{total\}\] \{failed\} \{label\}\\n' \+ traceback\.format_exc\(\)"
+        # After the first failure no further case starts, as in the serial loop.
+        $unit | Should -Match 'if stop\.is_set\(\):\s+return\s+emit'
+        $unit | Should -Match 'stop\.set\(\)'
+        foreach ($name in @('VIRTUSPHERE_QA_CONTRACT_WORKERS')) {
+            ([regex]::Matches($script:FastGates, ("'-e', '" + $name + "'"))).Count | Should -Be 2 -Because 'both contract gates pass the worker count through'
+        }
+        # The output-buffering probe measures arrival times and stays serial.
+        $probe = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/output-buffering-probe.py') -Raw
+        $probe | Should -Not -Match 'contract_cases|ThreadPoolExecutor'
+    }
+
+    It 'checks every green contract step for complete interleaved progress and records the time per step (QL2)' {
+        $script:FastGates | Should -Match 'function Get-ContractCaseProgress'
+        $script:FastGates | Should -Match 'function Invoke-ContractSteps'
+        $script:FastGates | Should -Match '\$progress = Get-ContractCaseProgress -Output \$r\.Output -ResultWord \$step\.ResultWord'
+        $script:FastGates | Should -Match "Fortschrittszeilen verletzen A22"
+        $script:FastGates | Should -Match "'== \{0\}: exit \{1\}, \{2\}s ==' -f \`$step\.Label"
+        $script:QaGuide | Should -Match 'Interleaved progress \(QL2\)'
+        $script:QaGuide | Should -Match 'exactly once with `RUN` and exactly once with its result'
     }
 
     It 'reports each per-VM touch and info boundary before the ESXi read' {
@@ -136,11 +178,10 @@ Describe 'Visible progress reporting contract' {
 
     It 'streams the export, start and autostart retry cases with bounded progress' {
         $source = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa-ansible/esxi-step-retry-contract.py') -Raw
-        $source | Should -Match 'enumerate\(CASES, 1\)'
-        $source | Should -Match '\] RUN '
-        $source | Should -Match '\] pass '
-        $source | Should -Match '\] fail '
-        $script:FastGates | Should -Match "esxi-step-retry-contract\.py'\) -Live"
+        $source | Should -Match 'from contract_cases import run_cases'
+        $source | Should -Match 'raise SystemExit\(run_cases\(\[\(case\[0\], functools\.partial\(run_case, \*case\)\) for case in CASES\]\)\)'
+        $source | Should -Not -Match "print\(f'\["
+        $script:FastGates | Should -Match "Live = \`$true; ResultWord = 'pass'\s+Arguments = \`$container \+ @\('python', '/repo/Docker/qa-ansible/esxi-step-retry-contract\.py'\)"
     }
 
     It 'binds future agents and multi-unit runners to the n/total convention' {
@@ -213,22 +254,25 @@ Describe 'Visible progress reporting contract' {
     }
 
     It 'reports and streams every create async production sample' {
-        $script:CreateAsyncContract | Should -Match 'for index, \(label, case\) in enumerate\(cases, start=1\)'
-        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] RUN \{label\}"'
-        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] PASS \{label\}"'
-        $script:CreateAsyncContract | Should -Match 'f"\[\{index\}/\{len\(cases\)\}\] FAIL \{label\}:'
-        $script:FastGates | Should -Match "create-async-contract\.py'.+-Live"
+        # QL2: the counted loop is the shared case runner; the create samples
+        # keep their PASS/FAIL words and the error on the FAIL line.
+        $script:CreateAsyncContract | Should -Match 'from contract_cases import run_cases'
+        $script:CreateAsyncContract | Should -Match 'return run_cases\(\[\(label, functools\.partial\(run_sample, repo, label, case\)\) for label, case in cases\],\s+passed="PASS", failed="FAIL", error_on_fail_line=True\)'
+        $script:CreateAsyncContract | Should -Not -Match 'print\(f"\['
+        $script:FastGates | Should -Match "Live = \`$true; ResultWord = 'PASS'\s+Arguments = \`$container \+ @\('python3', '/repo/Docker/qa-ansible/create-async-contract\.py', '/repo'\)"
     }
 
     It 'keeps launch and status read-failure samples inside the counted create loop' {
         foreach ($label in @('prepare-bound-powered-on', 'launch-powered-on', 'launch-power-unknown', 'launch-suspended', 'launch-powered-off', 'status-power-read-failure', 'status-identity-read-failure')) {
             $script:CreateAsyncContract | Should -Match ([regex]::Escape($label))
         }
-        $loop = $script:CreateAsyncContract.Substring($script:CreateAsyncContract.IndexOf('for index, (label, case)'))
-        $loop | Should -Match 'run_launch_case\(repo, label, case\[1\]\)'
-        $loop | Should -Match 'read_failure=case\[1\]'
-        $loop.IndexOf('] RUN') | Should -BeLessThan $loop.IndexOf('run_launch_case(')
-        $loop.IndexOf('run_launch_case(') | Should -BeLessThan $loop.IndexOf('] PASS')
+        # Every sample of the list goes through the counted runner, and the
+        # runner dispatches launch and read-failure samples to their cases.
+        $main = $script:CreateAsyncContract.Substring($script:CreateAsyncContract.IndexOf('def main('))
+        $main.IndexOf('cases += [("launch-powered-on"') | Should -BeLessThan $main.IndexOf('return run_cases(')
+        $sample = $script:CreateAsyncContract.Substring($script:CreateAsyncContract.IndexOf('def run_sample('))
+        $sample | Should -Match 'run_launch_case\(repo, label, case\[1\]\)'
+        $sample | Should -Match 'read_failure=case\[1\]'
     }
 
     It 'reports every selected guard case before and after execution' {
