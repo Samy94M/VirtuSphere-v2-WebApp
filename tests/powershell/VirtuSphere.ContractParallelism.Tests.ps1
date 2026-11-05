@@ -171,6 +171,9 @@ Describe 'php-lint-all.sh in parallel' {
 
         function Invoke-Lint {
             param([string]$Root, [string]$Jobs = '')
+            # Windows PowerShell 5.1 exposes native stderr as ErrorRecord, and the
+            # runner sets Stop; the broken-file case must reach its exit code.
+            $ErrorActionPreference = 'Continue'
             $calls = Join-Path $TestDrive ('calls-' + [guid]::NewGuid().ToString('N'))
             [IO.File]::WriteAllText($calls, '')
             $saved = @{ PATH = $env:PATH; ROOT = $env:VIRTUSPHERE_CHECK_ROOT; JOBS = $env:VIRTUSPHERE_PHP_LINT_JOBS; CALLS = $env:PHP_LINT_CALLS }
