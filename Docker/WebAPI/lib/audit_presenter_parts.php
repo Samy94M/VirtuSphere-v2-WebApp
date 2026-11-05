@@ -95,9 +95,18 @@ function audit_login_description(string $id, string $result, array $context, str
         ]);
     }
     $reason = isset($context['reason']) ? audit_code_label($locale, 'login_reason', (string) $context['reason']) : audit_t($locale, 'invalid_credentials');
-    $user = isset($context['username'])
-        ? audit_t($locale, 'login_user_name', ['username' => (string) $context['username']])
-        : ($id !== 'unknown' ? audit_t($locale, 'login_user_id', ['id' => $id]) : '');
+    // F1: a name that matches no account is stored as its length only. Rows
+    // written before F1 carry the old English placeholder instead.
+    $length = $context['username_length'] ?? null;
+    if ($length === null && preg_match('/^<unusual input, (\d+) characters>$/', (string) ($context['username'] ?? ''), $legacy) === 1) {
+        $length = (int) $legacy[1];
+    }
+    $user = match (true) {
+        $length !== null => audit_t($locale, 'login_user_unknown', ['length' => (string) $length]),
+        isset($context['username']) => audit_t($locale, 'login_user_name', ['username' => (string) $context['username']]),
+        $id !== 'unknown' => audit_t($locale, 'login_user_id', ['id' => $id]),
+        default => '',
+    };
 
     return audit_t($locale, 'login_rejected', ['user_part' => $user, 'reason' => $reason]);
 }

@@ -92,9 +92,9 @@ function is_request_secure(): bool
 
 /**
  * Sign-in outcomes reach the `auth` audit channel, not just the lockout counter
- * in deploy_login_attempts, which no page ever shows. The typed user name is
- * recorded on failures because that is the only handle an admin has on an
- * unknown account; it is bounded and escaped on render, never trusted.
+ * in deploy_login_attempts, which no page ever shows. A failure records the
+ * typed name only when it names an existing account (F1); any other input is
+ * recorded as its length, so a password typed into the name field never lands.
  *
  * The account is deliberately NOT named on a rejected sign-in for an existing
  * user beyond the typed string, and no reason is leaked to the user, so this
@@ -156,7 +156,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
             'reason' => VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_LOCKED,
-            'username' => virtusphere_log_login_name($username),
+            ...virtusphere_login_name_audit_context($username, true),
         ], (int) $user['id']);
         return ['ok' => false, 'reason' => 'rate_limited'];
     }
@@ -194,7 +194,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', $user ? (int) $user['id'] : null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
             'reason' => $reason,
-            'username' => virtusphere_log_login_name($username),
+            ...virtusphere_login_name_audit_context($username, is_array($user)),
         ], $user ? (int) $user['id'] : null);
 
         return ['ok' => false, 'reason' => $limitReached ? 'rate_limited' : 'invalid'];

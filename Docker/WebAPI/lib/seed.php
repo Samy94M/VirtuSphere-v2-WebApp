@@ -15,29 +15,26 @@ if (PHP_SAPI !== 'cli') {
 // check below rejects empty credentials. There is no silent default secret.
 //
 // Forms, by argument count (argv[0] is the script):
-//   <user> <email>             the documented form. The password is read from
-//                              STDIN, one line: an argument would stay in the
-//                              shell history and in the process list.
-//   <user> <password> [email]  the legacy positional form, kept for scripts.
-//   no arguments               SEED_ADMIN_* (Docker/scripts/setup.sh); an empty
-//                              password is read from STDIN.
-$usage = "Usage: php lib/seed.php <admin-user> <admin-email>   (password: one line on STDIN)\n"
-    . "       php lib/seed.php <admin-user> <admin-password> [email]   (legacy form)\n";
+//   <user> <email>   the documented form. The password is read from STDIN, one
+//                    line: an argument would stay in the shell history and in
+//                    the process list.
+//   <user>           the same with the email from SEED_ADMIN_EMAIL.
+//   no arguments     SEED_ADMIN_* (Docker/scripts/setup.sh); an empty password
+//                    is read from STDIN.
+// The old positional form `<user> <password> [email]` is refused (F2) before
+// anything else happens: it put the password into the process list.
+$usage = "Usage: php lib/seed.php <admin-user> <admin-email>   (password: one line on STDIN)\n";
+$legacy = "seed: the password is not accepted as an argument any more; pass it as one line on STDIN.\n";
 $arguments = array_slice($argv ?? [], 1);
-$name = (string) ($arguments[0] ?? getenv('SEED_ADMIN_USER'));
-if (count($arguments) === 2) {
-    $email = (string) $arguments[1];
-    if (!str_contains($email, '@')) {
-        // The legacy form `<user> <password>` lands here too: it must not turn
-        // the password into an email address.
-        fwrite(STDERR, $usage);
-        exit(2);
-    }
-    $password = '';
-} else {
-    $password = (string) ($arguments[1] ?? getenv('SEED_ADMIN_PASSWORD'));
-    $email = (string) ($arguments[2] ?? getenv('SEED_ADMIN_EMAIL'));
+if (count($arguments) > 2 || (count($arguments) === 2 && !str_contains((string) $arguments[1], '@'))) {
+    // `<user> <password>` lands here too: it must not turn the password into
+    // an email address. Neither message repeats an argument.
+    fwrite(STDERR, $legacy . $usage);
+    exit(2);
 }
+$name = (string) ($arguments[0] ?? getenv('SEED_ADMIN_USER'));
+$password = count($arguments) === 2 ? '' : (string) getenv('SEED_ADMIN_PASSWORD');
+$email = (string) ($arguments[1] ?? getenv('SEED_ADMIN_EMAIL'));
 if ($email === '') {
     $email = 'admin@localhost';
 }

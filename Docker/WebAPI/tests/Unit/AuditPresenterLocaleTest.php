@@ -71,6 +71,10 @@ final class AuditPresenterLocaleTest extends TestCase
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', '42', VIRTUSPHERE_AUDIT_RESULT_DENIED, ['source' => 'local', 'reason' => 'invalid credentials', 'username' => 'jörg.müller'], 'de')
         );
         self::assertSame(
+            'Anmeldung abgewiesen für eine Eingabe ohne passendes Konto (9 Zeichen): ungültige Anmeldedaten',
+            audit_event_description(VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', null, VIRTUSPHERE_AUDIT_RESULT_DENIED, ['source' => 'local', 'reason' => 'invalid credentials', 'username_length' => 9], 'de')
+        );
+        self::assertSame(
             'VM mit ID 99 („srv-sql-01“) in Mission 12 (cpu, memory) geändert',
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_VM_CHANGED, 'vm', '99', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'updated', 'mission_id' => 12, 'name' => 'srv-sql-01', 'changes' => 'cpu, memory'], 'de')
         );

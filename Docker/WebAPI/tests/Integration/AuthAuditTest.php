@@ -58,6 +58,10 @@ final class AuthAuditTest extends TestCase
         $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND log_message LIKE '%" . self::PREFIX . "%'");
         // The rate-limit onset line carries neither username nor user id.
         $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND log_message LIKE 'ip rate limited%'");
+        // F1: a rejected sign-in for a name without an account keeps only its
+        // length, so the prefix match above cannot find it; this test's client
+        // IP is its own.
+        $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND ip = '" . self::CLIENT_IP . "'");
         if ($this->userId > 0) {
             $this->db->query('DELETE FROM deploy_logs WHERE user_id = ' . $this->userId);
         }
@@ -130,6 +134,42 @@ final class AuthAuditTest extends TestCase
         self::assertSame($this->userName, $context['username']);
         self::assertArrayHasKey('reason', $context, 'a refusal that does not say why is not evidence');
         self::assertArrayNotHasKey('password', $context);
+    }
+
+    /**
+     * F1: a name that matches no account never reaches the trail, because it is
+     * the one place a password typed into the name field would land. The row
+     * still exists and keeps the length, so a guessing run stays visible.
+     */
+    public function testAFailedLoginForAnUnknownNameKeepsOnlyItsLength(): void
+    {
+        $typed = self::PREFIX . 'Pw7xQ';
+        $before = (int) ($this->db->query("SELECT COALESCE(MAX(id), 0) AS m FROM deploy_logs")->fetch_assoc()['m'] ?? 0);
+
+        $result = login($typed, 'wrong-password', $this->db);
+        self::assertFalse($result['ok'] ?? true);
+
+        $stmt = $this->db->prepare(
+            "SELECT id, log_message, event_code, result, context_json FROM deploy_logs
+             WHERE category = 'auth' AND id > ? AND event_code = ? ORDER BY id DESC LIMIT 1"
+        );
+        $event = VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN;
+        $stmt->bind_param('is', $before, $event);
+        $stmt->execute();
+        $row = (array) $stmt->get_result()->fetch_assoc();
+        try {
+            self::assertNotSame([], $row, 'a rejected sign-in for an unknown name is still audited');
+            self::assertSame(VIRTUSPHERE_AUDIT_RESULT_DENIED, (string) $row['result']);
+            $context = json_decode((string) $row['context_json'], true, 8, JSON_THROW_ON_ERROR);
+            self::assertArrayNotHasKey('username', $context, 'a name without an account may be a password');
+            self::assertSame(mb_strlen($typed), $context['username_length']);
+            self::assertStringNotContainsString($typed, (string) $row['log_message']);
+            self::assertStringNotContainsString($typed, (string) $row['context_json']);
+        } finally {
+            if (isset($row['id'])) {
+                $this->db->query('DELETE FROM deploy_logs WHERE id = ' . (int) $row['id']);
+            }
+        }
     }
 
     public function testTheLockoutItselfIsAudited(): void

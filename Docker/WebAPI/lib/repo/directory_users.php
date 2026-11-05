@@ -36,6 +36,20 @@ function repo_directory_user(mysqli $db, int $userId): ?array
 }
 
 /**
+ * Whether a typed sign-in name is the UPN of an imported AD account (F1). Only
+ * then does a rejected directory sign-in keep the name in the audit trail.
+ */
+function repo_directory_upn_is_imported(mysqli $db, string $upn): bool
+{
+    return repo_fetch_one(
+        $db,
+        'SELECT id FROM deploy_users WHERE auth_source = ? AND (name = ? OR ad_upn = ?) LIMIT 1',
+        'sss',
+        [VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY, $upn, $upn]
+    ) !== null;
+}
+
+/**
  * Locks the three local authorization facts that must still agree immediately
  * before an AD session is created. LDAP success alone never grants a session.
  *
