@@ -89,6 +89,20 @@ a parse error over an empty body instead of its documented `413
 request_too_large`. `php -i | grep post_max_size` inside the container is the
 check.
 
+OPcache is on for PHP-FPM and off for the CLI and both workers. The base
+image loads the extension (`docker-php-ext-opcache.ini`); the same ini file
+states the values the runtime relies on (P2, 05.11.2026), pinned by
+`tests/Static/OpcacheRuntimeContractTest.php`; the measured effect is recorded
+in the session register (`docs/audits/2026-09-12-consolidated-session-backlog.md`,
+package P2). `php -i` shows the CLI view only; the FPM state
+needs an FPM request (`opcache_get_status()`). Timestamp validation stays at
+PHP's defaults: a file replaced in the bind-mounted code with a new mtime is
+picked up within 2 s, but one replaced with an unchanged mtime (an archive
+that preserves mtimes, a `cp -p`) keeps running as the old code until the FPM
+master restarts. The update runbook therefore always recreates the containers
+(`docs/operations/update.md`, rule 2); never hot-patch a PHP file in place and
+rely on the cache to notice.
+
 The deploy form's label map (`virtusphere_deploy_mode_labels()`) is the source of truth for which modes an operator may ask for. `inventory` is a *system* mode: it has no label, cannot be posted, and `repo_create_system_job()` refuses anything else. The read side (`deploy_job_normalize_mode()`) still accepts it, because the worker reads back a queued inventory job's payload. The location gate follows the same shape: `autostart` reads neither `datacenter_name` nor `datastore_name`, so a mission without a datastore can still have its autostart policy written, while every other mode is refused. Staggering is refused for `autostart` in the repository as well as on the page, because a config write has nothing to spread over time.
 
 ### One VM at a time: the create contract
