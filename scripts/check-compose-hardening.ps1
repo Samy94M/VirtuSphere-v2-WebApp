@@ -9,6 +9,7 @@
     compose config --format json, inklusive tools-Profil), nie per Regex ueber
     das YAML: gepinnt werden read_only+tmpfs (jede Flaeche mit size, Summe
     unter mem_limit), read-only Webserver-Mounts ausser virtusphere-conf.d,
+    eine uid ungleich 0 fuer jeden read_only-Dienst ohne cap_add,
     cap_drop ALL, die exakt
     dokumentierten cap_add-Sets, no-new-privileges, PID-/Memory-Limits,
     Healthchecks, service_healthy-Startordnung, restart- und Logging-Policy, die
@@ -279,6 +280,25 @@ if ($findings.Count -eq 0) {
         $memLimit = Get-Prop $svc 'mem_limit'
         if ($null -ne $memLimit -and [long]$memLimit -gt 0 -and $tmpfsBytes -ge [long]$memLimit) {
             Add-Finding 'tmpfs-size' ('{0}: tmpfs-Summe {1} B erreicht mem_limit {2} B' -f $name, $tmpfsBytes, $memLimit)
+        }
+    }
+
+    # SEC2 (C-06): Ein First-Party-Dienst ohne jede Capability braucht root
+    # fuer nichts; root haette nur noch den Besitz von root-Dateien voraus.
+    # Abgeleitet statt gelistet: jeder read_only-Dienst mit leerem cap_add-Set
+    # laeuft unter einer numerischen uid ungleich 0. Laeuft er auf dem
+    # PHP-Laufzeitimage, dann genau als 33:33, dem Benutzer des FPM-Pools, damit
+    # logs/ einen Besitzer behaelt.
+    foreach ($name in $readOnlyServices) {
+        if (@($expectedCapAdd[$name]).Count -ne 0) { continue }
+        $svc = Get-Prop $servicesNode $name
+        $user = "$(Get-Prop $svc 'user')"
+        if (-not ($user -match '^(\d+)(:(\d+))?$') -or [long]$Matches[1] -eq 0) {
+            Add-Finding 'worker-user' ('{0}: user "{1}" statt numerischer uid ungleich 0 (kein cap_add, also kein Grund fuer root)' -f $name, $user)
+            continue
+        }
+        if ("$(Get-Prop $svc 'image')" -eq 'virtusphere-php:8.4-runtime' -and $user -ne '33:33') {
+            Add-Finding 'worker-user' ('{0}: user "{1}" statt 33:33 (Benutzer des FPM-Pools, ein Besitzer fuer logs/)' -f $name, $user)
         }
     }
 

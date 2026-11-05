@@ -54,11 +54,15 @@ return [
     ['id' => 'auth_login_denied_user_id_only', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials']],
     ['id' => 'auth_login_denied_no_user_no_id', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => null, 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials']],
     ['id' => 'auth_login_denied_literal_unknown_id', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => 'unknown', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials']],
+    // F1: a name without an account is stored as its length; rows from before F1 carry the old placeholder
+    ['id' => 'auth_login_denied_unknown_name_length', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => null, 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials', 'username_length' => 9]],
+    ['id' => 'auth_login_denied_legacy_placeholder', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => null, 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'invalid credentials', 'username' => '<unusual input, 12 characters>']],
     // A redacted marker from the writer survives unchanged (the presenter must not redact it twice).
     ['id' => 'auth_login_denied_redacted_marker', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['source' => 'local', 'reason' => 'password=[redacted] rejected']],
 
     // auth.account_locked / auth.ip_rate_limited
     ['id' => 'auth_account_locked', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 15, 'failure_count' => 5]],
+    ['id' => 'auth_account_locked_per_address', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 15, 'failure_count' => 5, 'per_address' => true]],
     ['id' => 'auth_ip_rate_limited_ipv4', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED, 'object_type' => 'client_ip', 'object_id' => '10.89.7.12', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 15, 'failure_count' => 20]],
     ['id' => 'auth_ip_rate_limited_ipv6', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED, 'object_type' => 'client_ip', 'object_id' => '2001:db8::1', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 5, 'failure_count' => 10]],
 

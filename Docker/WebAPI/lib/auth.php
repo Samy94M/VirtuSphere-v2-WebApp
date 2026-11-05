@@ -92,9 +92,9 @@ function is_request_secure(): bool
 
 /**
  * Sign-in outcomes reach the `auth` audit channel, not just the lockout counter
- * in deploy_login_attempts, which no page ever shows. The typed user name is
- * recorded on failures because that is the only handle an admin has on an
- * unknown account; it is bounded and escaped on render, never trusted.
+ * in deploy_login_attempts, which no page ever shows. A failure records the
+ * typed name only when it names an existing account (F1); any other input is
+ * recorded as its length, so a password typed into the name field never lands.
  *
  * The account is deliberately NOT named on a rejected sign-in for an existing
  * user beyond the typed string, and no reason is leaked to the user, so this
@@ -140,28 +140,18 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
 {
     $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
     if (auth_user_source_schema_available($db)) {
-        $stmt = $db->prepare('SELECT id, name, auth_source, password, email, role, is_active, must_change_password, locked_until FROM deploy_users WHERE name = ? AND auth_source = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT id, name, auth_source, password, email, role, is_active, must_change_password FROM deploy_users WHERE name = ? AND auth_source = ? LIMIT 1');
         $stmt->bind_param('ss', $username, $source);
     } else {
-        $stmt = $db->prepare("SELECT id, name, 'local' AS auth_source, password, email, role, is_active, must_change_password, locked_until FROM deploy_users WHERE name = ? LIMIT 1");
+        $stmt = $db->prepare("SELECT id, name, 'local' AS auth_source, password, email, role, is_active, must_change_password FROM deploy_users WHERE name = ? LIMIT 1");
         $stmt->bind_param('s', $username);
     }
     $stmt->execute();
     $user = $stmt->get_result()->fetch_assoc();
 
-    if ($user && !empty($user['locked_until']) && strtotime((string) $user['locked_until']) > time()) {
-        // Same comparison cost as every other answer; the result is irrelevant.
-        auth_password_verify_constant_cost($password, null);
-        auth_finish_failed_login($db, $attemptId, $username, $source);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', (int) $user['id'], VIRTUSPHERE_AUDIT_RESULT_DENIED, [
-            'source' => $source,
-            'reason' => VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_LOCKED,
-            'username' => virtusphere_log_login_name($username),
-        ], (int) $user['id']);
-        return ['ok' => false, 'reason' => 'rate_limited'];
-    }
-
     // One full-cost comparison for known, deactivated and unknown names (C-04).
+    // A lock is the per-address budget the reservation already enforced (C-04c);
+    // nothing locks the account itself, so no caller can lock out another one.
     $passwordMatches = auth_password_verify_constant_cost($password, $user['password'] ?? null);
     $valid = $user && (int) $user['is_active'] === 1 && $passwordMatches;
 
@@ -171,21 +161,11 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         // whether or not the account exists; the audit row keeps the cause.
         $limitReached = auth_failed_attempt_count($db, $username, $source) >= VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT;
         if ($user && $limitReached) {
-            $lockSql = auth_user_source_schema_available($db)
-                ? 'UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ? AND auth_source = ?'
-                : 'UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ?';
-            $lockStmt = $db->prepare($lockSql);
-            $lockMinutes = VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES;
             $userId = (int) $user['id'];
-            if (auth_user_source_schema_available($db)) {
-                $lockStmt->bind_param('iis', $lockMinutes, $userId, $source);
-            } else {
-                $lockStmt->bind_param('ii', $lockMinutes, $userId);
-            }
-            $lockStmt->execute();
             audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
-                'duration_minutes' => VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES,
+                'duration_minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES,
                 'failure_count' => VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT,
+                'per_address' => true,
             ], $userId);
             return ['ok' => false, 'reason' => 'rate_limited'];
         }
@@ -194,7 +174,7 @@ function auth_login_local(mysqli $db, string $username, string $password, int $a
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN, 'user', $user ? (int) $user['id'] : null, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'source' => $source,
             'reason' => $reason,
-            'username' => virtusphere_log_login_name($username),
+            ...virtusphere_login_name_audit_context($username, is_array($user)),
         ], $user ? (int) $user['id'] : null);
 
         return ['ok' => false, 'reason' => $limitReached ? 'rate_limited' : 'invalid'];

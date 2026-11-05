@@ -35,7 +35,8 @@ function audit_event_description(string $eventCode, string $objectType, ?string 
             ? audit_t($locale, 'password_changed', ['scope' => audit_scope_label($locale, $context)])
             : audit_t($locale, 'password_change_rejected', ['scope' => audit_scope_label($locale, $context), 'reason_part' => audit_reason_part($locale, audit_code_label($locale, 'password_reason', (string) ($context['reason'] ?? '')))]),
         VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN => audit_login_description($id, $result, $context, $locale),
-        VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED => audit_t($locale, 'account_locked', ['duration' => (string) ($context['duration_minutes'] ?? 0), 'failures' => (string) ($context['failure_count'] ?? 0)]),
+        // SEC3: a lock since C-04c holds only for the address of the row; older rows locked the account.
+        VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED => audit_t($locale, ($context['per_address'] ?? false) === true ? 'account_locked_address' : 'account_locked', ['duration' => (string) ($context['duration_minutes'] ?? 0), 'failures' => (string) ($context['failure_count'] ?? 0)]),
         VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED => audit_t($locale, 'ip_rate_limited', ['duration' => (string) ($context['duration_minutes'] ?? 0), 'failures' => (string) ($context['failure_count'] ?? 0)]),
         VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED => audit_session_description($context, $locale),
         VIRTUSPHERE_AUDIT_EVENT_USER_CREATED => audit_t($locale, 'user_created', ['source' => audit_code_label($locale, 'auth_source', (string) ($context['source'] ?? VIRTUSPHERE_AUTH_SOURCE_LOCAL)), 'id' => $id, 'named' => audit_description_named($context, $locale)]),

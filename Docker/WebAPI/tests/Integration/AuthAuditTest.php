@@ -17,6 +17,7 @@ final class AuthAuditTest extends TestCase
 {
     private const PREFIX = 'phpunit_auth_';
     private const CLIENT_IP = '198.51.100.77';
+    private const OTHER_IP = '198.51.100.78';
 
     private ?mysqli $db = null;
     private int $userId = 0;
@@ -58,11 +59,15 @@ final class AuthAuditTest extends TestCase
         $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND log_message LIKE '%" . self::PREFIX . "%'");
         // The rate-limit onset line carries neither username nor user id.
         $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND log_message LIKE 'ip rate limited%'");
+        // F1: a rejected sign-in for a name without an account keeps only its
+        // length, so the prefix match above cannot find it; this test's client
+        // IP is its own.
+        $this->db->query("DELETE FROM deploy_logs WHERE category = 'auth' AND ip = '" . self::CLIENT_IP . "'");
         if ($this->userId > 0) {
             $this->db->query('DELETE FROM deploy_logs WHERE user_id = ' . $this->userId);
         }
-        $this->db->query("DELETE FROM deploy_login_attempts WHERE username LIKE '" . self::PREFIX . "%'");
-        $this->db->query("DELETE FROM deploy_login_attempts WHERE ip_address = '" . self::CLIENT_IP . "'");
+        // The counter keeps only a name key (SEC3); this test's addresses are its own.
+        $this->db->query("DELETE FROM deploy_login_attempts WHERE ip_address IN ('" . self::CLIENT_IP . "', '" . self::OTHER_IP . "')");
         $this->db->query("DELETE FROM deploy_users WHERE name LIKE '" . self::PREFIX . "%'");
         $this->userId = 0;
     }
@@ -132,6 +137,42 @@ final class AuthAuditTest extends TestCase
         self::assertArrayNotHasKey('password', $context);
     }
 
+    /**
+     * F1: a name that matches no account never reaches the trail, because it is
+     * the one place a password typed into the name field would land. The row
+     * still exists and keeps the length, so a guessing run stays visible.
+     */
+    public function testAFailedLoginForAnUnknownNameKeepsOnlyItsLength(): void
+    {
+        $typed = self::PREFIX . 'Pw7xQ';
+        $before = (int) ($this->db->query("SELECT COALESCE(MAX(id), 0) AS m FROM deploy_logs")->fetch_assoc()['m'] ?? 0);
+
+        $result = login($typed, 'wrong-password', $this->db);
+        self::assertFalse($result['ok'] ?? true);
+
+        $stmt = $this->db->prepare(
+            "SELECT id, log_message, event_code, result, context_json FROM deploy_logs
+             WHERE category = 'auth' AND id > ? AND event_code = ? ORDER BY id DESC LIMIT 1"
+        );
+        $event = VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN;
+        $stmt->bind_param('is', $before, $event);
+        $stmt->execute();
+        $row = (array) $stmt->get_result()->fetch_assoc();
+        try {
+            self::assertNotSame([], $row, 'a rejected sign-in for an unknown name is still audited');
+            self::assertSame(VIRTUSPHERE_AUDIT_RESULT_DENIED, (string) $row['result']);
+            $context = json_decode((string) $row['context_json'], true, 8, JSON_THROW_ON_ERROR);
+            self::assertArrayNotHasKey('username', $context, 'a name without an account may be a password');
+            self::assertSame(mb_strlen($typed), $context['username_length']);
+            self::assertStringNotContainsString($typed, (string) $row['log_message']);
+            self::assertStringNotContainsString($typed, (string) $row['context_json']);
+        } finally {
+            if (isset($row['id'])) {
+                $this->db->query('DELETE FROM deploy_logs WHERE id = ' . (int) $row['id']);
+            }
+        }
+    }
+
     public function testTheLockoutItselfIsAudited(): void
     {
         // The threshold count of failures trips a lockout; that transition, not
@@ -168,6 +209,65 @@ final class AuthAuditTest extends TestCase
             array_filter($messages, static fn (string $m): bool => str_contains($m, 'account locked')),
             'the lockout is still audited with its exact cause'
         );
+    }
+
+    /**
+     * SEC3 (C-04c): five failures from one address lock the local name for that
+     * address only. The owner signs in from another address meanwhile, so an
+     * anonymous caller cannot lock someone else out. The audit line says so.
+     */
+    public function testFailuresFromOneAddressDoNotLockOutAnother(): void
+    {
+        for ($i = 0; $i < VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT; $i++) {
+            login($this->userName, 'wrong-password', $this->db);
+        }
+        self::assertSame('rate_limited', login($this->userName, $this->password, $this->db)['reason'] ?? '', 'the failing address stays locked, even with the right password');
+
+        $_SERVER['REMOTE_ADDR'] = self::OTHER_IP;
+        self::assertTrue(login($this->userName, $this->password, $this->db)['ok'] ?? false, 'another address is not locked out');
+
+        $messages = array_column($this->authLogsForUser(), 'log_message');
+        self::assertNotEmpty(array_filter($messages, static fn (string $m): bool => str_contains($m, 'account locked from this address')));
+    }
+
+    /**
+     * SEC3: the counter holds a keyed hash of the name for every attempt; neither
+     * an existing name nor a typed password-like input lands in the table.
+     */
+    public function testTheCounterStoresNoTypedName(): void
+    {
+        $typed = self::PREFIX . 'Pw7xQ';
+        login($typed, 'wrong-password', $this->db);
+        login($this->userName, 'wrong-password', $this->db);
+        login($this->userName, $this->password, $this->db);
+
+        $stored = array_column($this->db->query("SELECT username FROM deploy_login_attempts WHERE ip_address = '" . self::CLIENT_IP . "'")->fetch_all(MYSQLI_ASSOC), 'username');
+        self::assertCount(3, $stored);
+        foreach ($stored as $value) {
+            self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', (string) $value);
+        }
+        self::assertContains(auth_login_name_key($typed, VIRTUSPHERE_AUTH_SOURCE_LOCAL), $stored);
+        self::assertNotContains($typed, $stored);
+        self::assertNotContains($this->userName, $stored);
+    }
+
+    /** The users page shows the lock from the counter, and "clear lock" frees every address. */
+    public function testTheUsersPageSeesAndClearsAnAddressLock(): void
+    {
+        self::assertSame([], auth_local_login_lock_ends($this->db, [$this->userName]));
+        for ($i = 0; $i < VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT; $i++) {
+            login($this->userName, 'wrong-password', $this->db);
+        }
+        $ends = auth_local_login_lock_ends($this->db, [$this->userName]);
+        self::assertArrayHasKey($this->userName, $ends);
+        $stmt = $this->db->prepare('SELECT ? > NOW() AS future');
+        $stmt->bind_param('s', $ends[$this->userName]);
+        $stmt->execute();
+        self::assertSame(1, (int) $stmt->get_result()->fetch_assoc()['future'], 'the lock ends in the future, in database time');
+
+        self::assertSame(VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT, auth_clear_local_login_lock($this->db, $this->userName));
+        self::assertSame([], auth_local_login_lock_ends($this->db, [$this->userName]));
+        self::assertTrue(login($this->userName, $this->password, $this->db)['ok'] ?? false, 'the cleared address signs in again');
     }
 
     public function testChangingOwnPasswordIsAudited(): void

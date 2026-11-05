@@ -37,6 +37,7 @@ require_once __DIR__ . '/migrations/0069_audit_vm_refs.php';
 require_once __DIR__ . '/migrations/0070_mecm_sync_deploy_failed.php';
 require_once __DIR__ . '/migrations/0071_deploy_ansible_connection_lost.php';
 require_once __DIR__ . '/migrations/0072_device_sync_causes.php';
+require_once __DIR__ . '/migrations/0073_login_attempt_name_keys.php';
 function migrator_acquire_schema_lock(mysqli $db): void
 {
     $row = migrator_query_row($db, "SELECT GET_LOCK('virtusphere_schema_migration', 30) AS locked", 'schema migration lock');
@@ -1218,6 +1219,7 @@ SQL;
     '0070_mecm_sync_deploy_failed' => migrate_0070_mecm_sync_deploy_failed(...),
     '0071_deploy_ansible_connection_lost' => migrate_0071_deploy_ansible_connection_lost(...),
     '0072_device_sync_causes' => migrate_0072_device_sync_causes(...),
+    '0073_login_attempt_name_keys' => migrate_0073_login_attempt_name_keys(...),
 ];
 try {
     $db = db();

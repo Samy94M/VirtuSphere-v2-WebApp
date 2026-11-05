@@ -100,4 +100,33 @@ final class SessionHardeningContractTest extends TestCase
         self::assertArrayHasKey($key, $settings);
         self::assertSame($expected, $settings[$key]);
     }
+
+    /**
+     * SEC2 (C-02): an anonymous request writes no session file. The runtime
+     * proof (20 cookieless sign-in forms and 20 invented session cookies: zero
+     * files; a sign-in: one) is in the SEC2 register entry; this pins the shape
+     * that produced it, so a "simple" session_start() in the bootstrap or a
+     * session-bound token on the sign-in form cannot come back unnoticed.
+     */
+    public function testAnonymousRequestsOpenNoSession(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $bootstrap = (string) file_get_contents($root . '/lib/bootstrap.php');
+        self::assertSame(1, substr_count($bootstrap, 'session_start('), 'one place creates a session: virtusphere_create_session()');
+        self::assertMatchesRegularExpression(
+            '/function virtusphere_start_session\(\): void\s*\{.*?\$_COOKIE\[session_name\(\)\].*?return;.*?virtusphere_create_session\(\);\s*if \(\$_SESSION === \[\]\) \{\s*virtusphere_discard_session\(\);/s',
+            $bootstrap,
+            'without the session cookie nothing starts, and an empty session is discarded at once'
+        );
+
+        $login = (string) file_get_contents($root . '/portal/login.php');
+        self::assertDoesNotMatchRegularExpression('/(?<![a-z_])csrf_field\(/', $login, 'the sign-in form token must not live in a session');
+        self::assertStringContainsString('login_csrf_verify($_COOKIE,', $login);
+        $create = strpos($login, 'virtusphere_create_session();');
+        $attempt = strpos($login, '$result = login(');
+        self::assertIsInt($create);
+        self::assertIsInt($attempt);
+        self::assertLessThan($attempt, $create, 'the session exists before auth_complete_login() renews its id');
+        self::assertStringContainsString("if (\$_SESSION === []) {\n        virtusphere_discard_session();", $login, 'a failed attempt leaves no file');
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/log_rotation.php';
+require_once __DIR__ . '/error_debug.php';
 
 function virtusphere_install_error_handlers(): void
 {
@@ -374,18 +375,6 @@ function virtusphere_render_error_page(Throwable $exception, string $refId): voi
         echo '</pre>';
     }
     echo "</main></body></html>\n";
-}
-
-function virtusphere_debug_enabled(): bool
-{
-    if (function_exists('envboot_optional')) {
-        $value = envboot_optional('VIRTUSPHERE_DEBUG', '0');
-    } else {
-        $raw = getenv('VIRTUSPHERE_DEBUG');
-        $value = $raw === false ? '0' : (string) $raw;
-    }
-
-    return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
 }
 
 function virtusphere_error_nonce(): string

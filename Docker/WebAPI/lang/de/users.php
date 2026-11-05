@@ -16,7 +16,7 @@ return [
     'th_must_change' => 'Passwortwechsel',
     'th_last_seen' => 'Zuletzt angemeldet',
     'badge_locked' => 'Gesperrt',
-    'locked_until_hint' => 'Automatisch gesperrt bis :time',
+    'locked_until_hint' => 'Anmeldung von mindestens einer Adresse gesperrt bis :time',
     'btn_activate' => 'Aktivieren',
     'btn_deactivate' => 'Deaktivieren',
     'btn_role' => 'Rolle ändern',

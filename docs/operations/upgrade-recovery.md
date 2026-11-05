@@ -54,7 +54,7 @@ bewiesene konsistente Restorestand verwendet.
 | Klasse | Migrationen | Rückkehrvertrag |
 |---|---|---|
 | A — additive Form | 0001, 0002, 0004, 0005, 0006, 0007, 0010, 0011, 0012, 0013, 0015, 0016, 0019, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0030, 0031, 0032, 0033, 0035, 0036, 0037, 0038, 0039, 0051, 0052, 0054, 0055, 0061, 0062, 0069, 0071, 0072 | Ältere Leser können zusätzliche Form häufig ignorieren. Das erlaubt keinen pauschalen App-Rollback: erst aktive Jobs, neue Statuswerte und Writer prüfen; für eine garantierte Rückkehr weiterhin Restore. |
-| N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
+| N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020, 0073 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
 | C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060, 0063, 0064, 0065, 0066, 0067, 0068, 0070 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
 
 Migration 0034 entfernt das Legacy-Tokenschema ausdrücklich. Die Migrationen
@@ -89,6 +89,8 @@ Migration 0070 benennt den MECM-Wert eines gescheiterten Auftrags von `failed` i
 Migration 0071 erweitert nur die CHECK-Bedingung der Abschlussgründe: `outcome_unknown` ist jetzt auch mit `ansible_connection_lost` gültig (U-01, Worker verlor die SSH-Verbindung zum Ansible-Host mitten im Schritt). Kein neuer Status, keine Spalte, keine Rückfüllung. Alter Code schreibt den Grund nie und zeigt ihn bei vorhandenen Zeilen als älteren Abschlussgrund ohne Klartext; sein Worker endet bei einem Verbindungsverlust weiter `failed`. Deshalb Klasse A. Eine Rückkehr unter 0065 sperrt weiterhin die Statusvorprüfung von 0065; eine exakte Rückkehr bleibt der Restore.
 
 Migration 0072 legt `deploy_vm_sync_causes` an: je VM den Wartegrund, den der Devices Sync zuletzt über `reportDeviceCauses` gemeldet hat (MX1), mit Fremdschlüssel auf `deploy_vms` und sieben Tagen Aufbewahrung. Keine Rückfüllung, keine Änderung an bestehenden Tabellen. Alter Code liest und schreibt die Tabelle nicht und kennt die Aktion nicht: Er antwortet dem neuen Sync mit 400 oder 413, der Sync setzt dann aus, die Anzeige bleibt wie vor MX1. Deshalb Klasse A; eine exakte Rückkehr bleibt der Restore.
+
+Migration 0073 (SEC3) löscht im Anmeldezähler `deploy_login_attempts` jede Zeile, die noch den eingegebenen Namen statt des Namensschlüssels trägt, und leert alte Kontosperren in `deploy_users.locked_until`. Der neue Code speichert für jeden Versuch nur einen Schlüsselhash des Namens und sperrt ein lokales Konto nur für die Adresse, von der die Fehlversuche kamen. Der Zähler blickt 15 Minuten zurück; die einzige Folge ist ein frisches Fehlversuchsbudget beim Update. Alter Code läuft auf dem Schema weiter: Er findet die Schlüsselzeilen in seinem Namenszähler nicht und setzt wieder seine globale Sperre, die IP-Drossel zählt beide Formen. Die gelöschten Zeilen kommen nicht zurück. Deshalb Klasse N; eine exakte Rückkehr bleibt der Restore.
 
 ## Upgradefolge
 

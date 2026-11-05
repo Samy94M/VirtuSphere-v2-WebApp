@@ -46,7 +46,7 @@ function audit_context_field_registry(): array
         'reason' => ['type' => 'string', 'max' => 256],
         'page' => ['type' => 'identifier', 'max' => 64],
         'permission' => ['type' => 'identifier', 'max' => 128],
-        'username' => ['type' => 'string', 'max' => 191],
+        'username' => ['type' => 'string', 'max' => 191], 'username_length' => $int,
         'name' => ['type' => 'string', 'max' => 191],
         'role' => $id, 'previous_role' => $id, 'outcome' => $id, 'component' => $id, 'direction' => $id,
         'trust_mode' => $id, 'progress_kind' => $id, 'mode' => $id,
@@ -107,7 +107,7 @@ function audit_context_field_registry(): array
         'item_count' => $int, 'report_version' => $int, 'suppressed_count' => $int,
         'created_count' => $int, 'retired_count' => $int,
         'throttle_seconds' => $int,
-        'enabled' => $bool, 'selection_cleared' => $bool, 'scheduled' => $bool,
+        'enabled' => $bool, 'selection_cleared' => $bool, 'scheduled' => $bool, 'per_address' => $bool,
         // Manual credential tests can finish after their configuration or test
         // generation changed. The bool distinguishes a current persisted result
         // from that deliberately discarded completion without admitting a free

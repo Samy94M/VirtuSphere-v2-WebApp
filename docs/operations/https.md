@@ -46,10 +46,14 @@ Neues Zertifikat einfach über denselben Upload installieren (Überschreiben
 wird bestätigt). Ein aktiver HTTPS-Listener übernimmt es beim nächsten
 Watcher-Durchlauf; kein Container-Neustart nötig.
 
-Dieselbe Aktion schreibt auch die generierte Konfiguration neu. Ein Update,
-das die nginx-Vorlage ändert (Body-Grenze, Sperrregeln, Anmeldedrossel), wirkt
-auf HTTPS deshalb erst nach einem erneuten Hochladen des aktuellen Zertifikats;
-HTTP nutzt sofort den neuen Stand ([Update-Runbook](update.md), Schritt 5).
+Dieselbe Aktion schreibt auch die generierte Konfiguration neu. Nach einem
+Update erneuert der PHP-Container sie bei jedem Start selbst, bevor nginx
+hochfährt (seit SEC3): Weicht eine vorhandene Datei in `Docker/nginx/conf.d`
+von der Vorlage des Release ab, schreibt er sie als PHP-Pool-Benutzer (uid 33) mit gleichen Rechten neu.
+HTTP und HTTPS tragen damit dieselben Grenzen und Sperrregeln, ohne erneutes
+Hochladen. Das Containerlog von `php` meldet `[https-refresh] generated HTTPS
+block rewritten for this release`. Eine beiseitegelegte `*.conf.bad`-Datei bleibt
+unberührt; ohne generierte Datei (HTTPS aus) geschieht nichts.
 
 ## Störungsbilder
 

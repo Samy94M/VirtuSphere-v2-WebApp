@@ -29,6 +29,28 @@ require_once __DIR__ . '/errors.php';
  */
 
 /**
+ * Opens the rotation lock for flock(). The lock file only carries the lock, so a
+ * read-only handle is enough: flock() does not need write access. That matters
+ * across an owner change (SEC2, C-06): a lock file left by a root worker is
+ * 0644 root, and the worker now running as uid 33 cannot open it for writing.
+ * A lock file this uid can write is made 0666 like the other shared files in
+ * logs/ (only its owner can, and only once), so the next owner change in either
+ * direction, an update or a way back, does not meet the same trap.
+ *
+ * @return resource|false
+ */
+function virtusphere_open_rotation_lock(string $path)
+{
+    $lock = @fopen($path, 'c');
+    if ($lock !== false) {
+        virtusphere_try_chmod($path, 0666, 0006);
+        return $lock;
+    }
+
+    return @fopen($path, 'r');
+}
+
+/**
  * Rotate every known file log that exceeds the cap. Returns the number of
  * rotated files; idle (0) when nothing is due or another rotation holds the
  * lock. $logDirOverride exists for the unit tests, which rotate in a temp
@@ -45,7 +67,7 @@ function virtusphere_rotate_logs(
         return 0;
     }
 
-    $lock = fopen($logDir . DIRECTORY_SEPARATOR . '.rotation.lock', 'c');
+    $lock = virtusphere_open_rotation_lock($logDir . DIRECTORY_SEPARATOR . '.rotation.lock');
     if ($lock === false) {
         throw new RuntimeException('Log rotation lock cannot be opened in ' . $logDir);
     }

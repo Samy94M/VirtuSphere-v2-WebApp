@@ -368,6 +368,8 @@ CREATE TABLE IF NOT EXISTS deploy_migrations (
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- SEC3 (migration 0073): `username` holds auth_login_name_key() (HMAC under APP_KEY), never the typed
+-- name; a local name is counted per address (C-04c). deploy_users.locked_until is no longer used.
 CREATE TABLE IF NOT EXISTS deploy_login_attempts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) NOT NULL,

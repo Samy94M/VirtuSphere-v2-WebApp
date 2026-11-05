@@ -203,25 +203,34 @@ final class LogRedactionTest extends TestCase
         self::assertStringContainsString('after the key', $redacted);
     }
 
-    /** LG-11: a name that looks like a user name is kept as typed. */
-    public function testAUserNameIsLoggedAsTyped(): void
+    /** LG-11, F1: the name of an existing account is kept as typed, whatever its characters. */
+    public function testTheNameOfAKnownAccountIsLoggedAsTyped(): void
     {
-        foreach (['alice', 'anna.mueller@example.lan', 'Jürgen_01', 'svc-backup', 'a\\b', str_repeat('a', 64)] as $name) {
-            self::assertSame($name, virtusphere_log_login_name($name), 'a plausible name was replaced: ' . $name);
+        foreach (['alice', 'anna.mueller@example.lan', 'Jürgen_01', 'svc-backup', 'a\\b', 'bob smith', str_repeat('a', 191)] as $name) {
+            self::assertSame(['username' => $name], virtusphere_login_name_audit_context($name, true), 'a known name was replaced: ' . $name);
         }
     }
 
     /**
-     * LG-11: anything else is replaced by its length, so a password typed into
-     * the name field never reaches the trail. The length is in characters.
+     * F1: a name that matches no account is recorded as its length only, even
+     * when it looks like a user name: `Passw0rd` or `winter2026` pass any
+     * character rule, which is why LG-11's shape test was not enough. The
+     * length is in characters.
      */
-    public function testAnythingElseIsReplacedByItsLength(): void
+    public function testANameWithoutAnAccountKeepsOnlyItsLength(): void
     {
-        self::assertSame('<unusual input, 9 characters>', virtusphere_log_login_name('bob smith'));
-        self::assertSame('<unusual input, 9 characters>', virtusphere_log_login_name('Passw0rd!'));
-        self::assertSame('<unusual input, 65 characters>', virtusphere_log_login_name(str_repeat('a', 65)));
-        self::assertSame('<unusual input, 0 characters>', virtusphere_log_login_name(''));
-        self::assertSame('<unusual input, 3 characters>', virtusphere_log_login_name("a\nb"));
-        self::assertStringNotContainsString(self::SENTINEL, virtusphere_log_login_name('x' . self::SENTINEL . ' y'));
+        self::assertSame(['username_length' => 8], virtusphere_login_name_audit_context('Passw0rd', false));
+        self::assertSame(['username_length' => 9], virtusphere_login_name_audit_context('Passw0rd!', false));
+        self::assertSame(['username_length' => 6], virtusphere_login_name_audit_context('Jürgen', false));
+        self::assertSame(['username_length' => 0], virtusphere_login_name_audit_context('', false));
+        $context = virtusphere_login_name_audit_context(self::SENTINEL, false);
+        self::assertStringNotContainsString(self::SENTINEL, json_encode($context, JSON_THROW_ON_ERROR));
+    }
+
+    /** A known name that could not be stored or shown as one line is also reduced to its length. */
+    public function testAnUnstorableKnownNameKeepsOnlyItsLength(): void
+    {
+        self::assertSame(['username_length' => 192], virtusphere_login_name_audit_context(str_repeat('a', 192), true));
+        self::assertSame(['username_length' => 3], virtusphere_login_name_audit_context("a\nb", true));
     }
 }

@@ -71,7 +71,7 @@ $passwordMinLength = password_policy_min_length(db());
             <ul>
                 <li><?php echo h(__t('help_users.usersmgmt_safety_1')); ?></li>
                 <li><?php echo h(__t('help_users.usersmgmt_safety_2')); ?></li>
-                <li><?php echo h(__t('help_users.usersmgmt_safety_3', ['minutes' => VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES])); ?></li>
+                <li><?php echo h(__t('help_users.usersmgmt_safety_3', ['minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES])); ?></li>
                 <li><?php echo h(__t('help_users.usersmgmt_safety_4')); ?></li>
             </ul>
             <p><?php echo h(__t('help_users.usersmgmt_audit_p1')); ?></p>

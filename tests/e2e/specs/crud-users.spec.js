@@ -32,7 +32,7 @@ echo 'JSON' . json_encode(['id' => $id]) . 'JSON';
 function userRow(id) {
   return phpJson(`
 $db = db();
-$stmt = $db->prepare('SELECT name, password, email, role, is_active, must_change_password, locked_until FROM deploy_users WHERE id = ? LIMIT 1');
+$stmt = $db->prepare('SELECT name, password, email, role, is_active, must_change_password FROM deploy_users WHERE id = ? LIMIT 1');
 $id = ${Number(id)};
 $stmt->bind_param('i', $id);
 $stmt->execute();
@@ -47,6 +47,7 @@ $stmt = $db->prepare("DELETE FROM deploy_users WHERE name LIKE ?");
 $like = '${PREFIX}%';
 $stmt->bind_param('s', $like);
 $stmt->execute();
+$db->query("DELETE FROM deploy_login_attempts WHERE ip_address = '198.51.100.201'");
 echo 'CLEANED';
 `);
 }
@@ -196,18 +197,39 @@ test('reset_password: Cancel keeps the hash, Confirm replaces it and forces a ch
 });
 
 // e2e-covers: users.php:clear_lock
-test('clear_lock: unlocking a locked account clears locked_until without a prompt', async ({ page }) => {
-  const name = PREFIX + 'lock-1';
-  const id = seedUser(name, `
-$stmt = $db->prepare('UPDATE deploy_users SET locked_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE) WHERE id = ?');
-$stmt->bind_param('i', $id);
+// SEC3 (C-04c): a lock is the failure count of a local name per address in
+// deploy_login_attempts, keyed by auth_login_name_key(); the seed writes five
+// failures from one TEST-NET-2 address and the action removes them.
+function lockFailures(name) {
+  return phpJson(`
+$db = db();
+$key = auth_login_name_key('${name}', VIRTUSPHERE_AUTH_SOURCE_LOCAL);
+$stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE username = ? AND auth_source = 'local' AND result = 'credential_failure'");
+$stmt->bind_param('s', $key);
 $stmt->execute();
-`);
-  expect(userRow(id).locked_until, 'the seed produced a locked account').not.toBeNull();
+echo 'JSON' . json_encode((int) $stmt->get_result()->fetch_assoc()['c']) . 'JSON';
+`, ['lib/auth_rate_limit.php']);
+}
+
+test('clear_lock: unlocking an address-locked account removes its counted failures without a prompt', async ({ page }) => {
+  const name = PREFIX + 'lock-1';
+  seedUser(name);
+  runPhp(`
+$db = db();
+$key = auth_login_name_key('${name}', VIRTUSPHERE_AUTH_SOURCE_LOCAL);
+$stmt = $db->prepare("INSERT INTO deploy_login_attempts (username, auth_source, ip_address, success, result) VALUES (?, 'local', '198.51.100.201', 0, 'credential_failure')");
+for ($i = 0; $i < VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT; $i++) {
+    $stmt->bind_param('s', $key);
+    $stmt->execute();
+}
+echo 'SEEDED';
+`, ['lib/auth_rate_limit.php']);
+  expect(lockFailures(name), 'the seed produced a locked account').toBe(5);
 
   await page.goto('users.php');
+  await expect(targetRow(page, name).locator('.badge-warning'), 'the users page shows the address lock').toBeVisible();
   const unlock = targetRow(page, name).locator('form:has(input[name="action"][value="clear_lock"]) button');
   await expect(unlock, 'unlocking is a reversible remediation and needs no prompt').not.toHaveAttribute('data-confirm', /./);
   await submitAndWaitForNavigation(page, unlock, 'users.php');
-  expect(userRow(id).locked_until, 'the lock is cleared').toBeNull();
+  expect(lockFailures(name), 'the lock is cleared').toBe(0);
 });

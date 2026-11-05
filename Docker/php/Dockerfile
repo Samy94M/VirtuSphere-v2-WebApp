@@ -28,9 +28,10 @@ FROM php:8.4-fpm@sha256:cc7cdfe4da7d46f6e69ac653e3d3396590bf51d6d6731854d01449d0
 #
 # The digest fixes the upstream filesystem; `apt-get upgrade` consumes the
 # Debian security updates the pinned base lags on during the controlled
-# rebuild. Measured 2026-10-14: the newest published php:8.4-fpm (pinned above,
-# PHP 8.4.26) still shipped curl 8.14.1-2+deb13u5 while the fix needed deb13u7,
-# so the digest bump alone would have left the release gate red.
+# rebuild. Measured 2026-10-14: the newest published php:8.4-fpm of that day
+# (PHP 8.4.26; the digest above has moved on since) still shipped curl
+# 8.14.1-2+deb13u5 while the fix needed deb13u7, so the digest bump alone would
+# have left the release gate red.
 # hadolint ignore=SC2086
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
@@ -68,8 +69,13 @@ RUN mkdir -p /etc/nginx/ssl /etc/nginx/virtusphere-conf.d \
 
 WORKDIR /var/www/html
 
+# SEC3: refresh an existing generated HTTPS block, then exec php-fpm (PID 1
+# stays php-fpm). The workers set their own command and skip this.
+COPY start-fpm.sh /usr/local/bin/virtusphere-start-fpm
+RUN chmod 0755 /usr/local/bin/virtusphere-start-fpm
+
 EXPOSE 9000
-CMD ["php-fpm"]
+CMD ["virtusphere-start-fpm"]
 
 FROM runtime AS tooling
 

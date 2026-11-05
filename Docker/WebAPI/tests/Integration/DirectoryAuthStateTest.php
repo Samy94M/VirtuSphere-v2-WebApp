@@ -22,7 +22,8 @@ final class DirectoryAuthStateTest extends TestCase
         } catch (Throwable $exception) {
             self::markTestSkipped('Database not reachable: ' . $exception->getMessage());
         }
-        $this->db->query("DELETE FROM deploy_login_attempts WHERE username LIKE '" . self::PREFIX . "%'");
+        // The counter keeps only name keys (SEC3); the test addresses are TEST-NET-2.
+        $this->db->query("DELETE FROM deploy_login_attempts WHERE ip_address LIKE '198.51.100.%'");
         $_SERVER['REMOTE_ADDR'] = '198.51.100.10';
     }
 
@@ -31,7 +32,7 @@ final class DirectoryAuthStateTest extends TestCase
         if ($this->db === null) {
             return;
         }
-        $this->db->query("DELETE FROM deploy_login_attempts WHERE username LIKE '" . self::PREFIX . "%'");
+        $this->db->query("DELETE FROM deploy_login_attempts WHERE ip_address LIKE '198.51.100.%'");
         if ($this->ownsConfig) {
             $this->db->query('DELETE FROM deploy_ad_config WHERE id = 1');
         }
@@ -49,6 +50,11 @@ final class DirectoryAuthStateTest extends TestCase
         self::assertSame(0, auth_failed_ip_attempt_count($this->db));
     }
 
+    /**
+     * A directory name keeps one budget across addresses (SEC3, C-04c applies to
+     * local names only): the domain controller locks the account domain-wide, so
+     * the portal must not send it more bad binds per extra host.
+     */
     public function testUserBudgetAggregatesCredentialFailuresAcrossIps(): void
     {
         $username = self::PREFIX . 'distributed@example.test';

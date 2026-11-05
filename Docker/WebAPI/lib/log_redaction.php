@@ -133,17 +133,22 @@ function virtusphere_log_text_bytes(string $text, int $maxBytes): string
 }
 
 /**
- * The audit value for a typed login name (LG-11). The name field takes whatever
- * was typed, and a password pasted into it would otherwise stay in the trail for
- * a year, readable by every users.manage holder. A value that does not look like
- * a user name is replaced by its length; the failed attempt itself is still logged.
+ * The audit context for a typed login name (LG-11, F1). The name field takes
+ * whatever was typed, and a password typed into it would otherwise stay in the
+ * trail for a year, readable by every users.manage holder; credentials are never
+ * logged (OWASP Logging Cheat Sheet, ASVS V7.1.1). The name is kept only when it
+ * belongs to an existing account of the sign-in source, which the caller has
+ * already looked up; anything else is recorded as its length in characters. The
+ * failed attempt itself is always logged.
+ *
+ * @return array{username:string}|array{username_length:int}
  */
-function virtusphere_log_login_name(string $typed): string
+function virtusphere_login_name_audit_context(string $typed, bool $knownAccount): array
 {
     $length = mb_strlen($typed, 'UTF-8');
-    if ($length > 64 || preg_match('/^[\p{L}\p{Nd}._@\\\\-]+$/u', $typed) !== 1) {
-        return '<unusual input, ' . $length . ' characters>';
+    if (!$knownAccount || $length > 191 || preg_match('/\p{C}/u', $typed) !== 0) {
+        return ['username_length' => $length];
     }
 
-    return $typed;
+    return ['username' => $typed];
 }
