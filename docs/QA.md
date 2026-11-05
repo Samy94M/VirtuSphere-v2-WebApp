@@ -1375,6 +1375,17 @@ git diff --check -- ':!Docker/WebAPI/vendor/**'
 
 Vendored Composer packages can contain upstream trailing whitespace or blank EOF lines. Do not rewrite vendor files just to satisfy whitespace checks; keep them as Composer installed them.
 
+## Name Denylist Hook
+
+The repository is public. Server names, FQDNs and domain parts, production IPs, DP names, the site code, real MACs and production VM or rollout names must never reach code, tests, docs, the CHANGELOG or a commit message (NS1). `scripts/check-name-denylist.sh` compares commits against a **private list outside the repository**; the hooks under `.githooks/` call it. It is deliberately not a `check.ps1` gate: CI has no list, and a missing list would only be an `infrastructure_error` there.
+
+- **List.** `$HOME/.config/virtusphere/name-denylist.txt`, or the path in `VIRTUSPHERE_NAME_DENYLIST`. One entry per line, compared case-insensitively as a fixed string; `#` lines and blank lines are ignored; a `word:` prefix matches only a whole word (no letter, digit or `_` directly before or after), which suits short codes and IPs. The format and synthetic examples are in `.githooks/name-denylist.template.txt`, which has no entries and therefore counts as an empty list. Never put a real list into a tracked file; if one ever lands in a worktree, the staged check flags it itself.
+- **Activation.** `git config core.hooksPath "$(git rev-parse --show-toplevel)/.githooks"` in the main checkout covers every worktree, including those whose base predates the hooks, because each hook calls the script next to itself. A single worktree can use `git config --worktree core.hooksPath .githooks`. `sh scripts/check-name-denylist.sh --check-list` confirms the list is readable.
+- **What runs.** `pre-commit` and `pre-merge-commit` check the lines and file names that the index adds against `HEAD` (a merge therefore checks everything it brings in); `commit-msg` checks the message up to the scissors line of `commit -v`. Removed lines are not checked. Binary files are checked by name only and listed as a `HINWEIS`, because a fixed-string match over image data would hit short entries by chance. Rebase and cherry-pick do not run `pre-commit`, and a fast-forward merge creates no commit; the range check below covers them.
+- **Before a merge.** `sh scripts/check-name-denylist.sh --range main..<branch>` checks the message, added lines and file names of every commit in the range, so a name added and later removed still fails. This replaces the manual diff search before merging a package branch.
+- **Output and exit codes.** A hit prints its location and the list line number, never the name; a name inside a file name is masked as `***`. `0` no hit, `1` hit, `2` list missing, unreadable, empty or invalid (the hook fails closed), `3` invalid call or Git error. The only bypass is Git's own `git commit --no-verify`; use it only for a commit that provably carries no listed name, never to get past a hit.
+- **Proof.** `tests/powershell/VirtuSphere.NameDenylist.Tests.ps1` (part of `powershell-tests`) runs the script and the hooks in throwaway repositories with synthetic names only.
+
 ## Vendored Dev Dependencies
 
 This repository already tracks `Docker/WebAPI/vendor` and the application must stay usable in air-gapped environments. When PHPUnit is updated through Composer, commit the matching `composer.json`, `composer.lock`, `vendor/composer/*` metadata and new `vendor/*` package directories together.
