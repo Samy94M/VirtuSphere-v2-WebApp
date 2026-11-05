@@ -152,12 +152,13 @@ function Register-IntegrationCheckGates {
         # und MySQL-Init aus dem Volume qa-repo statt ueber die 9p-Freigabe (OV1).
         $source = Sync-QaSourceVolume
         if ($source.class -ne 'pass') { return $source }
-        # Fresh, non-copying QA log storage: FPM owns it, root workers use group 0
-        # without DAC_OVERRIDE. Never chmod or rotate the host's development logs.
+        # Fresh, non-copying QA log and runtime storage, owned by uid 33 (FPM and,
+        # since SEC2, both workers). var/ like go-live 1a.1: 33:33, mode 0700.
+        # Never chmod or rotate the host's development logs.
         $logInit = Invoke-QaCompose @('run', '--rm', '--no-deps', '--build',
             '--cap-add', 'CHOWN', '--cap-add', 'FOWNER', 'php', 'sh', '-c',
-            'chown 33:0 /var/www/html/logs && chmod 0770 /var/www/html/logs')
-        if ($logInit.ExitCode -ne 0) { return New-InfraResult 'QA-App-Logvolume nicht initialisierbar' $logInit.Output }
+            'chown 33:0 /var/www/html/logs && chmod 0770 /var/www/html/logs && chown 33:33 /var/www/html/var && chmod 0700 /var/www/html/var')
+        if ($logInit.ExitCode -ne 0) { return New-InfraResult 'QA-App-Log- und Runtime-Volume nicht initialisierbar' $logInit.Output }
         $up = Invoke-QaCompose (@('up', '-d', '--build', '--wait') + $qaServices)
         if ($up.ExitCode -ne 0) { return New-InfraResult 'docker compose up --wait rot (QA-Stack startet nicht)' $up.Output }
 
