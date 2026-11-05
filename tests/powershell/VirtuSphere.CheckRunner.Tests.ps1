@@ -79,6 +79,58 @@ Describe 'check.ps1 golden surface' {
     }
 }
 
+# The gate tables in docs/QUALITY-GATES.md and the -NoNetwork sentence in
+# docs/QA.md mirror the registry. Both are derived from `check.ps1 -List` of the
+# Release lane (every gate and its [netz] flag), never from a list in this file:
+# dependency-osv and portal-assets-vendor-free (DG1) were the first gates added
+# after the mirror existed only as prose.
+Describe 'gate registry mirrors in the QA documents' {
+    BeforeAll {
+        $listing = Invoke-CheckRunnerCase @('-Lane', 'Release', '-List')
+        if ($listing.ExitCode -ne 0) { throw 'runner list failed for Release' }
+        $script:RegistryGates = @($listing.Output | ForEach-Object {
+                if ($_ -match '^  (\S+)\s+\S+\s+lanes=\S+(\s+\[netz\])?') { [pscustomobject]@{ Name = $Matches[1]; Network = [bool]$Matches[2] } }
+            })
+        $script:QualityGatesDoc = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'docs') 'QUALITY-GATES.md') -Raw
+        $script:QaDoc = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'docs') 'QA.md') -Raw
+
+        function Get-GatesWithoutTableRow {
+            param($Gates, [string]$Document)
+            return @($Gates | Where-Object { $Document -notmatch ('(?m)^\|[^|\r\n]*`' + [regex]::Escape($_.Name) + '`') } | ForEach-Object { $_.Name })
+        }
+        function Get-NetworkGatesNotNamed {
+            param($Gates, [string]$Document)
+            $sentence = @($Document -split "`n" | Where-Object { $_ -match '`-NoNetwork` marks every gate' })
+            if ($sentence.Count -ne 1) { return @('<-NoNetwork sentence not found exactly once>') }
+            return @($Gates | Where-Object { $_.Network -and ($sentence[0] -notmatch ('`' + [regex]::Escape($_.Name) + '`')) } | ForEach-Object { $_.Name })
+        }
+    }
+
+    It 'derives a non-empty registry with network gates' {
+        $script:RegistryGates.Count | Should -Be @($script:Golden.lanes.Release).Count
+        @($script:RegistryGates | Where-Object { $_.Network }).Count | Should -BeGreaterThan 0
+    }
+
+    It 'gives every registered gate a row in docs/QUALITY-GATES.md' {
+        Get-GatesWithoutTableRow $script:RegistryGates $script:QualityGatesDoc | Should -BeNullOrEmpty
+    }
+
+    It 'names every network gate in the -NoNetwork sentence of docs/QA.md' {
+        Get-NetworkGatesNotNamed $script:RegistryGates $script:QaDoc | Should -BeNullOrEmpty
+    }
+
+    It 'detects a removed table row and a removed network gate name' {
+        $gate = @($script:RegistryGates | Where-Object { $_.Name -eq 'dependency-osv' })
+        $gate.Count | Should -Be 1
+        $withoutRow = [regex]::Replace($script:QualityGatesDoc, '(?m)^\|\s*`dependency-osv`[^\r\n]*\r?\n', '')
+        $withoutRow | Should -Not -Be $script:QualityGatesDoc
+        Get-GatesWithoutTableRow $gate $withoutRow | Should -Be @('dependency-osv')
+        $withoutName = $script:QaDoc.Replace(', `dependency-osv`', '')
+        $withoutName | Should -Not -Be $script:QaDoc
+        Get-NetworkGatesNotNamed $gate $withoutName | Should -Be @('dependency-osv')
+    }
+}
+
 Describe 'dot-sourced runner modules' {
     It 'contain only function definitions at import scope and resolve no caller working directory' {
         $modules = @(Get-ChildItem -LiteralPath $script:ModuleDir -Filter '*.ps1' -File)

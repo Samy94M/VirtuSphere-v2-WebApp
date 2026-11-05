@@ -884,6 +884,62 @@ function zz_guard_ok(mysqli $db): void
         $fx = New-Fixture
         Assert-Guard (Invoke-RunnerGate $fx 'js-syntax') @(2)
     } }
+    @{ Name = 'runner.portal-assets-vendor-free.green'; Body = {
+        Assert-Guard (Invoke-RunnerGate $repoRoot 'portal-assets-vendor-free') @(0)
+    } }
+    @{ Name = 'runner.portal-assets-vendor-free.zero-match'; Body = {
+        $fx = New-Fixture
+        Add-FixtureFile $fx 'Docker/WebAPI/portal/assets/img/logo.png' 'x'
+        $result = Invoke-RunnerGate $fx 'portal-assets-vendor-free'
+        Assert-Guard $result @(2) '\[assets\.zero-match\]'
+    } }
+)
+# Ein Fall je Merkmal fremden Codes (DG1): die echte Asset-Kopie plus genau
+# eine Fremddatei. Jede muss mit ihrer eigenen Diagnose-ID rot werden; ein
+# gruener Lauf hiesse, dass der Guard dieses Merkmal nicht mehr sieht.
+$assetMutations = @(
+    @{ Case = 'minified-name'; Path = 'lib/chart.min.js'; Content = "var a=1;`n"; Id = 'minified' }
+    @{ Case = 'minified-line'; Path = 'widget.js'; Content = ('var x="' + ('a' * 1200) + '";' + "`n"); Id = 'minified' }
+    @{ Case = 'license-banner'; Path = 'widget.js'; Content = "/*! Widget v1.2.3 | (c) Example Authors | MIT License */`nvar w=1;`n"; Id = 'license-banner' }
+    @{ Case = 'source-map'; Path = 'widget.js'; Content = "var w=1;`n//# sourceMappingURL=widget.js.map`n"; Id = 'source-map' }
+    @{ Case = 'bundle'; Path = 'widget.js'; Content = "(function(g,f){typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = f() : g.W = f();})(this,function(){return 1;});`n"; Id = 'bundle' }
+    @{ Case = 'vendor-dir'; Path = 'vendor/helper.js'; Content = "var h=1;`n"; Id = 'vendor-dir' }
+    @{ Case = 'font'; Path = 'css/fonts/inter.woff2'; Content = 'x'; Id = 'font' }
+    @{ Case = 'external-url'; Path = 'css/theme-extra.css'; Content = "@import url(`"https://cdn.example.invalid/x.css`");`n"; Id = 'external-url' }
+    @{ Case = 'unknown-type'; Path = 'engine.wasm'; Content = 'x'; Id = 'unknown-type' }
+)
+foreach ($mutation in $assetMutations) {
+    $cases += @{ Name = ('runner.portal-assets-vendor-free.' + $mutation.Case); Mutation = $mutation; Body = {
+        # Der Lauf ruft jeden Body in seiner Schleife ueber $case auf; $mutation
+        # haette dann laengst den Wert des letzten Eintrags.
+        $m = $case.Mutation
+        $fx = New-Fixture @('Docker/WebAPI/portal/assets')
+        Add-FixtureFile $fx ('Docker/WebAPI/portal/assets/' + $m.Path) $m.Content
+        Assert-Guard (Invoke-RunnerGate $fx 'portal-assets-vendor-free') @(1) ('\[assets\.' + $m.Id + '\]')
+    } }
+}
+$cases += @(
+    # dependency-osv ohne Netz: Faelle ohne eine einzige Lockdatei stellen keine
+    # Anfrage, beweisen aber die Klassen, auf die es ankommt. Eine leere Wurzel ist
+    # nie pass, eine fehlende Ausnahmedatei auch nicht, und ein Manifest ohne
+    # Lock ist ein Befund, der den Infrastrukturfehler dominiert.
+    @{ Name = 'runner.dependency-osv.zero-match'; Body = {
+        $fx = New-Fixture @('.dependency-osv-ignore.yaml')
+        Assert-Guard (Invoke-RunnerGate $fx 'dependency-osv') @(2) '\[osv\.zero-match\]'
+    } }
+    @{ Name = 'runner.dependency-osv.ignore-missing'; Body = {
+        $fx = New-Fixture
+        Assert-Guard (Invoke-RunnerGate $fx 'dependency-osv') @(2) '\[osv\.ignore-missing\]'
+    } }
+    @{ Name = 'runner.dependency-osv.ignore-invalid'; Body = {
+        $fx = New-Fixture @('.dependency-osv-ignore.yaml')
+        Edit-Fixture $fx '.dependency-osv-ignore.yaml' 'vulnerabilities: []' "vulnerabilities:`n  - id: GHSA-xxxx-xxxx-xxxx`n    statement: ohne Verantwortlichen`n    expired_at: 2099-12-31"
+        Assert-Guard (Invoke-RunnerGate $fx 'dependency-osv') @(2) '\[osv\.ignore-invalid\].*Owner'
+    } }
+    @{ Name = 'runner.dependency-osv.unlocked-manifest'; Body = {
+        $fx = New-Fixture @('.dependency-osv-ignore.yaml', 'Docker/WebAPI/composer.json')
+        Assert-Guard (Invoke-RunnerGate $fx 'dependency-osv') @(1) '\[osv\.unlocked-manifest\] Docker/WebAPI/composer\.json'
+    } }
     @{ Name = 'runner.fail-dominates-infra'; Body = {
         $fx = New-Fixture
         Add-FixtureFile $fx 'broken.ps1' "function Broken {`n"
