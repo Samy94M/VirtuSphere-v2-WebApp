@@ -492,7 +492,7 @@ echo 'OK';
     await expect(page).toHaveURL(/account\.php|dashboard\.php/);
   });
 
-  test('a wrong AD password is rejected without a local fallback, and local source rejects the LDAP-only account', async ({ page, request }) => {
+  test('a wrong AD password is rejected without a local fallback, and local source rejects the LDAP-only account', async ({ page }) => {
     await page.goto(httpsBaseUrl + 'login.php');
     await page.locator('#auth_source').selectOption('active_directory');
     await page.locator('#username').fill(ALICE_UPN);
@@ -503,16 +503,35 @@ echo 'OK';
 
     // A manipulated POST that names the local source for an AD-only account
     // must fail exactly like an unknown user, never fall back to comparing
-    // against a local hash the account does not have.
-    const html = await page.content();
-    const csrf = csrfFrom(html);
-    const response = await request.post(httpsBaseUrl + 'login.php', {
-      form: { _csrf: csrf, username: ALICE_UPN, password: ALICE_PASSWORD, auth_source: 'local' },
-      ignoreHTTPSErrors: true,
+    // against a local hash the account does not have, nor to the directory.
+    //
+    // KB3 (05.11.2026): this used to go through the `request` fixture, a cookie
+    // jar of its own. Its POST carried this page's token without this page's
+    // session, so login.php rejected it as CSRF (302 back to the form) before
+    // the source was ever read, and the test stayed green with the source
+    // check broken. page.request shares the page's cookies, so the token is
+    // valid and the answer below is the source decision: a rejected sign-in
+    // re-renders the form (200), a CSRF rejection redirects (302).
+    const invalidCredentials = /Invalid username or password\.|Benutzername oder Passwort ungültig\./;
+    const sessionExpired = /Your session expired\.|Ihre Sitzung ist abgelaufen\./;
+    const manipulated = await page.request.post(httpsBaseUrl + 'login.php', {
+      form: { _csrf: csrfFrom(await page.content()), username: ALICE_UPN, password: ALICE_PASSWORD, auth_source: 'local' },
       maxRedirects: 0,
     });
-    expect(response.status(), 'a manipulated local-source POST for an AD-only account is rejected exactly like an unknown user, not a server error').toBe(302);
-    expect(response.headers()['location'], 'rejected back to the login form, not signed in').toContain('login.php');
+    const rejectedHtml = await manipulated.text();
+    expect(manipulated.status(), 'the local-source POST reached the sign-in decision and was refused there, neither signed in nor a CSRF redirect').toBe(200);
+    expect(rejectedHtml, 'refused like an unknown user').toMatch(invalidCredentials);
+    expect(rejectedHtml, 'not the stale-token answer').not.toMatch(sessionExpired);
+
+    // Control in the same session: the right source with the same password
+    // signs in. So the refusal above is the source choice, not the session,
+    // the token or the password.
+    const control = await page.request.post(httpsBaseUrl + 'login.php', {
+      form: { _csrf: csrfFrom(rejectedHtml), username: ALICE_UPN, password: ALICE_PASSWORD, auth_source: 'active_directory' },
+      maxRedirects: 0,
+    });
+    expect(control.status(), 'the directory source signs the same account in').toBe(302);
+    expect(control.headers()['location'], 'signed in, not sent back to the form').not.toContain('login.php');
   });
 });
 
