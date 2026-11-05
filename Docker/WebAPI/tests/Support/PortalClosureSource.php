@@ -11,21 +11,40 @@ use PhpParser\NodeVisitorAbstract;
 use PhpParser\ParserFactory;
 use PhpParser\ConstExprEvaluator;
 
-/** Parses source only: never includes a portal, bootstrap or owner module. */
+require_once __DIR__ . '/PortalClosureCalls.php';
+
+/**
+ * Parses source only: never includes a portal, bootstrap or owner module.
+ *
+ * Each file is parsed once for the owner index (lib, portal, function.php) and
+ * once when the closure walk first reaches it. That walk records the module
+ * edges, the include targets and the call findings of the file, none of which
+ * depend on the entry; every later entry reuses them (QL1: 4,327 parses of 383
+ * files per run before, 105 to 137 s). No tree or file content outlives the
+ * call that parsed it, so the PM1 memory budget holds without a tree cache.
+ */
 final class PortalClosureSource
 {
-    /** @var array<string,array<Node>> */
-    private array $cache = [];
     /** @var array<string,Node\Expr\Array_> */
     private array $constants = [];
     /** @var array<string,list<Node\Stmt\ClassMethod>> */
-    public array $methods = [];
+    private array $methods = [];
+    /** @var array<string,array{file:string,node:Node\Stmt\Function_}>|null */
+    private ?array $index = null;
     /** @var array<string,array<int,list<string>>> */
     private array $edges = [];
     /** @var array<string,list<string>> */
     private array $eager = [];
     /** @var array<string,array<string,true>> */
     private array $availableCache = [];
+    /** @var array<string,list<string>> walked file => include targets in walk order */
+    private array $targets = [];
+    /** @var array<string,true> data catalogs already proven to hold data only */
+    private array $catalogs = [];
+    /** @var array<string,list<array{0:string,1:?string,2:array<string,true>}>|Throwable> walked, not yet resolved */
+    private array $facts = [];
+    /** @var array<string,array<string,?string>> message => owner file the entry must load, or null */
+    private array $findings = [];
     private ?NodeTraverser $detach = null;
     private ?Node\Stmt\Function_ $plain = null;
 
@@ -33,21 +52,10 @@ final class PortalClosureSource
     public function __construct(private array $overrides = []) {}
 
     /** @return array<Node> */
-    public function nodes(string $file): array
+    private function nodes(string $file): array
     {
-        if (!isset($this->cache[$file])) {
-            $nodes = (new ParserFactory())->createForNewestSupportedVersion()->parse($this->overrides[$file] ?? (string) file_get_contents($file));
-            $traverser = new NodeTraverser(new NameResolver());
-            $this->cache[$file] = $traverser->traverse($nodes ?? []);
-            // Keep the normal PHPUnit memory limit: owner indexing covers the
-            // entire library, but only a small working set needs full bodies.
-            if (count($this->cache) > 8) {
-                // The tree is acyclic and is freed at once. PortalClosureCalls
-                // must not hold it in a reference cycle (PM1).
-                array_shift($this->cache);
-            }
-        }
-        return $this->cache[$file];
+        $nodes = (new ParserFactory())->createForNewestSupportedVersion()->parse($this->overrides[$file] ?? (string) file_get_contents($file));
+        return (new NodeTraverser(new NameResolver()))->traverse($nodes ?? []);
     }
 
     /** @return list<string> */
@@ -69,6 +77,33 @@ final class PortalClosureSource
         return $files;
     }
 
+    /**
+     * Problems of each entry's closure, in walk order and without repeats.
+     *
+     * @param list<string> $entries
+     * @return list<string>
+     */
+    public function problems(string $root, array $entries): array
+    {
+        $this->owners($root);
+        $problems = [];
+        foreach ($entries as $entry) {
+            $closure = $this->closure($entry);
+            $loaded = $this->available($entry);
+            foreach ($closure as $file) {
+                if (str_contains($file, '/vendor/')) {
+                    continue;
+                }
+                foreach ($this->findings($file) as $message => $owner) {
+                    if ($owner === null || !isset($loaded[$owner])) {
+                        $problems[] = $message;
+                    }
+                }
+            }
+        }
+        return array_values(array_unique($problems));
+    }
+
     /** @return array<string,array{file:string,node:Node\Stmt\Function_}> */
     public function owners(string $root): array
     {
@@ -77,7 +112,9 @@ final class PortalClosureSource
             if (!is_file($file)) {
                 continue;
             }
-            foreach ((new NodeFinder())->findInstanceOf($this->nodes($file), Node\Stmt\Const_::class) as $declaration) {
+            $nodes = $this->nodes($file);
+            $finder = new NodeFinder();
+            foreach ($finder->findInstanceOf($nodes, Node\Stmt\Const_::class) as $declaration) {
                 foreach ($declaration->consts as $constant) {
                     // registryPaths() reads array registries only.
                     $registry = $constant->value instanceof Node\Expr\Array_ ? $this->detached($constant->value) : null;
@@ -86,10 +123,10 @@ final class PortalClosureSource
                     }
                 }
             }
-            foreach ((new NodeFinder())->findInstanceOf($this->nodes($file), Node\Stmt\ClassMethod::class) as $method) {
+            foreach ($finder->findInstanceOf($nodes, Node\Stmt\ClassMethod::class) as $method) {
                 $this->methods[strtolower((string) $method->name)][] = $this->signature($method);
             }
-            foreach ((new NodeFinder())->findInstanceOf($this->nodes($file), Node\Stmt\Function_::class) as $node) {
+            foreach ($finder->findInstanceOf($nodes, Node\Stmt\Function_::class) as $node) {
                 $name = strtolower((string) ($node->namespacedName ?? $node->name));
                 if (isset($owners[$name]) && $owners[$name]['file'] !== $file) {
                     throw new RuntimeException('[portal-closure.duplicate-owner] ' . $name);
@@ -100,7 +137,7 @@ final class PortalClosureSource
         if ($owners === []) {
             throw new RuntimeException('[portal-closure.zero-match] Empty function owner index');
         }
-        return $owners;
+        return $this->index = $owners;
     }
 
     /**
@@ -145,7 +182,7 @@ final class PortalClosureSource
         return false;
     }
 
-    /** Deep copy without attributes; the parsed tree in the cache stays untouched. */
+    /** Deep copy without attributes; the parsed tree stays untouched. */
     private function detached(Node $node): Node
     {
         $this->detach ??= new NodeTraverser(new CloningVisitor(), new class extends NodeVisitorAbstract {
@@ -175,78 +212,154 @@ final class PortalClosureSource
             if (str_contains($file, '/vendor/')) {
                 continue;
             }
-            $nodes = $this->nodes($file);
-            $finder = new NodeFinder();
-            $eagerIncludes = [];
-            foreach ($nodes as $statement) {
-                if ($statement instanceof Node\Stmt\Expression && $statement->expr instanceof Node\Expr\Include_) {
-                    $eagerIncludes[spl_object_id($statement->expr)] = true;
-                }
-                if ($statement instanceof Node\Stmt\Namespace_) {
-                    foreach ($statement->stmts as $child) {
-                        if ($child instanceof Node\Stmt\Expression && $child->expr instanceof Node\Expr\Include_) {
-                            $eagerIncludes[spl_object_id($child->expr)] = true;
-                        }
-                    }
-                }
+            $pending = array_merge($pending, $this->targets[$file] ??= $this->walk($file));
+        }
+        return array_keys($seen);
+    }
+
+    /**
+     * The one parse of a reached file: module edges, include targets in the
+     * order the walk visits them, and the file's call findings.
+     *
+     * @return list<string>
+     */
+    private function walk(string $file): array
+    {
+        $nodes = $this->nodes($file);
+        $finder = new NodeFinder();
+        $eagerIncludes = [];
+        foreach ($nodes as $statement) {
+            if ($statement instanceof Node\Stmt\Expression && $statement->expr instanceof Node\Expr\Include_) {
+                $eagerIncludes[spl_object_id($statement->expr)] = true;
             }
-            $variables = [];
-            $ambiguousVariables = [];
-            foreach ($finder->findInstanceOf($nodes, Node\Expr\Assign::class) as $assignment) {
-                if ($assignment->var instanceof Node\Expr\Variable && is_string($assignment->var->name)) {
-                    if (isset($variables[$assignment->var->name])) { $ambiguousVariables[$assignment->var->name] = true; }
-                    $variables[$assignment->var->name] = $assignment->expr;
-                }
-            }
-            foreach ($finder->findInstanceOf($nodes, Node\Stmt\Foreach_::class) as $loop) {
-                if ($loop->valueVar instanceof Node\Expr\Variable && is_string($loop->valueVar->name)) {
-                    if (isset($variables[$loop->valueVar->name])) { $ambiguousVariables[$loop->valueVar->name] = true; }
-                    $variables[$loop->valueVar->name] = $loop->expr;
-                }
-            }
-            foreach ($ambiguousVariables as $name => $_) { unset($variables[$name]); }
-            foreach ($finder->findInstanceOf($nodes, Node\Expr\Include_::class) as $include) {
-                $registryPaths = $this->registryPaths($include->expr, dirname($file), $variables);
-                if ($registryPaths !== null) {
-                    $this->recordEdges($file, $include, $registryPaths, isset($eagerIncludes[spl_object_id($include)]));
-                    $pending = array_merge($pending, $registryPaths);
-                    continue;
-                }
-                $path = $this->path($include->expr, dirname($file), $variables);
-                if ($path === null) {
-                    throw new RuntimeException('[portal-closure.dynamic-require] ' . $file . ':' . $include->getStartLine());
-                }
-                if (str_contains($path, '*')) {
-                    $matches = glob($path) ?: [];
-                    if ($matches === []) {
-                        throw new RuntimeException('[portal-closure.zero-match] ' . $path);
+            if ($statement instanceof Node\Stmt\Namespace_) {
+                foreach ($statement->stmts as $child) {
+                    if ($child instanceof Node\Stmt\Expression && $child->expr instanceof Node\Expr\Include_) {
+                        $eagerIncludes[spl_object_id($child->expr)] = true;
                     }
-                    // Dynamic catalogs may contain data only. A new function,
-                    // call or statement cannot silently escape owner indexing.
-                    foreach ($matches as $match) {
-                        foreach ($this->nodes($match) as $statement) {
-                            if (!$statement instanceof Node\Stmt\Return_ && !$statement instanceof Node\Stmt\Declare_) {
-                                throw new RuntimeException('[portal-closure.dynamic-code] ' . $match);
-                            }
-                            if ($statement instanceof Node\Stmt\Return_ && $statement->expr !== null) {
-                                try { (new ConstExprEvaluator())->evaluateDirectly($statement->expr); }
-                                catch (Throwable) { throw new RuntimeException('[portal-closure.dynamic-code] ' . $match); }
-                            }
-                            if ($statement instanceof Node\Stmt\Declare_ && $statement->stmts !== null) {
-                                throw new RuntimeException('[portal-closure.dynamic-code] ' . $match);
-                            }
-                        }
-                        if ($finder->findInstanceOf($this->nodes($match), Node\Expr\FuncCall::class) !== []) {
-                            throw new RuntimeException('[portal-closure.dynamic-code] ' . $match);
-                        }
-                    }
-                } else {
-                    $this->recordEdges($file, $include, [$path], isset($eagerIncludes[spl_object_id($include)]));
-                    $pending[] = $path;
                 }
             }
         }
-        return array_keys($seen);
+        $variables = [];
+        $ambiguousVariables = [];
+        foreach ($finder->findInstanceOf($nodes, Node\Expr\Assign::class) as $assignment) {
+            if ($assignment->var instanceof Node\Expr\Variable && is_string($assignment->var->name)) {
+                if (isset($variables[$assignment->var->name])) { $ambiguousVariables[$assignment->var->name] = true; }
+                $variables[$assignment->var->name] = $assignment->expr;
+            }
+        }
+        foreach ($finder->findInstanceOf($nodes, Node\Stmt\Foreach_::class) as $loop) {
+            if ($loop->valueVar instanceof Node\Expr\Variable && is_string($loop->valueVar->name)) {
+                if (isset($variables[$loop->valueVar->name])) { $ambiguousVariables[$loop->valueVar->name] = true; }
+                $variables[$loop->valueVar->name] = $loop->expr;
+            }
+        }
+        foreach ($ambiguousVariables as $name => $_) { unset($variables[$name]); }
+        $targets = [];
+        foreach ($finder->findInstanceOf($nodes, Node\Expr\Include_::class) as $include) {
+            $registryPaths = $this->registryPaths($include->expr, dirname($file), $variables);
+            if ($registryPaths !== null) {
+                $this->recordEdges($file, $include, $registryPaths, isset($eagerIncludes[spl_object_id($include)]));
+                $targets = array_merge($targets, $registryPaths);
+                continue;
+            }
+            $path = $this->path($include->expr, dirname($file), $variables);
+            if ($path === null) {
+                throw new RuntimeException('[portal-closure.dynamic-require] ' . $file . ':' . $include->getStartLine());
+            }
+            if (str_contains($path, '*')) {
+                $matches = glob($path) ?: [];
+                if ($matches === []) {
+                    throw new RuntimeException('[portal-closure.zero-match] ' . $path);
+                }
+                foreach ($matches as $match) {
+                    $this->catalog($match);
+                }
+            } else {
+                $this->recordEdges($file, $include, [$path], isset($eagerIncludes[spl_object_id($include)]));
+                $targets[] = $path;
+            }
+        }
+        if ($this->index !== null) {
+            // A call check that fails surfaces where the per-entry check
+            // surfaced it: after the walk, at this file's place in the closure.
+            try {
+                $this->facts[$file] = (new PortalClosureCalls($this->index, $this->methods, $this))->findings($nodes, $file);
+            } catch (Throwable $error) {
+                $this->facts[$file] = $error;
+            }
+        }
+        return $targets;
+    }
+
+    /**
+     * Dynamic catalogs may contain data only. A new function, call or
+     * statement cannot silently escape owner indexing.
+     */
+    private function catalog(string $match): void
+    {
+        if (isset($this->catalogs[$match])) {
+            return;
+        }
+        $nodes = $this->nodes($match);
+        foreach ($nodes as $statement) {
+            if (!$statement instanceof Node\Stmt\Return_ && !$statement instanceof Node\Stmt\Declare_) {
+                throw new RuntimeException('[portal-closure.dynamic-code] ' . $match);
+            }
+            if ($statement instanceof Node\Stmt\Return_ && $statement->expr !== null) {
+                try { (new ConstExprEvaluator())->evaluateDirectly($statement->expr); }
+                catch (Throwable) { throw new RuntimeException('[portal-closure.dynamic-code] ' . $match); }
+            }
+            if ($statement instanceof Node\Stmt\Declare_ && $statement->stmts !== null) {
+                throw new RuntimeException('[portal-closure.dynamic-code] ' . $match);
+            }
+        }
+        if ((new NodeFinder())->findInstanceOf($nodes, Node\Expr\FuncCall::class) !== []) {
+            throw new RuntimeException('[portal-closure.dynamic-code] ' . $match);
+        }
+        $this->catalogs[$match] = true;
+    }
+
+    /**
+     * Findings of a walked file, resolved against its own unconditional
+     * closure and the edges it passed before each call. What remains depends
+     * only on the entry: a missing-owner finding keeps the owner file the
+     * entry would have to load. Same message, same owner: the first occurrence
+     * that stays open keeps its place.
+     *
+     * Valid once the walk of an entry containing $file is complete, because
+     * available() follows edges of every file it reaches.
+     *
+     * @return array<string,?string>
+     */
+    private function findings(string $file): array
+    {
+        if (isset($this->findings[$file])) {
+            return $this->findings[$file];
+        }
+        $facts = $this->facts[$file] ?? throw new LogicException('[portal-closure.order] owners() and closure() must run before findings: ' . $file);
+        if ($facts instanceof Throwable) {
+            throw $facts;
+        }
+        $own = $this->available($file);
+        $open = [];
+        foreach ($facts as [$message, $owner, $passed]) {
+            if ($owner !== null) {
+                if (isset($own[$owner])) {
+                    continue;
+                }
+                foreach ($passed as $dependency => $_) {
+                    if (isset($this->available($dependency)[$owner])) {
+                        continue 2;
+                    }
+                }
+            }
+            if (!array_key_exists($message, $open)) {
+                $open[$message] = $owner;
+            }
+        }
+        unset($this->facts[$file]);
+        return $this->findings[$file] = $open;
     }
 
     /** @param list<string> $paths */

@@ -289,6 +289,28 @@ final class CliRequireClosureContractTest extends TestCase
     }
 
     /**
+     * A nested checkout is a different tree, not part of this one: a session
+     * worktree under .claude/worktrees, a .codex clone or a submodule. Derived
+     * from its own `.git` (file or directory) rather than listed, like
+     * Test-NestedWorkingTree in scripts/lib/check/runtime.ps1.
+     */
+    public function testTheInvocationScanSkipsNestedCheckouts(): void
+    {
+        $root = $this->fixtureTree([
+            'Docker/scripts/start.sh' => "#!/bin/sh\nphp /app/lib/fixture_real.php\n",
+            '.claude/worktrees/foreign/.git' => "gitdir: /elsewhere/.git/worktrees/foreign\n",
+            '.claude/worktrees/foreign/Docker/scripts/start.sh' => "#!/bin/sh\nphp /app/lib/fixture_worktree.php\n",
+            'tools/clone/.git/HEAD' => "ref: refs/heads/main\n",
+            'tools/clone/run.sh' => "php lib/fixture_clone.php\n",
+        ]);
+        try {
+            self::assertSame(['lib/fixture_real.php' => ['Docker/scripts/start.sh']], $this->discoverInvokedEntrypoints($root));
+        } finally {
+            $this->removeTree($root);
+        }
+    }
+
+    /**
      * Every `php .../lib/<x>.php` the project's own executable sources start.
      *
      * @return array<string, list<string>> relative entrypoint => sources
@@ -297,10 +319,14 @@ final class CliRequireClosureContractTest extends TestCase
     {
         $skip = ['node_modules', 'vendor', '.git', 'qa-artifacts', 'test-results', 'playwright-report'];
         $found = [];
+        // QL1, 04.11.2026: in the main checkout 31,653 of 34,026 visited files
+        // belonged to 19 session worktrees (183 s), and the result depended on
+        // their uncommitted state.
         $iterator = new RecursiveIteratorIterator(
             new RecursiveCallbackFilterIterator(
                 new RecursiveDirectoryIterator($repoRoot, FilesystemIterator::SKIP_DOTS),
-                static fn (SplFileInfo $file): bool => !$file->isDir() || !in_array($file->getFilename(), $skip, true)
+                static fn (SplFileInfo $file): bool => !$file->isDir()
+                    || (!in_array($file->getFilename(), $skip, true) && !file_exists($file->getPathname() . '/.git'))
             )
         );
         foreach ($iterator as $file) {
@@ -346,6 +372,18 @@ final class CliRequireClosureContractTest extends TestCase
         }
 
         return $root;
+    }
+
+    private function removeTree(string $root): void
+    {
+        $entries = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($entries as $entry) {
+            $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+        }
+        rmdir($root);
     }
 
 }

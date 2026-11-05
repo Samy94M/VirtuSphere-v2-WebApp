@@ -14,19 +14,7 @@ final class PortalRequireClosureContractTest extends TestCase
     {
         $root = str_replace('\\', '/', dirname(__DIR__, 2));
         $source = new PortalClosureSource();
-        $entries = $source->files($root . '/portal');
-        $index = $source->owners($root);
-        $problems = [];
-        foreach ($entries as $entry) {
-            $closure = $source->closure($entry);
-            foreach ($closure as $file) {
-                if (!str_contains($file, '/vendor/')) {
-                    $calls = new PortalClosureCalls($index, $source->available($entry) + $source->available($file), $source->methods, $source);
-                    $problems = array_merge($problems, $calls->check($source->nodes($file), $file));
-                }
-            }
-        }
-        $problems = array_values(array_unique($problems));
+        $problems = $source->problems($root, $source->files($root . '/portal'));
         self::assertSame([], $problems, implode("\n", $problems));
     }
 }

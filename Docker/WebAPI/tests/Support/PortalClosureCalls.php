@@ -5,26 +5,51 @@ declare(strict_types=1);
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 
-/** Function-call analysis; methods are never mistaken for global functions. */
+/**
+ * Function-call analysis; methods are never mistaken for global functions.
+ *
+ * The findings of one file do not depend on the portal entry (QL1). Instead of
+ * the entry's loaded modules, $available holds the module edges this file has
+ * passed at each point (one key per dependency). A missing-owner finding keeps
+ * its owner file and those edges; PortalClosureSource drops it once the owner
+ * is in the unconditional closure of the file, of one of the edges or of the
+ * entry. Every operation on $available is a union or a restore, so this is the
+ * same decision the per-entry analysis made with the full sets.
+ */
 final class PortalClosureCalls
 {
-    /** @var list<string> */
-    private array $problems = [];
+    /** @var list<array{0:string,1:?string,2:array<string,true>}> message, owner file, edges passed */
+    private array $findings = [];
+    /** @var array<string,true> */
+    private array $available = [];
     /** @var array<string,true> */
     private array $builtins;
 
     /** @param array<string,array{file:string,node:Node\Stmt\Function_}> $owners */
-    public function __construct(private array $owners, private array $available, private array $methods = [], private ?PortalClosureSource $source = null)
+    public function __construct(private array $owners, private array $methods = [], private ?PortalClosureSource $source = null)
     {
         $this->builtins = array_fill_keys(get_defined_functions()['internal'], true);
     }
 
-    /** @param array<Node> $nodes @return list<string> */
-    public function check(array $nodes, string $file): array
+    /**
+     * Every occurrence in visit order; the owner resolves and deduplicates.
+     *
+     * @param array<Node> $nodes
+     * @return list<array{0:string,1:?string,2:array<string,true>}>
+     */
+    public function findings(array $nodes, string $file): array
     {
-        $this->problems = [];
+        $this->findings = [];
+        $this->available = [];
         $this->scope($nodes, $file, []);
-        return array_values(array_unique($this->problems));
+        $findings = $this->findings;
+        $this->findings = [];
+        return $findings;
+    }
+
+    private function report(string $message): void
+    {
+        $this->findings[] = [$message, null, []];
     }
 
     /** @param array<Node> $nodes @param array<string,list<Node\Expr>|true> $inherited */
@@ -80,7 +105,7 @@ final class PortalClosureCalls
             }
             if ($node instanceof Node\Expr\Include_ && $this->source !== null) {
                 foreach ($this->source->dependencies($file, $node) as $dependency) {
-                    $this->available += $this->source->available($dependency);
+                    $this->available[$dependency] = true;
                 }
             }
             if ($node instanceof Node\FunctionLike) {
@@ -133,7 +158,7 @@ final class PortalClosureCalls
                         $this->arguments($name, $node->getArgs(), $symbols, $file);
                     }
                 } elseif (!$this->callable($node->name, $symbols, $file, 0)) {
-                    $this->problems[] = '[portal-closure.dynamic-call] ' . $file . ':' . $node->getStartLine();
+                    $this->report('[portal-closure.dynamic-call] ' . $file . ':' . $node->getStartLine());
                 }
             }
             // Optional diagnostic hooks remain optional only inside the exact
@@ -179,7 +204,7 @@ final class PortalClosureCalls
         if ($owner !== null && str_contains($this->typeText($owner->getReturnType()), 'callable')) {
             foreach ((new NodeFinder())->findInstanceOf($nodes, Node\Stmt\Return_::class) as $return) {
                 if ($return->expr !== null && !$this->callable($return->expr, $symbols, $file, 0)) {
-                    $this->problems[] = '[portal-closure.callback-return] ' . $file . ':' . $return->getStartLine();
+                    $this->report('[portal-closure.callback-return] ' . $file . ':' . $return->getStartLine());
                 }
             }
         }
@@ -197,9 +222,10 @@ final class PortalClosureCalls
         $name = strtolower(ltrim($name, '\\'));
         if (isset($guards[$name]) || isset($this->builtins[$name])) { return; }
         if (!isset($this->owners[$name])) {
-            $this->problems[] = '[portal-closure.unknown-function] ' . $file . ':' . $line . ' ' . $name;
+            $this->report('[portal-closure.unknown-function] ' . $file . ':' . $line . ' ' . $name);
         } elseif (!isset($this->available[$this->owners[$name]['file']])) {
-            $this->problems[] = '[portal-closure.missing-owner] ' . $file . ':' . $line . ' ' . $name . ' requires ' . $this->owners[$name]['file'];
+            $owner = $this->owners[$name]['file'];
+            $this->findings[] = ['[portal-closure.missing-owner] ' . $file . ':' . $line . ' ' . $name . ' requires ' . $owner, $owner, $this->available];
         }
     }
 
@@ -232,18 +258,18 @@ final class PortalClosureCalls
             }
             if ($argument === null) {
                 foreach ($args as $candidate) {
-                    if ($candidate->unpack) { $this->problems[] = '[portal-closure.callback-unpack] ' . $file . ':' . $candidate->getStartLine(); }
+                    if ($candidate->unpack) { $this->report('[portal-closure.callback-unpack] ' . $file . ':' . $candidate->getStartLine()); }
                 }
                 continue;
             }
             if ($argument->unpack) {
-                $this->problems[] = '[portal-closure.callback-unpack] ' . $file . ':' . $argument->getStartLine();
+                $this->report('[portal-closure.callback-unpack] ' . $file . ':' . $argument->getStartLine());
                 continue;
             }
             $expr = $argument->value;
             $valid = $collection ? $this->collection($expr, $symbols, $file, 0) : $this->callable($expr, $symbols, $file, 0);
             if (!$valid) {
-                $this->problems[] = '[portal-closure.callback] ' . $file . ':' . $expr->getStartLine() . ' ' . $name;
+                $this->report('[portal-closure.callback] ' . $file . ':' . $expr->getStartLine() . ' ' . $name);
             }
         }
     }
