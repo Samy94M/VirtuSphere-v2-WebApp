@@ -38,6 +38,8 @@ save_create_args() {
 
 case "$1 $2" in
   'image inspect')
+    # MP1: the drill reads the image ID with --format '{{.Id}}' and names it.
+    printf 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n'
     exit 0
     ;;
   'network inspect')
@@ -203,10 +205,23 @@ case "$1" in
     exit 0
     ;;
   rm)
-    [ "${2:-}" = -f ] || exit 96
+    shift
+    rm_force=0
+    rm_volumes=0
+    while [ "$#" -gt 1 ]; do
+      case "$1" in
+        -f) rm_force=1 ;;
+        -v) rm_volumes=1 ;;
+        *) exit 96 ;;
+      esac
+      shift
+    done
+    [ "$rm_force" -eq 1 ] || exit 96
     [ "$mode" != cleanup-rm-failure ] || exit 42
-    case "${3:-}" in
-      "$mysql_id") touch "$state/mysql-removed" ;;
+    case "${1:-}" in
+      # MP1: the MySQL image declares VOLUME /var/lib/mysql; removing the
+      # container without -v would leave the restored database behind.
+      "$mysql_id") [ "$rm_volumes" -eq 1 ] || exit 95; touch "$state/mysql-removed" ;;
       "$smoke_id") touch "$state/smoke-removed" ;;
       *) exit 96 ;;
     esac

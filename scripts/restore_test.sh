@@ -19,9 +19,16 @@
 #      einem falschen Schluessel (tests/tools/restore-drill-probe.php)
 #   8. App-Smoke gegen die wiederhergestellten Daten: health.php, Portal-Login
 #      mit einem Drill-Admin, Machine-API-Ablehnung eines ungueltigen Tokens
-#   9. Vollstaendiges Cleanup (Container, Netz, Tempdateien) per Trap
+#   9. Vollstaendiges Cleanup (Container samt anonymem MySQL-Volume, Netz,
+#      Tempdateien) per Trap
 #
-# Der laufende Stack wird nicht beruehrt. Kanonischer Backup-Weg ist
+# Code, Schema und Migrationen kommen aus dem Pruefroot (VIRTUSPHERE_CHECK_ROOT,
+# Standard: das Repository dieses Skripts), das Backup-Tripel aus
+# VIRTUSPHERE_RESTORE_BACKUP_DIR (Standard: <Pruefroot>/Docker/backups). Mit
+# einem neuen Klon als Pruefroot ist der Lauf ein Migrations-Probelauf des neuen
+# Stands auf dem vorhandenen Backup (docs/operations/backup.md).
+#
+# Der laufende Stack wird nicht beruehrt; das Backupverzeichnis wird nur gelesen. Kanonischer Backup-Weg ist
 # scripts/backup.sh; die frueheren Docker/scripts/{backup,restore}.sh sind
 # stillgelegt (E5). Empfohlene Kadenz: Release-Lane (scripts/check.ps1) und
 # mindestens monatlich (docs/operations/backup.md).
@@ -67,10 +74,27 @@ fi
   || envfail "[restore.root-missing] beauftragter Restore-Pruefroot existiert nicht: $requested_root"
 CHECK_ROOT=$(CDPATH='' cd -- "$requested_root" 2>/dev/null && pwd -P) \
   || envfail "[restore.root-missing] beauftragter Restore-Pruefroot ist nicht aufloesbar: $requested_root"
-BACKUP_DIR="$CHECK_ROOT/Docker/backups"
 SCHEMA_SQL="$CHECK_ROOT/Docker/mysql/mysql-init/struktur.sql"
-[ -d "$BACKUP_DIR" ] \
-  || envfail "[restore.root-incomplete] Backupverzeichnis fehlt im beauftragten Restore-Pruefroot: $BACKUP_DIR"
+# MP1: Das Backupverzeichnis ist getrennt vom Pruefroot waehlbar. So laeuft der
+# Migrations-Probelauf mit dem Code eines neuen Klons gegen das Backup des
+# laufenden Checkouts, ohne Dump und .env in den Klon zu kopieren. Gleiche
+# Strenge wie beim Pruefroot: gesetzt, aber leer oder fehlend bricht ab, nie
+# Rueckfall auf das Verzeichnis im Pruefroot. Ein relativer Pfad gilt ab dem
+# Aufrufverzeichnis. Der Drill liest dort nur; nichts davon wird gemountet.
+if [ "${VIRTUSPHERE_RESTORE_BACKUP_DIR+x}" = x ]; then
+  [ -n "$VIRTUSPHERE_RESTORE_BACKUP_DIR" ] \
+    || envfail "[restore.backup-dir-empty] VIRTUSPHERE_RESTORE_BACKUP_DIR ist gesetzt, aber leer; kein Rueckfall auf das Backupverzeichnis im Pruefroot."
+  [ -d "$VIRTUSPHERE_RESTORE_BACKUP_DIR" ] \
+    || envfail "[restore.backup-dir-missing] beauftragtes Backupverzeichnis existiert nicht: $VIRTUSPHERE_RESTORE_BACKUP_DIR"
+  BACKUP_DIR=$(CDPATH='' cd -- "$VIRTUSPHERE_RESTORE_BACKUP_DIR" 2>/dev/null && pwd -P) \
+    || envfail "[restore.backup-dir-missing] beauftragtes Backupverzeichnis ist nicht aufloesbar: $VIRTUSPHERE_RESTORE_BACKUP_DIR"
+  backup_dir_source=VIRTUSPHERE_RESTORE_BACKUP_DIR
+else
+  BACKUP_DIR="$CHECK_ROOT/Docker/backups"
+  backup_dir_source=Pruefroot
+  [ -d "$BACKUP_DIR" ] \
+    || envfail "[restore.root-incomplete] Backupverzeichnis fehlt im beauftragten Restore-Pruefroot: $BACKUP_DIR"
+fi
 [ -f "$SCHEMA_SQL" ] \
   || envfail "[restore.root-incomplete] struktur.sql fehlt im beauftragten Restore-Pruefroot: $SCHEMA_SQL"
 for required in \
@@ -83,6 +107,24 @@ do
     || envfail "[restore.root-incomplete] $required fehlt im beauftragten Restore-Pruefroot $CHECK_ROOT"
 done
 cd "$CHECK_ROOT"
+
+# MP1: Der Nachweis nennt den Codestand des Pruefroots, damit ein Probelauf mit
+# neuem Code nicht mit dem Drill des laufenden Stands verwechselt wird. Nur der
+# Commit des Pruefroots selbst zaehlt (show-prefix leer), nie der eines
+# umgebenden Repositorys. Ohne Git oder bei verweigertem Zugriff bleibt der
+# Stand unbekannt; der Drill laeuft trotzdem. git laeuft im Pruefroot (cd oben)
+# statt mit -C: unter Git Bash schaltet MSYS_NO_PATHCONV die Pfaduebersetzung
+# fuer das Windows-git ab.
+root_commit="unbekannt (kein Git-Checkout oder git verweigert den Pruefroot)"
+if command -v git >/dev/null 2>&1 \
+  && root_prefix=$(git rev-parse --show-prefix 2>/dev/null) \
+  && [ -z "$root_prefix" ] \
+  && root_head=$(git rev-parse --verify -q HEAD 2>/dev/null); then
+  root_commit=$root_head
+  if [ -n "$(git -c core.fsmonitor=false status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    root_commit="$root_head (Arbeitsbaum geaendert)"
+  fi
+fi
 
 MYSQL_IMAGE="${VIRTUSPHERE_MYSQL_IMAGE:-mysql:8.4-virtusphere}"
 PHP_IMAGE="${VIRTUSPHERE_PHP_IMAGE:-virtusphere-php:8.4-runtime}"
@@ -135,7 +177,11 @@ cleanup() {
   fi
   if [ -n "$MYSQL_ID" ]; then
     if verify_container "$MYSQL_ID" "$MYSQL_NAME"; then
-      docker rm -f "$MYSQL_ID" >/dev/null 2>&1 || cleanup_failed=1
+      # -v: Das MySQL-Image deklariert VOLUME /var/lib/mysql. Ohne -v bliebe
+      # nach jedem Lauf ein anonymes Volume mit der wiederhergestellten
+      # Datenbank zurueck (Plattenplatz und eine Datenkopie ausserhalb des
+      # Backups). Benannte Volumes hat der Wegwerf-Container nicht.
+      docker rm -f -v "$MYSQL_ID" >/dev/null 2>&1 || cleanup_failed=1
     else
       echo "FEHLER: Cleanup verweigert fremden MySQL-Container $MYSQL_ID." >&2
       cleanup_failed=1
@@ -176,6 +222,7 @@ manifest="$BACKUP_DIR/manifest-$ts.sha256"
 [ -f "$config" ] || fail "[restore.backup-incomplete] Config-Archiv $config fehlt zum Dump $dump; das Backup-Tripel ist unvollstaendig."
 [ -f "$manifest" ] || fail "[restore.backup-incomplete] Manifest $manifest fehlt. Ein Backup ohne Hash-Manifest ist nicht verifizierbar; sh scripts/backup.sh erneut laufen lassen."
 echo "Restore-Drill Auswahl: Pruefroot=$CHECK_ROOT; Backup-Stand=$ts"
+echo "Restore-Drill Quelle: Pruefroot-Commit=$root_commit; Backupverzeichnis=$BACKUP_DIR (aus $backup_dir_source)"
 
 # K19-A3: .env-Werte liest dieselbe Funktion wie backup.sh (scripts/lib/env_file.sh).
 [ -f "$SCRIPT_DIR/lib/env_file.sh" ] \
@@ -193,10 +240,14 @@ if [ "$encrypted" -eq 1 ]; then
   # shellcheck disable=SC1091
   . "$SCRIPT_DIR/lib/backup_crypto.sh"
 fi
-docker image inspect "$PHP_IMAGE" >/dev/null 2>&1 \
+PHP_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$PHP_IMAGE" 2>/dev/null) && [ -n "$PHP_IMAGE_ID" ] \
   || envfail "PHP-Image $PHP_IMAGE fehlt (Stack einmal bauen oder VIRTUSPHERE_PHP_IMAGE setzen)."
-docker image inspect "$MYSQL_IMAGE" >/dev/null 2>&1 \
+MYSQL_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$MYSQL_IMAGE" 2>/dev/null) && [ -n "$MYSQL_IMAGE_ID" ] \
   || envfail "MySQL-Image $MYSQL_IMAGE fehlt (Stack einmal bauen oder VIRTUSPHERE_MYSQL_IMAGE setzen)."
+# MP1: Die Image-IDs gehoeren zum Nachweis. Vor dem Laden neuer Images zeigen
+# die Namen noch auf die laufenden, danach auf die neuen; nur die ID sagt, was
+# geprueft wurde.
+echo "Restore-Drill Images: PHP=$PHP_IMAGE ($PHP_IMAGE_ID); MySQL=$MYSQL_IMAGE ($MYSQL_IMAGE_ID)"
 progress_result pass
 
 # --- 1. Manifest ---------------------------------------------------------------
@@ -534,5 +585,5 @@ docker run --rm --network "$NET_ID" \
 # Drill-Spuren in der Wegwerf-DB entfernen, damit ein zweiter Lauf identisch ist.
 run_php "$APP_KEY" "$PROBE" cleanup "$DRILL_ADMIN_USER" >/dev/null || true
 
-echo "Restore-Drill OK: Manifest, Schema, Migrationen, Invarianten, APP_KEY-Bindung und App-Smoke bestanden ($restored_tables Tabellen, Stand $ts)."
+echo "Restore-Drill OK: Manifest, Schema, Migrationen, Invarianten, APP_KEY-Bindung und App-Smoke bestanden ($restored_tables Tabellen, Stand $ts, Pruefroot-Commit $root_commit)."
 progress_result pass

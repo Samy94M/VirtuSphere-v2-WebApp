@@ -117,6 +117,31 @@ normalisierten Standardroot. Die Ausgabe verbindet den normalisierten Prüfroot
 mit dem ausgewählten Backupstand, damit die Gateevidenz beide eindeutig
 zuordnet.
 
+Das Backuptripel kann getrennt vom Prüfroot aus
+`VIRTUSPHERE_RESTORE_BACKUP_DIR` kommen (Standard: `<Prüfroot>/Docker/backups`).
+Dafür gilt dieselbe Strenge: explizit leer gesetzt endet der Drill mit
+`[restore.backup-dir-empty]`, ein fehlendes Verzeichnis mit
+`[restore.backup-dir-missing]`, ein Verzeichnis ohne Tripel mit
+`[restore.backup-missing]`, jeweils Exitcode 2 und ohne Rückfall auf das
+Verzeichnis im Prüfroot. Ein relativer Pfad gilt ab dem Aufrufverzeichnis. Das
+Verzeichnis wird nur gelesen. Wofür die Trennung da ist, steht unter
+„Migrations-Probelauf mit dem neuen Stand“.
+
+Vor dem Import nennt der Drill seine Quellen in drei Zeilen, damit ein Nachweis
+eindeutig einem Stand zugeordnet bleibt:
+
+```text
+Restore-Drill Auswahl: Pruefroot=<Pfad>; Backup-Stand=<ts>
+Restore-Drill Quelle: Pruefroot-Commit=<Commit>; Backupverzeichnis=<Pfad> (aus Pruefroot|VIRTUSPHERE_RESTORE_BACKUP_DIR)
+Restore-Drill Images: PHP=<Name> (sha256:…); MySQL=<Name> (sha256:…)
+```
+
+Der Commit ist der des Prüfroots selbst; `(Arbeitsbaum geaendert)` dahinter
+heißt, dass getrackte Dateien vom Commit abweichen. `unbekannt` steht dort, wenn
+der Prüfroot kein eigener Git-Checkout ist oder `git` fehlt oder den Zugriff
+verweigert. Die Schlusszeile `Restore-Drill OK` wiederholt Backupstand und
+Commit.
+
 Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem lokal getaggten Stack-Image `mysql:8.4-virtusphere`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
 
 1. Manifest (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf): Es muss genau die gewählten Archive listen, also Dump und Konfigurationsarchiv desselben Zeitstempels (bei verschlüsseltem Tripel deren `.cms`-Namen), und deren SHA-256-Hashes müssen stimmen. Sonst endet der Drill mit `[restore.manifest-mismatch]` (Exitcode 1), bevor etwas entschlüsselt oder ein Container angelegt wird.
@@ -127,9 +152,32 @@ Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, 
 5. Invarianten und Rowcounts (Benutzer, Migrationstracking, keine verwaisten Interfaces/VMs/Jobs)
 6. Credential-Entschlüsselung mit dem `APP_KEY` aus dem gesicherten `.env`, und erwartetes Scheitern mit einem falschen Schlüssel
 7. App-Smoke gegen die wiederhergestellten Daten: `health.php`, Portal-Login mit einem Drill-Admin, Machine-API-Ablehnung einer nicht freigegebenen IP (eingefrorene 403-Antwort von `mecm-api.php`)
-8. Vollständiges Cleanup per Trap; der laufende Stack wird nie berührt
+8. Vollständiges Cleanup per Trap: Container, das anonyme Datenvolume des Wegwerf-MySQL (sonst bliebe nach jedem Lauf eine Kopie der Datenbank im Docker-Datenbereich liegen), Netz und Arbeitsverzeichnis; der laufende Stack wird nie berührt
 
-Kadenz: Release-Lane des kanonischen Runners (`scripts/check.ps1 -Lane Release`, Gate `restore-drill`), nach jedem Schema-Meilenstein und mindestens monatlich.
+Kadenz: Release-Lane des kanonischen Runners (`scripts/check.ps1 -Lane Release`, Gate `restore-drill`), nach jedem Schema-Meilenstein, mindestens monatlich und als Migrations-Probelauf vor jedem Update mit neuen Migrationen.
+
+### Migrations-Probelauf mit dem neuen Stand
+
+Der Drill vor einem Update ([Update-Runbook](update.md), Schritt 3.2) beweist, dass das Backup des **laufenden** Stands wiederherstellbar ist. Die Migrationen des neuen Releases laufen dabei nie. Auf echte Daten treffen sie sonst erst im Wartungsfenster, und ab der ersten Klasse-C-Migration ([Upgrade-Recovery](upgrade-recovery.md)) bleibt dort nur der Restore. Der Probelauf ist derselbe Drill mit dem Code des neuen Stands als Prüfroot und dem vorhandenen Backup als Quelle: Er spielt eine Kopie der echten Daten in die Wegwerf-Umgebung ein, wendet alle offenen Migrationen an und vergleicht das Ergebnis mit dem `struktur.sql` des neuen Stands. Datenabhängige Fehler (Zeilen, die eine neue Einschränkung verletzen; Laufzeit) zeigen sich so vor dem Fenster.
+
+**Vorab, außerhalb des Fensters**, sobald der neue Stand auf dem Host liegt:
+
+1. Den neuen Stand als eigenen Klon neben den laufenden Checkout legen. Der Klon braucht weder `.env` noch `Docker/backups`; Backup und `.env` nicht dorthin oder ins Home-Verzeichnis kopieren.
+2. Den Drill aus dem Klon starten und das Backupverzeichnis des laufenden Checkouts benennen. `sudo` gibt Umgebungsvariablen nur als Argument weiter:
+
+   ```sh
+   cd <neuer-Klon>
+   sudo VIRTUSPHERE_RESTORE_BACKUP_DIR=/opt/VirtuSphere-v2-WebApp/Docker/backups sh scripts/restore_test.sh
+   ```
+
+   Quelle ist das jüngste Tripel dort, in der Regel das nächtliche aus dem Zeitplan. Der Drill mountet das Verzeichnis in keinen Container und schreibt, verschiebt oder löscht dort nichts. Entschlüsselte Archive und die archivierte `.env` liegen nur im Wegwerf-Arbeitsverzeichnis, das der Cleanup entfernt. Platzbedarf während des Laufs: die entpackte Datenbank im Docker-Datenbereich und bei verschlüsseltem Backup die entschlüsselten Archive im Temp-Verzeichnis; beides ist nach dem Lauf wieder frei.
+3. Die Zeile `Restore-Drill Quelle` prüfen: `Pruefroot-Commit` muss der Commit des neuen Stands sein, ohne `(Arbeitsbaum geaendert)`. Steht dort `unbekannt`, den Commit mit `git -C <neuer-Klon> rev-parse HEAD` von Hand zum Ergebnis notieren.
+
+Vorab findet der Drill die Images über ihre Namen, also in der Regel die laufenden; die Zeile `Restore-Drill Images` nennt ihre IDs. Ein Wechsel des PHP- oder MySQL-Images ist damit erst im zweiten Lauf im Fenster geprüft.
+
+Grün (`Restore-Drill OK`, Exitcode 0) heißt: Die Migrationen des neuen Stands laufen auf diesem Datenstand durch, und das Schema stimmt. Rot (Exitcode 1) ist ein Befund am neuen Stand, nicht am Backup: Den Rollout nicht ansetzen und die Ausgabe an die Entwicklung geben; der laufende Stand bleibt unberührt. Exitcode 2 ist eine fehlende Voraussetzung und kein Nachweis.
+
+**Im Fenster** läuft derselbe Drill ein zweites Mal: nach dem Umstellen des Checkouts und dem Laden der neuen Images, vor dem Migrationsschritt. Prüfroot und Backupverzeichnis sind dann wieder derselbe Checkout, die Variable entfällt, und Quelle ist das eben geschriebene Backup. Rot heißt dort Abbruch vor der Migration, solange der Rückweg noch „alte Quellen und Images zurück“ ist.
 
 `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt: Ein zweiter, unvalidierter Pfad wäre gefährlich, deshalb brechen sie absichtlich mit einem Verweis hierher ab.
 
