@@ -1,0 +1,6 @@
+#!/bin/sh
+# Namensschutz (NS1): hinzugefuegte Zeilen und Dateinamen des Index gegen die
+# private Namensliste pruefen. Einrichtung: docs/QA.md, "Name Denylist Hook".
+# Das Skript liegt relativ zu diesem Hook, damit ein absoluter core.hooksPath
+# auch Worktrees schuetzt, deren Stand das Skript noch nicht enthaelt.
+exec sh "$(dirname "$0")/../scripts/check-name-denylist.sh" --staged

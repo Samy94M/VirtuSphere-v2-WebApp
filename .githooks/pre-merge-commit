@@ -1,0 +1,5 @@
+#!/bin/sh
+# Namensschutz (NS1): ein automatischer Merge-Commit bringt den Diff gegen den
+# ersten Elternteil mit; derselbe Indexabgleich wie pre-commit. Ein Merge mit
+# Konflikt endet mit "git commit" und laeuft damit durch pre-commit.
+exec sh "$(dirname "$0")/../scripts/check-name-denylist.sh" --staged
