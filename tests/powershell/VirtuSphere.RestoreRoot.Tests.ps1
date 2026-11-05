@@ -1,6 +1,7 @@
 # Root-routing regression for the canonical restore-drill gate. The dynamic
 # cases stop at a fake `docker image inspect`; they prove source selection and
 # fail-closed behavior, not a database import, mount, migration or smoke run.
+# MP1 adds the backup directory as a second, separately selectable source.
 
 BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -128,7 +129,8 @@ BeforeAll {
         param(
             [Parameter(Mandatory)][string]$SourceRoot,
             [string]$CheckRoot,
-            [switch]$UseDefault
+            [switch]$UseDefault,
+            [string]$BackupDir = ''
         )
         $fakeBin = Join-Path $TestDrive ('fake-bin-' + [guid]::NewGuid().ToString('N'))
         $fakeLog = Join-Path $TestDrive ('fake-docker-' + [guid]::NewGuid().ToString('N') + '.log')
@@ -139,6 +141,7 @@ BeforeAll {
         $oldPhpImage = $env:VIRTUSPHERE_PHP_IMAGE
         $oldMysqlImage = $env:VIRTUSPHERE_MYSQL_IMAGE
         $oldRealSh = $env:VS_REAL_SH
+        $oldBackupDir = $env:VIRTUSPHERE_RESTORE_BACKUP_DIR
         try {
             $realShBin = Split-Path $script:ShExe -Parent
             $env:PATH = $fakeBin + [IO.Path]::PathSeparator + $realShBin + [IO.Path]::PathSeparator + $oldPath
@@ -148,6 +151,8 @@ BeforeAll {
             $env:VIRTUSPHERE_MYSQL_IMAGE = 'fixture-mysql-image-never-present'
             if ($UseDefault) { Remove-Item Env:VIRTUSPHERE_CHECK_ROOT -ErrorAction SilentlyContinue }
             else { $env:VIRTUSPHERE_CHECK_ROOT = $CheckRoot }
+            if ($BackupDir -ne '') { $env:VIRTUSPHERE_RESTORE_BACKUP_DIR = $BackupDir }
+            else { Remove-Item Env:VIRTUSPHERE_RESTORE_BACKUP_DIR -ErrorAction SilentlyContinue }
 
             $runnerShell = (Get-Command sh -ErrorAction SilentlyContinue).Source
             if (-not $runnerShell -or $runnerShell -notmatch 'fake-bin-') {
@@ -174,6 +179,7 @@ BeforeAll {
             $env:VS_REAL_SH = $oldRealSh
             $env:VIRTUSPHERE_PHP_IMAGE = $oldPhpImage
             $env:VIRTUSPHERE_MYSQL_IMAGE = $oldMysqlImage
+            $env:VIRTUSPHERE_RESTORE_BACKUP_DIR = $oldBackupDir
         }
     }
 }
@@ -217,7 +223,7 @@ Describe 'Restore drill check-root contract' {
         $text | Should -Match 'Pruefroot=.*source-a-shadow; Backup-Stand=fixture-b'
         $text | Should -Match 'Backup-Stand=fixture-b'
         $text | Should -Not -Match 'Backup-Stand=fixture-a'
-        $result.DockerCalls | Should -Contain 'image inspect fixture-php-image-never-present'
+        $result.DockerCalls | Should -Contain 'image inspect --format {{.Id}} fixture-php-image-never-present'
         @($result.DockerCalls | Where-Object { $_ -match '^(run|exec)\s|^network\s+create' }).Count | Should -Be 0
     }
 
@@ -269,7 +275,8 @@ Describe 'Restore drill check-root contract' {
         $result = Invoke-CanonicalSelectionCase -SourceRoot $sourceA -UseDefault
         $result.ExitCode | Should -Be 2
         ($result.Output -join "`n") | Should -Match 'Backup-Stand=default-a'
-        $result.DockerCalls | Should -Contain 'image inspect fixture-php-image-never-present'
+        ($result.Output -join "`n") | Should -Match 'Backupverzeichnis=.*default-a/Docker/backups \(aus Pruefroot\)'
+        $result.DockerCalls | Should -Contain 'image inspect --format {{.Id}} fixture-php-image-never-present'
     }
 
     It 'rejects an explicitly empty shell root before the runner can normalize it' {
@@ -287,6 +294,98 @@ Describe 'Restore drill check-root contract' {
         }
         $exitCode | Should -Be 2
         ($output -join "`n") | Should -Match '\[restore\.root-empty\]'
+    }
+
+    # MP1: the backup directory is a second source next to the check root. A new
+    # clone as check root reads the backup of the running checkout in place.
+    It 'MP1: reads the triplet from VIRTUSPHERE_RESTORE_BACKUP_DIR and the code from the check root' {
+        $sourceA = Join-Path $TestDrive 'mp1-code-a'
+        New-CanonicalSourceRoot -Root $sourceA -Stamp 'mp1-code-a'
+        $cloneB = Join-Path $TestDrive 'mp1-clone-b'
+        New-SyntheticRestoreRoot -Root $cloneB -Stamp 'mp1-clone-b'
+        Remove-Item -LiteralPath (Join-Path $cloneB 'Docker\backups') -Recurse -Force
+        $backupRoot = Join-Path $TestDrive 'mp1-running'
+        New-SyntheticRestoreRoot -Root $backupRoot -Stamp 'mp1-nightly'
+        $backupDir = Join-Path $backupRoot 'Docker\backups'
+
+        $result = Invoke-CanonicalSelectionCase -SourceRoot $sourceA -CheckRoot $cloneB -BackupDir $backupDir
+        $text = $result.Output -join "`n"
+        $result.ExitCode | Should -Be 2 -Because 'the fake image inspect stops the drill after the selection'
+        $text | Should -Match 'Pruefroot=.*mp1-clone-b; Backup-Stand=mp1-nightly'
+        $text | Should -Match 'Backupverzeichnis=.*mp1-running/Docker/backups \(aus VIRTUSPHERE_RESTORE_BACKUP_DIR\)'
+        $text | Should -Not -Match 'Backup-Stand=mp1-code-a'
+        $text | Should -Not -Match '\[restore\.root-incomplete\]' -Because 'a clone without Docker/backups is a valid check root once the backup directory is named'
+        $result.DockerCalls | Should -Contain 'image inspect --format {{.Id}} fixture-php-image-never-present'
+        @($result.DockerCalls | Where-Object { $_ -match '^(run|exec)\s|^network\s+create' }).Count | Should -Be 0
+    }
+
+    It 'MP1: fails a missing or tripletless backup directory without falling back to the check root' {
+        $sourceA = Join-Path $TestDrive 'mp1-fallback-a'
+        New-CanonicalSourceRoot -Root $sourceA -Stamp 'mp1-fallback-a'
+        $emptyRoot = Join-Path $TestDrive 'mp1-empty-backups'
+        New-SyntheticRestoreRoot -Root $emptyRoot -Stamp 'mp1-empty' -State empty-backups
+        $missingDir = Join-Path $TestDrive 'mp1-missing-backups'
+
+        $missing = Invoke-CanonicalSelectionCase -SourceRoot $sourceA -CheckRoot $sourceA -BackupDir $missingDir
+        $empty = Invoke-CanonicalSelectionCase -SourceRoot $sourceA -CheckRoot $sourceA -BackupDir (Join-Path $emptyRoot 'Docker\backups')
+        $missing.ExitCode | Should -Be 2
+        $empty.ExitCode | Should -Be 2
+        ($missing.Output -join "`n") | Should -Match '\[restore\.backup-dir-missing\]'
+        ($empty.Output -join "`n") | Should -Match '\[restore\.backup-missing\]'
+        ($missing.Output -join "`n") | Should -Not -Match 'Backup-Stand=mp1-fallback-a'
+        ($empty.Output -join "`n") | Should -Not -Match 'Backup-Stand=mp1-fallback-a'
+        @(@($missing.DockerCalls) + @($empty.DockerCalls) | Where-Object { $_ -match '^image\s+inspect|^(run|exec)\s|^network\s+create' }).Count | Should -Be 0
+    }
+
+    It 'MP1: rejects an explicitly empty backup directory instead of using the check root' {
+        $sourceA = Join-Path $TestDrive 'mp1-empty-env-a'
+        New-CanonicalSourceRoot -Root $sourceA -Stamp 'mp1-empty-env-a'
+        $scriptPath = (Join-Path (Join-Path $sourceA 'scripts') 'restore_test.sh') -replace '\\', '/'
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = (Split-Path $script:ShExe -Parent) + [IO.Path]::PathSeparator + $oldPath
+            $output = @(& $script:ShExe -c 'VIRTUSPHERE_CHECK_ROOT="$2" VIRTUSPHERE_RESTORE_BACKUP_DIR= sh "$1" 2>&1' 'restore-empty-backup-dir' $scriptPath ($sourceA -replace '\\', '/') |
+                ForEach-Object { "$_" })
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $env:PATH = $oldPath
+        }
+        $exitCode | Should -Be 2
+        ($output -join "`n") | Should -Match '\[restore\.backup-dir-empty\]'
+        ($output -join "`n") | Should -Not -Match 'Backup-Stand=mp1-empty-env-a'
+    }
+
+    It 'MP1: names the check-root commit, a changed work tree, and unknown outside Git' {
+        $git = (Get-Command git -ErrorAction SilentlyContinue).Source
+        if (-not $git) { throw 'git is required to prove the check-root commit line' }
+        $sourceA = Join-Path $TestDrive 'mp1-commit-a'
+        New-CanonicalSourceRoot -Root $sourceA -Stamp 'mp1-commit-a'
+        $plain = Invoke-CanonicalSelectionCase -SourceRoot $sourceA -CheckRoot $sourceA
+        ($plain.Output -join "`n") | Should -Match 'Pruefroot-Commit=unbekannt'
+
+        $gitArgs = @('-C', $sourceA, '-c', 'core.autocrlf=false', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false')
+        & $git @gitArgs init -q
+        & $git @gitArgs add -A
+        & $git @gitArgs commit -q -m 'mp1 fixture'
+        if ($LASTEXITCODE -ne 0) { throw 'synthetic check-root commit failed' }
+        $head = (& $git -C $sourceA rev-parse HEAD).Trim()
+
+        $clean = Invoke-CanonicalSelectionCase -SourceRoot $sourceA -CheckRoot $sourceA
+        ($clean.Output -join "`n") | Should -Match ('Pruefroot-Commit=' + $head + '; Backupverzeichnis=')
+
+        Add-Content -LiteralPath (Join-Path $sourceA 'Docker\WebAPI\lib\migrate.php') -Value 'changed'
+        $dirty = Invoke-CanonicalSelectionCase -SourceRoot $sourceA -CheckRoot $sourceA
+        ($dirty.Output -join "`n") | Should -Match ('Pruefroot-Commit=' + $head + ' \(Arbeitsbaum geaendert\)')
+    }
+
+    It 'MP1: never mounts or writes the backup directory' {
+        $restore = Get-Content -LiteralPath $script:RestoreScript -Raw
+        $restore | Should -Match 'if \[ "\$\{VIRTUSPHERE_RESTORE_BACKUP_DIR\+x\}" = x \]'
+        $restore | Should -Not -Match '-v\s+"?\$BACKUP_DIR'
+        $restore | Should -Not -Match '>>?\s*"?\$BACKUP_DIR'
+        $restore | Should -Not -Match '\b(rm|mv|cp|touch|mkdir|chmod|chown|tee|ln)\b[^\r\n]*\$BACKUP_DIR'
+        $restore | Should -Not -Match '\b(rm|mv|touch|chmod|chown)\b[^\r\n]*"\$(dump|config|manifest)"'
+        $restore | Should -Match 'docker rm -f -v "\$MYSQL_ID"'
     }
 }
 
@@ -328,7 +427,8 @@ Describe 'Restore and backup resource safety' {
                 [string]$BackupContainer = 'fixture-backup-mysql-never-real',
                 [string]$BackupCert = '',
                 [string]$PrivateKey = '',
-                [string]$ProcessPin = ''
+                [string]$ProcessPin = '',
+                [string]$BackupDir = ''
             )
             $fakeBin = Join-Path $TestDrive ('safety-bin-' + [guid]::NewGuid().ToString('N'))
             $fakeLog = Join-Path $TestDrive ('safety-' + [guid]::NewGuid().ToString('N') + '.log')
@@ -358,6 +458,7 @@ Describe 'Restore and backup resource safety' {
                 VS_FAKE_BACKUP_CERT = $env:VS_FAKE_BACKUP_CERT
                 VIRTUSPHERE_BACKUP_PRIVATE_KEY = $env:VIRTUSPHERE_BACKUP_PRIVATE_KEY
                 VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 = $env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256
+                VIRTUSPHERE_RESTORE_BACKUP_DIR = $env:VIRTUSPHERE_RESTORE_BACKUP_DIR
                 MSYS_NO_PATHCONV = $env:MSYS_NO_PATHCONV
                 TZ = $env:TZ
             }
@@ -384,6 +485,8 @@ Describe 'Restore and backup resource safety' {
                 # probe for the process-environment case, never a source.
                 if ($ProcessPin -ne '') { $env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 = $ProcessPin }
                 else { Remove-Item Env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 -ErrorAction SilentlyContinue }
+                if ($BackupDir -ne '') { $env:VIRTUSPHERE_RESTORE_BACKUP_DIR = $BackupDir.Replace('\', '/') }
+                else { Remove-Item Env:VIRTUSPHERE_RESTORE_BACKUP_DIR -ErrorAction SilentlyContinue }
 
                 $runnerShell = (Get-Command sh -ErrorAction SilentlyContinue).Source
                 if (-not $runnerShell -or $runnerShell -notmatch 'safety-bin-') {
@@ -573,9 +676,39 @@ Describe 'Restore and backup resource safety' {
         $result = Invoke-RestoreSafety -Mode success -FullDump
         $result.ExitCode | Should -Be 0
         $result.DockerCalls | Should -Contain ('rm -f ' + ('c' * 64))
-        $result.DockerCalls | Should -Contain ('rm -f ' + ('b' * 64))
+        $result.DockerCalls | Should -Contain ('rm -f -v ' + ('b' * 64))
         $result.DockerCalls | Should -Contain ('network rm ' + ('a' * 64))
         ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
+        ($result.Output -join "`n") | Should -Match 'Restore-Drill Images: PHP=fixture-php-never-real \(sha256:d{64}\); MySQL=fixture-mysql-never-real \(sha256:d{64}\)'
+    }
+
+    It 'MP1: a drill with a separate backup directory passes, names its sources and leaves the backups untouched' {
+        $root = Join-Path $TestDrive 'restore-mp1-clone'
+        New-CanonicalSourceRoot -Root $root -Stamp 'mp1-nightly'
+        Set-CompleteSyntheticDump -Root $root -Stamp 'mp1-nightly'
+        $backupDir = Join-Path $TestDrive 'mp1-running-backups'
+        Move-Item -LiteralPath (Join-Path $root 'Docker\backups') -Destination $backupDir
+        $snapshot = {
+            Get-ChildItem -LiteralPath $backupDir -Recurse -Force | Sort-Object FullName | ForEach-Object {
+                $hash = if ($_.PSIsContainer) { 'dir' } else { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+                '{0}|{1}|{2}' -f $_.FullName.Substring($backupDir.Length), $_.LastWriteTimeUtc.Ticks, $hash
+            }
+        }
+        $before = @(& $snapshot)
+
+        $result = Invoke-WithSafetyDocker -ScriptPath (Join-Path $root 'scripts\restore_test.sh') -Mode success -CheckRoot $root -BackupDir $backupDir
+        $text = $result.Output -join "`n"
+        $result.ExitCode | Should -Be 0
+        $text | Should -Match 'Backup-Stand=mp1-nightly'
+        $text | Should -Match 'Backupverzeichnis=.*mp1-running-backups \(aus VIRTUSPHERE_RESTORE_BACKUP_DIR\)'
+        $text | Should -Match 'Restore-Drill Images: PHP=fixture-php-never-real \(sha256:d{64}\)'
+        $text | Should -Match 'Restore-Drill OK: .*Stand mp1-nightly, Pruefroot-Commit '
+        $text | Should -Match '\[10/10\] pass cleanup'
+        $result.DockerCalls | Should -Contain ('rm -f -v ' + ('b' * 64))
+        @($result.DockerCalls | Where-Object { $_ -match 'mp1-running-backups' }).Count | Should -Be 0 -Because 'the backup directory is never mounted into a container'
+        $before.Count | Should -BeGreaterThan 2
+        (@(& $snapshot) -join "`n") | Should -Be ($before -join "`n") -Because 'the drill only reads the backup directory'
+        Test-Path -LiteralPath (Join-Path $root 'Docker\backups') | Should -BeFalse -Because 'the drill creates no backup directory in the check root'
     }
 
     It 'R1: imports the dump only after the final MySQL server answers over TCP' {
@@ -612,7 +745,7 @@ Describe 'Restore and backup resource safety' {
     It 'keeps ownership after create when database start fails and cleans by exact ID' {
         $result = Invoke-RestoreSafety -Mode start-failure
         $result.ExitCode | Should -Be 2
-        $result.DockerCalls | Should -Contain ('rm -f ' + ('b' * 64))
+        $result.DockerCalls | Should -Contain ('rm -f -v ' + ('b' * 64))
         $result.DockerCalls | Should -Contain ('network rm ' + ('a' * 64))
     }
 
@@ -620,7 +753,7 @@ Describe 'Restore and backup resource safety' {
         $result = Invoke-RestoreSafety -Mode identity-mismatch -FullDump
         $result.ExitCode | Should -Be 1
         ($result.Output -join "`n") | Should -Match 'Cleanup verweigert fremden'
-        @($result.DockerCalls | Where-Object { $_ -match '^rm -f [bc]{64}$' }).Count | Should -Be 0
+        @($result.DockerCalls | Where-Object { $_ -match '^rm -f (-v )?[bc]{64}$' }).Count | Should -Be 0
     }
 
     It 'turns an exact-ID docker rm failure into a failed drill' {
@@ -632,7 +765,7 @@ Describe 'Restore and backup resource safety' {
     It 'cleans recorded IDs when TERM arrives after create and before start completes' {
         $result = Invoke-RestoreSafety -Mode signal
         $result.ExitCode | Should -Be 130
-        $result.DockerCalls | Should -Contain ('rm -f ' + ('b' * 64))
+        $result.DockerCalls | Should -Contain ('rm -f -v ' + ('b' * 64))
         $result.DockerCalls | Should -Contain ('network rm ' + ('a' * 64))
     }
 
