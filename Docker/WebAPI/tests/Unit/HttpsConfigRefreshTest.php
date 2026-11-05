@@ -30,7 +30,7 @@ final class HttpsConfigRefreshTest extends TestCase
         @rmdir($this->dir);
     }
 
-    public function testAStaleBlockIsRewrittenWithItsMode(): void
+    public function testAStaleBlockIsRewrittenWithItsModeAndNoChown(): void
     {
         $target = $this->dir . '/virtusphere-https.conf';
         file_put_contents($target, "server { listen 8443 ssl; location ~ ^/(lib|vendor)/ { deny all; } }\n");
@@ -43,6 +43,10 @@ final class HttpsConfigRefreshTest extends TestCase
             self::assertSame('640', substr(sprintf('%o', (int) fileperms($target)), -3), 'the mode of the existing block is kept');
         }
         self::assertSame('current', https_refresh_generated_conf($this->dir), 'a second start has nothing to do');
+
+        $function = new ReflectionFunction('https_refresh_generated_conf');
+        $lines = array_slice((array) file((string) $function->getFileName()), $function->getStartLine() - 1, $function->getEndLine() - $function->getStartLine() + 1);
+        self::assertStringNotContainsString('chown(', implode('', $lines), 'the PHP container has no CAP_CHOWN; a chown there aborts the refresh');
     }
 
     /**
@@ -78,6 +82,9 @@ final class HttpsConfigRefreshTest extends TestCase
         self::assertNotFalse($exec, 'the start script must exec php-fpm so it stays PID 1');
         self::assertLessThan($exec, $refresh);
         self::assertStringContainsString('refresh=/var/www/html/lib/https_refresh.php', $script);
+        // Measured on the QA stack (SEC3 run2): without CAP_CHOWN root cannot hand
+        // the block back to uid 33, so the refresh runs as the pool user.
+        self::assertStringContainsString('setpriv --reuid=www-data --regid=www-data --clear-groups php "$refresh"', $script);
         self::assertFileExists(dirname(__DIR__, 2) . '/lib/https_refresh.php');
         self::assertStringNotContainsString('set -e', $script, 'a failed refresh must never keep FPM down');
     }

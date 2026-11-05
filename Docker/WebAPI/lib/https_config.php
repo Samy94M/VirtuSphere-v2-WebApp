@@ -296,7 +296,7 @@ function https_apply_state(mysqli $db, string $confDir = VIRTUSPHERE_HTTPS_CONF_
  * HTTPS used to keep the previous release's rules until the next certificate
  * upload. The PHP container calls this on every start, before FPM and therefore
  * before nginx (which waits for a healthy PHP): an existing block that differs
- * from this release's template is rewritten with the same owner and mode.
+ * from this release's template is rewritten with the same mode.
  * Without a block nothing happens, deliberately: HTTPS is off, or the nginx boot
  * quarantine renamed a broken block aside, and reviving that would point the
  * portal's redirect at a listener that is not there. No database is involved;
@@ -314,19 +314,13 @@ function https_refresh_generated_conf(string $confDir = VIRTUSPHERE_HTTPS_CONF_D
     if (file_get_contents($target) === $rendered) {
         return 'current';
     }
-    $owner = fileowner($target);
-    $group = filegroup($target);
+    // No chown: the container has no CAP_CHOWN, so the start script runs this as
+    // the pool user, who then owns the file as after a portal upload.
     $mode = fileperms($target) & 0777;
     $tmp = $target . '.tmp';
     if (file_put_contents($tmp, $rendered) === false || !chmod($tmp, $mode)) {
         @unlink($tmp);
         throw new RuntimeException('Failed to write the refreshed nginx config.');
-    }
-    // The FPM master starts as root; keep the file with its owner (the pool user
-    // that wrote it), so the next upload from the portal can replace it again.
-    if (function_exists('posix_geteuid') && posix_geteuid() === 0 && $owner !== false && $group !== false) {
-        chown($tmp, $owner);
-        chgrp($tmp, $group);
     }
     if (!rename($tmp, $target)) {
         @unlink($tmp);
