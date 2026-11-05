@@ -209,6 +209,12 @@ comm -23 /home/<betriebskonto>/release-alt.lst /home/<betriebskonto>/release-neu
 Die Images werden erst im Wartungsfenster getauscht (Schritt 3.3 und 3.4), weil
 der Restore-Drill vorher noch mit den laufenden Images arbeitet.
 
+Bringt das Release Migrationen mit, den Migrations-Probelauf vorab fahren
+([Backup](backup.md), „Migrations-Probelauf mit dem neuen Stand“): neuer Stand
+als eigener Klon, zum Beispiel der Transfer-Klon aus 2.2, mit
+`sudo VIRTUSPHERE_RESTORE_BACKUP_DIR=/opt/VirtuSphere-v2-WebApp/Docker/backups sh scripts/restore_test.sh`.
+Rot heißt: Rollout nicht ansetzen.
+
 ## Schritt 3: Wartungsfenster
 
 ### 3.1 Aufträge anhalten
@@ -378,9 +384,38 @@ die in der Vorlage stehen, aber in der `.env` des Hosts fehlen. Jeden davon
 bewusst setzen; eine Warnung „variable is not set“ von `config` ist ein Abbruch,
 denn Compose setzt den Wert sonst still leer.
 
+### 3.6a Migrations-Probelauf
+
+Noch vor jeder Schemaänderung läuft derselbe Drill wie in Schritt 3.2, jetzt mit
+dem neuen Quellstand und den neuen Images. Er spielt das Backup aus 3.2 in eine
+Wegwerf-Datenbank, wendet dort alle offenen Migrationen an und vergleicht das
+Schema mit dem neuen `struktur.sql`. Der laufende MySQL bleibt unberührt; der
+Drill braucht daneben etwa 0,5 GiB Arbeitsspeicher und Platz für eine Kopie der
+Datenbank, beides ist nach dem Lauf wieder frei.
+
+```bash
+cd /opt/VirtuSphere-v2-WebApp
+sudo sh scripts/restore_test.sh
+```
+
+Erwartet: Der Drill zählt bis `[10/10] pass cleanup` und meldet „Restore-Drill
+OK“ mit dem Zeitstempel aus Schritt 3.2. Die Zeile `Restore-Drill Quelle` nennt
+den Ziel-Commit aus Schritt 3.6, ohne `(Arbeitsbaum geaendert)`. Die Zeile
+`Restore-Drill Images` nennt die eben geladenen Image-IDs (beim Bundle gegen
+`images.txt`). Jede offene Migration erscheint als `applied`.
+
+**Rot ist ein Abbruch vor 3.7.** Das Schema ist noch unverändert: zurück wie
+unter „Wenn etwas schiefgeht“, Fall vor der Migration. Die Ausgabe des Drills
+aufheben; sie ist der Befund für die Entwicklung. Exitcode 2 (fehlende
+Voraussetzung) ist ebenfalls kein Freigabegrund.
+
+Lief der Probelauf schon vorab mit diesem Release grün ([Backup](backup.md),
+„Migrations-Probelauf mit dem neuen Stand“), bleibt dieser Lauf trotzdem: Er
+prüft den Datenstand des Fensters und die neuen Images.
+
 ### 3.7 Datenbank und PHP neu erzeugen, dann migrieren
 
-Zuerst nur MySQL und PHP mit den neuen Images. So läuft die Migration mit neuem
+Erst nach grünem Probelauf (3.6a). Zuerst nur MySQL und PHP mit den neuen Images. So läuft die Migration mit neuem
 Code im neuen Image, und ein Startproblem des neuen MySQL-Images zeigt sich vor
 jeder Schemaänderung:
 
@@ -527,6 +562,7 @@ nach dem [Backup-Runbook](backup.md) **dieses alten Stands** ausführen (Abschni
 | MySQL startet nach dem Neuerzeugen nicht | Startprüfung der Datenbankpasswörter (zu kurz oder Vorlagenwert) | `docker compose logs mysql`; Passwortwechsel ist ein eigener Vorgang ([Go-Live](go-live.md), Schritt 3a) |
 | Portal antwortet mit 502 | nur `php` neu gestartet, nginx hält die alte Adresse | `docker compose up -d --no-build --force-recreate --wait` |
 | Drill rot | Backup unvollständig oder Restore-Weg gestört | anhalten; ohne grünen Drill kein Update |
+| Migrations-Probelauf (3.6a) rot | eine Migration scheitert an diesen Daten oder das Schema weicht ab | vor 3.7 abbrechen, Rückweg vor der Migration; Drill-Ausgabe an die Entwicklung |
 
 ## Nach dem Update festhalten
 

@@ -177,7 +177,7 @@ Vorab findet der Drill die Images über ihre Namen, also in der Regel die laufen
 
 Grün (`Restore-Drill OK`, Exitcode 0) heißt: Die Migrationen des neuen Stands laufen auf diesem Datenstand durch, und das Schema stimmt. Rot (Exitcode 1) ist ein Befund am neuen Stand, nicht am Backup: Den Rollout nicht ansetzen und die Ausgabe an die Entwicklung geben; der laufende Stand bleibt unberührt. Exitcode 2 ist eine fehlende Voraussetzung und kein Nachweis.
 
-**Im Fenster** läuft derselbe Drill ein zweites Mal: nach dem Umstellen des Checkouts und dem Laden der neuen Images, vor dem Migrationsschritt. Prüfroot und Backupverzeichnis sind dann wieder derselbe Checkout, die Variable entfällt, und Quelle ist das eben geschriebene Backup. Rot heißt dort Abbruch vor der Migration, solange der Rückweg noch „alte Quellen und Images zurück“ ist.
+**Im Fenster** läuft derselbe Drill ein zweites Mal ([Update-Runbook](update.md), Schritt 3.6a): nach dem Umstellen des Checkouts und dem Laden der neuen Images, vor dem Migrationsschritt. Prüfroot und Backupverzeichnis sind dann wieder derselbe Checkout, die Variable entfällt, und Quelle ist das eben geschriebene Backup. Rot heißt dort Abbruch vor der Migration, solange der Rückweg noch „alte Quellen und Images zurück“ ist.
 
 `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt: Ein zweiter, unvalidierter Pfad wäre gefährlich, deshalb brechen sie absichtlich mit einem Verweis hierher ab.
 

@@ -57,6 +57,10 @@ bewiesene konsistente Restorestand verwendet.
 | N — normalisierende Datenänderung | 0003, 0008, 0009, 0014, 0017, 0018, 0020, 0073 | Vorwärts reparierbar und idempotent geprüft, aber ursprüngliche Bytes/Bedeutung werden nicht rekonstruiert. Exakte Rückkehr nur über Restore. |
 | C — Vertrags-/Rückkehrgrenze | 0028, 0034, 0040, 0041, 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049, 0050, 0053, 0056, 0057, 0058, 0059, 0060, 0063, 0064, 0065, 0066, 0067, 0068, 0070 | Entfernte Form, neue Identitäts-/Ownership-/Prozess-/Callbackverträge oder neue Schreibfences machen alten Code unsicher. Kein gemischter Betrieb; Rückkehr nur als zusammengehöriger Source-, Schema-, Konfigurations- und Schlüsselrestore. |
 
+Vor einer Klasse-C-Migration ist der Migrations-Probelauf Pflicht
+([Update-Runbook](update.md), Schritt 3.6a); er zeigt datenabhängige Fehler,
+solange der Rückweg noch „alte Quellen und Images zurück“ ist.
+
 Migration 0034 entfernt das Legacy-Tokenschema ausdrücklich. Die Migrationen
 0042, 0043, 0044, 0045, 0046, 0047, 0048, 0049 und 0050 führen
 Runtimegeneration, Remoteausführung, Claim-/Supervisorzustand,
