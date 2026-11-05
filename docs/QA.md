@@ -111,6 +111,23 @@ Gate logs go to a directory under the system temp path that each run creates for
 
 The runner prints `[n/total] RUN <gate>` immediately before every selected gate and `[n/total] <result> <gate>` immediately afterwards. Keep those lines visible for long local and agent-driven runs. If a terminal or tool buffers the process output, tee the same stream to a file that can be polled while the process is running, or invoke the lane in observable blocks. Read that live output at least once per minute and report the latest real `[n/total]` line; a message containing only elapsed time does not show progress. Before the first gate, `[0/total]` is the honest status when the selected total is known. Do not infer a counter from process age or report a gate as complete before its result line exists.
 
+**Interleaved progress (QL2).** A runner may run independent units side by side. A22 still holds per unit: its `[n/total] RUN <unit>` comes right before that unit starts and its `[n/total] <result> <unit>` right after it ends. The lines of different units then interleave and the result numbers are not in order; in a green run every number from 1 to total appears exactly once with `RUN` and exactly once with its result, the `RUN` first, and each line is written whole. When polling such a run, report the latest line as it is and, if useful, how many result lines exist so far; do not read the number of the latest line as the count of finished units. With four workers the start of `ansible-create-async` reads, for example:
+
+```text
+contract cases: 34, workers: 4
+[1/34] RUN async-core-seam
+[2/34] RUN changed-success
+[3/34] RUN unchanged-success
+[4/34] RUN terminal-module-failure
+[2/34] PASS changed-success
+[5/34] RUN terminal-module-failure-without-text
+[4/34] PASS terminal-module-failure
+[6/34] RUN terminal-module-exception
+[1/34] PASS async-core-seam
+```
+
+The three Ansible contract scripts (`powercycle-sequence-contract.py`, `esxi-step-retry-contract.py`, `create-async-contract.py`) run their cases through `Docker/qa-ansible/contract_cases.py`: at most `VIRTUSPHERE_QA_CONTRACT_WORKERS` cases at a time (1 to 8, default 4; 1 runs them one after another), and after the first failure no further case starts while running ones still report. Every case owns its temporary directory, environment and `ansible-playbook` process. The gates `ansible-powercycle-selection` and `ansible-create-async` pass the variable through from the runner's environment, check every green step for that complete set of lines (`Get-ContractCaseProgress` in `scripts/lib/check/gates-fast.ps1`; a swallowed case turns the gate red), keep the output of every step in the gate log and name each step's duration, case count and worker count in the result detail. `output-buffering-probe.py` measures arrival times and stays serial. The waits the powercycle cases assert are lower bounds taken inside the pause action itself, so a busy host can lengthen them but not fake a skipped pause. `scripts/php-lint-all.sh` lints with `xargs -P` (`VIRTUSPHERE_PHP_LINT_JOBS`, 1 to 32, default 8), still checks every file after a syntax error and keeps its exit codes and its `linted N file(s)` line.
+
 Tool versions are pinned in `scripts/tool-lock.json` (AP4): registry images by digest, PowerShell modules by exact version. The runner refuses to start without a valid lock file (exit 2). The Ansible gates (`ansible-syntax`, `ansible-lint`, `yaml-roundtrip`) run against the locally built `virtusphere-qa-ansible` image; build it once with `docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .` (pip pins with hashes in `Docker/qa-ansible/requirements.txt`, collection pin from `Ansible/requirements.yml`).
 
 The `yaml-roundtrip` gate (AP5) is the semantic complement to the substring pins in PHPUnit: `Docker/WebAPI/tests/tools/render-golden-serverlist.php` renders the hostile golden mission (`tests/fixtures/golden-mission.json` — Norway tokens, control bytes, unicode, overrides, autostart clamps) through the production generators, and `Ansible/tests/roundtrip_verify.py` loads the result with PyYAML (Ansible's YAML 1.1 semantics) and deep-compares it against the fixture's `expected` contract. Change the generator and the `expected` block must move with it — that forced conversation is the point. `AnsiblePlaybookHygieneContractTest` pins the playbook side: `ignore_errors` only registered and allowlisted, command tasks classified, the ESXi password never outside the no_log module argument, credential files at mode 0600. Still open for the Release lane / real staging (rollout step 10): a second idempotence run against a real ESXi host.

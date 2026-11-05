@@ -1,4 +1,5 @@
 """Execute production control flow with local action doubles; never contact ESXi."""
+import functools
 import json
 import os
 from pathlib import Path
@@ -6,6 +7,8 @@ import subprocess
 import tempfile
 
 import yaml
+
+from contract_cases import run_cases
 
 ROOT = Path('/repo')
 PLAY = 'powercycleVMs-ESXi_playbook.yml'
@@ -123,7 +126,10 @@ class ActionModule(Pause):
         scenario = json.loads(Path(os.environ['PC_SCENARIO']).read_text())
         if scenario.get('pause_failure'):
             return dict(failed=True, msg='synthetic pause failure')
-        return super().run(tmp, task_vars)
+        result = super().run(tmp, task_vars)
+        with open(os.environ['PC_EVENTS'], 'a') as stream:
+            stream.write(json.dumps(['pause_done', None, self._task.args['seconds'], time.monotonic()]) + '\\n')
+        return result
 '''
 
 
@@ -204,15 +210,18 @@ def run_case(name, settings, expected, failed=False, output=()):
             assert sum(1 for event in events if event[0] == 'info' and event[1] == failed_info) == len(RETRY_PAUSES) + 1, (name, events)
             assert 'synthetic info failure' in result.stdout, (name, result.stdout)
         # Every own cycle includes its real wait before the first power-off;
-        # a repeated power-off follows its retry pause.
+        # a repeated power-off follows its retry pause. Start and end of the
+        # wait are both taken inside the pause action (QL2): cases run side by
+        # side, and a busy host could otherwise stretch the time between a
+        # skipped pause and the power-off until it looks like a real wait.
         powered_off = set()
         for index, event in enumerate(events):
             if event[0] == 'power' and event[2] == 'powered-off' and not settings.get('pause_failure'):
-                pause = events[index - 1]
-                assert pause[0] == 'pause', events
+                done, pause = events[index - 1], events[index - 2]
+                assert done[0] == 'pause_done' and pause[0] == 'pause' and done[2] == pause[2], events
                 if event[1] not in powered_off:
                     assert int(pause[2]) == wait_seconds, events
-                    assert event[3] - pause[3] >= wait_seconds - 0.1, events
+                    assert done[3] - pause[3] >= wait_seconds - 0.1, events
                 else:
                     assert int(pause[2]) in RETRY_PAUSES, events
                 powered_off.add(event[1])
@@ -273,11 +282,5 @@ CASES = [
      ('after 4 attempt(s)',)),
 ]
 
-for position, case in enumerate(CASES, 1):
-    print(f'[{position}/{len(CASES)}] RUN {case[0]}', flush=True)
-    try:
-        run_case(*case)
-    except Exception:
-        print(f'[{position}/{len(CASES)}] fail {case[0]}', flush=True)
-        raise
-    print(f'[{position}/{len(CASES)}] pass {case[0]}', flush=True)
+# QL2: the cases share nothing and run on a bounded pool (contract_cases.py).
+raise SystemExit(run_cases([(case[0], functools.partial(run_case, *case)) for case in CASES]))
