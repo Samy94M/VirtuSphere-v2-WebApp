@@ -90,7 +90,9 @@ test('adding a VM renders to the end of the page, as wide as editing one', async
   await expect(page.getByText('VirtuSphere Fehler')).toHaveCount(0);
   await expect(page.locator('dialog.modal-confirm')).toHaveCount(1);
   await expect(page.locator('#vm-timeline-heading')).toHaveCount(0);
-  await expect(page.locator('form button[type="submit"]').last()).toBeVisible();
+  // The confirm dialog (layout_modals.php) closes every page with its own
+  // hidden form; the VM form's submit is the last one outside that dialog.
+  await expect(page.locator('main form:not([method="dialog"]) button[type="submit"]').last()).toBeVisible();
   const addWidth = await page.locator('main').evaluate((main) => main.getBoundingClientRect().width);
   expect(addWidth).toBe(editWidth);
 });
