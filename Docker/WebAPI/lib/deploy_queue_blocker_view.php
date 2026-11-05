@@ -68,7 +68,7 @@ function deploy_render_blockers(array $blockers, array $user, array $warnings = 
     $shown = deploy_preflight_bounded_findings($blockers, VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT);
     $shownWarnings = deploy_preflight_bounded_findings($warnings, VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT);
     ?>
-    <div class="deploy-preparation" data-deploy-blockers data-endpoint="deploy_blockers.php" data-error-message="<?php echo h(__t('deploy.blocker_refresh_failed')); ?>" data-checking-message="<?php echo h(__t('deploy.preparation_checking')); ?>" data-unreliable-message="<?php echo h(__t('deploy.preparation_unreliable')); ?>" data-hard-network-modes="<?php echo h(json_encode(deploy_modes_with_hard_network_gate(), JSON_THROW_ON_ERROR)); ?>" data-initial-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT); ?>" data-preparation-state="<?php echo h((string) $presentation['state']); ?>">
+    <div class="deploy-preparation" data-deploy-blockers data-endpoint="deploy_blockers.php" data-error-message="<?php echo h(__t('deploy.blocker_refresh_failed')); ?>" data-error-message-server-check="<?php echo h(__t('deploy.blocker_refresh_failed_server_checks')); ?>"data-checking-message="<?php echo h(__t('deploy.preparation_checking')); ?>" data-unreliable-message="<?php echo h(__t('deploy.preparation_unreliable')); ?>" data-hard-network-modes="<?php echo h(json_encode(deploy_modes_with_hard_network_gate(), JSON_THROW_ON_ERROR)); ?>" data-initial-limit="<?php echo h((string) VIRTUSPHERE_DEPLOY_PREFLIGHT_INITIAL_LIMIT); ?>" data-preparation-state="<?php echo h((string) $presentation['state']); ?>">
         <div class="deploy-preparation-head">
             <div>
                 <h3><?php echo h(__t('deploy.preparation_heading')); ?></h3>

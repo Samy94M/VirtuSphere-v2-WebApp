@@ -87,6 +87,7 @@ return [
     'blocker_session_expired' => 'Your session expired. Blocker checks have stopped; please sign in again.',
     'blocker_forbidden' => 'Permission to queue deploy jobs is missing. Blocker checks have stopped.',
     'blocker_refresh_failed' => 'The blockers could not be checked with current data. Queueing remains disabled as a precaution; change a field or reload the page.',
+    'blocker_refresh_failed_server_checks' => 'The blockers could not be checked with current data. The server checks every prerequisite again when you queue; change a field or reload the page.',
     'network_empty' => 'VM ":name", network adapter: The port group name is empty.',
     'network_ambiguous' => 'VM ":name": :count network adapters use the same exact port group ":vlan".',
     'wds_mission_missing' => 'VM ":name": No WDS/PXE port group is configured for the mission.',

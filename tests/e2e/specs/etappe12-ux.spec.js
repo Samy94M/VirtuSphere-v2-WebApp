@@ -330,6 +330,66 @@ test('invalid content type fails closed and 403 stops later live requests', asyn
   expect(requests, '401/403 permanently stops this client instance').toBe(1);
 });
 
+// KB3: a JSON answer that is no verdict (an error status other than 401/403,
+// or ok:false) used to fall through refresh() without a render. The status
+// stayed on "checking" forever and the button kept the previous verdict, which
+// after a ready verdict is a stale release. It is now the same failure as a
+// network error: visible, retried on the next change, and only the hard
+// network modes say (and do) that queueing stays disabled.
+test('a JSON error answer or ok:false is a visible unreliable check, never a lingering one', async ({ page }) => {
+  const ids = seed();
+  const replies = [];
+  let requests = 0;
+  await page.route('**/deploy_blockers.php?*', async (route) => {
+    requests += 1;
+    // An extra request gets an answer too; the request count below names it.
+    const reply = replies.shift() || { status: 500, body: { ok: false, message: 'unexpected request' } };
+    await route.fulfill({ status: reply.status, contentType: 'application/json', body: JSON.stringify(reply.body) });
+  });
+  await page.goto(`deploy.php?mission_id=${ids.mission}&lang=de`);
+  const form = page.locator('form:has([data-deploy-mission])');
+  const root = page.locator('[data-deploy-blockers]');
+  const status = page.locator('[data-deploy-preparation-status]');
+  const button = page.locator('[data-deploy-queue-button]');
+  const failure = page.locator('[data-deploy-blocker-list] > .alert');
+  await expect(form.locator('select[name="mode"]')).toHaveValue('full');
+
+  replies.push({ status: 200, body: blockerPayload([], true) });
+  await form.locator('select[name="credential_esxi_id"]').selectOption(String(ids.esxi));
+  await waitForLiveVerdict(page);
+  await expect(button).toBeEnabled();
+
+  replies.push({ status: 500, body: { ok: false, message: 'SERVERTEXT 500' } });
+  await form.locator('select[name="credential_ansible_id"]').selectOption(String(ids.ansible));
+  await waitForLiveVerdict(page);
+  await expect(root).toHaveAttribute('data-preparation-state', 'unreliable');
+  await expect(status).toHaveText('Nicht verlässlich aktuell geprüft');
+  await expect(failure).toHaveCount(1);
+  await expect(failure).toHaveClass(/alert-error/);
+  await expect(failure).toContainText('Das Einreihen bleibt vorsorglich gesperrt');
+  await expect(button, 'the ready verdict before the failure must not stay a release').toBeDisabled();
+  await expect(page.getByText('SERVERTEXT 500')).toHaveCount(0);
+
+  replies.push({ status: 200, body: { ok: false } });
+  await form.locator('input[name="verbose"]').check();
+  await waitForLiveVerdict(page);
+  await expect(root).toHaveAttribute('data-preparation-state', 'unreliable');
+  await expect(failure).toContainText('Das Einreihen bleibt vorsorglich gesperrt');
+  await expect(button).toBeDisabled();
+
+  // start has no hard network gate: the client invents no lock and says so.
+  replies.push({ status: 500, body: { ok: false, message: 'SERVERTEXT 500' } });
+  await form.locator('select[name="mode"]').selectOption('start');
+  await waitForLiveVerdict(page);
+  await expect(root).toHaveAttribute('data-preparation-state', 'unreliable');
+  await expect(status).toHaveText('Nicht verlässlich aktuell geprüft');
+  await expect(failure).toHaveClass(/alert-warning/);
+  await expect(failure).not.toHaveAttribute('data-deploy-blocker', '');
+  await expect(failure).toContainText('Beim Einreihen prüft der Server alle Voraussetzungen erneut');
+  await expect(button).toBeEnabled();
+  expect(requests, 'a failed check is retried on every change, unlike 401/403').toBe(4);
+});
+
 test('password purpose, policy hints and updated display are user-facing', async ({ page }) => {
   const ids = seed();
   await page.goto('account.php?lang=de');
