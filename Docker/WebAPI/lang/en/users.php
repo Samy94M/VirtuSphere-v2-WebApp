@@ -16,7 +16,7 @@ return [
     'th_must_change' => 'Must Change',
     'th_last_seen' => 'Last Login',
     'badge_locked' => 'Locked',
-    'locked_until_hint' => 'Automatically locked until :time',
+    'locked_until_hint' => 'Sign-in locked for at least one address until :time',
     'btn_activate' => 'Activate',
     'btn_deactivate' => 'Deactivate',
     'btn_role' => 'Change role',

@@ -12,16 +12,11 @@ const VIRTUSPHERE_TEMPLATE_PREFIX = '_';
 // decay on the general window (NOT IN in removeLog()).
 const VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS = 365;
 const VIRTUSPHERE_LOG_RETENTION_DAYS = 90;
-// How long an account stays locked after too many failed sign-ins. Was written
-// straight into the SQL (`INTERVAL 15 MINUTE`) and, separately, into the help
-// text; the two could drift apart without anything noticing.
-const VIRTUSPHERE_LOGIN_LOCKOUT_MINUTES = 15;
-// The window the failure counters look back over. A different thing from the
-// lockout duration above, which happens to share its value today: this one asks
-// "how many failures recently", that one answers "how long are you out". They
-// were both the literal 15 in three SQL statements and two audit sentences, so
-// raising the lockout would have silently widened the counting window too, or
-// worse, not - and no test would have noticed either way.
+// The window the failure counters look back over. Since SEC3 (C-04c) it is also
+// the lock duration: nothing locks an account row any more, a local name is
+// refused for an address (a directory name for every address) while the limit
+// of failures lies in this window.
+// The help text and the audit sentences read this constant, never a literal.
 const VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES = 15;
 
 // bcrypt (PASSWORD_DEFAULT) silently truncates its input at 72 BYTES. Beyond

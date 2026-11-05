@@ -17,6 +17,7 @@ final class AuthAuditTest extends TestCase
 {
     private const PREFIX = 'phpunit_auth_';
     private const CLIENT_IP = '198.51.100.77';
+    private const OTHER_IP = '198.51.100.78';
 
     private ?mysqli $db = null;
     private int $userId = 0;
@@ -65,8 +66,8 @@ final class AuthAuditTest extends TestCase
         if ($this->userId > 0) {
             $this->db->query('DELETE FROM deploy_logs WHERE user_id = ' . $this->userId);
         }
-        $this->db->query("DELETE FROM deploy_login_attempts WHERE username LIKE '" . self::PREFIX . "%'");
-        $this->db->query("DELETE FROM deploy_login_attempts WHERE ip_address = '" . self::CLIENT_IP . "'");
+        // The counter keeps only a name key (SEC3); this test's addresses are its own.
+        $this->db->query("DELETE FROM deploy_login_attempts WHERE ip_address IN ('" . self::CLIENT_IP . "', '" . self::OTHER_IP . "')");
         $this->db->query("DELETE FROM deploy_users WHERE name LIKE '" . self::PREFIX . "%'");
         $this->userId = 0;
     }
@@ -208,6 +209,65 @@ final class AuthAuditTest extends TestCase
             array_filter($messages, static fn (string $m): bool => str_contains($m, 'account locked')),
             'the lockout is still audited with its exact cause'
         );
+    }
+
+    /**
+     * SEC3 (C-04c): five failures from one address lock the local name for that
+     * address only. The owner signs in from another address meanwhile, so an
+     * anonymous caller cannot lock someone else out. The audit line says so.
+     */
+    public function testFailuresFromOneAddressDoNotLockOutAnother(): void
+    {
+        for ($i = 0; $i < VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT; $i++) {
+            login($this->userName, 'wrong-password', $this->db);
+        }
+        self::assertSame('rate_limited', login($this->userName, $this->password, $this->db)['reason'] ?? '', 'the failing address stays locked, even with the right password');
+
+        $_SERVER['REMOTE_ADDR'] = self::OTHER_IP;
+        self::assertTrue(login($this->userName, $this->password, $this->db)['ok'] ?? false, 'another address is not locked out');
+
+        $messages = array_column($this->authLogsForUser(), 'log_message');
+        self::assertNotEmpty(array_filter($messages, static fn (string $m): bool => str_contains($m, 'account locked from this address')));
+    }
+
+    /**
+     * SEC3: the counter holds a keyed hash of the name for every attempt; neither
+     * an existing name nor a typed password-like input lands in the table.
+     */
+    public function testTheCounterStoresNoTypedName(): void
+    {
+        $typed = self::PREFIX . 'Pw7xQ';
+        login($typed, 'wrong-password', $this->db);
+        login($this->userName, 'wrong-password', $this->db);
+        login($this->userName, $this->password, $this->db);
+
+        $stored = array_column($this->db->query("SELECT username FROM deploy_login_attempts WHERE ip_address = '" . self::CLIENT_IP . "'")->fetch_all(MYSQLI_ASSOC), 'username');
+        self::assertCount(3, $stored);
+        foreach ($stored as $value) {
+            self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', (string) $value);
+        }
+        self::assertContains(auth_login_name_key($typed, VIRTUSPHERE_AUTH_SOURCE_LOCAL), $stored);
+        self::assertNotContains($typed, $stored);
+        self::assertNotContains($this->userName, $stored);
+    }
+
+    /** The users page shows the lock from the counter, and "clear lock" frees every address. */
+    public function testTheUsersPageSeesAndClearsAnAddressLock(): void
+    {
+        self::assertSame([], auth_local_login_lock_ends($this->db, [$this->userName]));
+        for ($i = 0; $i < VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT; $i++) {
+            login($this->userName, 'wrong-password', $this->db);
+        }
+        $ends = auth_local_login_lock_ends($this->db, [$this->userName]);
+        self::assertArrayHasKey($this->userName, $ends);
+        $stmt = $this->db->prepare('SELECT ? > NOW() AS future');
+        $stmt->bind_param('s', $ends[$this->userName]);
+        $stmt->execute();
+        self::assertSame(1, (int) $stmt->get_result()->fetch_assoc()['future'], 'the lock ends in the future, in database time');
+
+        self::assertSame(VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT, auth_clear_local_login_lock($this->db, $this->userName));
+        self::assertSame([], auth_local_login_lock_ends($this->db, [$this->userName]));
+        self::assertTrue(login($this->userName, $this->password, $this->db)['ok'] ?? false, 'the cleared address signs in again');
     }
 
     public function testChangingOwnPasswordIsAudited(): void

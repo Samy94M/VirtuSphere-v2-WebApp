@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/directory_constants.php';
+require_once __DIR__ . '/auth_rate_limit.php';
 require_once __DIR__ . '/auth_schema.php';
 require_once __DIR__ . '/password_policy.php';
 require_once __DIR__ . '/permissions.php';
@@ -264,15 +265,9 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
         ], (int) $actor['id']);
         flash_set('success', __t('users.flash_password_reset'));
     } else {
-        if (auth_user_source_schema_available($db)) {
-            $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
-            $stmt = $db->prepare('UPDATE deploy_users SET locked_until = NULL, updated_at = NOW() WHERE id = ? AND auth_source = ?');
-            $stmt->bind_param('is', $targetId, $source);
-        } else {
-            $stmt = $db->prepare('UPDATE deploy_users SET locked_until = NULL, updated_at = NOW() WHERE id = ?');
-            $stmt->bind_param('i', $targetId);
-        }
-        $stmt->execute();
+        // SEC3 (C-04c): the lock is the failure count per address, not a column;
+        // clearing it removes the counted failures from every address.
+        auth_clear_local_login_lock($db, (string) $localTarget['name']);
         audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
             'action' => 'cleared_login_lock',
         ], (int) $actor['id']);
@@ -291,10 +286,23 @@ function users_admin_rows(mysqli $db): array
     // csp-allow: interpolated-sql
     $stmt = $db->prepare(
         'SELECT id, name, ' . $directoryColumns . ', email, role, is_active, must_change_password,
-                locked_until, last_seen_at, created_at, updated_at
+                last_seen_at, created_at, updated_at
          FROM deploy_users ORDER BY id'
     );
     $stmt->execute();
+    $rows = repo_fetch_all($stmt->get_result());
+    // `locked_until` is when the last address-bound lock of a local account ends (C-04c).
+    $localNames = [];
+    foreach ($rows as $row) {
+        if ((string) $row['auth_source'] === VIRTUSPHERE_AUTH_SOURCE_LOCAL) {
+            $localNames[] = (string) $row['name'];
+        }
+    }
+    $lockEnds = auth_local_login_lock_ends($db, $localNames);
+    foreach ($rows as &$row) {
+        $row['locked_until'] = (string) $row['auth_source'] === VIRTUSPHERE_AUTH_SOURCE_LOCAL ? ($lockEnds[(string) $row['name']] ?? null) : null;
+    }
+    unset($row);
 
-    return repo_fetch_all($stmt->get_result());
+    return $rows;
 }

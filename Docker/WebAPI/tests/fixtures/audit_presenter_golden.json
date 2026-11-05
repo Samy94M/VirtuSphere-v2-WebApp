@@ -2,6 +2,7 @@
     "auth_access_denied_colon_permission": "access denied: settings:write required",
     "auth_access_denied_users_manage": "access denied: users.manage required",
     "auth_account_locked": "account locked for 15 minutes after 5 failed sign-ins",
+    "auth_account_locked_per_address": "account locked from this address for 15 minutes after 5 failed sign-ins",
     "auth_csrf_rejected_page": "csrf token rejected on missions.php",
     "auth_ip_rate_limited_ipv4": "ip rate limited for 15 minutes after 20 failed sign-ins",
     "auth_ip_rate_limited_ipv6": "ip rate limited for 5 minutes after 10 failed sign-ins",

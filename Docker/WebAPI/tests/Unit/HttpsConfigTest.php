@@ -169,7 +169,7 @@ final class HttpsConfigTest extends TestCase
         self::assertStringNotContainsString('/var/log/nginx/', $conf);
         self::assertStringNotContainsString('PRIVATE KEY', $conf);
         // The deny rules must mirror the HTTP block in Docker/nginx/default.conf.
-        self::assertStringContainsString('location ~ ^/(lib|vendor|var|logs|tests)/ { deny all; }', $conf);
+        self::assertStringContainsString('location ~ ^/(lib|vendor|var|logs|tests|lang)/ { deny all; }', $conf);
     }
 
     public function testHttpAndHttpsDenyRulesStayInSync(): void
@@ -183,7 +183,9 @@ final class HttpsConfigTest extends TestCase
             self::markTestSkipped('Docker/nginx/default.conf is not visible from this runtime');
         }
         $httpConf = (string) file_get_contents($path);
-        preg_match_all('/^\s*(location ~[^\n]*deny all;[^\n]*)$/m', $httpConf, $httpRules);
+        // SEC3 (C-09): the 404 rules for non-entry PHP files are part of the set.
+        preg_match_all('/^\s*(location ~[^\n]*(?:deny all|return 404);[^\n]*)$/m', $httpConf, $httpRules);
+        self::assertGreaterThanOrEqual(5, count($httpRules[1]), 'the rule extraction found too few rules to mean anything');
         $generated = https_render_nginx_conf();
         foreach ($httpRules[1] as $rule) {
             self::assertStringContainsString(trim($rule), $generated, 'deny rule missing from the generated HTTPS block: ' . trim($rule));
@@ -197,7 +199,7 @@ final class HttpsConfigTest extends TestCase
         foreach (['Docker/nginx/default.conf' => $httpConf, 'generated HTTPS block' => $generated] as $label => $conf) {
             $dot = strpos($conf, $dotRule);
             self::assertNotFalse($dot, $label . ' has no dot-file deny rule');
-            self::assertLessThan((int) strpos($conf, 'location ~ \.php$ {'), $dot, $label . ': dot rule after the PHP location');
+            self::assertLessThan((int) strpos($conf, 'location ~ ^/(portal/)?[^/]+\.php$ {'), $dot, $label . ': dot rule after the PHP location');
             self::assertStringContainsString('|.*\.(dist|lock))$ { deny all; }', $conf, $label . ': *.dist is not denied');
         }
     }

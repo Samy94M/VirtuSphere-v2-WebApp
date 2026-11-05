@@ -69,8 +69,13 @@ RUN mkdir -p /etc/nginx/ssl /etc/nginx/virtusphere-conf.d \
 
 WORKDIR /var/www/html
 
+# SEC3: refresh an existing generated HTTPS block, then exec php-fpm (PID 1
+# stays php-fpm). The workers set their own command and skip this.
+COPY start-fpm.sh /usr/local/bin/virtusphere-start-fpm
+RUN chmod 0755 /usr/local/bin/virtusphere-start-fpm
+
 EXPOSE 9000
-CMD ["php-fpm"]
+CMD ["virtusphere-start-fpm"]
 
 FROM runtime AS tooling
 

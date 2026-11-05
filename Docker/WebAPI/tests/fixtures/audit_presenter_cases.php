@@ -62,6 +62,7 @@ return [
 
     // auth.account_locked / auth.ip_rate_limited
     ['id' => 'auth_account_locked', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 15, 'failure_count' => 5]],
+    ['id' => 'auth_account_locked_per_address', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_ACCOUNT_LOCKED, 'object_type' => 'user', 'object_id' => '42', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 15, 'failure_count' => 5, 'per_address' => true]],
     ['id' => 'auth_ip_rate_limited_ipv4', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED, 'object_type' => 'client_ip', 'object_id' => '10.89.7.12', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 15, 'failure_count' => 20]],
     ['id' => 'auth_ip_rate_limited_ipv6', 'event' => VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED, 'object_type' => 'client_ip', 'object_id' => '2001:db8::1', 'result' => VIRTUSPHERE_AUDIT_RESULT_DENIED, 'context' => ['duration_minutes' => 5, 'failure_count' => 10]],
 

@@ -47,6 +47,7 @@ return [
     'login_user_unknown' => ' für eine Eingabe ohne passendes Konto (:length Zeichen)',
     'login_user_id' => ' für Benutzer-ID :id',
     'account_locked' => 'Konto für :duration Minuten gesperrt nach :failures fehlgeschlagenen Anmeldungen',
+    'account_locked_address' => 'Konto von dieser Adresse aus für :duration Minuten gesperrt nach :failures fehlgeschlagenen Anmeldungen',
     'ip_rate_limited' => 'IP-Adresse für :duration Minuten gedrosselt nach :failures fehlgeschlagenen Anmeldungen',
     'session_expired' => 'Sitzung nach :seconds Sekunden abgelaufen',
     'session_ended' => 'Sitzung beendet: :reason',

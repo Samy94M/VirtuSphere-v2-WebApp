@@ -107,7 +107,7 @@ function audit_context_field_registry(): array
         'item_count' => $int, 'report_version' => $int, 'suppressed_count' => $int,
         'created_count' => $int, 'retired_count' => $int,
         'throttle_seconds' => $int,
-        'enabled' => $bool, 'selection_cleared' => $bool, 'scheduled' => $bool,
+        'enabled' => $bool, 'selection_cleared' => $bool, 'scheduled' => $bool, 'per_address' => $bool,
         // Manual credential tests can finish after their configuration or test
         // generation changed. The bool distinguishes a current persisted result
         // from that deliberately discarded completion without admitting a free

@@ -18,6 +18,7 @@ declare(strict_types=1);
 
 // Why a sign-in was refused (auth.login).
 const VIRTUSPHERE_AUDIT_LOGIN_REASON_INVALID_CREDENTIALS = 'invalid credentials';
+// No writer since SEC3 (the account row is never locked); older rows still carry it.
 const VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_LOCKED = 'account is locked';
 const VIRTUSPHERE_AUDIT_LOGIN_REASON_ACCOUNT_DEACTIVATED = 'account is deactivated';
 

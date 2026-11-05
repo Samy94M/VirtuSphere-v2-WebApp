@@ -234,11 +234,13 @@ server {
     location = /robots.txt { access_log off; log_not_found off; }
 
     # Keep in sync with Docker/nginx/default.conf (the HTTP block).
-    location ~ ^/(lib|vendor|var|logs|tests)/ { deny all; }
+    location ~ ^/(lib|vendor|var|logs|tests|lang)/ { deny all; }
     location ~* /(composer\.(json|lock)|phpstan.*\.neon|.*\.(dist|lock))$ { deny all; }
     location ~ /\.(?!well-known/) { deny all; }
 
-    location ~ \.php$ {
+    # Only entry points reach PHP-FPM (SEC3, C-09), as in the HTTP block.
+    location ~ ^/(function|mysql)\.php$ { return 404; }
+    location ~ ^/(portal/)?[^/]+\.php$ {
         # Sign-in rate limit; zone and URI key live in default.conf (http context).
         limit_req zone=virtusphere_login burst=20 nodelay;
         limit_req_status 429;
@@ -256,6 +258,7 @@ server {
         fastcgi_buffer_size 16k;
         fastcgi_buffers 4 16k;
     }
+    location ~ \.php$ { return 404; }
 }
 CONF;
 }
@@ -286,6 +289,51 @@ function https_apply_state(mysqli $db, string $confDir = VIRTUSPHERE_HTTPS_CONF_
         @unlink($tmp);
         throw new RuntimeException('Failed to write the generated nginx config.');
     }
+}
+
+/**
+ * SEC3: the generated block lives on the host volume and survives an update, so
+ * HTTPS used to keep the previous release's rules until the next certificate
+ * upload. The PHP container calls this on every start, before FPM and therefore
+ * before nginx (which waits for a healthy PHP): an existing block that differs
+ * from this release's template is rewritten with the same owner and mode.
+ * Without a block nothing happens, deliberately: HTTPS is off, or the nginx boot
+ * quarantine renamed a broken block aside, and reviving that would point the
+ * portal's redirect at a listener that is not there. No database is involved;
+ * the block exists exactly while HTTPS is enabled (https_apply_state()).
+ *
+ * @return 'absent'|'current'|'refreshed'
+ */
+function https_refresh_generated_conf(string $confDir = VIRTUSPHERE_HTTPS_CONF_DIR): string
+{
+    $target = $confDir . '/virtusphere-https.conf';
+    if (!is_file($target)) {
+        return 'absent';
+    }
+    $rendered = https_render_nginx_conf();
+    if (file_get_contents($target) === $rendered) {
+        return 'current';
+    }
+    $owner = fileowner($target);
+    $group = filegroup($target);
+    $mode = fileperms($target) & 0777;
+    $tmp = $target . '.tmp';
+    if (file_put_contents($tmp, $rendered) === false || !chmod($tmp, $mode)) {
+        @unlink($tmp);
+        throw new RuntimeException('Failed to write the refreshed nginx config.');
+    }
+    // The FPM master starts as root; keep the file with its owner (the pool user
+    // that wrote it), so the next upload from the portal can replace it again.
+    if (function_exists('posix_geteuid') && posix_geteuid() === 0 && $owner !== false && $group !== false) {
+        chown($tmp, $owner);
+        chgrp($tmp, $group);
+    }
+    if (!rename($tmp, $target)) {
+        @unlink($tmp);
+        throw new RuntimeException('Failed to replace the generated nginx config.');
+    }
+
+    return 'refreshed';
 }
 
 /**

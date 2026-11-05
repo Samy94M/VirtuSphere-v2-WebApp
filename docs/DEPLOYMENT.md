@@ -367,7 +367,7 @@ The backend-only follow-up extends the same validation style to repo/service lay
 
 Deploy queue creation now blocks invalid work before the CLI worker sees it: missing user, template mission, missing datacenter/datastore, empty mission VM list, wrong credential type or incomplete credential data all return clear repository errors.
 
-Portal login keeps the existing per-user lockout and adds an IP-wide 15-minute throttle for repeated failed attempts across usernames. The throttle is backed by `deploy_login_attempts` and the `login_attempt_ip_lookup` index.
+Portal login locks a local name only for the address that failed (SEC3, C-04c; a directory name keeps one budget across addresses) and adds an IP-wide 15-minute throttle for repeated failed attempts across usernames. The counter stores a keyed hash of the name, never the typed name. The throttle is backed by `deploy_login_attempts` and the `login_attempt_ip_lookup` index.
 
 ## Retired unsafe bootstrap endpoints
 

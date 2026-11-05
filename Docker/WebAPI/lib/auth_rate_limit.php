@@ -6,6 +6,7 @@ require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/auth_schema.php';
+require_once __DIR__ . '/envboot.php';
 
 const VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT = 5;
 const VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT = 25;
@@ -19,12 +20,36 @@ function auth_client_ip(): string
     return (string) ($_SERVER['REMOTE_ADDR'] ?? 'cli');
 }
 
-/** @return list<string> */
-function auth_login_lock_names(string $username, string $source, string $ip): array
+/**
+ * SEC3: the counter never stores what was typed into the name field; a password
+ * typed there would otherwise stay in deploy_login_attempts for the retention
+ * window. Every row carries this keyed hash instead, known account or not, so
+ * the budget never depends on whether the name exists. A database dump alone
+ * cannot test guesses against it; that needs APP_KEY as well.
+ */
+function auth_login_name_key(string $username, string $source): string
 {
+    return hash_hmac('sha256', 'virtusphere.login-name.v1' . "\0" . $source . "\0" . mb_strtolower($username, 'UTF-8'), envboot_app_key_bytes());
+}
+
+/**
+ * C-04c: a local account is only locked for the address that failed, so an
+ * anonymous caller cannot lock someone else out. A directory account keeps one
+ * budget across addresses: the domain controller locks it domain-wide, and the
+ * portal must not multiply bad binds by the number of hosts a guesser uses.
+ */
+function auth_login_budget_is_per_address(string $source): bool
+{
+    return $source === VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+}
+
+/** @return list<string> */
+function auth_login_lock_names(string $nameKey, string $source, string $ip): array
+{
+    $budget = $nameKey . (auth_login_budget_is_per_address($source) ? ':' . $ip : '');
     $names = [
         'vs_login_' . substr(hash('sha256', 'ip:' . $ip), 0, 48),
-        'vs_login_' . substr(hash('sha256', 'user:' . $source . ':' . mb_strtolower($username, 'UTF-8')), 0, 48),
+        'vs_login_' . substr(hash('sha256', 'user:' . $source . ':' . $budget), 0, 48),
     ];
     sort($names, SORT_STRING);
 
@@ -80,7 +105,8 @@ function auth_reserve_login_attempt(mysqli $db, string $username, string $source
     }
 
     $ip = auth_client_ip();
-    $locks = auth_login_lock_names($username, $source, $ip);
+    $nameKey = auth_login_name_key($username, $source);
+    $locks = auth_login_lock_names($nameKey, $source, $ip);
     auth_acquire_login_locks($db, $locks);
     try {
         if (auth_failed_ip_attempt_count($db) >= VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT) {
@@ -93,7 +119,7 @@ function auth_reserve_login_attempt(mysqli $db, string $username, string $source
         $pending = VIRTUSPHERE_LOGIN_RESULT_PENDING;
         $failed = 0;
         $stmt = $db->prepare('INSERT INTO deploy_login_attempts (username, auth_source, ip_address, success, result) VALUES (?, ?, ?, ?, ?)');
-        $stmt->bind_param('sssis', $username, $source, $ip, $failed, $pending);
+        $stmt->bind_param('sssis', $nameKey, $source, $ip, $failed, $pending);
         $stmt->execute();
 
         return ['ok' => true, 'id' => (int) $db->insert_id, 'reason' => ''];
@@ -122,12 +148,13 @@ function auth_record_login_attempt(mysqli $db, string $username, bool $success, 
 {
     $ip = auth_client_ip();
     $successInt = $success ? 1 : 0;
+    $nameKey = auth_login_name_key($username, $source);
     if (auth_attempt_source_schema_available($db)) {
         $stmt = $db->prepare('INSERT INTO deploy_login_attempts (username, auth_source, ip_address, success) VALUES (?, ?, ?, ?)');
-        $stmt->bind_param('sssi', $username, $source, $ip, $successInt);
+        $stmt->bind_param('sssi', $nameKey, $source, $ip, $successInt);
     } else {
         $stmt = $db->prepare('INSERT INTO deploy_login_attempts (username, ip_address, success) VALUES (?, ?, ?)');
-        $stmt->bind_param('ssi', $username, $ip, $successInt);
+        $stmt->bind_param('ssi', $nameKey, $ip, $successInt);
     }
     $stmt->execute();
 }
@@ -135,17 +162,22 @@ function auth_record_login_attempt(mysqli $db, string $username, bool $success, 
 function auth_failed_attempt_count(mysqli $db, string $username, string $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL): int
 {
     $window = VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES;
+    $nameKey = auth_login_name_key($username, $source);
+    $ip = auth_client_ip();
     if (auth_attempt_source_schema_available($db) && auth_attempt_result_schema_available($db)) {
-        $stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE username = ? AND auth_source = ? AND result IN ('pending','credential_failure') AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)");
-        $stmt->bind_param('ssi', $username, $source, $window);
+        if (auth_login_budget_is_per_address($source)) {
+            $stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE username = ? AND auth_source = ? AND ip_address = ? AND result IN ('pending','credential_failure') AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)");
+            $stmt->bind_param('sssi', $nameKey, $source, $ip, $window);
+        } else {
+            $stmt = $db->prepare("SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE username = ? AND auth_source = ? AND result IN ('pending','credential_failure') AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)");
+            $stmt->bind_param('ssi', $nameKey, $source, $window);
+        }
     } elseif (auth_attempt_source_schema_available($db)) {
-        $ip = auth_client_ip();
         $stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE username = ? AND auth_source = ? AND ip_address = ? AND success = 0 AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)');
-        $stmt->bind_param('sssi', $username, $source, $ip, $window);
+        $stmt->bind_param('sssi', $nameKey, $source, $ip, $window);
     } else {
-        $ip = auth_client_ip();
         $stmt = $db->prepare('SELECT COUNT(*) AS c FROM deploy_login_attempts WHERE username = ? AND ip_address = ? AND success = 0 AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)');
-        $stmt->bind_param('ssi', $username, $ip, $window);
+        $stmt->bind_param('ssi', $nameKey, $ip, $window);
     }
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
@@ -192,6 +224,7 @@ function auth_finish_failed_login(mysqli $db, int $attemptId, string $username, 
         $stmt->execute();
         $attempt = $stmt->get_result()->fetch_assoc();
         if (is_array($attempt)) {
+            // `username` holds the name key (SEC3), so the locks match the reservation's.
             $locks = auth_login_lock_names((string) $attempt['username'], (string) $attempt['auth_source'], (string) $attempt['ip_address']);
             auth_acquire_login_locks($db, $locks);
             try {
@@ -222,4 +255,65 @@ function auth_finish_failed_login(mysqli $db, int $attemptId, string $username, 
 function auth_finish_infrastructure_login(mysqli $db, int $attemptId): void
 {
     auth_finish_login_attempt($db, $attemptId, VIRTUSPHERE_LOGIN_RESULT_INFRASTRUCTURE);
+}
+
+/**
+ * When the lock of each local account ends, for accounts locked from at least
+ * one address (C-04c). A lock ends once fewer than the limit of its failures are
+ * left in the window, so the end is the moment the oldest failure that still
+ * counts towards the limit leaves it.
+ *
+ * @param list<string> $names local account names
+ * @return array<string,string> account name => lock end (database time)
+ */
+function auth_local_login_lock_ends(mysqli $db, array $names): array
+{
+    if ($names === [] || !auth_attempt_source_schema_available($db) || !auth_attempt_result_schema_available($db)) {
+        return [];
+    }
+    $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+    $nameByKey = [];
+    foreach ($names as $name) {
+        $nameByKey[auth_login_name_key($name, $source)] = $name;
+    }
+    $keys = array_keys($nameByKey);
+    $window = VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES;
+    // csp-allow: interpolated-sql
+    $stmt = $db->prepare(
+        "SELECT username, ip_address, DATE_ADD(attempted_at, INTERVAL ? MINUTE) AS frees_at FROM deploy_login_attempts
+         WHERE auth_source = ? AND result IN ('pending','credential_failure') AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)
+           AND username IN (" . implode(',', array_fill(0, count($keys), '?')) . ')
+         ORDER BY attempted_at DESC, id DESC'
+    );
+    $stmt->bind_param('isi' . str_repeat('s', count($keys)), $window, $source, $window, ...$keys);
+    $stmt->execute();
+    $seen = [];
+    $ends = [];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $key = (string) $row['username'];
+        $budget = $key . "\0" . (string) $row['ip_address'];
+        $seen[$budget] = ($seen[$budget] ?? 0) + 1;
+        if ($seen[$budget] === VIRTUSPHERE_LOGIN_USER_FAILURE_LIMIT) {
+            $name = $nameByKey[$key];
+            $ends[$name] = max($ends[$name] ?? '', (string) $row['frees_at']);
+        }
+    }
+
+    return $ends;
+}
+
+/** Removes the counted failures of a local account from every address; the admin "clear lock" action. */
+function auth_clear_local_login_lock(mysqli $db, string $name): int
+{
+    if (!auth_attempt_source_schema_available($db) || !auth_attempt_result_schema_available($db)) {
+        return 0;
+    }
+    $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+    $nameKey = auth_login_name_key($name, $source);
+    $failure = VIRTUSPHERE_LOGIN_RESULT_CREDENTIAL_FAILURE;
+    $stmt = $db->prepare('DELETE FROM deploy_login_attempts WHERE username = ? AND auth_source = ? AND result = ?');
+    $stmt->bind_param('sss', $nameKey, $source, $failure);
+    $stmt->execute();
+
+    return $stmt->affected_rows;
 }

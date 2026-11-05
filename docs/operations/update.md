@@ -477,7 +477,6 @@ Systemstatus, auf der Seite Zugangsdaten und in Schritt 0. Wiederkehrende Beispi
 | „Einträge ohne Rolle“ bei den IP-Freigaben | jedem Eintrag seine Rolle geben ([Go-Live](go-live.md), Schritt 4.4) |
 | „Backups unverschlüsselt“ | optional ein Zertifikat hinterlegen ([Backup](backup.md), „Verschlüsselung“) |
 | Ansible-Zugangstest meldet fehlenden Aufräum-Timer | Timer installieren wie in Schritt 4 |
-| HTTPS ist eingeschaltet und das Release ändert `Docker/nginx/default.conf` | die HTTPS-Konfiguration einmal neu erzeugen: unter Einstellungen, Reiter HTTPS, das aktuelle Zertifikat erneut hochladen. Die Datei in `Docker/nginx/conf.d` entsteht nur beim Hochladen oder Einschalten; bis dahin gelten für HTTPS die Grenzen und Sperrregeln des alten Stands, für HTTP schon die neuen. Prüfen: `grep client_max_body_size Docker/nginx/conf.d/virtusphere-https.conf` zeigt denselben Wert wie `Docker/nginx/default.conf` |
 
 ## Wenn etwas schiefgeht
 
