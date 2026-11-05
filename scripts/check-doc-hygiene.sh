@@ -3,7 +3,9 @@
 #
 # Prueft die immer-geladenen Agenten-Dokus auf:
 #   1. Changelog-Marker (datierte Ueberschriften, "Nachtrag"/"Fortschritt") -> Fehler.
-#      Historie gehoert ausschliesslich nach docs/CHANGELOG.md.
+#      Historie gehoert ausschliesslich in den CHANGELOG (neue Eintraege als
+#      Fragment unter docs/changelog.d/) und ins Register (docs/register/);
+#      beides prueft scripts/check-doc-fragments.sh.
 #   2. Zeilen- und UTF-8-Bytebudget -> Fehler. Lange Einzelzeilen duerfen
 #      das Kontextbudget nicht umgehen. Bytes sind kein exakter Tokenzaehler.
 #
@@ -62,7 +64,7 @@ for file in AGENTS.md GROK.md CLAUDE.md README.md; do
 
   # 1. Changelog-Marker
   if grep -nE '^#{1,3} .*20[0-9]{2}-[0-9]{2}-[0-9]{2}|^\*\*(Nachtrag|Vorher|Aktueller Stand)|Fortschritt 20[0-9]{2}-' "$file" >&2; then
-    echo "FEHLER: [doc-hygiene.changelog-marker] $file enthaelt Changelog-Marker — Historie gehoert nach docs/CHANGELOG.md." >&2
+    echo "FEHLER: [doc-hygiene.changelog-marker] $file enthaelt Changelog-Marker — Historie gehoert als Fragment nach docs/changelog.d/ bzw. docs/register/." >&2
     errors=$((errors + 1))
   fi
 

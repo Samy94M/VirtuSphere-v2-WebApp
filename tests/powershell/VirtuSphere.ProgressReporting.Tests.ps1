@@ -16,6 +16,8 @@ BeforeAll {
     $script:ExportInfoTasks = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Ansible') 'export_vm_info.yml') -Raw
     $script:GuardRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1') -Raw
     $script:DocHygiene = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check-doc-hygiene.sh') -Raw
+    $script:DocFragments = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check-doc-fragments.sh') -Raw
+    $script:ChangelogMerge = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'merge-changelog-fragments.sh') -Raw
     $script:PowerShellRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'run-pester.ps1') -Raw
     $script:VisualRunner = Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $script:RepoRoot 'tests') 'e2e/visual') 'harness.js') -Raw
     $script:CollectionLock = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Docker/qa-ansible') 'verify-collection-lock.py') -Raw
@@ -288,6 +290,23 @@ Describe 'Visible progress reporting contract' {
         $script:DocHygiene | Should -Match '\[\$file_index/4\] fail doc-hygiene \$file'
         $script:DocHygiene | Should -Match '\[ "\$quiet" -eq 1 \] \|\| echo'
         $script:DocHygiene | Should -Match 'if \[ "\$quiet" -eq 0 \]; then'
+    }
+
+    # B1: the fragment guard reports its four units like doc-hygiene; the
+    # release-commit merge announces [0/N] and reports each fragment.
+    It 'reports each fragment-guard unit and each merged changelog fragment' {
+        $script:DocFragments | Should -Match 'unit_total=4'
+        $script:DocFragments | Should -Match '\[\$unit_index/\$unit_total\] RUN doc-fragments \$1'
+        $script:DocFragments | Should -Match '\[\$unit_index/\$unit_total\] \$result doc-fragments \$1'
+        foreach ($unit in @('changelog-head', 'changelog-since-release', 'register-archive', 'fragments')) {
+            $script:DocFragments | Should -Match ('unit_start ' + $unit)
+            $script:DocFragments | Should -Match ('unit_end ' + $unit)
+        }
+        $script:DocFragments | Should -Match '\[ "\$quiet" -eq 1 \] \|\| echo'
+        $script:ChangelogMerge | Should -Match 'echo "\[0/\$total\] merge-changelog'
+        $script:ChangelogMerge | Should -Match 'echo "\[\$index/\$total\] RUN merge-changelog \$name"'
+        $script:ChangelogMerge | Should -Match 'echo "\[\$index/\$total\] pass merge-changelog \$name"'
+        $script:ChangelogMerge | Should -Match 'echo "\[\$index/\$total\] fail merge-changelog \$name"'
     }
 
     It 'counts the complete unmutated module fixture as an observable guard case' {

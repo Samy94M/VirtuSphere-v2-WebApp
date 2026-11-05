@@ -1,8 +1,6 @@
 # Changelog
 
-Ab dem ersten Release gliedert sich dieses Changelog nach Release-Nummern (`JJJJ.MM.N`, zu sehen unter Einstellungen > Version). „Noch in keinem Release“ sammelt, was auf `main` liegt, aber noch nicht ausgeliefert ist; der Release-Commit macht aus dieser Überschrift `## JJJJ.MM.N (TT.MM.JJJJ)` und setzt eine neue darüber.
-
-## Noch in keinem Release
+Ab dem ersten Release gliedert sich dieses Changelog nach Release-Nummern (`JJJJ.MM.N`, zu sehen unter Einstellungen > Version). Was auf `main` liegt, aber noch in keinem Release ist, steht als eigene Datei je Paket unter [`changelog.d/`](changelog.d/README.md). Der Release-Commit führt diese Dateien mit `scripts/merge-changelog-fragments.sh` unter der neuen Überschrift `## JJJJ.MM.N (TT.MM.JJJJ)` zusammen und löscht sie; zwischen zwei Releases ändert sich diese Datei nicht (Gate `doc-fragments`).
 
 ## 2026.11.5 (05.11.2026)
 

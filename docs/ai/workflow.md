@@ -6,7 +6,7 @@ This procedure consumes the current user task and accepted plan. It does not sta
 
 - Read the root entry and only the routed contract/plan sections. Cross-area edits load all affected contracts, including callers outside the edited directory. Read the architecture/ADR index when locating an owner or deciding a contract.
 - Locate with `rg --files`; search owner names/headings with `rg -n`. On PowerShell pass a real directory plus `-g '*.php'`, not an unexpanded wildcard filename. Batch independent reads with bounded output. Narrow a truncated query instead of reprinting the entire group.
-- Use the existing task plan/register for requirement IDs, decisions, evidence and next step. Full logs and transient manifests belong in `qa-artifacts/`. Do not create competing plans or a second gate registry.
+- Use the existing task plan and the package's register file under `docs/register/` for requirement IDs, decisions, evidence and next step. Full logs and transient manifests belong in `qa-artifacts/`. Do not create competing plans or a second gate registry.
 - Tool adapters reference the same detailed contracts. Markdown links do not guarantee automatic loading. Claude `paths` rules and Codex's instruction chain differ; the explicit root routing duty remains. Verify loading in a fresh task before claiming live-client behavior changed.
 
 ## Implement and verify
@@ -41,7 +41,9 @@ Delegate output: scoped verdict, actionable findings with locations/evidence, va
 
 ## Finish and resume
 
-After each package update the existing register: requirement IDs, implementation, source manifest, applicable checks/artifacts, external gaps and next step. At interruption also record running processes/agents and the QA owner. Resume there without repeating the source tour or erasing prior failures.
+After each package update its register entry: requirement IDs, implementation, source manifest, applicable checks/artifacts, external gaps and next step. At interruption also record running processes/agents and the QA owner.
+
+Each package writes its own files so that no two packages touch the same one (B1). The register entry goes to `docs/register/JJJJ-MM-TT-<PAKET>.md` (start date, package ID, first line `# <PAKET> ...`); `docs/audits/2026-09-12-consolidated-session-backlog.md` is a read-only archive. CHANGELOG entries go to `docs/changelog.d/<PAKET>.md` as `- **Titel (PAKET, TT.MM.JJJJ).** Text` lines; `docs/CHANGELOG.md` changes only in a release commit. That commit raises both `VERSION` copies, runs `sh scripts/merge-changelog-fragments.sh --dry-run`, then `sh scripts/merge-changelog-fragments.sh --intro <update-paragraph-file>`, and stages `docs/CHANGELOG.md` and `docs/changelog.d`. The gate `doc-fragments` derives from Git what is new and rejects entries in the old places. Both folders' `README.md` describe the format. Resume there without repeating the source tour or erasing prior failures.
 
 Complete required joint end-state checks, help/documentation and actual operator flows. Separate implemented, locally checked, published, installed and externally verified. Necessary new gaps belong to their package; unselected features stay outside scope. Ask for missing lab details early; prepare concrete publication/production actions before requesting missing authority.
 

@@ -206,6 +206,16 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'Betriebsdoku ohne veraltbare Staende' 'Doku behauptet einen veralteten Stand'
     }
 
+    # B1: CHANGELOG und Register nur als Fragmente je Paket. Der Waechter leitet
+    # aus Git ab, was seit dem letzten Release-Commit und seit dem Archiv-Commit
+    # neu ist; ohne Git oder mit flachem Klon meldet er [doc-fragments.no-git].
+    Add-Gate -Name 'doc-fragments' -Lanes $allLanes -Kind 'native' -Body {
+        $r = Invoke-CheckShell 'check-doc-fragments.sh' @('--ci')
+        if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }
+        if ((@($r.Output) -join ' ') -match '\[doc-fragments\.no-git\]') { return New-InfraResult 'Fragment-Waechter ohne Git-Historie' $r.Output }
+        Format-ToolResult $r 'CHANGELOG und Register nur als Fragmente' 'neuer Eintrag am alten Ort oder kaputtes Fragment'
+    }
+
     Add-Gate -Name 'csp-patterns' -Lanes $allLanes -Kind 'native' -Body {
         $r = Invoke-CheckShell 'lint-csp-patterns.sh' @('--worktree')
         if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }

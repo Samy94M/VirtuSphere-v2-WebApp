@@ -26,7 +26,9 @@
 #      kommt im Go-Live-Runbook namentlich vor (APP_BIND_IP fehlte dort).
 #
 # Bewusst NICHT geprueft (datierte Dokumente, die einen Stand beschreiben
-# sollen): docs/audits/, docs/CHANGELOG.md, docs/adr/. Nicht maschinell
+# sollen): docs/audits/, docs/CHANGELOG.md, docs/adr/ und seit B1 die Fragmente
+# docs/changelog.d/ und docs/register/, die Teile von CHANGELOG und Register
+# sind. Die Fragmente prueft scripts/check-doc-fragments.sh. Nicht maschinell
 # pruefbar und daher Review-Sache bleiben: widerspruchsfreie Exitkriterien
 # und die CI-Lane-Beschreibung gegen ci.yml.
 #

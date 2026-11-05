@@ -1,5 +1,8 @@
 # Gemeinsamer konsolidierter Abarbeitungsplan
 
+<!-- register-archive -->
+> **Archiv seit 05.11.2026 (Paket B1).** Neue Registereinträge stehen als eigene Datei je Paket unter [`docs/register/`](../register/README.md). Diese Datei bekommt keine Einträge mehr dazu (Gate `doc-fragments`); sie bleibt unverändert lesbar, und Links auf ihre Abschnitte bleiben gültig.
+
 Stand: 14.09.2026, fortgeschrieben nach Powercycle-Umsetzung und vollständiger Fast-Bestandsaufnahme. Der aktuelle Auftrag integriert deren Ergebnis in Ziel, Etappen und Restumfang; er startet keine weitere Produktimplementierung, Container-Neuerstellung, Veröffentlichung oder Standortinstallation. Statusangaben beruhen auf den verlinkten Nachweisen und sind keine neue Laufzeitabnahme. Der Nutzer verlangt für alle Abläufe denselben strengen Qualitätsmaßstab; Prioritäten bestimmen die Reihenfolge. Aktuell arbeitet ein Admin allein. Die elf ausgewählten Funktionen und der Powercycle-Strang bleiben vollständig im Umfang.
 
 ## Quellen und Umfang

@@ -37,7 +37,7 @@ Das Portal ist server-gerendert (PHP, kein JS-Build, kein CDN) und zweisprachig:
 
 - Der frühere Desktop-Client und seine Token-API sind physisch entfernt (E3 angenommen, ADR-0035); die entfernten Pfade antworten per Wire-Contract mit 404. Die Maschinen-API (`mecm-*`, `db_importMAC.php`) bleibt wire-kompatibel.
 - Offen: rein visuelles Frontend-Design-Handoff und ein frischer Clean-Checkout-Setup-Probelauf als Release-Nachweis.
-- Abgeschlossene Arbeitsstände werden ausschließlich in `docs/CHANGELOG.md` geführt, nicht hier.
+- Abgeschlossene Arbeitsstände werden ausschließlich im Changelog geführt (bis zum Release als Datei je Paket unter `docs/changelog.d/`, danach in `docs/CHANGELOG.md`), nicht hier.
 
 ## Lizenz
 

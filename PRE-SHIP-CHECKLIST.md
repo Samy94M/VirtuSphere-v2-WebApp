@@ -24,7 +24,7 @@ Vor jedem Release-/Meilenstein-Abschluss durchgehen. Diese Datei bleibt eine **l
   - [ ] Device-Sync gegen echte MECM-Cmdlets: ein Gerät ohne ResourceID und ein MAC-Konflikt beenden den Lauf als `warning`, und die gemeldeten Ursachen nennen das betroffene Gerät.
   - [ ] Datastore-Health gegen den produktiven Host belegt: nach dem ersten echten Inventar-Abruf im Job-Log die Zeile `Datastore health:` lesen (steht neben `Inventory queries:`, auch im Gutfall) und prüfen, dass Erreichbarkeit und Wartungsmodus für **alle** Datastores ankamen, nicht nur für einen Teil. `accessible`/`maintenanceMode` sind gegen die Moduldoku gebaut; offline lässt sich nur die Argumentliste prüfen, nicht die Form der Antwort (ADR-0023). Ein Feldpfad, der nicht mehr trifft, sieht ohne diese Zeile aus wie eine Flotte ohne Wartung. Bedeutung der Zeile: `docs/operations/esxi-inventory.md`.
 - [ ] Keine Secrets/Logs/Build-Artefakte neu getrackt: `git status --short` und `git ls-files | grep -iE '\.(env|pfx|pem|key|log)$'` leer.
-- [ ] `docs/CHANGELOG.md` für den Meilenstein aktualisiert.
+- [ ] CHANGELOG-Fragmente aus `docs/changelog.d/` mit `scripts/merge-changelog-fragments.sh` unter die Release-Überschrift geführt.
 - [ ] Go-live-Schritte aus `docs/operations/go-live.md` geplant (IP-Allowlist für MECM- und Ansible-Host, `SEED_ADMIN_*`-Werte nach dem ersten Login aus der `.env` entfernen sofern dieser Seed-Weg genutzt wurde, DB-Konto-Rotation).
 
 ## Rollout-gebundene Punkte

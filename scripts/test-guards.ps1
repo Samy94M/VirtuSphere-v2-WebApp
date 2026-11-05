@@ -167,6 +167,41 @@ function Add-FixtureFile {
     [System.IO.File]::WriteAllText($file, $Content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+# doc-fragments leitet aus Git ab, was neu ist. Die Fixture ist deshalb ein
+# Git-Repo, dessen erster Commit die echten Quellen enthaelt (VERSION macht ihn
+# zum Release-Commit, die Archivzeile im Register zum Archiv-Commit); die
+# Mutation folgt als zweiter Commit. Ohne git: $null, der Fall wird infra.
+function New-DocFragmentRepo {
+    param([switch]$WithoutArchiveMarker)
+    if (-not (Test-Command 'git')) { return $null }
+    $fx = New-Fixture $docFragmentFixtureFiles
+    if ($WithoutArchiveMarker) {
+        Edit-Fixture $fx $docFragmentArchive "<!-- register-archive -->`n" ''
+    }
+    # Der Release-Commit enthaelt nur die README der Fragmentordner; die echten
+    # Fragmente folgen in einem eigenen Commit. Sonst waeren sie aus Sicht des
+    # Waechters liegengebliebene Fragmente eines Release-Commits (stale-fragment).
+    foreach ($gitArguments in @(
+        @('init', '-q', '.'), @('config', 'user.email', 'guard@example.test'), @('config', 'user.name', 'guard'),
+        @('config', 'core.autocrlf', 'false'), @('config', 'commit.gpgsign', 'false'),
+        @('add', '-A'), @('reset', '-q', '--', 'docs/changelog.d'), @('add', 'docs/changelog.d/README.md'),
+        @('commit', '-qm', 'release'),
+        @('add', '-A'), @('commit', '-q', '--allow-empty', '-m', 'fragments')
+    )) {
+        $r = Invoke-Tool 'git' (@('-C', $fx) + $gitArguments)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitArguments -join ' ') + ' in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+    return $fx
+}
+
+function Save-DocFragmentCommit {
+    param([string]$FixtureRoot)
+    foreach ($gitArguments in @(@('add', '-A'), @('commit', '-qm', 'mutation'))) {
+        $r = Invoke-Tool 'git' (@('-C', $FixtureRoot) + $gitArguments)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitArguments -join ' ') + ' in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+}
+
 # --- Bewertung ------------------------------------------------------------------
 function Assert-Guard {
     param($Result, [int[]]$ExpectExit, [string]$ExpectPattern = '', [switch]$InfraOnExit2)
@@ -213,6 +248,13 @@ $phpVerFixtureFiles = @(
     'Docker/WebAPI/lib/constants.php', 'CLAUDE.md', 'AGENTS.md'
 )
 $docFixtureFiles = @('AGENTS.md', 'GROK.md', 'CLAUDE.md', 'README.md')
+# doc-fragments: das Archiv ist die Datei mit der Archivzeile; die Fixture braucht
+# sie, den CHANGELOG, VERSION und beide Fragmentordner samt README.
+$docFragmentArchive = 'docs/audits/2026-09-12-consolidated-session-backlog.md'
+$docFragmentFixtureFiles = @(
+    'Docker/WebAPI/lib/VERSION', 'docs/CHANGELOG.md', $docFragmentArchive,
+    'docs/changelog.d', 'docs/register'
+)
 # doc-semantics liest den vollen Doku-Scope plus seine SSoT-Quellen; eine
 # unvollstaendige Fixture wuerde ueber missing-file rot und die Mutation
 # waere nicht mehr der bewiesene Grund.
@@ -506,6 +548,67 @@ $cases = @(
         $fx = New-Fixture $docSemFixtureFiles
         Edit-Fixture $fx 'docs/DEPLOYMENT.md' '| vCenter (`api_type = VirtualCenter`) | deploy **no**, partial read-only inventory |' '| Management endpoint | deploy **no**, partial read-only inventory |'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.vcenter-deploy-boundary\]'
+    } }
+
+    @{ Name = 'doc-fragments.green'; Body = {
+        $r = Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci')
+        if ($r -and (@($r.Output) -join ' ') -match '\[doc-fragments\.no-git\]') { return @{ Status = 'infra'; Detail = 'Repo ohne volle Git-Historie' } }
+        Assert-Guard $r @(0)
+    } }
+    @{ Name = 'doc-fragments.fixture-control'; Body = {
+        $fx = New-DocFragmentRepo
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(0)
+    } }
+    # Ein Eintrag direkt unter der obersten Release-Ueberschrift, committet: das
+    # alte Verfahren mit der Ueberschrift des letzten Releases statt "Noch in
+    # keinem Release". Der Anker ist die erste "## "-Zeile, kein Releasename.
+    @{ Name = 'doc-fragments.new-entry'; Body = {
+        $fx = New-DocFragmentRepo
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        $file = Join-Path $fx 'docs/CHANGELOG.md'
+        $text = [System.IO.File]::ReadAllText($file)
+        $heading = $text.IndexOf("`n## ")
+        if ($heading -lt 0) { throw 'Mutationsanker nicht gefunden in docs/CHANGELOG.md: erste Ueberschrift' }
+        $lineEnd = $text.IndexOf("`n", $heading + 1)
+        $text = $text.Insert($lineEnd + 1, "`n- **Guard probe (X1).** Old place.`n")
+        [System.IO.File]::WriteAllText($file, $text, (New-Object System.Text.UTF8Encoding($false)))
+        Save-DocFragmentCommit $fx
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.new-entry\]'
+    } }
+    @{ Name = 'doc-fragments.unreleased-section'; Body = {
+        $fx = New-DocFragmentRepo
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        $file = Join-Path $fx 'docs/CHANGELOG.md'
+        $text = [System.IO.File]::ReadAllText($file)
+        $heading = $text.IndexOf("`n## ")
+        if ($heading -lt 0) { throw 'Mutationsanker nicht gefunden in docs/CHANGELOG.md: erste Ueberschrift' }
+        $text = $text.Insert($heading + 1, "## Noch in keinem Release`n`n")
+        [System.IO.File]::WriteAllText($file, $text, (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.unreleased-section\]'
+    } }
+    @{ Name = 'doc-fragments.archive-entry'; Body = {
+        $fx = New-DocFragmentRepo
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        $file = Join-Path $fx $docFragmentArchive
+        [System.IO.File]::AppendAllText($file, "`n### Welle X1 (guard probe)`n", (New-Object System.Text.UTF8Encoding($false)))
+        Save-DocFragmentCommit $fx
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.archive-entry\]'
+    } }
+    @{ Name = 'doc-fragments.fragment-format'; Body = {
+        $fx = New-DocFragmentRepo
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        Add-FixtureFile $fx 'docs/changelog.d/x1.md' "Free paragraph.`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.fragment-format\]'
+    } }
+    @{ Name = 'doc-fragments.zero-match'; Body = {
+        $fx = New-DocFragmentRepo -WithoutArchiveMarker
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.no-archive\]'
+    } }
+    @{ Name = 'doc-fragments.no-git'; Body = {
+        $fx = New-Fixture $docFragmentFixtureFiles
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(2) '\[doc-fragments\.no-git\]'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {
