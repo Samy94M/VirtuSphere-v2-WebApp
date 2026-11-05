@@ -9,6 +9,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit(__t('portal.invalid_request'));
 }
 
+// logout() destroys the session, and an empty one is no longer resumed (SEC2,
+// C-02). Open it here so the stale-token branch below has one to end; a sign-out
+// therefore never leaves a file behind either way.
+virtusphere_create_session();
+
 // Only the countdown form carries a target; the sign-in returns there (QL-04 A).
 $signIn = login_return_login_url(request_string($_POST, VIRTUSPHERE_LOGIN_RETURN_FIELD)); // validates the target
 

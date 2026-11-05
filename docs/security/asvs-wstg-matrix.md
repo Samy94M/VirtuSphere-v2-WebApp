@@ -26,12 +26,13 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 
 | Zusage | Status | Beweis |
 |---|---|---|
-| Session-ID-Rotation beim Login (Fixation) | automatisiert | `session.use_strict_mode` + `session_regenerate_id` gepinnt durch `SessionHardeningContractTest`; Browser-Beweis der Rotation E2E `session-security.spec.js` |
+| Session-ID-Rotation beim Login (Fixation) | automatisiert | `session.use_strict_mode` + `session_regenerate_id` gepinnt durch `SessionHardeningContractTest`; Browser-Beweis der Rotation E2E `session-security.spec.js` (gepflanzte ID wird beim Login ersetzt) |
+| Keine Sessiondatei für anonyme Anfragen (Speicherflut, SEC2 C-02) | automatisiert + gemessen | Bootstrap setzt nur fort, legt nie an; leere Sitzung wird sofort verworfen; Anmeldeformular mit signiertem Double-Submit-Token statt Sessiontoken (`lib/login_csrf.php`, `LoginCsrfTest`, `SessionHardeningContractTest::testAnonymousRequestsOpenNoSession`, E2E `session-security.spec.js`); gemessen 04.11.2026: 20 Formulare, 20 erfundene Cookies, 3 Fehlversuche je 0 Dateien, Anmeldung 1, Abmeldung 0 |
 | Cookie-Flags HttpOnly/SameSite=Strict/use_only_cookies/kein trans_sid | automatisiert | `SessionHardeningContractTest` (INI-Ebene) + Bootstrap-Cookie-Params |
 | Secure-Flag dynamisch ab TLS | automatisiert | ADR-0027-Pfad, `HttpsConfigTest` |
 | Session-Datei überlebt die längste konfigurierbare Sitzung (gc_maxlifetime) | automatisiert | `SessionHardeningContractTest` (Konstante gegen INI) |
 | Serverseitiger Ablauf (session_expires_at), Verlängerung via session_ping | automatisiert | Settings-Wert E2E `settings-flow.spec.js`; erzwungener Re-Login nach Ablauf E2E `session-security.spec.js` (Session-Datei gealtert, kein Client-Timer) |
-| CSRF-Token sessiongebunden, POST ohne/mit fremdem Token abgelehnt | automatisiert | E2E `rbac-csrf.spec.js` (400 + unversehrte DB-Zeile), `PortalPostGuardContractTest` (jede Seite läuft durch den Guard) |
+| CSRF-Token sessiongebunden (Anmeldeformular: an sein Cookie gebunden, HMAC unter APP_KEY, SameSite=Strict), POST ohne/mit fremdem Token abgelehnt | automatisiert | E2E `rbac-csrf.spec.js` (400 + unversehrte DB-Zeile), `PortalPostGuardContractTest` (jede Seite läuft durch den Guard) |
 | Logout invalidiert serverseitig (Back-Button zeigt nichts Geschütztes) | automatisiert | E2E `session-security.spec.js` (destroy + Clear-Site-Data; direkter GET 302, Back+Reload landet am Login) |
 
 ## V4 Access Control
@@ -77,7 +78,7 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 
 | Zusage | Status | Beweis |
 |---|---|---|
-| Generische Fehlerseiten/-envelopes ohne Stacktrace/SQLSTATE | automatisiert | `PhaseCContractTest`, `MachineApiErrorShapeContractTest`; Fault-Beweis TESTPLAN 4.3 |
+| Generische Fehlerseiten/-envelopes ohne Stacktrace/SQLSTATE; Details unter `VIRTUSPHERE_DEBUG` nur für CLI und Loopback-Clients (SEC2 C-13) | automatisiert | `PhaseCContractTest`, `MachineApiErrorShapeContractTest`, `DebugLoopbackTest`; Fault-Beweis TESTPLAN 4.3 |
 | Keine exakten Komponentenversionen nach außen (X-Powered-By, Server, health.php) | automatisiert | `VersionExposureContractTest` (Fast) + `health-contract`-Gate (Laufzeit) |
 | Security-Header auch auf nginx-eigenen Antworten (403/404) | automatisiert | Header-Maps in `default.conf`; `health-contract`-Gate (nginx -t + Exposure) |
 | Interna nicht erreichbar (/lib,/vendor,/tests,/logs → 403) | automatisiert | `health-contract`-Gate (/tests=403) + nginx deny-Regeln |
@@ -85,7 +86,8 @@ GraphQL sind n. a. (Funktionalität existiert nicht).
 | Eine 16-stellige Korrelations-ID verbindet Portal-/Machine-API-/Worker-/PowerShell-Ereignisse und wird vor Ausgabe redigiert | automatisiert | `CorrelationIdTest`, `CorrelationTraceTest`, `ExceptionTraceRedactionTest`, Pester `VirtuSphere.RunReport.Tests.ps1` |
 | Secret-Scan über volle Git-Historie, null unerklärte Funde | automatisiert | `secret-scan`-Gate (Release-Lane), Allowlist-Vertrag `.gitleaks.toml` |
 | Dependency-/Image-CVE-Gates, SBOM, Digest-Pins | automatisiert | composer audit (Fast); `sbom`- und `image-cve`-Gates (Release-Lane, Trivy/Syft mit befristeten Ausnahmen in `.trivyignore.yaml`) |
-| Container-Härtung gepinnt (read_only, cap_drop, no-new-privileges) | automatisiert | Compose gesetzt; `compose-hardening`-Gate in allen Lanes (`scripts/check-compose-hardening.ps1`) |
+| Container-Härtung gepinnt (read_only, cap_drop, no-new-privileges, Dienste ohne Capability nicht als root: beide Worker uid 33, SEC2 C-06) | automatisiert | Compose gesetzt; `compose-hardening`-Gate in allen Lanes (`scripts/check-compose-hardening.ps1`, `[compose.worker-user]`) |
+| PHP-FPM sperrt Prozessstart, `mail`, `phpinfo` und Quelltextausgabe (`disable_functions` im Pool, CLI-Worker unberührt, SEC2 C-11) | automatisiert + gemessen | `FpmDisabledFunctionsContractTest` (FPM-Einstiegspunkte und ihre Closure abgeleitet, Laufzeitpakete aus `composer.lock`); gemessen 04.11.2026: FPM `Call to undefined function exec()`, CLI unverändert |
 
 ## WSTG-Zuordnung (Kurzindex)
 

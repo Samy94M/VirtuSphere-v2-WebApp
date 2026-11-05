@@ -86,7 +86,10 @@ SEED_ADMIN_PASSWORD=<lange-zufaellige-passphrase>
 SEED_ADMIN_EMAIL=admin@localhost
 ```
 
-Ohne diese Werte wird kein Benutzer automatisch angelegt.
+Ohne diese Werte wird kein Benutzer automatisch angelegt. Mit ihnen legt das Setup
+das Konto an, streicht danach `SEED_ADMIN_PASSWORD` aus der `.env` und erzeugt den
+Stack neu; das Passwort wird bei der ersten Anmeldung ohnehin geändert. Eine neu
+angelegte `.env` bekommt den Modus 600.
 
 ## Setup starten
 

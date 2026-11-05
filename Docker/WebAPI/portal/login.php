@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/login_csrf.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -29,23 +30,32 @@ $source = $directoryLoginAvailable
     ? VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY
     : VIRTUSPHERE_AUTH_SOURCE_LOCAL;
 if ($isPost) {
-    if (!csrf_verify($_POST['_csrf'] ?? null)) {
+    // The sign-in form carries no session token (SEC2, C-02, lib/login_csrf.php).
+    if (!login_csrf_verify($_COOKIE, $_POST[VIRTUSPHERE_LOGIN_CSRF_FIELD] ?? null)) {
         // Not portal_reject_csrf(): a stale token on the sign-in form is a normal
         // consequence of a page left open, and the user is sent back to a fresh
         // form rather than a 400. Still worth a line, because a flood of these
-        // without any matching sign-in is not a user leaving a tab open.
+        // without any matching sign-in is not a user leaving a tab open. The
+        // notice travels in the query, not as a flash: a flash would need the
+        // session this check exists to avoid.
         audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_AUTH_CSRF_REJECTED, 'request', 'login.php', VIRTUSPHERE_AUDIT_RESULT_DENIED, [
             'page' => 'login.php',
         ]);
-        flash_set('error', __t('login.session_expired'));
-        redirect_to(login_return_login_url($returnTarget));
+        redirect_to(login_return_login_url($returnTarget, true));
     }
 
     $username = request_trimmed($_POST, 'username');
     $source = request_string($_POST, 'auth_source', VIRTUSPHERE_AUTH_SOURCE_LOCAL);
+    // The session begins with an attempt that passed the token check:
+    // auth_complete_login() renews its id, and a failed attempt discards it.
+    virtusphere_create_session();
     $result = login($username, request_string($_POST, 'password'), $connection, $source);
     if ($result['ok'] ?? false) {
+        login_csrf_clear_cookie();
         redirect_to(login_return_after_sign_in($returnTarget, !empty($result['must_change_password'])));
+    }
+    if ($_SESSION === []) {
+        virtusphere_discard_session();
     }
 
     // login() answers a locked account and a name over its attempt budget with
@@ -59,6 +69,8 @@ if ($isPost) {
     };
 }
 $nonce = h(virtusphere_csp_nonce());
+// Before any output: it sets the cookie the token is bound to.
+$loginCsrfField = login_csrf_field();
 ?>
 <!DOCTYPE html>
 <html lang="<?php echo h(Lang::locale()); ?>" data-theme="light">
@@ -93,7 +105,7 @@ $nonce = h(virtusphere_csp_nonce());
     <?php if ($error !== '') { ?><div class="alert alert-error"><?php echo h($error); ?></div><?php } ?>
     <?php if ($directoryEnabled && !$directoryLoginAvailable) { ?><div class="alert alert-warning"><?php echo h(__t('login.directory_requires_https')); ?></div><?php } ?>
     <form class="stack" method="post" action="login.php">
-        <?php echo csrf_field(); ?>
+        <?php echo $loginCsrfField; ?>
         <?php if ($returnTarget !== null) { ?><input type="hidden" name="<?php echo h(VIRTUSPHERE_LOGIN_RETURN_FIELD); ?>" value="<?php echo h($returnTarget); ?>"><?php } ?>
         <?php if ($directoryLoginAvailable) { ?>
         <label for="auth_source"><?php echo h(__t('login.auth_source')); ?><select id="auth_source" name="auth_source"><option value="active_directory"<?php echo $source === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY ? ' selected' : ''; ?>><?php echo h(__t('login.source_directory')); ?></option><option value="local"<?php echo $source === VIRTUSPHERE_AUTH_SOURCE_LOCAL ? ' selected' : ''; ?>><?php echo h(__t('login.source_local')); ?></option></select></label>

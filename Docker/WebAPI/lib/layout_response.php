@@ -143,6 +143,11 @@ function role_label(string $role): string
  */
 function flash_set(string $type, string $message, string $detail = '', ?array $action = null): void
 {
+    // The portal resumes sessions but never creates one for an anonymous request
+    // (SEC2, C-02); a flash is a reason to have one, or the message is lost.
+    if (session_status() !== PHP_SESSION_ACTIVE && function_exists('virtusphere_create_session')) {
+        virtusphere_create_session();
+    }
     $safeAction = flash_action_normalize($action);
     $queue = $_SESSION['_flash'] ?? [];
     if (!is_array($queue)) {

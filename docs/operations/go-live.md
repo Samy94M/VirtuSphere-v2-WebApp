@@ -255,9 +255,11 @@ Namenspräfix.
 
    Das erste Admin-Konto entsteht in Schritt 4.1, **nach** den Migrationen. Wer
    `SEED_ADMIN_USER` und `SEED_ADMIN_PASSWORD` schon hier in die `.env` schreibt,
-   bekommt es von `Docker/scripts/setup.sh` gleich mit angelegt; auf einem
-   Produktionshost ist der Weg in Schritt 4.1 der bessere, weil das Passwort dann
-   nicht in einer Datei liegen bleibt.
+   bekommt es von `Docker/scripts/setup.sh` gleich mit angelegt. Das Skript
+   streicht `SEED_ADMIN_PASSWORD` danach aus der `.env` und erzeugt den Stack neu,
+   damit das Passwort weder in der Datei noch in der PHP-Umgebung bleibt; auf
+   einem Produktionshost ist der Weg in Schritt 4.1 trotzdem der bessere, weil das
+   Passwort dort gar nicht erst in eine Datei kommt.
 
 3. Stack starten und **alle fünf** Container prüfen, besonders den
    `maintenance-worker`:
@@ -282,10 +284,13 @@ genau diesen Host nicht hoch. Der `chmod` ist es **nicht**: Verzeichnisrechte si
 Hostzustand, den kein Archiv trägt, und deshalb steht er in
 `docs/operations/backup.md` als Restore-Schritt.
 
-1. **Bind-Mount-Rechte.** `Docker/WebAPI/logs` muss für PHP als uid 33
-   schreibbar sein. Gehört es nur dem SSH-User, crash-loopen PHP und Worker
-   (`Log directory is not writable`). Vor dem Start `chmod 0777` auf dieses
-   Verzeichnis. nginx schreibt Access-/Error-Ausgaben in stdout/stderr; dafür
+1. **Bind-Mount-Rechte.** `Docker/WebAPI/logs` muss für PHP und beide Worker,
+   alle als uid 33, schreibbar sein. Gehört es nur dem SSH-User, crash-loopen PHP
+   und Worker (`Log directory is not writable`). Vor dem Start `chmod 0777` auf
+   dieses Verzeichnis. Wer den überwachten Bereitstellungsprozess nutzt
+   (`docker-compose.supervisor.yml`), legt zusätzlich `Docker/WebAPI/var`
+   an und übergibt es uid 33 (`sudo install -d -o 33 -g 33 -m 0700
+   Docker/WebAPI/var`). nginx schreibt Access-/Error-Ausgaben in stdout/stderr; dafür
    gibt es keinen schreibbaren Host-Logmount mehr. Docker Desktop umgeht
    Bind-Mount-Rechte über seine VM, ein Linux-Host nicht. Dieselbe
    uid-33-Eigentümerschaft gilt für alles, was der PHP-Container dort anlegt: zum
@@ -400,9 +405,10 @@ erwartungsgemäß HTTP 503; deshalb die folgenden Schritte ohne Pause ausführen
    Der zweite Weg: `SEED_ADMIN_USER` und `SEED_ADMIN_PASSWORD` in der `.env`
    setzen (in `.env.example` als Kommentar vorbereitet), dann legt
    `Docker/scripts/setup.sh` das Konto beim Hochfahren mit an; ohne beide Werte
-   überspringt es den Schritt mit einer Meldung. Auf einem Produktionshost ist der
-   `docker compose exec`-Weg der bessere, weil das Passwort danach nicht in einer Datei
-   liegen bleibt.
+   überspringt es den Schritt mit einer Meldung. Nach dem Anlegen streicht es
+   `SEED_ADMIN_PASSWORD` aus der `.env` und erzeugt den Stack neu. Auf einem
+   Produktionshost ist der `docker compose exec`-Weg trotzdem der bessere, weil das
+   Passwort dort gar nicht erst in eine Datei kommt.
 
    Beide Wege legen **genau ein** Konto an, Rolle `admin`, mit
    `must_change_password=1`: die erste Anmeldung erzwingt ein neues Passwort, das
