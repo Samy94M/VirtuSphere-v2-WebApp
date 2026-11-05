@@ -58,16 +58,7 @@ final class PortalClosureAnalysisTest extends TestCase
     {
         $source ??= new PortalClosureSource();
         $root ??= $this->fixture;
-        $owners = $source->owners($root);
-        $closure = $source->closure($root . '/portal/' . $entry);
-        $problems = [];
-        foreach ($closure as $file) {
-            if (!str_contains($file, '/vendor/')) {
-                $calls = new PortalClosureCalls($owners, $source->available($root . '/portal/' . $entry) + $source->available($file), $source->methods, $source);
-                $problems = array_merge($problems, $calls->check($source->nodes($file), $file));
-            }
-        }
-        return array_values(array_unique($problems));
+        return $source->problems($root, [$root . '/portal/' . $entry]);
     }
 
     public function testBootstrapClosureIncludesUnexecutedBranchesWithoutExecutingThem(): void
@@ -223,6 +214,32 @@ final class PortalClosureAnalysisTest extends TestCase
         self::assertSame([], $this->problems());
         $this->put('portal/index.php', '<?php function load_helper(): void { require_once __DIR__ . "/../lib/helper.php"; } app_helper();');
         self::assertStringContainsString('[portal-closure.missing-owner]', implode("\n", $this->problems()));
+    }
+
+    public function testLocalRequireLoadsTheUnconditionalClosureOfThatModule(): void
+    {
+        $this->put('portal/index.php', '<?php function load_helper(): void { require_once __DIR__ . "/../lib/bootstrap.php"; app_helper(); } load_helper();');
+        self::assertSame([], $this->problems());
+        $this->put('portal/index.php', '<?php function load_helper(): void { require_once __DIR__ . "/../lib/bootstrap.php"; } function call_helper(): void { app_helper(); } load_helper(); call_helper();');
+        self::assertStringContainsString('[portal-closure.missing-owner]', implode("\n", $this->problems()));
+    }
+
+    /**
+     * Each file is walked once per analysis and its findings are reused for
+     * every later entry. Whether its owner is loaded still depends on the
+     * entry, whichever entry reaches the file first.
+     */
+    public function testReusedFileFindingsStillDependOnTheEntry(): void
+    {
+        $this->put('lib/view.php', '<?php function render_view(): void { app_helper(); }');
+        $this->put('portal/index.php', '<?php require_once __DIR__ . "/../lib/bootstrap.php"; require_once __DIR__ . "/../lib/view.php"; render_view();');
+        $this->put('portal/bare.php', '<?php require_once __DIR__ . "/../lib/view.php"; render_view();');
+        foreach ([['index.php', 'bare.php'], ['bare.php', 'index.php']] as $order) {
+            $entries = array_map(fn (string $entry): string => $this->fixture . '/portal/' . $entry, $order);
+            $problems = (new PortalClosureSource())->problems($this->fixture, $entries);
+            self::assertCount(1, $problems, implode(' then ', $order) . ': ' . implode(' | ', $problems));
+            self::assertStringContainsString('/lib/view.php:1 app_helper requires ' . $this->fixture . '/lib/helper.php', $problems[0]);
+        }
     }
 
     public function testExistingRegistryIsCheckedAgainstFilesystemInBothDirections(): void
