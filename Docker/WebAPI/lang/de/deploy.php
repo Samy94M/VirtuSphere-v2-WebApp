@@ -87,6 +87,7 @@ return [
     'blocker_session_expired' => 'Ihre Sitzung ist abgelaufen. Die Blockerprüfung wurde beendet; bitte melden Sie sich erneut an.',
     'blocker_forbidden' => 'Die Berechtigung zum Einreihen von Bereitstellungsaufträgen fehlt. Die Blockerprüfung wurde beendet.',
     'blocker_refresh_failed' => 'Die Blocker konnten nicht aktuell geprüft werden. Das Einreihen bleibt vorsorglich gesperrt; bitte ändern Sie ein Feld oder laden Sie die Seite neu.',
+    'blocker_refresh_failed_server_checks' => 'Die Blocker konnten nicht aktuell geprüft werden. Beim Einreihen prüft der Server alle Voraussetzungen erneut; bitte ändern Sie ein Feld oder laden Sie die Seite neu.',
     'network_empty' => 'VM „:name“, Netzwerkkarte: Der Portgruppenname ist leer.',
     'network_ambiguous' => 'VM „:name“: :count Netzwerkkarten verwenden exakt dieselbe Portgruppe „:vlan“.',
     'wds_mission_missing' => 'VM „:name“: In der Mission ist keine WDS/PXE-Portgruppe festgelegt.',

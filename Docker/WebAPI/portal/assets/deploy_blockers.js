@@ -176,6 +176,8 @@
     // submit time anyway. That asymmetry is a decision, not an oversight: a
     // client that disables the button on every hiccup teaches operators to
     // reload rather than to read. It is pinned by DeployBlockerContractTest.
+    // The default sentence follows the same split: only a hard mode may say
+    // that queueing stays disabled, the others say that the server re-checks.
     function renderFailure(message) {
         list.replaceChildren();
         var box = document.createElement('div');
@@ -185,7 +187,10 @@
         if (hardMode) {
             box.setAttribute('data-deploy-blocker', '');
         }
-        box.textContent = String(message || root.getAttribute('data-error-message') || '');
+        var fallback = hardMode
+            ? root.getAttribute('data-error-message')
+            : root.getAttribute('data-error-message-server-check');
+        box.textContent = String(message || fallback || '');
         list.appendChild(box);
         root.setAttribute('data-preparation-state', 'unreliable');
         status.textContent = root.getAttribute('data-unreliable-message') || '';
@@ -209,7 +214,7 @@
             var contentType = response.headers.get('content-type') || '';
             if (contentType.indexOf('application/json') === -1 || sequence !== requestSequence) {
                 if (sequence === requestSequence) {
-                    renderFailure(root.getAttribute('data-error-message'));
+                    renderFailure(null);
                 }
                 return;
             }
@@ -222,12 +227,17 @@
                 renderFailure(data.message);
                 return;
             }
-            if (response.ok && data.ok && Array.isArray(data.blockers)) {
+            if (response.ok && data && data.ok === true && Array.isArray(data.blockers)) {
                 render(data);
+                return;
             }
+            // Any other JSON answer (400, 500, ok:false, no list) is no verdict.
+            // Leaving it unhandled kept "checking" forever and the button as
+            // the previous verdict left it (KB3); it is the same failure.
+            renderFailure(null);
         } catch (error) {
             if (error.name !== 'AbortError') {
-                renderFailure(root.getAttribute('data-error-message'));
+                renderFailure(null);
             }
         }
     }
