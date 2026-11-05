@@ -305,7 +305,9 @@ gitignorierte Verzeichnis liegt im bind-gemounteten WebAPI-Baum; `/tmp` ist
 tmpfs und eignet sich dafür nicht. Verzeichnis und Dateien sind restriktiv und
 gehören uid 33, unter der beide Worker seit SEC2 laufen (ein Zustand eines
 älteren `root`-Workers wird beim Update übergeben, [Update](update.md),
-„Worker ohne root“). Ein
+„Worker ohne root“). Fehlt `var/`, kann uid 33 es im Host-Baum nicht selbst
+anlegen; vor dem ersten Wechsel deshalb `sudo install -d -o 33 -g 33 -m 0700
+Docker/WebAPI/var` wie beim [Go-live](go-live.md). Ein
 separates exklusives, nicht blockierendes Lock bleibt über die gesamte Laufzeit
 auf demselben Inode, während JSON im selben Verzeichnis atomar ersetzt wird.
 Vor jedem Kindstart ist der vollständige Zustand dauerhaft reserviert. Schlägt

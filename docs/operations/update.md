@@ -356,7 +356,10 @@ alte `root`-Sperrdatei auch lesend. Für `var/deploy-supervisor` ist er Pflicht,
 wo der überwachte Prozess (`docker-compose.supervisor.yml`) läuft: Sein Zustand
 ist `0700`/`0600`, ein Supervisor unter uid 33 kann einen `root`-Zustand nicht
 lesen und startet dann bewusst keinen Worker (ADR-0042, „fail closed“). Ohne
-`var/` ist nichts zu tun. Der Modus 0777 von `logs/` bleibt.
+`var/` ist jetzt nichts zu tun; ein Worker als uid 33 kann es aber nicht selbst
+anlegen. Wer später auf den Supervisor wechselt, legt es vorher an wie beim
+Go-live: `sudo install -d -o 33 -g 33 -m 0700 Docker/WebAPI/var`. Der Modus
+0777 von `logs/` bleibt.
 
 ### 3.6 Neuen Stand prüfen
 
