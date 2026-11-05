@@ -429,9 +429,19 @@ echo strtolower(str_replace(':', '', openssl_x509_fingerprint($cert, 'sha256')))
     const revision = seedDraftConfig().revision;
     seedValidatedController(FIXTURE_HOST_DC1, revision);
     enableDirectory();
+    // Every run of the wrong-password case leaves one AD failure for this
+    // account. Five within the window lock it (SEC3), and the control sign-in
+    // after them would then be refused for the lock, not for the source. Start
+    // each test with the account's budget empty, whatever ran before.
     runPhp(`
 require_once '/var/www/html/lib/directory_service.php';
 require_once '/var/www/html/lib/repo/directory_users.php';
+require_once '/var/www/html/lib/auth_rate_limit.php';
+$stmt = db()->prepare('DELETE FROM deploy_login_attempts WHERE username IN (?, ?)');
+$adKey = auth_login_name_key('${ALICE_UPN}', VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY);
+$localKey = auth_login_name_key('${ALICE_UPN}', VIRTUSPHERE_AUTH_SOURCE_LOCAL);
+$stmt->bind_param('ss', $adKey, $localKey);
+$stmt->execute();
 $entry = directory_find_user_by_upn(db(), '${ALICE_UPN}');
 repo_directory_import_user(db(), $entry, VIRTUSPHERE_ROLE_USER);
 echo 'OK';
