@@ -295,14 +295,35 @@ Hostzustand, den kein Archiv trägt, und deshalb steht er in
    Bind-Mount-Rechte über seine VM, ein Linux-Host nicht. Dieselbe
    uid-33-Eigentümerschaft gilt für alles, was der PHP-Container dort anlegt: zum
    Lesen einer solchen Datei vom SSH-User aus braucht es `sudo cat`.
-2. **Docker-Default-Subnetz.** `docker compose up` legt ein Netz aus
-   `172.17.0.0/16` an. Liegt die IP, über die du per SSH verbunden bist, in
-   diesem Bereich, routet der Host die Antwortpakete in die Docker-Bridge und die
-   SSH-Sitzung friert ein. In der Override ein unbenutztes Subnetz pinnen
-   (`networks.default.ipam.config.subnet`, z. B. `10.250.0.0/24`). Recovery bei
+2. **Docker-Default-Subnetz.** `docker compose up` legt jedes Netz des Stacks
+   mit einem Subnetz aus Dockers Standardbereich (`172.x`) an. Liegt die IP, über
+   die du per SSH verbunden bist, in einem dieser Bereiche, routet der Host die
+   Antwortpakete in die Docker-Bridge und die SSH-Sitzung friert ein. Der Stack
+   hat zwei Netze: `default` (Datenbank, PHP, Worker, phpMyAdmin) und `front`
+   (nur Webserver und PHP, Netztrennung C-07). In der Override für **beide** je
+   ein eigenes, unbenutztes Subnetz pinnen, zum Beispiel:
+
+   ```yaml
+   networks:
+     default:
+       ipam:
+         config:
+           - subnet: <freies-/24-fuer-default>
+     front:
+       ipam:
+         config:
+           - subnet: <freies-/24-fuer-front>
+   ```
+
+   Die Platzhalter durch zwei freie private /24 ersetzen, die das LAN nicht
+   nutzt. Die beiden Subnetze dürfen sich nicht überschneiden und keines darf das
+   Netz enthalten, aus dem SSH kommt. Vor jedem `up` belegt
+   `sh scripts/check-compose-network-pins.sh`, dass jedes Netz der wirksamen
+   Konfiguration gepinnt ist: erwartet `gepinnt=ja` für `default` und `front`
+   und am Ende `OK`. Das Skript nennt nur Netznamen, nie ein Subnetz. Recovery bei
    bereits eingefrorener Sitzung: neu verbinden, `docker compose --profile tools down`
-   (entfernt das Netz; ohne das Profil hält ein gestartetes phpMyAdmin das Netz
-   fest), Override anlegen, neu hoch.
+   (entfernt die Netze; ohne das Profil hält ein gestartetes phpMyAdmin
+   `default` fest), Override ergänzen, Prüfschritt, neu hoch.
 3. **Proxy-Variablen im Container.** Injiziert der Docker-Client
    (`~/.docker/config.json`) einen `HTTP_PROXY`, erben ihn alle Container. Der
    nginx-Healthcheck-`wget` schickt seinen Loopback-Aufruf dann durch den Proxy
@@ -313,7 +334,12 @@ Hostzustand, den kein Archiv trägt, und deshalb steht er in
    webserver-Healthcheck-Test auf `wget -Y off` setzen.
 
 Start-Reihenfolge, die funktioniert: PHP-Log-`chmod`, Override anlegen,
+`sh scripts/check-compose-network-pins.sh` (Exit 0),
 `docker compose up -d --force-recreate --wait`, dann Schritt 2.
+
+Restrisiko der Netztrennung: phpMyAdmin liegt mit PHP im Netz `default` und
+erreicht damit weiter den FPM-Port. Der Webserver erreicht dagegen nur PHP,
+weder MySQL noch die Worker.
 
 ## Schritt 2: Migrationen gegen die frische Produktions-DB
 

@@ -1296,9 +1296,36 @@ function New-ComposeFixture {
     $fx = New-Fixture @('docker-compose.yml', '.env.example',
         'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
         'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
-        'Docker/qa-ansible/Dockerfile')
+        'Docker/qa-ansible/Dockerfile', 'Docker/nginx/default.conf')
     Copy-Item -Force -Path (Join-Path $fx '.env.example') -Destination (Join-Path $fx '.env')
     return $fx
+}
+# Rollout-Pruefschritt C-07: belegt, dass jedes Netz der aufgeloesten Config ein
+# gepinntes Subnetz hat. Die Fixture-Override pinnt mit Dokumentationsbereichen
+# (RFC 5737); der Lauf darf keinen davon ausgeben.
+function Invoke-NetworkPinsGuard {
+    param([string]$FixtureRoot)
+    return Invoke-GuardShell (Join-Path $scriptDir 'check-compose-network-pins.sh') @() $FixtureRoot
+}
+function Get-NetworkPinsOverride {
+    param([string[]]$Networks)
+    $lines = @('networks:')
+    $subnets = @{ 'default' = '192.0.2.0/24'; 'front' = '198.51.100.0/24' }
+    foreach ($net in $Networks) {
+        $lines += ('  {0}:' -f $net)
+        $lines += '    ipam:'
+        $lines += '      config:'
+        $lines += ('        - subnet: {0}' -f $subnets[$net])
+    }
+    return (($lines -join "`n") + "`n")
+}
+function Assert-NoSubnetEcho {
+    param($Result)
+    $joined = @($Result.Output) -join "`n"
+    if ($joined -match '192\.0\.2\.|198\.51\.100\.') {
+        return @{ Status = 'unproven'; Detail = 'Pruefschritt gibt ein Subnetz aus' }
+    }
+    return $null
 }
 $cases += @(
     @{ Name = 'compose-hardening.green'; Body = {
@@ -1430,6 +1457,91 @@ $cases += @(
         $fx = New-ComposeFixture
         Edit-Fixture $fx 'docker-compose.yml' '  phpmyadmin:' '  phpmyadmin-renamed:'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.services\]' -InfraOnExit2
+    } }
+    # Netztrennung (C-07): jede Lockerung hat ihre eigene ID.
+    @{ Name = 'compose-hardening.network-webserver-backend-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' "    networks:`n      - front`n    depends_on:" "    networks:`n      - front`n      - default`n    depends_on:"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-edge\] webserver' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-php-front-missing'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' "    networks:`n      - default`n      - front`n" "    networks:`n      - default`n"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-upstream\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-front-member-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    command: ["mysqld", "--skip-log-bin"]' ("    command: [`"mysqld`", `"--skip-log-bin`"]`n    networks:`n      - default`n      - front")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-front\] mysql' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-mode-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' '    command: ["php", "/var/www/html/lib/maintenance_worker.php", "--loop", "--sleep=15"]' ("    command: [`"php`", `"/var/www/html/lib/maintenance_worker.php`", `"--loop`", `"--sleep=15`"]`n    network_mode: host")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-mode\] maintenance-worker' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-unknown-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' "networks:`n  front: {}" "networks:`n  front: {}`n  extra: {}"
+        Edit-Fixture $fx 'docker-compose.yml' '    command: ["php", "/var/www/html/lib/deploy_worker.php", "--loop", "--sleep=5"]' ("    command: [`"php`", `"/var/www/html/lib/deploy_worker.php`", `"--loop`", `"--sleep=5`"]`n    networks:`n      - default`n      - extra")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-unknown\] deploy-worker' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-published-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        # Abgeleitet, nicht gelistet: ein LAN-veroeffentlichter Port an einem
+        # Backend-Dienst ist rot, egal welcher Dienst es ist.
+        Edit-Fixture $fx 'docker-compose.yml' '      - "127.0.0.1:${PMA_PORT}:80"' '      - "0.0.0.0:${PMA_PORT}:80"'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-published\] phpmyadmin' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-ipam-in-repo-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'docker-compose.yml' "networks:`n  front: {}" "networks:`n  front:`n    ipam:`n      config:`n        - subnet: 198.51.100.0/24"
+        $r = Invoke-ComposeHardeningGuard $fx
+        $echo = Assert-NoSubnetEcho $r
+        if ($null -ne $echo) { return $echo }
+        Assert-Guard $r @(1) '\[compose\.network-ipam\]' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-upstream-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'Docker/nginx/default.conf' 'fastcgi_pass php:9000;' 'fastcgi_pass mysql:9000;'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-upstream\].*mysql' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.network-upstream-zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'Docker/nginx/default.conf' 'fastcgi_pass php:9000;' '# fastcgi_pass entfernt'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.network-upstream\].*Zero-Match' -InfraOnExit2
+    } }
+    @{ Name = 'network-pins.green'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Add-FixtureFile $fx 'docker-compose.override.yml' (Get-NetworkPinsOverride @('default', 'front'))
+        $r = Invoke-NetworkPinsGuard $fx
+        $echo = Assert-NoSubnetEcho $r
+        if ($null -ne $echo) { return $echo }
+        Assert-Guard $r @(0) '\[2/2\] gepinnt=ja front' -InfraOnExit2
+    } }
+    @{ Name = 'network-pins.front-unpinned'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        # Genau der Rollout-Fehler: die Override pinnt nur das alte default.
+        $fx = New-ComposeFixture
+        Add-FixtureFile $fx 'docker-compose.override.yml' (Get-NetworkPinsOverride @('default'))
+        $r = Invoke-NetworkPinsGuard $fx
+        $echo = Assert-NoSubnetEcho $r
+        if ($null -ne $echo) { return $echo }
+        Assert-Guard $r @(1) 'gepinnt=nein front' -InfraOnExit2
+    } }
+    @{ Name = 'network-pins.no-override'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Assert-Guard (Invoke-NetworkPinsGuard $fx) @(1) '2 von 2 Netzen ohne gepinntes Subnetz' -InfraOnExit2
     } }
 )
 

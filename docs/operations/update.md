@@ -91,6 +91,7 @@ Was die Ausgaben bedeuten:
 |---|---|
 | Änderungen unter `Docker/php`, `Docker/mysql`, `Docker/nginx` oder an `image:`-Zeilen in `docker-compose.yml` | neue Images nötig (laden oder bauen); ein reines `git pull` reicht nicht |
 | neue Schlüssel in `.env.example` | vor dem Start in die `.env` des Hosts übernehmen |
+| ein neues Netz im Block `networks:` von `docker-compose.yml` (zuletzt `front`, C-07) | vor dem ersten `up` in der Override pinnen ([Go-Live](go-live.md), Schritt 1a.2), sonst bekommt es ein Subnetz aus Dockers Standardbereich; Prüfschritt in 3.6 |
 | neue Dateien unter `Docker/WebAPI/lib/migrations` | Wartungsfenster mit Backup und Drill; die Rückkehrklasse jeder Migration steht in [Upgrade und Recovery](upgrade-recovery.md), Abschnitt „Migrationsklassen“. Steht eine neue Migration dort in keiner Klasse, gilt sie als Klasse C |
 | Änderungen unter `Powershell-MECM` | Schritt 4 (MECM) beachten; erst prüfen, ob der Installer dieses Stands überhaupt freigegeben ist |
 | Änderungen an `Ansible/requirements.yml`, `Ansible/host-cleanup`, `Ansible/runner` oder `Docker/qa-ansible/requirements.txt` | Schritt 4 (Ansible-Host). Aus der letzten Datei leitet das Offline-Bundle die Wheel-Pins des Hosts ab (ansible-core, pyvmomi, requests); eine neue ansible-core-Version erreicht den Host nur über das neue Bundle |
@@ -135,7 +136,9 @@ Erwartet:
 Außerdem die `docker-compose.override.yml` des Hosts ansehen und sichern, falls
 es sie gibt. Sie beschreibt nur diesen Host (Subnetz, Proxy-Variablen,
 Healthcheck). Jeder Eintrag darin muss zur neuen `docker-compose.yml` passen; ein
-Mount oder Dienst, den das neue Release entfernt hat, gehört dort heraus.
+Mount oder Dienst, den das neue Release entfernt hat, gehört dort heraus. Pinnt
+sie das Subnetz von `default`, braucht jedes neue Netz des Release ebenfalls
+einen Pin, bevor es zum ersten Mal entsteht (siehe „Netztrennung“ unter 3.5).
 
 ## Schritt 2: Release bereitstellen (kein Ausfall)
 
@@ -367,6 +370,25 @@ anlegen. Wer später auf den Supervisor wechselt, legt es vorher an wie beim
 Go-live: `sudo install -d -o 33 -g 33 -m 0700 Docker/WebAPI/var`. Der Modus
 0777 von `logs/` bleibt.
 
+**Netztrennung (ab dem Release mit C-07).** Der Webserver hängt nur noch am
+neuen Netz `front`, PHP an `front` und `default`; Datenbank, Worker und
+phpMyAdmin bleiben an `default`. Das erste `up` in Schritt 3.7 legt `front` an.
+Pinnt die Override das Subnetz von `default`, braucht `front` vorher ein eigenes
+freies Subnetz, sonst wählt Docker eines aus `172.x`, und liegt die SSH-Adresse
+darin, friert die Sitzung ein. Solange der Stack gestoppt ist, in der
+`docker-compose.override.yml` unter `networks:` neben `default` ergänzen:
+
+```yaml
+  front:
+    ipam:
+      config:
+        - subnet: <freies-/24-fuer-front>
+```
+
+Das Subnetz darf sich weder mit dem von `default` noch mit dem Netz überschneiden,
+aus dem SSH kommt. Belegt wird der Pin in Schritt 3.6. Ein Host ohne Override
+(Docker Desktop, Testrechner) braucht nichts.
+
 ### 3.6 Neuen Stand prüfen
 
 ```bash
@@ -383,6 +405,18 @@ Erwartet: `config exit=0` ohne jede Warnung. Die letzte Zeile nennt Schlüssel,
 die in der Vorlage stehen, aber in der `.env` des Hosts fehlen. Jeden davon
 bewusst setzen; eine Warnung „variable is not set“ von `config` ist ein Abbruch,
 denn Compose setzt den Wert sonst still leer.
+
+Auf einem Host mit Override zusätzlich, noch vor jedem `up`:
+
+```bash
+sh scripts/check-compose-network-pins.sh; echo "pins exit=$?"
+```
+
+Erwartet: je Netz eine Zeile `gepinnt=ja` (mindestens `default` und `front`),
+dann `OK` und `pins exit=0`. Eine Zeile `gepinnt=nein` ist ein Abbruch vor 3.7:
+den Pin für dieses Netz in der Override ergänzen (Go-Live, Schritt 1a.2) und den
+Block wiederholen. Wer den überwachten Bereitstellungsprozess nutzt, gibt dem
+Skript dieselben `-f`-Dateien wie dem Start.
 
 ### 3.6a Migrations-Probelauf
 
@@ -543,6 +577,23 @@ Docker/WebAPI/logs/.rotation.lock`, falls die Datei nicht schon `0666` ist (der
 neue Stand setzt das bei der ersten Logrotation selbst, der alte öffnet sie nur
 schreibend).
 
+Führt der Rückweg auf einen Stand vor der Netztrennung (C-07) zurück, zuerst,
+noch mit dem neuen Quellstand, den Stack samt Netzen abbauen, dann wie oben
+zurück:
+
+```bash
+cd /opt/VirtuSphere-v2-WebApp
+docker compose --profile tools down
+```
+
+Danach den Eintrag `front` aus der `docker-compose.override.yml` nehmen, den alten
+Quellstand und die alten Images wie oben zurückholen und vor dem `up`
+`sh scripts/check-compose-network-pins.sh` laufen lassen, falls der alte Stand das
+Skript schon hat (sonst `docker compose config --quiet`). Erwartet: nur noch
+`default`, `gepinnt=ja`. `down` stoppt auch MySQL; das ist im Rückweg gewollt,
+weil erst danach das Netz `front` verschwindet. Ohne `--profile tools` hält ein
+gestartetes phpMyAdmin `default` fest.
+
 Bei einem Archiv statt `git checkout` das alte `source.tar.gz` (und sein
 `deps/vendor.tar.gz`) wie in Schritt 3.5 über den Projektordner entpacken und die
 nur im neuen Release vorhandenen Dateien entfernen (`comm -13` statt `comm -23`).
@@ -561,6 +612,8 @@ nach dem [Backup-Runbook](backup.md) **dieses alten Stands** ausführen (Abschni
 | `docker compose config` warnt „variable is not set“ | ein neuer Schlüssel fehlt in `.env` | Schritt 3.6, Schlüssel setzen |
 | MySQL startet nach dem Neuerzeugen nicht | Startprüfung der Datenbankpasswörter (zu kurz oder Vorlagenwert) | `docker compose logs mysql`; Passwortwechsel ist ein eigener Vorgang ([Go-Live](go-live.md), Schritt 3a) |
 | Portal antwortet mit 502 | nur `php` neu gestartet, nginx hält die alte Adresse | `docker compose up -d --no-build --force-recreate --wait` |
+| SSH-Sitzung friert beim `up` ein | ein Netz ohne Pin bekam ein Subnetz aus `172.x`, in dem die SSH-Adresse liegt | neu verbinden, `docker compose --profile tools down`, Pin in der Override ergänzen, Prüfschritt aus 3.6, neu hoch |
+| `check-compose-network-pins.sh` meldet `gepinnt=nein` | Override pinnt nicht jedes Netz (nach C-07 fehlt oft `front`) | Pin ergänzen wie unter 3.5, „Netztrennung“; erst dann `up` |
 | Drill rot | Backup unvollständig oder Restore-Weg gestört | anhalten; ohne grünen Drill kein Update |
 | Migrations-Probelauf (3.6a) rot | eine Migration scheitert an diesen Daten oder das Schema weicht ab | vor 3.7 abbrechen, Rückweg vor der Migration; Drill-Ausgabe an die Entwicklung |
 

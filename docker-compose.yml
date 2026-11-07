@@ -51,6 +51,14 @@ services:
     # SSL_SUBJECT stand hier und wurde von nichts gelesen; es ist auch aus
     # .env.example und dem Runbook entfernt.
     # Gepinnt durch scripts/check-compose-hardening.ps1 ([compose.env-scope]).
+    # Network separation (C-07): nginx joins only `front`, so a compromised
+    # webserver reaches FPM and nothing else. MySQL, the workers and
+    # phpMyAdmin stay on `default`, the backend network. A host that pins
+    # the subnet of `default` in its override must pin `front` as well
+    # (docs/operations/go-live.md, step 1a.2); scripts/check-compose-network-pins.sh
+    # proves it before `up`. Pinned by [compose.network-*].
+    networks:
+      - front
     depends_on:
       php:
         # Real PHP readiness (AP8): nginx only starts once FPM answers its
@@ -104,6 +112,11 @@ services:
       target: runtime
     expose:
       - 9000
+    # FPM is the only bridge between both networks (C-07): nginx reaches it on
+    # `front`, it reaches MySQL (and in QA the LDAP fixture) on `default`.
+    networks:
+      - default
+      - front
     volumes:
       - ./Docker/WebAPI:/var/www/html
       # HTTPS admin flow (ADR-0012): PHP writes cert/key and the generated
@@ -326,3 +339,9 @@ services:
       - no-new-privileges:true
     pids_limit: 128
     mem_limit: 256m
+
+# `default` stays the backend network and keeps its name, so a host override
+# that already pins `networks.default.ipam` keeps working. No subnet here:
+# subnets are host state and live only in the local override.
+networks:
+  front: {}

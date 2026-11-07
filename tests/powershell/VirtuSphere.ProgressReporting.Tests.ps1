@@ -31,6 +31,7 @@ BeforeAll {
     $script:PackageWrapper = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'Powershell-MECM') 'Package_Vorlage/install.ps1') -Raw
     $script:RestoreDrill = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh') -Raw
     $script:BackupRunner = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup.sh') -Raw
+    $script:NetworkPins = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'scripts') 'check-compose-network-pins.sh') -Raw
 }
 
 
@@ -375,6 +376,13 @@ Describe 'Visible progress reporting contract' {
         $script:BackupRunner | Should -Match 'echo "\[\$backup_progress_position/\$BACKUP_PROGRESS_TOTAL\] RUN \$backup_progress_unit"'
         ([regex]::Matches($script:BackupRunner, 'backup_progress_run [1-6] ')).Count | Should -Be 6
         $script:BackupRunner | Should -Match 'backup_progress_result (pass|fail)'
+    }
+
+    It 'reports every network of the pin check before and after it, with a total derived from the config (C-07)' {
+        $script:NetworkPins | Should -Match 'total=\$\(printf .%s\\n. "\$result" \| grep -c \.'
+        $script:NetworkPins | Should -Match 'echo "\[0/\$total\]'
+        $script:NetworkPins | Should -Match 'echo "\[\$position/\$total\] RUN \$net"'
+        $script:NetworkPins | Should -Match 'echo "\[\$position/\$total\] gepinnt=\$flag \$net"'
     }
 
     It 'reports every automatically requested and revalidated MECM cleanup unit without polluting its result stream' {

@@ -15,7 +15,11 @@
     Healthchecks, service_healthy-Startordnung, restart- und Logging-Policy, die
     Loopback-Bindung und das tools-Profil von phpMyAdmin, feste Tags und
     Build-Kontexte der lokal gehaerteten Runtime-Images sowie die Digest-Pins in
-    den FROM-/COPY---from-Zeilen der First-Party-Dockerfiles. Der QA-Override (Docker/qa) aendert nur
+    den FROM-/COPY---from-Zeilen der First-Party-Dockerfiles. Dazu die
+    Netztrennung (C-07): webserver nur an front, php an front und default,
+    kein anderer Dienst an front, kein network_mode, keine unbekannten Netze,
+    kein Subnetz in der Basisdatei, jeder LAN-veroeffentlichte Dienst nur an
+    front und jeder nginx-Upstream im Netz des Webservers. Der QA-Override (Docker/qa) aendert nur
     volumes/restart und erbt die Haertung; geprueft wird die Basisdatei.
 
     Das aufgeloeste config-JSON enthaelt interpolierte Secrets aus .env und wird
@@ -391,6 +395,107 @@ if ($findings.Count -eq 0) {
         }
         if ($name -ne 'php' -and $null -ne (Get-Prop $svc 'build')) {
             Add-Finding 'php-worker-build' ('{0}: Worker darf keinen eigenen Build-Block besitzen; php ist alleiniger Buildowner' -f $name)
+        }
+    }
+
+    # --- Netztrennung (C-07, Variante A) ---------------------------------------
+    # `default` ist das Backend-Netz (MySQL, Worker, phpMyAdmin), `front` traegt
+    # nur den Weg nginx -> FPM. Benannt ist nur, was erhalten bleiben muss
+    # (webserver nur an front, php an beiden). Was nie auftreten darf, gilt fuer
+    # JEDEN Dienst der aufgeloesten Config, auch fuer einen, den dieser Contract
+    # noch nicht kennt. Diagnosen nennen Dienst und Netznamen, nie ein Subnetz.
+    $knownNetworks = @('default', 'front')
+    $expectedServiceNetworks = @{
+        'webserver' = @('front')
+        'php'       = @('default', 'front')
+    }
+    $loopbackHosts = @('127.0.0.1', '::1')
+    $serviceNetworks = @{}
+    foreach ($prop in @($servicesNode.PSObject.Properties)) {
+        $name = $prop.Name
+        $svc = $prop.Value
+        $mode = "$(Get-Prop $svc 'network_mode')"
+        if ($mode -ne '') {
+            Add-Finding 'network-mode' ('{0}: network_mode "{1}" umgeht die Netztrennung; Dienste haengen nur an benannten Compose-Netzen' -f $name, $mode)
+            $serviceNetworks[$name] = @()
+            continue
+        }
+        $netsNode = Get-Prop $svc 'networks'
+        $nets = @('default')
+        if ($null -ne $netsNode) {
+            $nets = @(@($netsNode.PSObject.Properties) | ForEach-Object { "$($_.Name)" } | Sort-Object)
+        }
+        $serviceNetworks[$name] = $nets
+        foreach ($net in $nets) {
+            if ($knownNetworks -notcontains $net) {
+                Add-Finding 'network-unknown' ('{0}: Netz "{1}" ist weder default noch front; ein neues Netz braucht Contract, Subnetz-Pin und Doku (go-live 1a.2)' -f $name, $net)
+            }
+        }
+        if (($nets -contains 'front') -and -not $expectedServiceNetworks.ContainsKey($name)) {
+            Add-Finding 'network-front' ('{0}: haengt an front; dort duerfen nur webserver und php liegen' -f $name)
+        }
+        # Abgeleitet: ein Dienst, der einen Port auf einer Nicht-Loopback-Adresse
+        # veroeffentlicht, ist LAN-zugewandt und darf das Backend-Netz nicht sehen.
+        foreach ($port in @(Get-Prop $svc 'ports')) {
+            if ($null -eq $port) { continue }
+            $hostIp = "$(Get-Prop $port 'host_ip')"
+            if (($loopbackHosts -notcontains $hostIp) -and (($nets -join ',') -ne 'front')) {
+                Add-Finding 'network-published' ('{0}: veroeffentlicht Port {1} auf "{2}" und haengt an [{3}] statt nur an front' -f $name, "$(Get-Prop $port 'published')", $hostIp, ($nets -join ', '))
+            }
+        }
+    }
+    foreach ($name in $expectedServiceNetworks.Keys) {
+        if (-not $serviceNetworks.ContainsKey($name)) { continue }
+        $actualNets = @($serviceNetworks[$name] | Sort-Object) -join ','
+        $expectedNets = @($expectedServiceNetworks[$name] | Sort-Object) -join ','
+        if ($actualNets -ne $expectedNets) {
+            Add-Finding 'network-edge' ('{0}: Netze [{1}], dokumentiert ist [{2}]' -f $name, $actualNets, $expectedNets)
+        }
+    }
+    # Subnetze sind Hostzustand: sie stehen nur in der lokalen Override-Datei,
+    # nie in der versionierten Basisdatei (ein Wert hier kollidiert auf einem
+    # Host mit anderem Adressplan, und das Repo ist oeffentlich).
+    $networksNode = Get-Prop $config 'networks'
+    if ($null -ne $networksNode) {
+        foreach ($prop in @($networksNode.PSObject.Properties)) {
+            if ($knownNetworks -notcontains $prop.Name) {
+                Add-Finding 'network-unknown' ('Netz "{0}" ist weder default noch front' -f $prop.Name)
+            }
+            $ipam = Get-Prop $prop.Value 'ipam'
+            $ipamConfig = if ($null -ne $ipam) { @(Get-Prop $ipam 'config') } else { @() }
+            foreach ($entry in $ipamConfig) {
+                if ($null -ne $entry -and "$(Get-Prop $entry 'subnet')" -ne '') {
+                    Add-Finding 'network-ipam' ('Netz "{0}": Subnetz in docker-compose.yml; Pins gehoeren in die lokale Override (go-live 1a.2)' -f $prop.Name)
+                }
+            }
+        }
+    }
+    # Abgeleitet aus der nginx-Konfiguration statt gelistet: jeder Upstream des
+    # Webservers muss ein Compose-Dienst sein, der ein Netz mit ihm teilt.
+    $nginxConfRel = 'Docker/nginx/default.conf'
+    $nginxConf = Join-Path $root $nginxConfRel
+    $upstreams = @()
+    if (Test-Path $nginxConf) {
+        foreach ($line in [System.IO.File]::ReadAllLines($nginxConf)) {
+            $code = ($line -split '#', 2)[0]
+            if ($code -match '^\s*(fastcgi_pass|proxy_pass|uwsgi_pass|scgi_pass|grpc_pass)\s+(?:[a-z]+://)?([^\s:;/]+)') {
+                $upstreams += $Matches[2]
+            }
+        }
+    }
+    if ($upstreams.Count -eq 0) {
+        Add-Finding 'network-upstream' ($nginxConfRel + ': kein *_pass-Upstream gefunden (Zero-Match-Schutz: der Contract leitet die Upstreams daraus ab)')
+    }
+    $webNets = @()
+    if ($serviceNetworks.ContainsKey('webserver')) { $webNets = @($serviceNetworks['webserver']) }
+    foreach ($upstream in @($upstreams | Sort-Object -Unique)) {
+        if (-not $serviceNetworks.ContainsKey($upstream)) {
+            Add-Finding 'network-upstream' ('{0}: Upstream "{1}" ist kein Compose-Dienst' -f $nginxConfRel, $upstream)
+            continue
+        }
+        $shared = @($serviceNetworks[$upstream] | Where-Object { $webNets -contains $_ })
+        if ($shared.Count -eq 0) {
+            Add-Finding 'network-upstream' ('{0}: Upstream "{1}" teilt kein Netz mit webserver (502)' -f $nginxConfRel, $upstream)
         }
     }
 }
