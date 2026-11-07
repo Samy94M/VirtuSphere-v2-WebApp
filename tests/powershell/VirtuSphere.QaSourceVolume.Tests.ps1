@@ -252,6 +252,29 @@ Describe 'QA stack reads only the verified copy' {
         (Get-QaStackIdentity 'C:/synthetic').SourceVolume | Should -Be 'virtusphere-qa_qa-repo'
     }
 
+    It 'attaches the phpunit-full container to every network of the stack before it starts (C-07)' {
+        # Abgeleitet aus der Basis-Compose: jedes dort deklarierte Netz ausser
+        # default muss die QA-Identitaet als <Projekt>_<Netz> kennen, sonst
+        # erreicht der Testcontainer webserver:8080 nicht.
+        $compose = (Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docker-compose.yml') -Raw) -replace "`r`n", "`n"
+        $block = [regex]::Match($compose, '(?ms)^networks:\n(.*?)(?=^\S|\z)').Groups[1].Value
+        $declared = @([regex]::Matches($block, '(?m)^  ([A-Za-z0-9_.-]+):') | ForEach-Object { $_.Groups[1].Value })
+        $declared | Should -Contain 'front'
+        $identity = Get-QaStackIdentity 'C:/synthetic'
+        foreach ($net in @($declared | Where-Object { $_ -ne 'default' })) {
+            $identity.FrontNetwork | Should -Be ('{0}_{1}' -f $identity.Project, $net)
+        }
+        $integration = (Get-Content -LiteralPath (Join-Path $script:ModuleDir 'gates-integration.ps1') -Raw) -replace "`r`n", "`n"
+        $phpunitFull = $integration.Substring($integration.IndexOf("Add-Gate -Name 'phpunit-full'"))
+        $phpunitFull = $phpunitFull.Substring(0, $phpunitFull.IndexOf("Add-Gate -Name 'schema-convergence'"))
+        $phpunitFull | Should -Match "'create', '--rm'"
+        $phpunitFull | Should -Match "'--network', \`$qaNetwork"
+        $connect = $phpunitFull.IndexOf("'network', 'connect', `$qaIdentity.FrontNetwork")
+        $connect | Should -BeGreaterThan 0
+        $connect | Should -BeLessThan $phpunitFull.IndexOf("'start', '--attach'")
+        $phpunitFull | Should -Not -Match "Invoke-Tool 'docker' @\('run'"
+    }
+
     It 'checks the copy before any Playwright run or worker pause' {
         $integration = (Get-Content -LiteralPath (Join-Path $script:ModuleDir 'gates-integration.ps1') -Raw) -replace "`r`n", "`n"
         $suite = $integration.Substring($integration.IndexOf('function Invoke-PlaywrightSuite'))

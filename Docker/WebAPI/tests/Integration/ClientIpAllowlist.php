@@ -10,10 +10,12 @@ require_once dirname(__DIR__, 2) . '/lib/db.php';
  * dynamischer Skip nie legitim (ADR-0015-Ergaenzung), also stellt der Test den
  * Zustand her, den er behauptet zu pruefen.
  *
- * Die eigene Client-IP kommt aus gethostbyname(gethostname()): die Wire-Tests
- * laufen per Definition im Compose-Netz gegen webserver:8080 (Default in
- * tests/bootstrap.php), und genau diese Container-IP sieht der Endpoint als
- * REMOTE_ADDR. restoreClientIpAllowlist() stellt in tearDown den
+ * Die eigene Client-IP ist die Adresse, die der Endpoint als REMOTE_ADDR sieht:
+ * die eigene IPv4 im Subnetz des Ziels aus tests/bootstrap.php (Default
+ * webserver:8080). Seit der Netztrennung (C-07) haengt ein Testcontainer an
+ * zwei Netzen, und gethostbyname(gethostname()) liefert dann eine beliebige der
+ * beiden Adressen; es bleibt nur der Rueckfall, wenn keine Schnittstelle im
+ * Zielnetz liegt. restoreClientIpAllowlist() stellt in tearDown den
  * Ausgangszustand exakt wieder her, damit ein Lauf gegen den Dev-Stack dessen
  * Allowlist nicht veraendert.
  */
@@ -27,6 +29,25 @@ trait ClientIpAllowlist
 
     private function ownClientIp(): string
     {
+        $targetHost = parse_url(virtusphere_test_base_url(), PHP_URL_HOST);
+        $targetIp = is_string($targetHost) && $targetHost !== '' ? gethostbyname($targetHost) : '';
+        $target = filter_var($targetIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? ip2long($targetIp) : false;
+        if ($target !== false) {
+            $interfaces = net_get_interfaces();
+            foreach (is_array($interfaces) ? $interfaces : [] as $interface) {
+                $unicast = is_array($interface) && is_array($interface['unicast'] ?? null) ? $interface['unicast'] : [];
+                foreach ($unicast as $address) {
+                    $ip = is_array($address) && is_string($address['address'] ?? null) ? $address['address'] : '';
+                    $mask = is_array($address) && is_string($address['netmask'] ?? null) ? $address['netmask'] : '';
+                    $ipLong = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? ip2long($ip) : false;
+                    $maskLong = filter_var($mask, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? ip2long($mask) : false;
+                    if ($ipLong !== false && $maskLong !== false && ($ipLong & $maskLong) === ($target & $maskLong)) {
+                        return $ip;
+                    }
+                }
+            }
+        }
+
         $host = (string) gethostname();
         $ip = gethostbyname($host);
         self::assertNotSame($host, $ip, 'Eigene Container-IP nicht bestimmbar (gethostbyname).');

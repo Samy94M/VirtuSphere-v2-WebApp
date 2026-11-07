@@ -220,18 +220,25 @@ function Register-IntegrationCheckGates {
             return New-InfraResult 'QA-Worker vor phpunit-full nicht quieszierbar' $stopped.Output
         }
 
-        # docker run mit dem Pruefstand aus qa-repo (tree/ als /repo, OV1) im
-        # QA-Netz statt exec in den App-Container: dieselben Dateien wie der Stack,
+        # Eigener Container mit dem Pruefstand aus qa-repo (tree/ als /repo, OV1)
+        # in den QA-Netzen statt exec in den App-Container: dieselben Dateien wie der Stack,
         # ohne 9p-Freigabe (KB2: Unit-Suite 884 s ueber 9p, 119 s aus dem Volume;
         # die errno=12 dieses Gates lagen dort). Die Repo-Level-Contract-Tests sehen ihre Dateien, die Integrationstests
         # erreichen mysql und webserver:8080 des QA-Projekts, und --fail-on-skipped
         # macht jeden dynamischen Skip rot (ADR-0015-Ergaenzung: in dieser Lane
         # ist ein Skip nie legitim).
+        # Netztrennung (C-07): mysql liegt nur im default-, webserver nur im
+        # front-Netz. Der Container entsteht deshalb im default-Netz, bekommt vor
+        # dem Start front dazu (create/connect/start statt run, das unter aelteren
+        # Docker-Versionen nur ein --network kennt) und raeumt sich per --rm selbst
+        # weg. Die Allowlist-Tests waehlen ihre Adresse im Subnetz von webserver
+        # (tests/Integration/ClientIpAllowlist.php).
         $r = $null
         $restarted = $null
+        $testContainer = $null
         try {
             $qaAppEnvFile = Get-QaAppEnvFile
-            $r = Invoke-Tool 'docker' @('run', '--rm',
+            $created = Invoke-Tool 'docker' @('create', '--rm',
                 '--mount', ('type=volume,source={0},target=/repo,volume-subpath=tree,volume-nocopy=true' -f $qaIdentity.SourceVolume),
                 '-w', '/repo/Docker/WebAPI',
                 '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'),
@@ -242,13 +249,30 @@ function Register-IntegrationCheckGates {
                 '-e', 'ANSIBLE_SOURCE_DIR=/repo/Ansible',
                 $toolImages.php, 'php', 'vendor/bin/phpunit', '--fail-on-skipped',
                 '--log-junit', '/qa-evidence/phpunit-full.xml')
+            $createdId = @(@($created.Output) | Where-Object { "$_" -match '^[0-9a-f]{12,64}$' } | Select-Object -Last 1)
+            if ($created.ExitCode -ne 0 -or $createdId.Count -ne 1) {
+                $r = @{ ExitCode = 2; Output = @('phpunit-full-Container nicht erzeugt') + @($created.Output); Infra = $true }
+            } else {
+                $testContainer = "$($createdId[0])"
+                $connected = Invoke-Tool 'docker' @('network', 'connect', $qaIdentity.FrontNetwork, $testContainer)
+                if ($connected.ExitCode -ne 0) {
+                    $r = @{ ExitCode = 2; Output = @(('phpunit-full-Container nicht an {0} angebunden' -f $qaIdentity.FrontNetwork)) + @($connected.Output); Infra = $true }
+                } else {
+                    $r = Invoke-Tool 'docker' @('start', '--attach', $testContainer)
+                    $testContainer = $null
+                }
+            }
         } finally {
+            # Nur ein nie gestarteter Container bleibt liegen (--rm greift erst
+            # nach einem Start); genau dieser eine wird per ID entfernt.
+            if ($testContainer) { $null = Invoke-Tool 'docker' @('rm', '--force', $testContainer) }
             $restarted = Invoke-QaCompose (@('up', '-d', '--wait') + $qaTestWorkers)
         }
         if ($null -eq $restarted -or $restarted.ExitCode -ne 0) {
             $restartOutput = if ($null -eq $restarted) { @('worker restart did not return a result') } else { @($restarted.Output) }
             return New-InfraResult 'QA-Worker nach phpunit-full nicht wieder healthy' (@($r.Output) + $restartOutput)
         }
+        if ($null -ne $r -and $r.Infra) { return New-InfraResult (@($r.Output)[0]) $r.Output }
         Format-ToolResult $r 'vollstaendige PHPUnit-Suite gruen (ohne Skips)' 'PHPUnit-Suite rot oder geskippt'
     }
 
