@@ -93,7 +93,9 @@ function auth_release_login_locks(mysqli $db, array $names): void
  */
 function auth_reserve_login_attempt(mysqli $db, string $username, string $source): array
 {
-    if (!auth_attempt_source_schema_available($db) || !auth_attempt_result_schema_available($db)) {
+    // Picks the whole reservation flow before the first statement, so this
+    // stays a probe (C3); the counters below answer from its verdict.
+    if (!auth_schema_features_present($db, [VIRTUSPHERE_SCHEMA_ATTEMPT_SOURCE, VIRTUSPHERE_SCHEMA_ATTEMPT_RESULT])) {
         if (auth_failed_ip_attempt_count($db) >= VIRTUSPHERE_LOGIN_IP_FAILURE_LIMIT) {
             return ['ok' => false, 'id' => 0, 'reason' => 'ip_locked'];
         }
@@ -269,7 +271,7 @@ function auth_finish_infrastructure_login(mysqli $db, int $attemptId): void
  */
 function auth_local_login_lock_ends(mysqli $db, array $names): array
 {
-    if ($names === [] || !auth_attempt_source_schema_available($db) || !auth_attempt_result_schema_available($db)) {
+    if ($names === []) {
         return [];
     }
     $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
@@ -279,18 +281,28 @@ function auth_local_login_lock_ends(mysqli $db, array $names): array
     }
     $keys = array_keys($nameByKey);
     $window = VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES;
-    // csp-allow: interpolated-sql
-    $stmt = $db->prepare(
-        "SELECT username, ip_address, DATE_ADD(attempted_at, INTERVAL ? MINUTE) AS frees_at FROM deploy_login_attempts
-         WHERE auth_source = ? AND result IN ('pending','credential_failure') AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)
-           AND username IN (" . implode(',', array_fill(0, count($keys), '?')) . ')
-         ORDER BY attempted_at DESC, id DESC'
+    // Without the source and result columns no lock is known (C3: try first).
+    $rows = auth_schema_attempt(
+        $db,
+        [VIRTUSPHERE_SCHEMA_ATTEMPT_SOURCE, VIRTUSPHERE_SCHEMA_ATTEMPT_RESULT],
+        static function () use ($db, $keys, $source, $window): array {
+            // csp-allow: interpolated-sql
+            $stmt = $db->prepare(
+                "SELECT username, ip_address, DATE_ADD(attempted_at, INTERVAL ? MINUTE) AS frees_at FROM deploy_login_attempts
+                 WHERE auth_source = ? AND result IN ('pending','credential_failure') AND attempted_at > DATE_SUB(NOW(), INTERVAL ? MINUTE)
+                   AND username IN (" . implode(',', array_fill(0, count($keys), '?')) . ')
+                 ORDER BY attempted_at DESC, id DESC'
+            );
+            $stmt->bind_param('isi' . str_repeat('s', count($keys)), $window, $source, $window, ...$keys);
+            $stmt->execute();
+
+            return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        },
+        static fn (): array => [],
     );
-    $stmt->bind_param('isi' . str_repeat('s', count($keys)), $window, $source, $window, ...$keys);
-    $stmt->execute();
     $seen = [];
     $ends = [];
-    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+    foreach ($rows as $row) {
         $key = (string) $row['username'];
         $budget = $key . "\0" . (string) $row['ip_address'];
         $seen[$budget] = ($seen[$budget] ?? 0) + 1;
@@ -306,15 +318,21 @@ function auth_local_login_lock_ends(mysqli $db, array $names): array
 /** Removes the counted failures of a local account from every address; the admin "clear lock" action. */
 function auth_clear_local_login_lock(mysqli $db, string $name): int
 {
-    if (!auth_attempt_source_schema_available($db) || !auth_attempt_result_schema_available($db)) {
-        return 0;
-    }
     $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
     $nameKey = auth_login_name_key($name, $source);
     $failure = VIRTUSPHERE_LOGIN_RESULT_CREDENTIAL_FAILURE;
-    $stmt = $db->prepare('DELETE FROM deploy_login_attempts WHERE username = ? AND auth_source = ? AND result = ?');
-    $stmt->bind_param('sss', $nameKey, $source, $failure);
-    $stmt->execute();
 
-    return $stmt->affected_rows;
+    // The DELETE fails on the names at prepare, before it removes anything (C3).
+    return auth_schema_attempt(
+        $db,
+        [VIRTUSPHERE_SCHEMA_ATTEMPT_SOURCE, VIRTUSPHERE_SCHEMA_ATTEMPT_RESULT],
+        static function () use ($db, $nameKey, $source, $failure): int {
+            $stmt = $db->prepare('DELETE FROM deploy_login_attempts WHERE username = ? AND auth_source = ? AND result = ?');
+            $stmt->bind_param('sss', $nameKey, $source, $failure);
+            $stmt->execute();
+
+            return (int) $stmt->affected_rows;
+        },
+        static fn (): int => 0,
+    );
 }

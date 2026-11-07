@@ -139,15 +139,13 @@ function login(string $username, string $password, ?mysqli $db = null, string $s
 function auth_login_local(mysqli $db, string $username, string $password, int $attemptId = 0): array
 {
     $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
-    if (auth_user_source_schema_available($db)) {
-        $stmt = $db->prepare('SELECT id, name, auth_source, password, email, role, is_active, must_change_password FROM deploy_users WHERE name = ? AND auth_source = ? LIMIT 1');
-        $stmt->bind_param('ss', $username, $source);
-    } else {
-        $stmt = $db->prepare("SELECT id, name, 'local' AS auth_source, password, email, role, is_active, must_change_password FROM deploy_users WHERE name = ? LIMIT 1");
-        $stmt->bind_param('s', $username);
-    }
-    $stmt->execute();
-    $user = $stmt->get_result()->fetch_assoc();
+    // The first reader of a sign-in request: tries the current columns (C3).
+    $user = auth_schema_attempt(
+        $db,
+        [VIRTUSPHERE_SCHEMA_USER_SOURCE],
+        static fn (): ?array => repo_fetch_one($db, 'SELECT id, name, auth_source, password, email, role, is_active, must_change_password FROM deploy_users WHERE name = ? AND auth_source = ? LIMIT 1', 'ss', [$username, $source]),
+        static fn (): ?array => repo_fetch_one($db, "SELECT id, name, 'local' AS auth_source, password, email, role, is_active, must_change_password FROM deploy_users WHERE name = ? LIMIT 1", 's', [$username]),
+    );
 
     // One full-cost comparison for known, deactivated and unknown names (C-04).
     // A lock is the per-address budget the reservation already enforced (C-04c);
@@ -279,14 +277,16 @@ function current_user(?mysqli $db = null): ?array
     }
 
     $db = $db ?? db();
-    $userSelect = auth_user_source_schema_available($db)
-        ? 'SELECT id, name, auth_source, email, role, is_active, must_change_password, last_seen_at, ad_object_guid, ad_upn, ad_sam_account_name, ad_display_name, ad_account_enabled, ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1'
-        : "SELECT id, name, 'local' AS auth_source, email, role, is_active, must_change_password, last_seen_at, NULL AS ad_object_guid, NULL AS ad_upn, NULL AS ad_sam_account_name, NULL AS ad_display_name, NULL AS ad_account_enabled, NULL AS ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1";
-    $stmt = $db->prepare($userSelect);
-    $stmt->bind_param('i', $userId);
-    $stmt->execute();
-    $user = $stmt->get_result()->fetch_assoc();
-    if (!$user || (int) $user['is_active'] !== 1) {
+    // Runs on every authenticated request, so it tries the current columns
+    // instead of probing the schema first (C3); later readers in the request
+    // answer from the remembered verdict.
+    $user = auth_schema_attempt(
+        $db,
+        [VIRTUSPHERE_SCHEMA_USER_SOURCE],
+        static fn (): ?array => repo_fetch_one($db, 'SELECT id, name, auth_source, email, role, is_active, must_change_password, last_seen_at, ad_object_guid, ad_upn, ad_sam_account_name, ad_display_name, ad_account_enabled, ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1', 'i', [$userId]),
+        static fn (): ?array => repo_fetch_one($db, "SELECT id, name, 'local' AS auth_source, email, role, is_active, must_change_password, last_seen_at, NULL AS ad_object_guid, NULL AS ad_upn, NULL AS ad_sam_account_name, NULL AS ad_display_name, NULL AS ad_account_enabled, NULL AS ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1", 'i', [$userId]),
+    );
+    if ($user === null || (int) $user['is_active'] !== 1) {
         return null;
     }
 
