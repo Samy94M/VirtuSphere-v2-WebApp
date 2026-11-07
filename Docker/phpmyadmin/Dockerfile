@@ -11,10 +11,12 @@
 # are byte-identical; only PHP and the Debian packages changed.
 #
 # The rebuilt tree still ships twig 3.11.3 (9 fixable Critical/High findings,
-# four of them Critical) and symfony/cache 5.4.46 (one more). A digest bump
-# cannot answer that, so this stage updates exactly those two packages against
-# phpMyAdmin's own constraint (`twig/twig: ^3.3.5`) and copies only the result
-# forward. Composer, git and unzip stay in the builder: the shipped image gets
+# four of them Critical), symfony/cache 5.4.46 (one more) and, since the
+# advisory of November 2026, symfony/expression-language 5.4.45 (CVE-2026-109449,
+# fixed in 5.4.54). A digest bump cannot answer that, so this stage updates
+# exactly those three packages against phpMyAdmin's own constraints
+# (`twig/twig: ^3.3.5`, `symfony/expression-language: ^5.2.3`) and copies only
+# the result forward. Composer, git and unzip stay in the builder: the shipped image gets
 # the vendor tree, not the toolchain that produced it. The tree is handed on
 # read-only again, the way the base image ships it.
 FROM phpmyadmin:5.2.3@sha256:62a50b1419fe55b9b4c3cd6f5aed03a18f8f5b4a236f24735d76400bea75a5ff AS vendor
@@ -24,7 +26,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends git unzip; \
     chmod -R u+w composer.json composer.lock vendor; \
-    COMPOSER_ALLOW_SUPERUSER=1 composer update twig/twig symfony/cache \
+    COMPOSER_ALLOW_SUPERUSER=1 composer update twig/twig symfony/cache symfony/expression-language \
         --no-dev --no-interaction --no-progress --no-scripts --optimize-autoloader; \
     chmod -R a-w vendor composer.lock
 
