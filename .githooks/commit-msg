@@ -1,4 +1,5 @@
 #!/bin/sh
-# Namensschutz (NS1): Commit-Nachricht (bis zur Scherenzeile von "commit -v")
-# gegen die private Namensliste pruefen. Einrichtung: docs/QA.md.
+# Namensschutz (NS1, NS3): Commit-Nachricht (bis zur Scherenzeile von
+# "commit -v") gegen die Musterliste und die optionale private Namensliste
+# pruefen. Einrichtung: docs/QA.md.
 exec sh "$(dirname "$0")/../scripts/check-name-denylist.sh" --message "$1"

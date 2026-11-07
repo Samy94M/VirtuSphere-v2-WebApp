@@ -1,0 +1,117 @@
+# VirtuSphere Musterliste fuer den Namensschutz (NS3). Getrackt und oeffentlich:
+# hier stehen NUR Muster und belegt synthetische oder oeffentliche Werte, nie
+# ein echter Servername, eine Prod-IP, ein echter Site-Code oder eine echte MAC.
+# Pflege: die Koordination (nicht der Nutzer). Format im Kopf von
+# scripts/check-name-denylist.sh, Einrichtung in docs/QA.md (Name Denylist Hook).
+#
+# re:     Treffermuster (POSIX-ERE, klein, ganzes Wort, ohne {n,m})
+# allow:  Freigabe; erfasst sie den Text eines re:-Treffers ganz, zaehlt er nicht
+#
+# Freigaben nur fuer Werte, deren synthetische oder oeffentliche Herkunft im
+# Repo belegt ist. Keine pauschale Freigabe privater Bereiche (10/8, 172.16/12,
+# 192.168/16): dort liegen echte Prod-Werte. Unklares nicht freigeben, sondern
+# an die Koordination melden. Neue Tests nehmen Dokumentationswerte
+# (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, example.test,
+# 00:00:5E:00:53:xx) statt einer neuen Freigabe.
+#
+# Ein Oktett (0-255) ausgeschrieben, weil Muster keine Variablen kennen:
+#   (25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
+
+# --- IPv4 -------------------------------------------------------------------
+# Private Bereiche, CGNAT und Link-Local immer, auch ohne Port oder Praefix.
+re:10\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
+re:172\.(1[6-9]|2[0-9]|3[01])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
+re:192\.168\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
+re:100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
+re:169\.254\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
+# Jede andere IPv4 nur mit Praefixlaenge oder Port: ohne sie gleicht eine
+# Adresse einer Versionsnummer oder OID.
+re:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(/[0-9][0-9]?|:[0-9][0-9]*)
+
+# Dokumentationsbereiche (RFC 5737), Loopback, 0.0.0.0, Netzmasken.
+allow:(192\.0\.2|198\.51\.100|203\.0\.113)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(/[0-9][0-9]?|:[0-9][0-9]*)?
+allow:127\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(/[0-9][0-9]?|:[0-9][0-9]*)?
+allow:0\.0\.0\.0(/[0-9][0-9]?|:[0-9][0-9]*)?
+allow:255\.(0|128|192|224|240|248|252|254|255)\.(0|128|192|224|240|248|252|254|255)\.(0|128|192|224|240|248|252|254|255)(/[0-9][0-9]?)?
+# Docker-Standardpools und das Beispielnetz aus docs/operations/go-live.md.
+allow:172\.17\.0\.[01](/16)?
+allow:172\.31\.0\.0(/16)?
+allow:192\.168\.0\.0(/16|/20)?
+allow:10\.250\.0\.0(/24)?
+# Einzelne synthetische Testwerte in privaten Bereichen (Tests, Fixtures,
+# Platzhalter); NS2 hat echte Altwerte durch einen Teil davon ersetzt.
+allow:10\.0\.0\.(1|2|5|6|7|8|9|10|11|12|20|21|30|31|40|44)(:[0-9][0-9]*)?
+allow:10\.0\.1\.(1|10)
+allow:10\.0\.5\.(11|12|13|21|22)
+allow:10\.1\.2\.(3|4)
+allow:10\.9\.9\.(1|2|10)
+allow:10\.10\.10\.10(:[0-9][0-9]*)?
+allow:10\.20\.30\.40
+allow:10\.23\.0\.20
+allow:10\.23\.250\.1
+allow:10\.9[01]\.0\.(1|10)
+allow:10\.99\.0\.(1|7|8|42)
+
+# --- UNC-Pfade --------------------------------------------------------------
+# \\host\freigabe roh und als Zeichenkettenliteral mit verdoppelten
+# Backslashes; der Host beginnt mit Buchstabe oder Ziffer und hat mindestens
+# zwei Zeichen (sonst traefen Escapes wie \\r\n).
+re:\\\\[a-z0-9][a-z0-9_.$-]+\\[a-z0-9_.$-]+
+re:\\\\\\\\[a-z0-9][a-z0-9_.$-]+\\\\[a-z0-9_.$-]+
+allow:(\\\\|\\\\\\\\)(srv01|server|host|other|other01|fixture|networkcomputer)(\\|\\\\)[a-z0-9_.$-]+
+allow:(\\\\|\\\\\\\\)(srv01\.corp\.example|fileserver\.example\.test)(\\|\\\\)[a-z0-9_.$-]+
+# Platzhalter fuer den MECM-Server in Doku und Tests (Ermessen, NS3-Register).
+allow:(\\\\|\\\\\\\\)(mecm|mecm01|mecm-01|mecm-server)(\\|\\\\)[a-z0-9_.$-]+
+
+# --- FQDNs ------------------------------------------------------------------
+# Interne Endungen und die gaengigen oeffentlichen. Dateiendungen, die zugleich
+# Laenderendungen sind (.md, .sh, .py, .ps), und Endungen, die in Code als
+# Methode vorkommen (.at, .info), sind bewusst nicht dabei.
+re:([a-z0-9][a-z0-9-]*\.)+(local|localdomain|lan|intern|internal|intra|corp|home)
+re:([a-z0-9][a-z0-9-]*\.)+(com|net|org|de|ch|eu|io|gov|edu)
+
+# Synthetische Domains.
+allow:([a-z0-9-]+\.)*(example|contoso)\.(com|net|org|local|lan|corp|de)
+allow:([a-z0-9-]+\.)*example\.local
+# Synthetische Hosts ohne Domainteil in Tests, Platzhaltern und Hilfetexten
+# (Produktname, Rollen, Testmarken); ein Name mit Firmendomain faellt weiter.
+allow:(virtusphere|portal|portal\.virtusphere|ansible|esxi|esxi01|esxi-01|test|host|override|ld|corp|e2e-https|e2e-ad-https|a-b|a-|ab-cd\.ef-gh|web01|web01\.intern)\.(lan|local|intern)
+# Einbuchstabige Labels (Testwerte, minifiziertes JavaScript) und Code, der
+# wie ein Name aussieht (Python Path.home(), JavaScript this.internal).
+allow:[a-z]\.(local|lan|internal|intern|home)
+allow:(path|this)\.(home|internal|local)
+allow:system\.(io|net)
+
+# Oeffentliche Hosts aus Doku, Links und vendor/ (registrierbare Domain samt
+# Subdomains). Neue oeffentliche Quellen hier ergaenzen.
+allow:([a-z0-9-]+\.)*(a|afilina|alt-three|amazon|ansible|anthropic|apple|ascii-table|asquaredozen|bar|blogspot|c4model|broadcom|caniuse|carbondesignsystem|cdn77|chargeover|chatgpt|choosealicense|claude|cloudflare|datadoghq|di-mgt|djangoproject|docker|emc|foo|free-electrons|getbootstrap|git-scm|github|githubusercontent|gitlab|gmail|google|googleapis|googlesource|goteleport|gstatic|hashicorp|herodevs|imgur|infoq|inviqa|iodigital|ircmaxell|jetbrains|keepachangelog|lambdatest|liberapay|libtomcrypt|maithean|microsoft|modeling-languages|mysql|netapp|netscape|nngroup|obj-sys|oneuptime|openai|opensourcepledge|openssh|packagist|paragonie|patreon|phpbb|phpseclib|phpstan|plus|reddit|redhat|rightcapital|route4me|rsa|sagepub|setasign|shopware|ssh|stackexchange|stackoverflow|stateworks|symfony|testmo|testmuai|thecodingmachine|ticketswap|tidelift|tideways|tobtu|togetter|tronic-media|typo3|ubuntu|vandyke|vmware|wallbash)\.com
+allow:([a-z0-9-]+\.)*(arc42|archive|arxiv|bearssl|chromium|dokuwiki|ecc-brainpool|fedorahosted|fedoraproject|freedesktop|getcomposer|getpsalm|gnu|greenend|httpoxy|hyperelliptic|iana|ieee|ietf|jquery|js|kernel|libssh|man7|mathforum|mindrot|mozilla|nginx|nodejs|npmjs|openbsd|opendev|opends|opengroup|opensource|openssl|opentest4j|owasp|packagist|php-fig|phpstan|potencier|pugx|python|rfc-editor|secg|semanticscholar|semver|spdx|tartarus|travis-ci|uclibc|w3|whatwg|wikibooks|wikipedia|xdebug)\.org
+allow:([a-z0-9-]+\.)*(bubbleshooter|campoint|die|launchpad|openwall|php|researchgate|sourceforge)\.net
+allow:([a-z0-9-]+\.)*(blackfire|codecov|coveralls|docker|ghcr|github|grpc|healthchecks|kubernetes|opentelemetry|phar|readthedocs|shields|spacelift)\.io
+allow:([a-z0-9-]+\.)*(blankerts|check24|kore-nordmann|naderman|phpeople|phpunit|sebastian-bergmann|teletrust|vema-eg|zufall)\.de
+allow:([a-z0-9-]+\.)*(asit-asso|datasphere)\.ch
+allow:([a-z0-9-]+\.)*(boisestate|eku|oregonstate|psu|stanford|ucsd)\.edu
+allow:([a-z0-9-]+\.)*nist\.gov
+
+# --- MECM-Site-Code -----------------------------------------------------------
+# WMI-Namensraum site_<code> und Zuweisungen an SiteCode/site_code.
+re:site_[a-z0-9][a-z0-9][a-z0-9]
+re:site_?code["' ]*(=>|=|:)?[ ]*["'][a-z0-9][a-z0-9][a-z0-9]["']
+allow:site_(xyz|x99)
+allow:site_?code["' ]*(=>|=|:)?[ ]*["'](xyz|x99)["']
+
+# --- MAC-Adressen -------------------------------------------------------------
+# Sechs Hex-Paare mit ':' oder '-'.
+re:[0-9a-f][0-9a-f][:-][0-9a-f][0-9a-f][:-][0-9a-f][0-9a-f][:-][0-9a-f][0-9a-f][:-][0-9a-f][0-9a-f][:-][0-9a-f][0-9a-f]
+# Dokumentationsbereich (RFC 7042) und die synthetischen Folgen der Tests.
+allow:00[:-]00[:-]5e[:-]00[:-]53[:-][0-9a-f][0-9a-f]
+allow:(00|02)[:-]11[:-]22[:-]33[:-]44[:-][0-9a-f][0-9a-f]
+allow:(00|02)[:-]50[:-]56[:-]aa[:-]bb[:-][0-9a-f][0-9a-f]
+allow:(00|02)[:-]50[:-]56[:-]ab[:-]cd[:-]ef
+allow:00[:-]50[:-]56[:-](ee[:-]00[:-]01|ff[:-]ee[:-]dd)
+allow:02[:-]00[:-]00[:-]00[:-][0-9a-f][0-9a-f][:-][0-9a-f][0-9a-f]
+allow:02[:-]00[:-]5e[:-](10[:-]20[:-]30|20[:-]20[:-]20)
+allow:(02[:-])?aa[:-]bb[:-]cc[:-]dd[:-](ee[:-])?[0-9a-f][0-9a-f]
+allow:02[:-]ab[:-]cd[:-]ef[:-]00[:-]11
+# Beispiel-Fingerabdruck aus RFC 4716 in vendor/phpseclib.
+allow:(c1[:-]b1[:-]30[:-]29[:-]d7[:-]b8|de[:-]6c[:-]97[:-]77[:-]10[:-]d7)

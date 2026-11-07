@@ -1,20 +1,24 @@
-# VirtuSphere Namensliste (privat). NIE in ein Repo legen oder committen.
+# VirtuSphere Namensliste (privat, optional). NIE in ein Repo legen oder committen.
 # Ablage: $HOME/.config/virtusphere/name-denylist.txt
-# (anderer Ort: Umgebungsvariable VIRTUSPHERE_NAME_DENYLIST)
+# (anderer Ort: Umgebungsvariable VIRTUSPHERE_NAME_DENYLIST; die Datei muss
+# dann existieren). Ohne Datei am Standardort gilt nur die getrackte
+# Musterliste .githooks/name-patterns.txt.
+#
+# Auch hier keine echten Werte: nur Muster oder synthetische Zeichenketten,
+# gepflegt von der Koordination. Echte Servernamen, Prod-IPs, Site-Code oder
+# MACs gehoeren in keine Liste.
 #
 # Eine Zeile je Eintrag. Leerzeilen und Zeilen mit '#' am Anfang zaehlen nicht.
-# Vergleich ohne Gross-/Kleinschreibung als feste Zeichenkette (Teilstring).
+# Ohne Praefix: feste Zeichenkette (Teilstring), ohne Gross-/Kleinschreibung.
 # Praefix "word:" verlangt ein ganzes Wort: kein Buchstabe, keine Ziffer und
-# kein '_' direkt davor oder danach (sinnvoll fuer kurze Codes und IPs, damit
-# eine IP nicht jede laengere mit gleichem Anfang trifft).
-#
-# Hierher gehoeren Servernamen, FQDNs und Domainteile, Prod-IPs, DP-Namen,
-# Site-Code, echte MACs sowie VM- und Rolloutnamen aus Prod.
+# kein '_' direkt davor oder danach.
+# Praefix "re:" ist ein POSIX-ERE-Muster (klein, ganzes Wort, ohne {n,m}),
+# "allow:" gibt einen re:-Treffer frei, dessen Text es ganz erfasst.
 #
 # Beispiele (synthetisch, nicht eintragen):
 #   srv-a.example.test
-#   example.test
 #   word:192.0.2.10
-#   word:XY1
+#   re:srv-[a-z]+\.example\.test
+#   allow:srv-ok\.example\.test
 #
 # Pruefen: sh scripts/check-name-denylist.sh --check-list
