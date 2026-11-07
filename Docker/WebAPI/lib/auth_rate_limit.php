@@ -265,6 +265,7 @@ function auth_finish_infrastructure_login(mysqli $db, int $attemptId): void
  *
  * @param list<string> $names local account names
  * @return array<string,string> account name => lock end (database time)
+ * @phpstan-impure it reads the counter; two calls around a sign-in differ.
  */
 function auth_local_login_lock_ends(mysqli $db, array $names): array
 {

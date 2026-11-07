@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # scripts/lib/doc-fragments.sh - Form der CHANGELOG- und Register-Fragmente (B1).
 #
 # Wird von scripts/check-doc-fragments.sh (Waechter) und
@@ -10,7 +11,10 @@
 #   docs/register/JJJJ-MM-TT-<PAKET>.md Registereintrag eines Pakets, bleibt dauerhaft
 # README.md in beiden Ordnern beschreibt die Form und ist kein Fragment.
 
+# Die beiden Ordner lesen die ladenden Skripte (SC2034 sieht nur diese Datei).
+# shellcheck disable=SC2034
 DOC_FRAGMENT_CHANGELOG_DIR='docs/changelog.d'
+# shellcheck disable=SC2034
 DOC_FRAGMENT_REGISTER_DIR='docs/register'
 # Paketkennung wie im Projekt ueblich: SEC2, RL1-D7, K21-F, BK-N5.
 DOC_FRAGMENT_ID_RE='[A-Z][A-Z0-9]*(-[A-Z0-9]+)*'

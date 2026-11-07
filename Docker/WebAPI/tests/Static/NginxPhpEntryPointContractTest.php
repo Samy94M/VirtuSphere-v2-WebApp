@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use PhpParser\Node\Expr;
+use PhpParser\Node\Stmt;
+use PhpParser\ParserFactory;
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/constants.php';
@@ -11,8 +14,9 @@ require_once dirname(__DIR__, 2) . '/lib/https_config.php';
  * SEC3 (C-09, and the derived half of C-03): nginx hands only real entry points
  * to PHP-FPM and serves only the asset tree. Derived, not listed:
  *  - the entry points are the PHP files directly in the webroot or directly in
- *    portal/ that no other webroot file requires; a required one is an include
- *    file and must answer 404;
+ *    portal/ that no other webroot file requires and that do more than declare
+ *    or require; a required one, or a pure library such as function.php (the
+ *    legacy data layer, only requires), is an include file and must answer 404;
  *  - every other file in the webroot (deeper PHP, translations, tool configs,
  *    dot files) must be refused, and only portal/assets/ is served as a file.
  * The test replays nginx's location choice (exact, longest prefix, `^~`, then
@@ -128,6 +132,23 @@ final class NginxPhpEntryPointContractTest extends TestCase
         return $required;
     }
 
+    /** Top level only declares or requires: a library, never an entry point. */
+    private static function isLibrary(string $relative): bool
+    {
+        $nodes = (new ParserFactory())->createForNewestSupportedVersion()
+            ->parse((string) file_get_contents(self::webRoot() . '/' . $relative)) ?? [];
+        foreach ($nodes as $statement) {
+            $declares = $statement instanceof Stmt\Declare_ || $statement instanceof Stmt\Function_
+                || $statement instanceof Stmt\Const_ || $statement instanceof Stmt\Use_ || $statement instanceof Stmt\Nop
+                || ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\Include_);
+            if (!$declares) {
+                return false;
+            }
+        }
+
+        return $nodes !== [];
+    }
+
     public function testOnlyEntryPointsReachFpmAndOnlyAssetsAreServed(): void
     {
         $files = self::webrootFiles();
@@ -138,13 +159,15 @@ final class NginxPhpEntryPointContractTest extends TestCase
         foreach ($files as $relative) {
             $entryCandidate = preg_match('#^(portal/)?[^/]+\.php$#', $relative) === 1;
             $expected[$relative] = match (true) {
-                $entryCandidate && !isset($required[$relative]) => ['fpm'],
+                $entryCandidate && !isset($required[$relative]) && !self::isLibrary($relative) => ['fpm'],
                 str_starts_with($relative, 'portal/assets/') && !str_ends_with($relative, '.php') => ['file'],
                 default => ['deny', '404'],
             };
         }
         $includeOnly = array_values(array_filter($files, static fn (string $f): bool => preg_match('#^[^/]+\.php$#', $f) === 1 && isset($required[$f])));
         self::assertNotSame([], $includeOnly, 'no top-level include file found; the derivation is broken');
+        self::assertTrue(self::isLibrary('function.php'), 'the legacy data layer no longer counts as a library; the library check is broken');
+        self::assertFalse(self::isLibrary('index.php'), 'index.php counts as a library; the library check is broken');
 
         foreach (self::configs() as $label => $config) {
             $locations = self::locations($config);

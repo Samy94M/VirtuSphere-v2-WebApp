@@ -52,7 +52,7 @@ final class PortalClosureSource
     public function __construct(private array $overrides = []) {}
 
     /** @return array<Node> */
-    private function nodes(string $file): array
+    public function nodes(string $file): array
     {
         $nodes = (new ParserFactory())->createForNewestSupportedVersion()->parse($this->overrides[$file] ?? (string) file_get_contents($file));
         return (new NodeTraverser(new NameResolver()))->traverse($nodes ?? []);
