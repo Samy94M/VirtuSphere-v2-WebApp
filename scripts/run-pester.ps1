@@ -107,6 +107,14 @@ function Get-PesterContainerErrorLine {
 # Kindprozess.
 $excludedTag = 'Haertung'
 
+# Coverage ueber den Profiler-Tracer statt ueber Breakpoints (C2, gemessen am
+# 08.11.2026): Testphase 563 s statt 1392 s bei 85,73 % statt 85,94 %. Die 8
+# abweichenden der 3727 Befehle sind Messmethode, kein Testverlust: Breakpoints
+# zaehlen in mehrzeiligen Hashtable-Literalen den ungenutzten else-Zweig als
+# getroffen, der Tracer zaehlt Parameter-Defaults. Pester 6 macht den Tracer
+# zum Standard. Eine Quelle fuer Einzel- und Kindprozess.
+$coverageUseBreakpoints = $false
+
 # Coverage-Befehle eines Laufs, gezaehlt je Position (Datei, Start, Ende): die
 # Position ist die Identitaet, ueber die sich die Kinder exakt vereinigen
 # lassen. Kompakt fuer die Ergebnisdatei: eine Dateitabelle und je Position
@@ -148,6 +156,7 @@ if ($PartitionSpec -ne '') {
             $config.CodeCoverage.Enabled = $true
             $config.CodeCoverage.Path = [string[]]@($spec.coverage.paths)
             $config.CodeCoverage.OutputPath = [string]$spec.coverage.outputPath
+            $config.CodeCoverage.UseBreakpoints = $coverageUseBreakpoints
         }
         $result = Invoke-Pester -Configuration $config
     } catch {
@@ -399,6 +408,7 @@ if (-not $SkipTests) {
         $config.CodeCoverage.Enabled = $true
         $config.CodeCoverage.Path = $coveragePaths
         $config.CodeCoverage.OutputPath = Join-Path ([System.IO.Path]::GetTempPath()) 'vs-pester-coverage.xml'
+        $config.CodeCoverage.UseBreakpoints = $coverageUseBreakpoints
     }
 
     $testFiles = @(Get-ChildItem -LiteralPath $testRoot -Recurse -File -Filter '*.Tests.ps1' | Sort-Object FullName)

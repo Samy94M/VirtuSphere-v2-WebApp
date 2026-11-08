@@ -38,7 +38,7 @@ function New-PesterConfiguration {
         Run          = [pscustomobject]@{ Path = $null; PassThru = $false }
         Output       = [pscustomobject]@{ Verbosity = 'Normal' }
         Filter       = [pscustomobject]@{ ExcludeTag = @() }
-        CodeCoverage = [pscustomobject]@{ Enabled = $false; Path = @(); OutputPath = $null }
+        CodeCoverage = [pscustomobject]@{ Enabled = $false; Path = @(); OutputPath = $null; UseBreakpoints = $true }
     }
 }
 
@@ -87,6 +87,7 @@ function Invoke-Pester {
         $run = New-StubRun -Result $(if ($failedContainers -gt 0) { 'Failed' } else { 'Passed' }) -Total $items.Count -Passed ($items.Count - $failedContainers) `
             -Failed 0 -FailedContainers $failedContainers -FailedBlocks 0 -Containers $containers
         if ($Configuration.CodeCoverage.Enabled) {
+            Write-Host ('stub coverage breakpoints=' + $Configuration.CodeCoverage.UseBreakpoints)
             $hitLines = @(foreach ($item in $items) { @{ 'alpha.Tests.ps1' = 1; 'beta.Tests.ps1' = 2; 'gamma.Tests.ps1' = 3 }[$item] })
             $commands = @(1..4 | ForEach-Object { [pscustomobject]@{ File = 'C:\fake\Common.ps1'; StartLine = $_; StartColumn = 1; EndLine = $_; EndColumn = 9 } })
             $hit = @($commands | Where-Object { $hitLines -contains $_.StartLine })
@@ -240,6 +241,8 @@ Describe 'run-pester.ps1 partitions the Pester suite into child processes' {
             $result.Output | Should -Match ('\[{0}/3\] RUN  Pester-Teil {0}/3 \(1 Dateien\)' -f $k)
             $result.Output | Should -Match ('\[Teil {0}/3\] stub ran (alpha|beta|gamma)\.Tests\.ps1' -f $k)
             $result.Output | Should -Match ('\[{0}/3\] pass Pester-Teil {0}/3: 1 Test\(s\), 0 rot \(\d+\.\ds\)' -f $k)
+            # Coverage ueber den Profiler-Tracer, in jedem Teil.
+            $result.Output | Should -Match ('\[Teil {0}/3\] stub coverage breakpoints=False' -f $k)
         }
         # Jeder Teil allein deckt 25 % ab; vereinigt sind es drei von vier Befehlen.
         $result.Output | Should -Match 'Coverage 75% \(Floor 55%\)'
@@ -248,6 +251,7 @@ Describe 'run-pester.ps1 partitions the Pester suite into child processes' {
         $single = Invoke-StubRunner -Root $script:PartitionRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 1'
         $single.ExitCode | Should -Be 0
         $single.Output | Should -Not -Match 'Pester-Teil'
+        $single.Output | Should -Match 'stub coverage breakpoints=False'
         $single.Output | Should -Match 'Coverage 75% \(Floor 55%\)'
     }
 
