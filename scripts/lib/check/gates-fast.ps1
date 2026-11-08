@@ -335,24 +335,10 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'GitHub-Workflows sauber' 'actionlint meldet Befunde'
     }
 
-    Add-Gate -Name 'ansible-syntax' -Lanes $allLanes -Kind 'container' -Body {
-        $playbooks = @(Get-ChildItem -Path (Join-Path $repoRoot 'Ansible') -Filter '*_playbook.yml' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
-        if ($playbooks.Count -eq 0) { return New-InfraResult 'keine Playbooks unter Ansible/ gefunden (Zero-Match)' }
-        if (-not (Test-DockerImage $toolImages.ansible)) {
-            return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
-        }
-        $source = Get-FastGateSource
-        if ($source.Outcome) { return $source.Outcome }
-        $mount = Get-FastSourceMountArgs $source '/repo'
-        $bad = @()
-        foreach ($pb in $playbooks) {
-            $r = Invoke-Tool 'docker' (@('run', '--rm') + $mount + @('-w', '/repo/Ansible', $toolImages.ansible, 'ansible-playbook', '--syntax-check', $pb))
-            if ($r.ExitCode -ne 0) { $bad += $r.Output }
-        }
-        if ($bad.Count -gt 0) { return Add-FastSourceNote (New-FailResult 'Playbook-Syntaxcheck rot' $bad) $source }
-        Add-FastSourceNote (New-PassResult ("{0} Playbook(s) syntaktisch sauber" -f $playbooks.Count)) $source
-    }
-
+    # Ein eigenes Gate ansible-syntax (ansible-playbook --syntax-check je Playbook)
+    # entfiel mit C2 (R2, Nutzerentscheid 08.11.2026): ansible-lint --strict fuehrt
+    # den Syntaxcheck selbst aus und wurde per Mutation bei YAML-Fehler und
+    # unbekanntem Play-Schluesselwort rot (docs/register/2026-11-08-C2.md).
     Add-Gate -Name 'ansible-lint' -Lanes $allLanes -Kind 'container' -Body {
         if (-not (Test-Path (Join-Path $repoRoot 'Ansible'))) { return New-InfraResult 'kein Ansible/ unter dem Pruef-Root (Zero-Match)' }
         if (-not (Test-DockerImage $toolImages.ansible)) {
@@ -365,8 +351,8 @@ function Register-FastCheckGates {
     }
 
     Add-Gate -Name 'ansible-module-contract' -Lanes $allLanes -Kind 'container' -Body {
-        # ansible-syntax und ansible-lint lesen die Playbooks; keiner der beiden ruft
-        # ein Modul auf. Genau dort lag der Befund: jedes benutzte community.vmware-
+        # ansible-lint (mit Syntaxcheck) liest die Playbooks, ruft aber
+        # kein Modul auf. Genau dort lag der Befund: jedes benutzte community.vmware-
         # Modul importiert vmware_rest_client, der ohne die Python-Bibliothek
         # `requests` abbricht - und die stand weder in der QA-Toolchain noch in den
         # dokumentierten Host-Voraussetzungen. Auf einem nach Doku aufgesetzten

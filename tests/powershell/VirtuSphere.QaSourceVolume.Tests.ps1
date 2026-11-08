@@ -356,7 +356,8 @@ Describe 'Fast gates read the run copy instead of the working tree (C1)' {
     It 'routes php-lint, phpunit-unit, phpstan and every ansible-* gate through Get-FastGateSource' {
         # Abgeleitet aus der Registrierung: ein neues ansible-*-Gate faellt hier auf.
         $ansible = @([regex]::Matches($script:FastSource, "Add-Gate -Name '(ansible-[a-z-]+)'") | ForEach-Object { $_.Groups[1].Value })
-        $ansible.Count | Should -BeGreaterOrEqual 7
+        # 6 seit C2: ansible-syntax entfiel (R2, Nutzerentscheid 08.11.2026).
+        $ansible.Count | Should -BeGreaterOrEqual 6
         foreach ($name in (@('php-lint', 'phpunit-unit', 'phpstan') + $ansible)) {
             $block = Get-GateBlock $name
             $block | Should -Not -BeNullOrEmpty -Because $name
