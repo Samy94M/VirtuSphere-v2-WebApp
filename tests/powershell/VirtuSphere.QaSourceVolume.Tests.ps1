@@ -183,6 +183,211 @@ Describe 'QA source copy and stale-stack guard' {
     }
 }
 
+Describe 'Fast-gate source volume of one run (C1)' {
+    BeforeAll {
+        function Get-QaSourceServiceBlock {
+            $override = (Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/qa/docker-compose.qa.yml') -Raw) -replace "`r`n", "`n"
+            return [regex]::Match($override, '(?ms)^  qa-source:\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|^\S|\z)').Groups[1].Value
+        }
+    }
+
+    BeforeEach {
+        $script:FixtureRoot = New-SourceFixture
+        $repoRoot = $script:FixtureRoot
+        $toolImages = @{ php = 'virtusphere-php:8.4-tooling' }
+        $artifactDir = Join-Path $TestDrive ('virtusphere-qa-20261108-101500-4242-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Path $artifactDir | Out-Null
+        $script:artifactDir = $artifactDir
+        $script:DockerCalls = @()
+        $script:VolumeLines = $null
+        $script:CreateExit = 0
+        Remove-Variable -Name qaSourceManifest, fastSource, fastSourceVolume -Scope Script -ErrorAction SilentlyContinue
+        Mock Invoke-Tool -ParameterFilter { $Exe -eq 'docker' } {
+            $script:DockerCalls += , @($Arguments)
+            $joined = $Arguments -join ' '
+            if ($joined -match '^volume create ') { return @{ ExitCode = $script:CreateExit; Output = @('created'); StartFailed = $false } }
+            if ($joined -match 'qa-source-sync\.sh$') {
+                $evidence = ($joined | Select-String -Pattern '-v (\S+):/qa-evidence').Matches[0].Groups[1].Value
+                $lines = if ($null -ne $script:VolumeLines) { $script:VolumeLines } else {
+                    @(Get-Content -LiteralPath (Join-Path $evidence 'qa-source.checkout.sha256') | ForEach-Object { $_ -replace '  ', '  ./' })
+                }
+                [System.IO.File]::WriteAllLines((Join-Path $evidence 'qa-source.volume.sha256'), [string[]]$lines)
+            }
+            return @{ ExitCode = 0; Output = @(); StartFailed = $false }
+        }
+    }
+
+    It 'fills the given volume through qa-source-sync.sh with the qa-stack selection and comparison, without touching qa-repo' {
+        $result = Sync-QaSourceVolume -Volume 'run-src'
+        $result.class | Should -Be 'pass'
+        $result.detail | Should -Match '6 Dateien'
+        $result.detail | Should -Match 'run-src Datei fuer Datei identisch'
+        $script:DockerCalls.Count | Should -Be 1
+        $copy = $script:DockerCalls[0] -join ' '
+        $copy | Should -Not -Match 'compose'
+        $copy | Should -Match ([regex]::Escape('type=volume,source=run-src,target=/qa-repo,volume-nocopy=true'))
+        $copy | Should -Match ([regex]::Escape($script:FixtureRoot + ':/qa-source:ro'))
+        $copy | Should -Match '--entrypoint sh virtusphere-php:8\.4-tooling /qa-source/Docker/qa/qa-source-sync\.sh$'
+        # Nachweise im eigenen Unterordner; qa-stack desselben Laufs schreibt
+        # seine Listen weiter direkt ins Laufverzeichnis.
+        Test-Path -LiteralPath (Join-Path $script:artifactDir 'fast-source/qa-source.files') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:artifactDir 'qa-source.files') | Should -BeFalse
+        # Das Merkmal "qa-repo in diesem Lauf geprueft" bleibt unberuehrt.
+        Test-Path variable:script:qaSourceManifest | Should -BeFalse
+    }
+
+    It 'refuses a run volume that differs from the checkout' {
+        $script:VolumeLines = @(('0' * 64) + '  ./Docker/WebAPI/lib/app.php')
+        $result = Sync-QaSourceVolume -Volume 'run-src'
+        $result.class | Should -Be 'infrastructure_error'
+        $result.detail | Should -Match 'run-src weicht vom Checkout ab'
+        @($result.output) | Should -Contain 'Inhalt weicht ab: Docker/WebAPI/lib/app.php'
+    }
+
+    It 'starts the copy container with the isolation of the qa-source Compose service' {
+        # Nur die Kommandozeile zaehlt hier; ohne Checkout-Liste meldet der Mock eine Zeile.
+        $script:VolumeLines = @('container output')
+        $null = Invoke-FastSourceCopy -Volume 'run-src' -EvidenceDir $script:artifactDir
+        $copy = @($script:DockerCalls[0])
+        $block = Get-QaSourceServiceBlock
+        $block | Should -Match 'network_mode: none'
+        @($copy[[array]::IndexOf($copy, '--network') + 1]) | Should -Be 'none'
+        $block | Should -Match '(?m)^    read_only: true$'
+        $copy | Should -Contain '--read-only'
+        $tmpfsList = @([regex]::Matches(([regex]::Match($block, '(?m)^    tmpfs:\n((?:      - [^\n]+\n)+)').Groups[1].Value), '- (\S+)') | ForEach-Object { $_.Groups[1].Value })
+        $tmpfsList | Should -Be @('/tmp')
+        foreach ($tmpfs in $tmpfsList) { ($copy -join ' ') | Should -Match ('--tmpfs ' + [regex]::Escape($tmpfs)) }
+        $block | Should -Match '(?m)^    cap_drop:\n      - ALL$'
+        ($copy -join ' ') | Should -Match '--cap-drop ALL'
+        $capAdd = @([regex]::Matches(([regex]::Match($block, '(?m)^    cap_add:\n((?:      - [^\n]+\n)+)').Groups[1].Value), '- (\S+)') | ForEach-Object { $_.Groups[1].Value })
+        $capAdd.Count | Should -BeGreaterThan 0
+        $granted = @(for ($i = 0; $i -lt $copy.Count - 1; $i++) { if ($copy[$i] -eq '--cap-add') { $copy[$i + 1] } })
+        ($granted | Sort-Object) | Should -Be ($capAdd | Sort-Object)
+        $block | Should -Match 'no-new-privileges:true'
+        ($copy -join ' ') | Should -Match '--security-opt no-new-privileges:true'
+        $block | Should -Match ([regex]::Escape('entrypoint: ["sh", "/qa-source/Docker/qa/qa-source-sync.sh"]'))
+        $copy[-1] | Should -Be '/qa-source/Docker/qa/qa-source-sync.sh'
+    }
+
+    It 'creates one volume named after the run directory, copies once and names the copy only at the first gate' {
+        $first = Get-FastGateSource
+        $first.Outcome | Should -BeNullOrEmpty
+        $expected = (Split-Path -Leaf $script:artifactDir) + '-src'
+        $first.Volume | Should -Be $expected
+        $first.Note | Should -Match '^Pruefstand kopiert in [0-9.]+s: .*Datei fuer Datei identisch'
+        ($script:DockerCalls[0] -join ' ') | Should -Be ('volume create --label virtusphere.check=fast-source ' + $expected)
+        $calls = $script:DockerCalls.Count
+        $second = Get-FastGateSource
+        $second.Volume | Should -Be $expected
+        $second.Note | Should -Be ''
+        $script:DockerCalls.Count | Should -Be $calls
+
+        Remove-FastGateSource
+        ($script:DockerCalls[-1] -join ' ') | Should -Be ('volume rm --force ' + $expected)
+        $after = $script:DockerCalls.Count
+        Remove-FastGateSource
+        $script:DockerCalls.Count | Should -Be $after
+    }
+
+    It 'gives every later gate the same infrastructure error when the copy fails, and still removes the volume' {
+        $script:VolumeLines = @(('0' * 64) + '  ./Docker/WebAPI/lib/app.php')
+        $first = Get-FastGateSource
+        $first.Outcome.class | Should -Be 'infrastructure_error'
+        $calls = $script:DockerCalls.Count
+        (Get-FastGateSource).Outcome.detail | Should -Be $first.Outcome.detail
+        $script:DockerCalls.Count | Should -Be $calls
+        Remove-FastGateSource
+        ($script:DockerCalls[-1] -join ' ') | Should -Match '^volume rm --force .+-src$'
+    }
+
+    It 'reports an uncreatable volume as an infrastructure error' {
+        $script:CreateExit = 1
+        $result = Get-FastGateSource
+        $result.Outcome.class | Should -Be 'infrastructure_error'
+        $result.Outcome.detail | Should -Match 'nicht anlegbar'
+        @($script:DockerCalls | Where-Object { ($_ -join ' ') -match 'qa-source-sync' }).Count | Should -Be 0
+    }
+
+    It 'keeps the read-only bind for a check root outside git (guard fixtures) and fails without git' {
+        $plain = Join-Path $TestDrive ('plain-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $plain | Out-Null
+        $repoRoot = $plain
+        $fallback = Get-FastGateSource
+        $fallback.Outcome | Should -BeNullOrEmpty
+        $fallback.Volume | Should -Be ''
+        $fallback.Note | Should -Be 'Pruef-Root ohne Git: Bind-Mount'
+        $script:DockerCalls.Count | Should -Be 0
+        (Get-FastSourceMountArgs $fallback '/repo') | Should -Be @('-v', ($plain + ':/repo:ro'))
+        Remove-FastGateSource
+        $script:DockerCalls.Count | Should -Be 0
+
+        Remove-Variable -Name fastSource -Scope Script -ErrorAction SilentlyContinue
+        Mock Invoke-Tool -ParameterFilter { $Exe -eq 'git' } { return @{ ExitCode = 127; Output = @('git fehlt'); StartFailed = $true } }
+        (Get-FastGateSource).Outcome.class | Should -Be 'infrastructure_error'
+    }
+
+    It 'mounts tree/ of the run volume read-only unless the gate asks for a writable copy' {
+        $source = @{ Volume = 'run-src' }
+        (Get-FastSourceMountArgs $source '/repo') | Should -Be @('--mount', 'type=volume,source=run-src,target=/repo,volume-subpath=tree,volume-nocopy=true,readonly')
+        (Get-FastSourceMountArgs $source '/repo' -Writable) | Should -Be @('--mount', 'type=volume,source=run-src,target=/repo,volume-subpath=tree,volume-nocopy=true')
+        (Get-FastSourceMountArgs @{ Volume = '' } '/checkroot' -Writable) | Should -Be @('-v', ($repoRoot + ':/checkroot'))
+    }
+
+    It 'adds the copy note only to the gate that paid for the copy' {
+        $outcome = New-PassResult 'gruen'
+        (Add-FastSourceNote $outcome @{ Note = 'Pruefstand kopiert in 1s: x' }).detail | Should -Be 'gruen [Pruefstand kopiert in 1s: x]'
+        (Add-FastSourceNote (New-PassResult 'gruen') @{ Note = '' }).detail | Should -Be 'gruen'
+    }
+}
+
+Describe 'Fast gates read the run copy instead of the working tree (C1)' {
+    BeforeAll {
+        $script:FastSource = (Get-Content -LiteralPath (Join-Path $script:ModuleDir 'gates-fast.ps1') -Raw) -replace "`r`n", "`n"
+        function Get-GateBlock {
+            param([string]$Name)
+            $start = $script:FastSource.IndexOf("Add-Gate -Name '$Name'")
+            if ($start -lt 0) { return '' }
+            $next = $script:FastSource.IndexOf('Add-Gate -Name', $start + 10)
+            if ($next -lt 0) { $next = $script:FastSource.Length }
+            return $script:FastSource.Substring($start, $next - $start)
+        }
+    }
+
+    It 'routes php-lint, phpunit-unit, phpstan and every ansible-* gate through Get-FastGateSource' {
+        # Abgeleitet aus der Registrierung: ein neues ansible-*-Gate faellt hier auf.
+        $ansible = @([regex]::Matches($script:FastSource, "Add-Gate -Name '(ansible-[a-z-]+)'") | ForEach-Object { $_.Groups[1].Value })
+        $ansible.Count | Should -BeGreaterOrEqual 7
+        foreach ($name in (@('php-lint', 'phpunit-unit', 'phpstan') + $ansible)) {
+            $block = Get-GateBlock $name
+            $block | Should -Not -BeNullOrEmpty -Because $name
+            $block | Should -Match '\$source = Get-FastGateSource\s+if \(\$source\.Outcome\) \{ return \$source\.Outcome \}' -Because $name
+            $block | Should -Match 'Get-FastSourceMountArgs \$source' -Because $name
+            $block | Should -Match 'Add-FastSourceNote' -Because $name
+            $block | Should -Not -Match ([regex]::Escape("(`$repoRoot + ':/repo")) -Because $name
+            $block | Should -Not -Match ([regex]::Escape("(`$repoRoot + ':/checkroot")) -Because $name
+        }
+    }
+
+    It 'gives only phpunit-unit a writable copy' {
+        foreach ($match in [regex]::Matches($script:FastSource, "Add-Gate -Name '([a-z-]+)'")) {
+            $name = $match.Groups[1].Value
+            $block = Get-GateBlock $name
+            if ($name -eq 'phpunit-unit') { $block | Should -Match "Get-FastSourceMountArgs \`$source '/repo' -Writable" }
+            else { $block | Should -Not -Match '-Writable' -Because $name }
+        }
+    }
+
+    It 'removes the run volume in the finally block of check.ps1' {
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1'), [ref]$tokens, [ref]$errors)
+        $errors | Should -BeNullOrEmpty
+        $finally = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.TryStatementAst] -and $null -ne $node.Finally -and $node.Finally.Extent.Text -match 'QA-Stack bleibt stehen' }, $true))
+        $finally.Count | Should -Be 1
+        $finally[0].Finally.Extent.Text | Should -Match '(?m)^\s*Remove-FastGateSource\s*$'
+    }
+}
+
 Describe 'QA stack reads only the verified copy' {
     BeforeAll {
         $composeBase = (Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docker-compose.yml') -Raw) -replace "`r`n", "`n"

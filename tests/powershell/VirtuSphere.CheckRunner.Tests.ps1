@@ -573,3 +573,115 @@ Describe 'QA stack teardown carries the tools profile (BK-N5)' {
         ($case.Output -join "`n") | Should -Match ([regex]::Escape($expected))
     }
 }
+
+# C1: PHPStan keeps its result cache between Fast runs, in one volume per
+# checkout, serialised by flock; the Release lane runs cold. Whether a cached
+# result is still valid is PHPStan's own decision (config, lock files, versions,
+# file hashes); these cases pin where the cache lives and that the gate can
+# neither share it unlocked nor carry it into a release proof.
+Describe 'PHPStan result cache (C1)' {
+    BeforeAll {
+        . (Join-Path $script:ModuleDir 'qa-identity.ps1')
+        . (Join-Path $script:ModuleDir 'runtime.ps1')
+        $script:FastSource = (Get-Content -LiteralPath (Join-Path $script:ModuleDir 'gates-fast.ps1') -Raw) -replace "`r`n", "`n"
+    }
+
+    BeforeEach {
+        $repoRoot = 'C:/synthetic/checkout-a'
+        $script:DockerCalls = @()
+        $script:CreateExit = 0
+        Mock Invoke-Tool -ParameterFilter { $Exe -eq 'docker' } {
+            $script:DockerCalls += , @($Arguments)
+            if (($Arguments -join ' ') -match '^volume create ') { return @{ ExitCode = $script:CreateExit; Output = @(); StartFailed = $false } }
+            return @{ ExitCode = 0; Output = @(); StartFailed = $false }
+        }
+    }
+
+    It 'derives one stable key per checkout path' {
+        $a = Get-CheckoutCacheKey 'C:/synthetic/checkout-a'
+        $a | Should -Match '^[0-9a-f]{16}$'
+        Get-CheckoutCacheKey 'C:/synthetic/checkout-a/' | Should -Be $a
+        Get-CheckoutCacheKey 'C:\synthetic\checkout-a' | Should -Be $a
+        Get-CheckoutCacheKey 'C:/synthetic/checkout-b' | Should -Not -Be $a
+        if ($env:OS -eq 'Windows_NT') { Get-CheckoutCacheKey 'c:/SYNTHETIC/checkout-a' | Should -Be $a }
+    }
+
+    It 'mounts the checkout volume at the PHPStan tmpDir and runs PHPStan under flock outside the Release lane' {
+        foreach ($lane in @('Fast', 'Integration')) {
+            $script:DockerCalls = @()
+            $setup = Get-PhpStanCacheSetup -Lane $lane
+            $setup.Outcome | Should -BeNullOrEmpty
+            $volume = 'virtusphere-phpstan-cache-' + (Get-CheckoutCacheKey $repoRoot)
+            ($script:DockerCalls[0] -join ' ') | Should -Be ('volume create --label virtusphere.check=phpstan-cache ' + $volume)
+            $setup.Mounts | Should -Be @('--mount', ('type=volume,source={0},target=/tmp/phpstan' -f $volume))
+            $setup.Command | Should -Be @('flock', '/tmp/phpstan/.lock', 'composer')
+        }
+    }
+
+    It 'gives two checkouts two cache volumes' {
+        $a = (Get-PhpStanCacheSetup -Lane 'Fast').Mode
+        $repoRoot = 'C:/synthetic/checkout-b'
+        $b = (Get-PhpStanCacheSetup -Lane 'Fast').Mode
+        $a | Should -Not -Be $b
+    }
+
+    It 'runs the Release lane cold, without any cache volume' {
+        $setup = Get-PhpStanCacheSetup -Lane 'Release'
+        $setup.Mounts.Count | Should -Be 0
+        $setup.Command | Should -Be @('composer')
+        $setup.Mode | Should -Be 'kalt'
+        $script:DockerCalls.Count | Should -Be 0
+        Get-PhpStanCacheState -Output @('Result cache restored. 0 files will be reanalysed.') -Mode 'kalt' | Should -Be 'Ergebniscache aus (Release-Lane, kalt)'
+    }
+
+    It 'reports an uncreatable cache volume as an infrastructure error' {
+        $script:CreateExit = 1
+        (Get-PhpStanCacheSetup -Lane 'Fast').Outcome.class | Should -Be 'infrastructure_error'
+    }
+
+    It 'names what PHPStan said about its cache' {
+        Get-PhpStanCacheState -Output @('x', 'Result cache restored. 0 files will be reanalysed.') -Mode 'v' | Should -Be 'Ergebniscache genutzt, 0 Datei(en) neu analysiert'
+        Get-PhpStanCacheState -Output @('Result cache restored in 6.1 seconds. 1 file will be reanalysed.') -Mode 'v' | Should -Be 'Ergebniscache genutzt, 1 Datei(en) neu analysiert'
+        Get-PhpStanCacheState -Output @('Result cache not used because the metadata do not match: projectConfig') -Mode 'v' | Should -Be 'Ergebniscache nicht genutzt: the metadata do not match: projectConfig'
+        Get-PhpStanCacheState -Output @('Result cache not used because the cache file does not exist.') -Mode 'v' | Should -Be 'Ergebniscache nicht genutzt: the cache file does not exist'
+        Get-PhpStanCacheState -Output @('[OK] No errors') -Mode 'v' | Should -Be 'Ergebniscache-Zustand nicht gemeldet'
+    }
+
+    It 'relies on the default tmpDir, so the volume target is where PHPStan keeps its cache' {
+        # The mount target /tmp/phpstan is sys_get_temp_dir() . '/phpstan'. A
+        # tmpDir or resultCachePath in the project config would move the cache
+        # off the volume (every run cold) or, worse, into the checkout.
+        $config = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/WebAPI/phpstan.neon.dist') -Raw
+        $config | Should -Not -Match '(?m)^\s*(tmpDir|resultCachePath)\s*:'
+        $composer = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Docker/WebAPI/composer.json') -Raw | ConvertFrom-Json
+        $composer.scripts.stan | Should -Match '^phpstan analyse '
+    }
+
+    It 'runs the phpstan gate on the read-only copy with -vv and the lane-dependent cache' {
+        $start = $script:FastSource.IndexOf("Add-Gate -Name 'phpstan'")
+        $block = $script:FastSource.Substring($start, $script:FastSource.IndexOf('Add-Gate -Name', $start + 10) - $start)
+        $block | Should -Match ([regex]::Escape('$cache = Get-PhpStanCacheSetup -Lane $Lane'))
+        $block | Should -Match ([regex]::Escape("Invoke-AppComposer @('run', 'stan', '--', '-vv') -Mounts ((Get-FastSourceMountArgs `$source '/repo') + `$cache.Mounts) -Command `$cache.Command"))
+        $block | Should -Match 'Get-PhpStanCacheState -Output \$r\.Output -Mode \$cache\.Mode'
+    }
+
+    It 'keeps the default composer mounts and takes the caller''s mounts and command prefix when given' {
+        $artifactDir = Join-Path $TestDrive ('run-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $artifactDir | Out-Null
+        $qaEnvFile = Join-Path $script:RepoRoot 'Docker/qa/qa.env'
+        $toolImages = @{ php = 'virtusphere-php:8.4-tooling' }
+        Mock Test-DockerImage { return $true }
+
+        $null = Invoke-AppComposer @('validate')
+        $plain = @($script:DockerCalls[-1])
+        ($plain -join ' ') | Should -Match ([regex]::Escape('-v C:/synthetic/checkout-a:/repo --tmpfs /repo/Docker/WebAPI/var:mode=1777'))
+        ($plain -join ' ') | Should -Match ([regex]::Escape(':/repo/Docker/WebAPI/.env:ro'))
+        @($plain[-2..-1]) | Should -Be @('composer', 'validate')
+
+        $null = Invoke-AppComposer @('run', 'stan') -Mounts @('--mount', 'type=volume,source=s,target=/repo,readonly') -Command @('flock', '/tmp/phpstan/.lock', 'composer')
+        $custom = @($script:DockerCalls[-1])
+        ($custom -join ' ') | Should -Not -Match 'tmpfs|\.env'
+        ($custom -join ' ') | Should -Match '^run --rm --mount type=volume,source=s,target=/repo,readonly -w /repo/Docker/WebAPI '
+        @($custom[-5..-1]) | Should -Be @('flock', '/tmp/phpstan/.lock', 'composer', 'run', 'stan')
+    }
+}

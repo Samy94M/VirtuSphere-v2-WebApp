@@ -176,7 +176,22 @@ function Format-QaSourceOrigin {
 # Erster Schritt von qa-stack: Pruefstand bestimmen, kopieren, Volume gegen
 # den Checkout pruefen. Jede Abweichung ist infrastructure_error, denn dann
 # wuerde der Stack etwas anderes beweisen als diesen Checkout.
+#
+# Mit -Volume fuellt dieselbe Funktion statt qa-repo das Volume der Fast-Gates
+# dieses Laufs (C1, Get-FastGateSource): gleiche Auswahl, gleiches Skript
+# qa-source-sync.sh, gleicher Vergleich, nur das Ziel und der Ort der
+# Nachweise (Unterordner fast-source/) sind andere. Das Merkmal
+# qaSourceManifest bleibt dann unberuehrt, denn es heisst "qa-repo des
+# QA-Stacks ist in diesem Lauf geprueft".
 function Sync-QaSourceVolume {
+    param([string]$Volume = '')
+    $evidenceDir = $artifactDir
+    $target = 'qa-repo'
+    if ($Volume) {
+        $evidenceDir = Join-Path $artifactDir 'fast-source'
+        New-Item -ItemType Directory -Force -Path $evidenceDir | Out-Null
+        $target = $Volume
+    }
     $selection = Get-QaSourceSelection $repoRoot
     if (-not $selection.Ok) { return New-InfraResult $selection.Detail $selection.Output }
     $hostLines = Get-QaSourceHashLines $repoRoot $selection.Files
@@ -185,25 +200,201 @@ function Sync-QaSourceVolume {
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $entries = @($selection.Directories) + @($selection.Files)
-    [System.IO.File]::WriteAllText((Join-Path $artifactDir 'qa-source.files'), (($entries -join [string][char]0) + [string][char]0), $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $artifactDir 'qa-source.origin.json'), $origin.Json, $utf8NoBom)
-    [System.IO.File]::WriteAllLines((Join-Path $artifactDir 'qa-source.checkout.sha256'), [string[]]$hostLines, $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $evidenceDir 'qa-source.files'), (($entries -join [string][char]0) + [string][char]0), $utf8NoBom)
+    [System.IO.File]::WriteAllText((Join-Path $evidenceDir 'qa-source.origin.json'), $origin.Json, $utf8NoBom)
+    [System.IO.File]::WriteAllLines((Join-Path $evidenceDir 'qa-source.checkout.sha256'), [string[]]$hostLines, $utf8NoBom)
 
-    # qa-source nutzt das Runtime-Image des php-Dienstes; vor dem ersten Lauf
-    # existiert es noch nicht.
-    $build = Invoke-QaCompose @('build', 'php')
-    if ($build.ExitCode -ne 0) { return New-InfraResult 'PHP-Runtime-Image fuer qa-source nicht baubar' $build.Output }
-    $copy = Invoke-QaCompose @('run', '--rm', '--no-deps', '-T',
-        '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'), 'qa-source')
-    if ($copy.ExitCode -ne 0) { return New-InfraResult 'qa-source hat qa-repo nicht gefuellt' $copy.Output }
-    $volumeList = Join-Path $artifactDir 'qa-source.volume.sha256'
+    if ($Volume) {
+        $copy = Invoke-FastSourceCopy -Volume $Volume -EvidenceDir $evidenceDir
+        if ($copy.StartFailed -or ($copy.ExitCode -ne 0)) { return New-InfraResult ('qa-source-sync.sh hat {0} nicht gefuellt' -f $Volume) $copy.Output }
+    } else {
+        # qa-source nutzt das Runtime-Image des php-Dienstes; vor dem ersten Lauf
+        # existiert es noch nicht.
+        $build = Invoke-QaCompose @('build', 'php')
+        if ($build.ExitCode -ne 0) { return New-InfraResult 'PHP-Runtime-Image fuer qa-source nicht baubar' $build.Output }
+        $copy = Invoke-QaCompose @('run', '--rm', '--no-deps', '-T',
+            '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'), 'qa-source')
+        if ($copy.ExitCode -ne 0) { return New-InfraResult 'qa-source hat qa-repo nicht gefuellt' $copy.Output }
+    }
+    $volumeList = Join-Path $evidenceDir 'qa-source.volume.sha256'
     if (-not (Test-Path -LiteralPath $volumeList)) { return New-InfraResult 'qa-source hat keine Pruefsummen des Volumes geschrieben' $copy.Output }
     $differences = Compare-QaSourceHashes $hostLines @(Get-Content -LiteralPath $volumeList -Encoding UTF8)
     if ($differences.Count -gt 0) {
-        return New-InfraResult ('qa-repo weicht vom Checkout ab ({0} Dateien)' -f $differences.Count) @($differences | Select-Object -First 20)
+        return New-InfraResult ('{0} weicht vom Checkout ab ({1} Dateien)' -f $target, $differences.Count) @($differences | Select-Object -First 20)
     }
-    $script:qaSourceManifest = $origin.Origin.manifestSha256
-    return New-PassResult ((Format-QaSourceOrigin $origin.Origin) + '; qa-repo Datei fuer Datei identisch') @($copy.Output)
+    if (-not $Volume) { $script:qaSourceManifest = $origin.Origin.manifestSha256 }
+    return New-PassResult ((Format-QaSourceOrigin $origin.Origin) + ('; {0} Datei fuer Datei identisch' -f $target)) @($copy.Output)
+}
+
+# --- Pruefstand der Fast-Gates (C1, 08.11.2026) -------------------------------
+# A26 auf die Fast-Gates: php-lint (Container-Weg), phpunit-unit, phpstan und
+# die ansible-*-Gates lesen nicht mehr die 9p-Freigabe, sondern eine
+# gepruefte Kopie (vorher: Unit-Suite 470 bis 528 s ueber 9p gegen 126 s fuer
+# phpunit-full aus qa-repo). Die Kopie liegt in einem Volume NUR DIESES Laufs,
+# nicht in qa-repo: qa-repo gehoert dem einen QA-Projekt, und Fast-Laeufe
+# duerfen ohne Sperre nebeneinander laufen. Der Name kommt aus dem
+# Laufverzeichnis (New-CheckArtifactDirectory, je Lauf eindeutig), das
+# Volume entsteht beim ersten Gate, das es braucht, und check.ps1 entfernt es
+# im finally (Remove-FastGateSource). Zwei gleichzeitige Laeufe, auch aus
+# demselben Checkout, teilen so nie eine Kopie.
+
+# Derselbe Einmal-Container wie der Compose-Dienst qa-source (ohne Netz,
+# Wurzel nur lesend, alle Capabilities ab ausser den drei fuer tar,
+# no-new-privileges, Checkout nur lesend), aber als docker run gegen das
+# Volume dieses Laufs: der Compose-Dienst ist an qa-repo gebunden.
+# VirtuSphere.QaSourceVolume.Tests.ps1 leitet die Optionen aus dem
+# Compose-Block ab. Das Tooling-Image baut auf dem Runtime-Image auf und
+# bringt dieselben Werkzeuge (sh, tar, find, sha256sum) mit; die Fast-Lane
+# setzt es ohnehin voraus.
+function Invoke-FastSourceCopy {
+    param([string]$Volume, [string]$EvidenceDir)
+    return Invoke-Tool 'docker' @('run', '--rm', '--network', 'none', '--read-only', '--tmpfs', '/tmp',
+        '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER',
+        '--security-opt', 'no-new-privileges:true',
+        '-v', ($repoRoot + ':/qa-source:ro'),
+        '--mount', ('type=volume,source={0},target=/qa-repo,volume-nocopy=true' -f $Volume),
+        '-v', (($EvidenceDir -replace '\\', '/') + ':/qa-evidence'),
+        '--entrypoint', 'sh', $toolImages.php, '/qa-source/Docker/qa/qa-source-sync.sh')
+}
+
+# Liefert den Pruefstand fuer ein Fast-Gate. Beim ersten Aufruf des Laufs
+# legt sie das Volume an und fuellt und prueft es; jeder spaetere Aufruf
+# bekommt dasselbe Ergebnis (auch dasselbe infrastructure_error). Note traegt
+# nur der erste Aufruf: das Gate, das die Kopie bezahlt hat, nennt sie.
+#
+# Ein Pruef-Root ausserhalb eines Git-Arbeitsbaums (die Fixtures von
+# scripts/test-guards.ps1 unter %TEMP%) hat keine Auswahl; dort bleibt der
+# Bind-Mount wie bisher. Fehlt git selbst, ist das infrastructure_error.
+function Get-FastGateSource {
+    if ((Test-Path variable:script:fastSource) -and $script:fastSource) {
+        $known = $script:fastSource.Clone()
+        $known.Note = ''
+        return $known
+    }
+    $inside = Invoke-Tool 'git' @('-C', $repoRoot, 'rev-parse', '--is-inside-work-tree')
+    if ($inside.StartFailed) {
+        $script:fastSource = @{ Outcome = (New-InfraResult 'git fehlt; ohne git keine Auswahl fuer den Pruefstand der Fast-Gates' $inside.Output); Volume = ''; Note = '' }
+    } elseif (($inside.ExitCode -ne 0) -or ((@($inside.Output) -join '').Trim() -ne 'true')) {
+        $script:fastSource = @{ Outcome = $null; Volume = ''; Note = 'Pruef-Root ohne Git: Bind-Mount' }
+    } else {
+        $volume = (Split-Path -Leaf $artifactDir) + '-src'
+        # Zuerst merken, dann anlegen: das finally raeumt auch ein halb
+        # angelegtes Volume weg.
+        $script:fastSourceVolume = $volume
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        $created = Invoke-Tool 'docker' @('volume', 'create', '--label', 'virtusphere.check=fast-source', $volume)
+        if ($created.StartFailed -or ($created.ExitCode -ne 0)) {
+            $script:fastSource = @{ Outcome = (New-InfraResult ('Volume {0} fuer den Pruefstand nicht anlegbar' -f $volume) $created.Output); Volume = ''; Note = '' }
+        } else {
+            $sync = Sync-QaSourceVolume -Volume $volume
+            $watch.Stop()
+            if ($sync.class -ne 'pass') {
+                $script:fastSource = @{ Outcome = $sync; Volume = ''; Note = '' }
+            } else {
+                $seconds = ([math]::Round($watch.Elapsed.TotalSeconds, 1)).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+                $script:fastSource = @{ Outcome = $null; Volume = $volume; Note = ('Pruefstand kopiert in {0}s: {1}' -f $seconds, $sync.detail) }
+            }
+        }
+    }
+    return $script:fastSource.Clone()
+}
+
+# Mount-Argumente fuer docker run: die Kopie (tree/ des Laufvolumes) oder im
+# Rueckfall der Bind-Mount des Pruef-Roots. Schreibgeschuetzt ist der
+# Normalfall; nur phpunit-unit liest beschreibbar wie phpunit-full, weil
+# Docker die Mountpunkte fuer tmpfs und .env darin anlegen muss.
+function Get-FastSourceMountArgs {
+    param($Source, [string]$Target, [switch]$Writable)
+    if ($Source.Volume) {
+        $spec = 'type=volume,source={0},target={1},volume-subpath=tree,volume-nocopy=true' -f $Source.Volume, $Target
+        if (-not $Writable) { $spec += ',readonly' }
+        return @('--mount', $spec)
+    }
+    $bind = $repoRoot + ':' + $Target
+    if (-not $Writable) { $bind += ':ro' }
+    return @('-v', $bind)
+}
+
+# Haengt die Kopie-Notiz an das Ergebnis des Gates, das sie ausgeloest hat.
+function Add-FastSourceNote {
+    param($Outcome, $Source)
+    if ($Source -and $Source.Note -and $Outcome) {
+        $Outcome.detail = ('{0} [{1}]' -f $Outcome.detail, $Source.Note)
+    }
+    return $Outcome
+}
+
+function Remove-FastGateSource {
+    if (-not ((Test-Path variable:script:fastSourceVolume) -and $script:fastSourceVolume)) { return }
+    $volume = $script:fastSourceVolume
+    $removed = Invoke-Tool 'docker' @('volume', 'rm', '--force', $volume)
+    if ($removed.StartFailed -or ($removed.ExitCode -ne 0)) {
+        Write-Host ('Pruefstand-Volume {0} nicht entfernbar; von Hand: docker volume rm {0}' -f $volume) -ForegroundColor Yellow
+    }
+    $script:fastSourceVolume = $null
+}
+
+# --- PHPStan-Ergebniscache (C1, 08.11.2026) ------------------------------------
+# PHPStan haelt seinen Ergebniscache in tmpDir (Vorgabe sys_get_temp_dir() .
+# '/phpstan', phpstan.neon.dist setzt weder tmpDir noch resultCachePath).
+# Ausserhalb der Release-Lane liegt dort ein Volume je Checkout, sonst wuerde
+# jeder Lauf kalt beginnen. Ungueltig macht den Cache PHPStan selbst
+# (2.2.5, ResultCacheManager::getMeta und restore): Config samt Baseline,
+# composer.lock und installed.php, PHP- und PHPStan-Version, Erweiterungen,
+# Level, Stub- und Bootstrap-Dateien vergleicht es als Metadaten, jede
+# analysierte Datei per SHA-256, und Abhaengige geaenderter Dateien
+# analysiert es neu. Die Kopie liegt in jedem Lauf unter /repo; derselbe Pfad
+# heisst derselbe Schluessel fuer PHPStan.
+#
+# Zwei Laeufe aus demselben Checkout teilen das Volume. PHPStan schreibt die
+# Cachedatei nicht atomar (fopen, dann Stueck fuer Stueck); flock auf
+# /tmp/phpstan/.lock laesst deshalb immer nur einen PHPStan-Prozess je Volume
+# arbeiten. Ein abgebrochener Schreiber hinterlaesst eine unvollstaendige
+# Datei; PHPStan verwirft sie beim naechsten require und analysiert voll.
+# Ein Cache aus einem anderen Stand desselben Checkouts ist kein Risiko: er
+# wird gegen die Hashes des aktuellen Standes geprueft.
+function Get-CheckoutCacheKey {
+    param([string]$Root)
+    $full = ([System.IO.Path]::GetFullPath($Root) -replace '\\', '/').TrimEnd('/')
+    if ($env:OS -eq 'Windows_NT') { $full = $full.ToLowerInvariant() }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash((New-Object System.Text.UTF8Encoding($false)).GetBytes($full))
+    } finally { $sha.Dispose() }
+    return (([System.BitConverter]::ToString($digest) -replace '-', '').ToLowerInvariant()).Substring(0, 16)
+}
+
+function Get-PhpStanCacheSetup {
+    param([string]$Lane)
+    if ($Lane -eq 'Release') {
+        # Release-Nachweise stehen nie auf einem Cache: ohne Volume ist tmpDir
+        # das leere /tmp des Wegwerfcontainers.
+        return @{ Outcome = $null; Mounts = @(); Command = @('composer'); Mode = 'kalt' }
+    }
+    $volume = 'virtusphere-phpstan-cache-' + (Get-CheckoutCacheKey $repoRoot)
+    $created = Invoke-Tool 'docker' @('volume', 'create', '--label', 'virtusphere.check=phpstan-cache', $volume)
+    if ($created.StartFailed -or ($created.ExitCode -ne 0)) {
+        return @{ Outcome = (New-InfraResult ('PHPStan-Cache-Volume {0} nicht anlegbar' -f $volume) $created.Output) }
+    }
+    return @{ Outcome = $null
+        Mounts = @('--mount', ('type=volume,source={0},target=/tmp/phpstan' -f $volume))
+        Command = @('flock', '/tmp/phpstan/.lock', 'composer'); Mode = $volume }
+}
+
+# Was PHPStan mit -vv ueber den Cache sagt, als Teil des Gate-Details. Das
+# Urteil haengt nie daran; es macht nur sichtbar, worauf ein Gruen steht.
+function Get-PhpStanCacheState {
+    param([string[]]$Output = @(), [string]$Mode)
+    if ($Mode -eq 'kalt') { return 'Ergebniscache aus (Release-Lane, kalt)' }
+    foreach ($line in @($Output)) {
+        if ("$line" -match 'Result cache restored(?: in [0-9.]+ seconds)?\. (\d+) files? will be reanalysed') {
+            return ('Ergebniscache genutzt, {0} Datei(en) neu analysiert' -f $Matches[1])
+        }
+        if ("$line" -match 'Result cache not used because (.+?)\.?\s*$') {
+            return ('Ergebniscache nicht genutzt: {0}' -f $Matches[1])
+        }
+    }
+    return 'Ergebniscache-Zustand nicht gemeldet'
 }
 
 # Vor einem Gate gegen einen Stack, den nicht dieser Lauf aufgebaut hat (etwa
@@ -533,14 +724,21 @@ function Invoke-CheckPhp {
 # Checkout gemountet sein und darf deshalb nie die bevorzugte Beweisquelle
 # sein. Nur das Tooling-Target bringt Composer mit; vendor/ kommt aus dem Mount.
 # Ein fehlendes Toolimage ist Infrastrukturfehler, kein Auftrag an den Dev-Stack.
+#
+# -Mounts ersetzt die Quell-Mounts (Arbeitsbaum, tmpfs, .env) durch die des
+# Aufrufers, etwa den schreibgeschuetzten Pruefstand und das Cache-Volume von
+# phpstan; -Command setzt einen Befehl vor composer (flock). Ohne beide bleibt
+# alles wie bisher (composer-validate, composer-audit).
 function Invoke-AppComposer {
-    param([string[]]$Arguments)
+    param([string[]]$Arguments, [string[]]$Mounts = $null, [string[]]$Command = @('composer'))
     if (Test-DockerImage $toolImages.php) {
-        $qaAppEnvFile = Get-QaAppEnvFile
-        return Invoke-Tool 'docker' (@('run', '--rm',
-            '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
-            '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
-            '-v', ($qaAppEnvFile + ':/repo/.env:ro'), '-v', ($qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
+        if ($null -eq $Mounts) {
+            $qaAppEnvFile = Get-QaAppEnvFile
+            $Mounts = @('-v', ($repoRoot + ':/repo'),
+                '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
+                '-v', ($qaAppEnvFile + ':/repo/.env:ro'), '-v', ($qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'))
+        }
+        return Invoke-Tool 'docker' (@('run', '--rm') + $Mounts + @('-w', '/repo/Docker/WebAPI',
             '-e', 'COMPOSER_CACHE_DIR=/tmp/composer-cache', '-e', 'COMPOSER_ALLOW_SUPERUSER=1',
             # Der Mount gehoert dem Host-User, composer laeuft als root: ohne
             # safe.directory verweigert git die Versionsermittlung und composer
@@ -548,7 +746,7 @@ function Invoke-AppComposer {
             # 2026-07-16). Env-Config statt --global, das Image bleibt sauber.
             '-e', 'GIT_CONFIG_COUNT=1',
             '-e', 'GIT_CONFIG_KEY_0=safe.directory', '-e', 'GIT_CONFIG_VALUE_0=*',
-            $toolImages.php, 'composer') + $Arguments)
+            $toolImages.php) + $Command + $Arguments)
     }
     return $null
 }

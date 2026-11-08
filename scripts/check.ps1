@@ -285,6 +285,9 @@ try {
             [void](Invoke-QaCompose @('--profile', 'tools', 'down', '-v', '--remove-orphans'))
         }
     }
+    # Der Pruefstand der Fast-Gates gehoert nur diesem Lauf (C1); seine
+    # Datei- und Pruefsummenlisten liegen im Laufverzeichnis unter fast-source/.
+    Remove-FastGateSource
 }
 
 # --- Summe, Artefakt, Exitcode -------------------------------------------------
