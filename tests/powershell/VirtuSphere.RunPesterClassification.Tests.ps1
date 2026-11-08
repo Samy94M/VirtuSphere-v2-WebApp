@@ -39,6 +39,7 @@ function New-PesterConfiguration {
         Output       = [pscustomobject]@{ Verbosity = 'Normal' }
         Filter       = [pscustomobject]@{ ExcludeTag = @() }
         CodeCoverage = [pscustomobject]@{ Enabled = $false; Path = @(); OutputPath = $null; UseBreakpoints = $true }
+        TestRegistry = [pscustomobject]@{ Enabled = $true }
     }
 }
 
@@ -76,6 +77,7 @@ function Invoke-Pester {
                 } else { Split-Path ([string]$_) -Leaf }
             })
         Write-Host ('stub ran ' + ($items -join ','))
+        Write-Host ('stub testregistry=' + $Configuration.TestRegistry.Enabled)
         if ($env:VS_STUB_SCENARIO -eq 'partition-crash' -and $items -contains 'gamma.Tests.ps1') { [Environment]::Exit(9) }
         $containers = @(foreach ($item in $items) {
                 $broken = ($env:VS_STUB_SCENARIO -eq 'partition-container-fails' -and $item -eq 'beta.Tests.ps1')
@@ -163,6 +165,13 @@ Describe 'Dummy' { It 'laeuft' { $true | Should -BeTrue } }
     New-FakeRepo -Root $script:PlainRoot -WithCoverageFloor $false
     New-FakeRepo -Root $script:FloorRoot -WithCoverageFloor $true
     New-FakeRepo -Root $script:PartitionRoot -WithCoverageFloor $true -ExtraTests @('alpha', 'beta', 'gamma')
+    # Wie PartitionRoot, nur benutzt gamma das TestRegistry-Laufwerk. Der Name
+    # ist zusammengesetzt, damit diese Datei selbst es nicht benutzt.
+    $script:RegistryRoot = Join-Path $TestDrive 'registry'
+    New-FakeRepo -Root $script:RegistryRoot -WithCoverageFloor $true -ExtraTests @('alpha', 'beta', 'gamma')
+    $registryDrive = 'TestRegistry' + ':\'
+    [System.IO.File]::WriteAllText((Join-Path (Join-Path (Join-Path $script:RegistryRoot 'tests') 'powershell') 'gamma.Tests.ps1'),
+        ("Describe 'Dummy' { It 'laeuft' { Test-Path '" + $registryDrive + "' | Should -BeTrue } }`n"), $script:Utf8)
 
     # Startet den Runner als Kindprozess. Das Testdouble steht nur in der Umgebung
     # dieses Kindes vorn im Modulpfad; die Umgebung der Suite bleibt unberuehrt.
@@ -253,6 +262,23 @@ Describe 'run-pester.ps1 partitions the Pester suite into child processes' {
         $single.Output | Should -Not -Match 'Pester-Teil'
         $single.Output | Should -Match 'stub coverage breakpoints=False'
         $single.Output | Should -Match 'Coverage 75% \(Floor 55%\)'
+        # Keine Datei benutzt das TestRegistry-Laufwerk, also kein Pester-Schluessel unter HKCU.
+        $result.Output | Should -Not -Match 'stub testregistry=True'
+        $single.Output | Should -Match 'stub testregistry=False'
+    }
+
+    It 'enables TestRegistry only for the part whose file uses it' {
+        $result = Invoke-StubRunner -Root $script:RegistryRoot -Scenario 'partition-healthy'
+        $result.ExitCode | Should -Be 0
+        $lines = @($result.Output -split "`r?`n")
+        $gammaPart = @($lines | Where-Object { $_ -match '^\[Teil (\d)/3\] stub ran gamma\.Tests\.ps1' } | ForEach-Object { $Matches[1] })
+        $gammaPart.Count | Should -Be 1
+        foreach ($k in 1..3) {
+            $expected = if ([string]$k -eq $gammaPart[0]) { 'True' } else { 'False' }
+            $result.Output | Should -Match ('\[Teil {0}/3\] stub testregistry={1}' -f $k, $expected)
+        }
+        $single = Invoke-StubRunner -Root $script:RegistryRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 1'
+        $single.Output | Should -Match 'stub testregistry=True'
     }
 
     It 'fails the run when a container of one part failed and names it' {

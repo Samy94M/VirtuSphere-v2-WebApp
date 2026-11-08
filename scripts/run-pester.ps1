@@ -115,6 +115,27 @@ $excludedTag = 'Haertung'
 # zum Standard. Eine Quelle fuer Einzel- und Kindprozess.
 $coverageUseBreakpoints = $false
 
+# TestRegistry nur, wenn eine Testdatei des Laufs TestRegistry: benutzt (C2,
+# aus den Dateien abgeleitet, keine Liste). Pester legt dafuer je Container
+# einen Schluessel unter HKCU\Software\Pester an; parallele Pester-Prozesse
+# (Partitionen, Laeufe anderer Worktrees) stoeren sich dort: am 08.11.2026
+# scheiterte ein Container mit "Es sind keine Daten mehr verfuegbar" in
+# New-RandomTempRegistry, das Pester selbst als Parallelfall kennt.
+function Test-PesterUsesTestRegistry {
+    param([string[]]$Paths)
+    foreach ($path in $Paths) {
+        if (Test-Path -LiteralPath $path -PathType Container) {
+            $files = @(Get-ChildItem -LiteralPath $path -Recurse -File -Filter '*.Tests.ps1')
+        } else {
+            $files = @(Get-Item -LiteralPath $path)
+        }
+        foreach ($file in $files) {
+            if ([System.IO.File]::ReadAllText($file.FullName) -match 'TestRegistry:') { return $true }
+        }
+    }
+    return $false
+}
+
 # Coverage-Befehle eines Laufs, gezaehlt je Position (Datei, Start, Ende): die
 # Position ist die Identitaet, ueber die sich die Kinder exakt vereinigen
 # lassen. Kompakt fuer die Ergebnisdatei: eine Dateitabelle und je Position
@@ -152,6 +173,7 @@ if ($PartitionSpec -ne '') {
         $config.Run.PassThru = $true
         $config.Output.Verbosity = 'Detailed'
         $config.Filter.ExcludeTag = $excludedTag
+        $config.TestRegistry.Enabled = (Test-PesterUsesTestRegistry @($spec.files))
         if ($null -ne $spec.coverage) {
             $config.CodeCoverage.Enabled = $true
             $config.CodeCoverage.Path = [string[]]@($spec.coverage.paths)
@@ -412,6 +434,7 @@ if (-not $SkipTests) {
     }
 
     $testFiles = @(Get-ChildItem -LiteralPath $testRoot -Recurse -File -Filter '*.Tests.ps1' | Sort-Object FullName)
+    $config.TestRegistry.Enabled = (Test-PesterUsesTestRegistry @($testFiles | ForEach-Object { $_.FullName }))
     $partitionCount = [Math]::Min($Partitions, $testFiles.Count)
     if ($partitionCount -le 1) {
         try { $result = Invoke-Pester -Configuration $config } catch {
@@ -569,6 +592,7 @@ if (-not $SkipTests) {
         $regConfig = New-PesterConfiguration
         $regConfig.Run.Path = $registerPath
         $regConfig.Run.PassThru = $true
+        $regConfig.TestRegistry.Enabled = (Test-PesterUsesTestRegistry @($registerPath))
         # Detailed macht jeden historischen Testnamen (unter anderem E1/E7/E9)
         # sowie Discoveryfehler sichtbar. Das Register bleibt trotzdem rein
         # informativ und veraendert weder $failed noch den Exitcode.
