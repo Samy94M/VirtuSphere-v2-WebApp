@@ -234,7 +234,7 @@ final class AuditProducerContractTest extends TestCase
             $code = $this->withoutComments($source);
             foreach ($forbidden as $key) {
                 if (preg_match(
-                    "/\b(?:audit_event|audit|machine_api_audit_warning)\s*\((?:[^;]{0,2000}?)'" . preg_quote($key, '/') . "'\s*=>/s",
+                    "/\b(?:audit_event_required|audit_event|audit|machine_api_audit_warning)\s*\((?:[^;]{0,2000}?)'" . preg_quote($key, '/') . "'\s*=>/s",
                     $code
                 ) === 1) {
                     $offenders[] = $relative . ': ' . $key;
