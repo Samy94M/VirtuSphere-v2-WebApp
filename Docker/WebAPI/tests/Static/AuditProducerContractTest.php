@@ -11,12 +11,12 @@ require_once dirname(__DIR__, 2) . '/lib/audit_registry.php';
  * The producer side of the Etappe 10C contract, as a build failure rather than
  * as a convention.
  *
- * `scripts/check-audit-contract.php` enforces the same rules in the guard lane,
- * with its own positive/negative/zero-match fixtures. Both exist because they
- * fail at different moments: the guard runs in `check.ps1` over the whole repo
- * with the diagnostic ids the harness mutates, this one runs in the unit lane
- * where a developer sees it before pushing. Neither is a copy of the other's
- * assertions: this file walks the parsed registry, the guard walks the text.
+ * `scripts/check-audit-contract.php` (gate `audit-contract`, with its harness
+ * fixtures) owns the text rules alone: dead-sink, token-sink, unredacted-sink and
+ * forbidden-field. W3A (R5) removed their copies here after a mutation probe
+ * showed the gate fails on each mutation by itself (`docs/register/2026-11-08-W3A.md`).
+ * What stays here says something the gate does not: the registry walk, the owner
+ * still holding the one INSERT, the throttle, export and filter shapes.
  */
 final class AuditProducerContractTest extends TestCase
 {
@@ -138,111 +138,6 @@ final class AuditProducerContractTest extends TestCase
         }
 
         self::assertSame([], $written, 'a historical audit event is written again');
-    }
-
-    /**
-     * The free-text sinks stay gone. `addLog()` was never called and one call
-     * away from persisting a token into a table with a 365-day window;
-     * `audit_auth()` was the parallel entry point whose existence is what let
-     * the auth channel drift from the rest.
-     */
-    public function testTheRemovedSinksAreNotReintroduced(): void
-    {
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            foreach (['addLog', 'audit_auth'] as $sink) {
-                self::assertSame(
-                    0,
-                    preg_match('/\b' . $sink . '\s*\(/', $this->withoutComments($source)),
-                    $relative . ' reintroduces ' . $sink . '()'
-                );
-            }
-        }
-    }
-
-    /**
-     * No logging or audit function may take a credential as a parameter.
-     *
-     * The signature is the boundary, not the call sites: as long as the
-     * parameter exists, "no caller passes a token" is a property of today's
-     * call sites, which is exactly what `addLog($db, $token, ...)` was until
-     * somebody would have called it.
-     */
-    public function testNoLogOrAuditSignatureCanBeHandedASecret(): void
-    {
-        $offenders = [];
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            preg_match_all(
-                '/function\s+([A-Za-z0-9_]+)\s*\(([^)]{0,600})\)/i',
-                $this->withoutComments($source),
-                $signatures,
-                PREG_SET_ORDER
-            );
-            foreach ($signatures as $signature) {
-                if (array_intersect(explode('_', strtolower($signature[1])), ['audit', 'log', 'logs']) === []) {
-                    continue;
-                }
-                foreach (['token', 'authToken', 'apiKey', 'secret', 'password', 'bearer', 'credential'] as $param) {
-                    if (preg_match('/\$' . $param . '\b/i', $signature[2]) === 1) {
-                        $offenders[] = $relative . ': ' . $signature[1] . '($' . $param . ')';
-                    }
-                }
-            }
-        }
-
-        self::assertSame([], $offenders);
-    }
-
-    public function testExceptionMessagesCrossTheCentralRedactorBeforeAProcessLog(): void
-    {
-        $offenders = [];
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            preg_match_all(
-                '/(?:(?<![A-Za-z0-9_])error_log\s*\(|fwrite\s*\(\s*STDERR\s*,)[^;]{0,1600}?->getMessage\s*\(\s*\)[^;]{0,400}?\);/s',
-                $this->withoutComments($source),
-                $sinks,
-                PREG_SET_ORDER
-            );
-            foreach ($sinks as $sink) {
-                if (preg_match(
-                    '/(?:virtusphere_redact_log_text|deploy_worker_redact_secrets)\s*\([^;]*->getMessage\s*\(\s*\)/s',
-                    $sink[0]
-                ) !== 1) {
-                    $offenders[] = $relative;
-                }
-            }
-        }
-
-        self::assertSame([], array_values(array_unique($offenders)));
-    }
-
-    /**
-     * A producer may not pass a context key that could carry a secret, a whole
-     * payload or a free exception dump. The registry refuses these at runtime
-     * as well; a rule enforced only at runtime is one whose violation is first
-     * observed in production.
-     */
-    public function testNoProducerPassesAForbiddenContextKey(): void
-    {
-        $forbidden = [
-            'password', 'passwd', 'secret', 'token', 'payload', 'body', 'exception',
-            'trace', 'stack', 'search', 'query', 'authorization', 'cookie', 'session',
-            'credentials', 'private_key',
-        ];
-
-        $offenders = [];
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            $code = $this->withoutComments($source);
-            foreach ($forbidden as $key) {
-                if (preg_match(
-                    "/\b(?:audit_event_required|audit_event|audit|machine_api_audit_warning)\s*\((?:[^;]{0,2000}?)'" . preg_quote($key, '/') . "'\s*=>/s",
-                    $code
-                ) === 1) {
-                    $offenders[] = $relative . ': ' . $key;
-                }
-            }
-        }
-
-        self::assertSame([], $offenders);
     }
 
     /**
