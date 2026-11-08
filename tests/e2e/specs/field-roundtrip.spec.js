@@ -13,11 +13,10 @@
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { submitAndWaitForNavigation } = require('../lib/navigation');
-const { execFileSync } = require('node:child_process');
+const php = require('../lib/php');
 
 test.use({ storageState: ROLES.admin.storageState });
 
-const PHP_CONTAINER = process.env.VIRTUSPHERE_PHP_CONTAINER || 'virtusphere-v2-webapp-php-1';
 const PREFIX = 'e2ert-'; // no spaces: mission_name forbids them
 
 // Each probe carries a distinct escaping/encoding concern and no spaces. The
@@ -35,12 +34,7 @@ const PROBES = [
 const HTML_ENTITY = /&(?:lt|gt|amp|quot|#0?39|#x27);/;
 
 function runPhp(body) {
-  const php = '<?php\nrequire_once "/var/www/html/lib/bootstrap.php";\n' + body;
-  return execFileSync('docker', ['exec', '-i', PHP_CONTAINER, 'php'], {
-    input: php,
-    encoding: 'utf8',
-    timeout: 15000,
-  });
+  return php.runPhp(body, [], { timeout: 15000 });
 }
 
 function missionColumn(missionId, column) {

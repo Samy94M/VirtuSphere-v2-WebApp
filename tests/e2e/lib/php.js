@@ -3,16 +3,22 @@
 // of each carrying its own copy (crud-mission/crud-negative predate it).
 
 const { execFileSync } = require('node:child_process');
+const profile = require('./exec-profile');
 
 const PHP_CONTAINER = process.env.VIRTUSPHERE_PHP_CONTAINER || 'virtusphere-v2-webapp-php-1';
+
+// Generous: the release browser matrix (Firefox/WebKit/Edge) can slow the
+// docker daemon enough that a 15s exec times out (ETIMEDOUT) on Edge.
+const DEFAULT_TIMEOUT_MS = 60000;
 
 /**
  * @param {string} body PHP statements, executed after the bootstrap require.
  * @param {string[]} [requires] additional /var/www/html-relative requires.
- * @param {{ user?: string }} [options] user runs the exec as that container
- *   user. Needed to touch files the FPM worker owns: the container drops
- *   CAP_DAC_OVERRIDE, so even root cannot read a www-data-owned 0600 session
- *   file - it has to be www-data.
+ * @param {{ user?: string, timeout?: number }} [options] user runs the exec as
+ *   that container user. Needed to touch files the FPM worker owns: the
+ *   container drops CAP_DAC_OVERRIDE, so even root cannot read a
+ *   www-data-owned 0600 session file - it has to be www-data. timeout is in
+ *   milliseconds and defaults to 60 s.
  */
 function runPhp(body, requires = [], options = {}) {
   const php =
@@ -25,13 +31,12 @@ function runPhp(body, requires = [], options = {}) {
     args.push('-u', options.user);
   }
   args.push(PHP_CONTAINER, 'php');
-  return execFileSync('docker', args, {
+  const meta = { helper: 'runPhp', transport: 'exec', container: PHP_CONTAINER, user: options.user };
+  return profile.timed(meta, () => execFileSync('docker', args, {
     input: php,
     encoding: 'utf8',
-    // Generous: the release browser matrix (Firefox/WebKit/Edge) can slow the
-    // docker daemon enough that a 15s exec times out (ETIMEDOUT) on Edge.
-    timeout: 60000,
-  });
+    timeout: options.timeout || DEFAULT_TIMEOUT_MS,
+  }));
 }
 
 /** Runs a snippet that echoes `JSON<data>JSON` and returns the parsed data. */

@@ -4,11 +4,9 @@
 // logins per browser project; the seeding happens only here.
 
 const { test, expect } = require('@playwright/test');
-const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const { ROLES, AUTH_DIR, signIn } = require('../lib/auth');
-
-const PHP_CONTAINER = process.env.VIRTUSPHERE_PHP_CONTAINER || 'virtusphere-v2-webapp-php-1';
+const { runPhp } = require('../lib/php');
 
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 
@@ -19,10 +17,8 @@ fs.mkdirSync(AUTH_DIR, { recursive: true });
  * first. Uses a heredoc so no secret rides on the command line.
  */
 function seedUser(role) {
-  // The opening tag is load-bearing: `php` reading a script from stdin treats
-  // input without <?php as literal text and echoes it instead of running it.
-  const php = `<?php
-require_once '/var/www/html/lib/bootstrap.php';
+  // runPhp prepends the <?php tag and the bootstrap require.
+  const out = runPhp(`
 $db = db();
 $name = ${phpString(role.username)};
 $stmt = $db->prepare('DELETE FROM deploy_users WHERE name = ?');
@@ -35,12 +31,7 @@ $stmt = $db->prepare('INSERT INTO deploy_users (name, password, email, role, is_
 $stmt->bind_param('ssss', $name, $pw, $mail, $rrole);
 $stmt->execute();
 echo 'seeded ' . $name;
-`;
-  const out = execFileSync('docker', ['exec', '-i', PHP_CONTAINER, 'php'], {
-    input: php,
-    encoding: 'utf8',
-    timeout: 15000,
-  });
+`, [], { timeout: 15000 });
   if (!out.includes('seeded')) {
     throw new Error('user seed failed: ' + out);
   }
