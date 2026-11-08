@@ -253,7 +253,7 @@ function Convert-VsWebApi {
         throw "WebApi darf nur host:port sein, keinen Pfad: '$value' (Beispiel: virtusphere.lan:8021)."
     }
     if ($value -notmatch '^[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?(:\d+)?$') {
-        throw "WebApi ist kein gueltiges host:port: '$value' (Beispiel: virtusphere.lan:8021 oder 10.0.0.5:8021)."
+        throw "WebApi ist kein gueltiges host:port: '$value' (Beispiel: virtusphere.lan:8021 oder 192.0.2.5:8021)."
     }
     return $value
 }

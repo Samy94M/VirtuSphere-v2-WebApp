@@ -60,7 +60,7 @@ final class PortalErrorActionTest extends TestCase
                 'vm_cpu' => 2,
                 'vm_ram' => 4096,
             ],
-            [['ip' => '10.91.0.10', 'subnet' => '255.255.255.0', 'gateway' => '10.91.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN91', 'mac' => '']],
+            [['ip' => '203.0.113.10', 'subnet' => '255.255.255.0', 'gateway' => '203.0.113.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN91', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 80, 'disk_type' => 'thin']],
             [],
             '',

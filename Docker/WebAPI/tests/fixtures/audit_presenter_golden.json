@@ -190,7 +190,7 @@
     "user_security_changed_unlocked": "unlocked for local user id 42",
     "vm_bulk_changed_empty_ids": "mecm_reset 0 vm(s) in mission id 12 []",
     "vm_bulk_changed_ids": "deleted 3 vm(s) in mission id 12 [99,100,101]",
-    "vm_changed_apostrophe_colon_changes": "updated vm id 99 (\"Kunde's VM\") in mission id 12 (ip: 10.1.2.3 -> 10.1.2.4)",
+    "vm_changed_apostrophe_colon_changes": "updated vm id 99 (\"Kunde's VM\") in mission id 12 (ip: 192.0.2.3 -> 192.0.2.4)",
     "vm_changed_created_named": "created vm id 99 (\"srv-app-01\") in mission id 12",
     "vm_changed_deleted_named": "deleted vm id 99 (\"srv-old-02\") in mission id 12",
     "vm_changed_updated_changes_named": "updated vm id 99 (\"srv-sql-01\") in mission id 12 (cpu, memory)",

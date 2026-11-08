@@ -87,7 +87,7 @@ final class DeployWorkerHostPreflightIntegrationTest extends TestCase
 
         $this->processClaimed($jobId, $this->runner(0, [
             VIRTUSPHERE_ANSIBLE_PREFLIGHT_MARKER . ' ' . VIRTUSPHERE_ANSIBLE_PREFLIGHT_ALLOWLIST,
-            VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' denied 10.20.30.40',
+            VIRTUSPHERE_ANSIBLE_ALLOWLIST_MARKER . ' denied 203.0.113.40',
         ]));
 
         $job = repo_deploy_job($this->db, $jobId);
@@ -96,7 +96,7 @@ final class DeployWorkerHostPreflightIntegrationTest extends TestCase
         $result = deploy_host_preflight_decode_result((string) $job['result_json']);
         self::assertNotNull($result, 'the block must be stored as a structured result the portal can link from');
         self::assertSame(VIRTUSPHERE_DEPLOY_HOST_PREFLIGHT_ALLOWLIST_DENIED, $result['blocker']);
-        self::assertSame('10.20.30.40', $result['ip']);
+        self::assertSame('203.0.113.40', $result['ip']);
         self::assertSame(0, $this->logCount($jobId, 'Deploy files prepared:%'), 'no artifact, no upload');
         self::assertSame($before, $this->vmState(), 'a job blocked before the remote work must not touch its VMs');
     }

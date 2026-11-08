@@ -254,7 +254,7 @@ final class DeployDatacenterResolutionTest extends TestCase
             $missionId,
             null,
             ['vm_name' => 'PHPUNITDCR1', 'vm_hostname' => 'PHPUNITDCR1', 'vm_os' => 'Windows Server 2019', 'vm_domain' => 'dc.example.com', 'vm_guest_id' => 'windows2019srv_64Guest'],
-            [['ip' => '10.0.0.5', 'subnet' => '255.255.255.0', 'gateway' => '10.0.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
+            [['ip' => '192.0.2.5', 'subnet' => '255.255.255.0', 'gateway' => '192.0.2.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',

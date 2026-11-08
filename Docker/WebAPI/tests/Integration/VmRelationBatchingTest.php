@@ -47,9 +47,9 @@ final class VmRelationBatchingTest extends TestCase
         $this->linkPackage($zetaId, $alphaPackage);
         $this->linkPackage($foreignId, $foreignPackage);
 
-        $this->interface($zetaId, '10.23.0.20', null, '');
+        $this->interface($zetaId, '198.51.100.20', null, '');
         $this->interface($zetaId, '', '', null);
-        $this->interface($foreignId, '10.99.0.1', 'foreign', 'foreign');
+        $this->interface($foreignId, '203.0.113.1', 'foreign', 'foreign');
         $this->disk($zetaId, 'System', 40, 'thick');
         $this->disk($zetaId, 'Data', 0, 'thin');
         $this->disk($foreignId, 'Foreign', 99, 'thin');
@@ -103,7 +103,7 @@ final class VmRelationBatchingTest extends TestCase
                 ''
             );
         }
-        $this->interface($lastVmId, '10.23.250.1', null, '');
+        $this->interface($lastVmId, '198.51.100.250', null, '');
 
         $beforeFirst = $this->selectCount();
         $first = getVMs($this->db, $missionId);

@@ -42,7 +42,7 @@ final class PackageRunReportWireTest extends TestCase
             'SELECT LOWER(BIN_TO_UUID(package_report_generation)) FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]);
         repo_execute($this->db,
             'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            'issssss', [$this->vmId, '10.0.0.20', '255.255.255.0', '10.0.0.1', self::MAC, 'dhcp', 'vmxnet3']);
+            'issssss', [$this->vmId, '192.0.2.20', '255.255.255.0', '192.0.2.1', self::MAC, 'dhcp', 'vmxnet3']);
     }
 
     protected function tearDown(): void

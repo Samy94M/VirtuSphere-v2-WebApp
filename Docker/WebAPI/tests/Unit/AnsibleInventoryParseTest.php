@@ -417,7 +417,7 @@ final class AnsibleInventoryParseTest extends TestCase
     {
         self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, ansible_categorize_inventory_error(self::fixture('connection-refused'), 2));
         // A number that only looks like a status is not one.
-        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, ansible_categorize_inventory_error(self::failure('Unable to connect to 10.0.0.503 port 443: timed out'), 2));
+        self::assertSame(VIRTUSPHERE_INVENTORY_ERROR_UNREACHABLE, ansible_categorize_inventory_error(self::failure('Unable to connect to 192.0.2.503 port 443: timed out'), 2));
     }
 
     public function testMeasuredAnsibleConfigFailuresOf219(): void

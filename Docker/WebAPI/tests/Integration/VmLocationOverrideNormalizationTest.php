@@ -99,7 +99,7 @@ final class VmLocationOverrideNormalizationTest extends TestCase
                 'vm_datastore' => $datastore,
                 'vm_datacenter' => $datacenter,
             ],
-            [['ip' => '10.0.0.5', 'subnet' => '255.255.255.0', 'gateway' => '10.0.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
+            [['ip' => '192.0.2.5', 'subnet' => '255.255.255.0', 'gateway' => '192.0.2.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',

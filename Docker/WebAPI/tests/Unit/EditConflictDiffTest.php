@@ -61,7 +61,7 @@ final class EditConflictDiffTest extends TestCase
 
     public function testChildRowsAreSummarizedAsCountsOnlyWhenTheyDiffer(): void
     {
-        $rows = [['ip' => '10.0.0.1', 'vlan' => 'a'], ['ip' => '', 'vlan' => 'b']];
+        $rows = [['ip' => '192.0.2.1', 'vlan' => 'a'], ['ip' => '', 'vlan' => 'b']];
 
         self::assertNull(edit_conflict_rows_summary($rows, $rows));
         self::assertSame(['submitted' => 2, 'current' => 3], edit_conflict_rows_summary($rows, [...$rows, ['ip' => '', 'vlan' => 'c']]));

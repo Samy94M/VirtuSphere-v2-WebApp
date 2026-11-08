@@ -58,7 +58,7 @@ final class PackageRunRepositoryTest extends TestCase
             'SELECT LOWER(BIN_TO_UUID(package_report_generation)) FROM deploy_vms WHERE id = ?', 'i', [$this->vmId]);
         repo_execute($this->db,
             'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            'issssss', [$this->vmId, '10.0.0.10', '255.255.255.0', '10.0.0.1', self::MAC, 'dhcp', 'vmxnet3']);
+            'issssss', [$this->vmId, '192.0.2.10', '255.255.255.0', '192.0.2.1', self::MAC, 'dhcp', 'vmxnet3']);
     }
 
     protected function tearDown(): void
@@ -137,7 +137,7 @@ final class PackageRunRepositoryTest extends TestCase
         $otherId = (int) $this->db->insert_id;
         repo_execute($this->db,
             'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            'issssss', [$otherId, '10.0.0.12', '255.255.255.0', '10.0.0.1', $otherMac, 'dhcp', 'vmxnet3']);
+            'issssss', [$otherId, '192.0.2.12', '255.255.255.0', '192.0.2.1', $otherMac, 'dhcp', 'vmxnet3']);
         $otherGeneration = (string) repo_scalar($this->db,
             'SELECT LOWER(BIN_TO_UUID(package_report_generation)) FROM deploy_vms WHERE id = ?', 'i', [$otherId]);
 
@@ -301,7 +301,7 @@ final class PackageRunRepositoryTest extends TestCase
         $otherId = (int) $this->db->insert_id;
         repo_execute($this->db,
             'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            'issssss', [$otherId, '10.0.0.11', '255.255.255.0', '10.0.0.1', '02:00:00:00:56:02', 'dhcp', 'vmxnet3']);
+            'issssss', [$otherId, '192.0.2.11', '255.255.255.0', '192.0.2.1', '02:00:00:00:56:02', 'dhcp', 'vmxnet3']);
         self::assertSame(['status' => 409, 'error' => 'ambiguous_device'],
             repo_package_report_resolve_vm($this->db, [self::MAC, '02:00:00:00:56:02']));
     }
