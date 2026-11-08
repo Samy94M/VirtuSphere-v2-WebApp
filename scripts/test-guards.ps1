@@ -620,11 +620,17 @@ $cases = @(
         Save-DocFragmentCommit $fx
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.new-entry\]'
     } }
-    # unreleased-section, fragment-format und no-git beweist
-    # tests/powershell/VirtuSphere.DocFragments.Tests.ps1 gegen dasselbe Skript
-    # mit derselben Diagnose-ID (R4, C2: je Regel abgeschaltet, Pester-Fall rot).
-    # Hier bleiben gruen, Fixture-Kontrolle, je eine Mutation der beiden Haelften
-    # (CHANGELOG und Archivregister) auf den echten Quellen und Zero-Match.
+    @{ Name = 'doc-fragments.unreleased-section'; Body = {
+        $fx = New-DocFragmentRepo
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        $file = Join-Path $fx 'docs/CHANGELOG.md'
+        $text = [System.IO.File]::ReadAllText($file)
+        $heading = $text.IndexOf("`n## ")
+        if ($heading -lt 0) { throw 'Mutationsanker nicht gefunden in docs/CHANGELOG.md: erste Ueberschrift' }
+        $text = $text.Insert($heading + 1, "## Noch in keinem Release`n`n")
+        [System.IO.File]::WriteAllText($file, $text, (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.unreleased-section\]'
+    } }
     @{ Name = 'doc-fragments.archive-entry'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
@@ -633,10 +639,20 @@ $cases = @(
         Save-DocFragmentCommit $fx
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.archive-entry\]'
     } }
+    @{ Name = 'doc-fragments.fragment-format'; Body = {
+        $fx = New-DocFragmentRepo
+        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
+        Add-FixtureFile $fx 'docs/changelog.d/x1.md' "Free paragraph.`n"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.fragment-format\]'
+    } }
     @{ Name = 'doc-fragments.zero-match'; Body = {
         $fx = New-DocFragmentRepo -WithoutArchiveMarker
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.no-archive\]'
+    } }
+    @{ Name = 'doc-fragments.no-git'; Body = {
+        $fx = New-Fixture $docFragmentFixtureFiles
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(2) '\[doc-fragments\.no-git\]'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {
@@ -981,6 +997,20 @@ function zz_guard_ok(mysqli $db): void
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'lint-csp-patterns.sh') @('--worktree') $fx) @(2) '\[csp\.no-git\]'
     } }
 
+    @{ Name = 'sh-posix.parse-all'; Body = {
+        if (-not $shExe) { return @{ Status = 'infra'; Detail = 'sh fehlt' } }
+        $shFiles = @(Get-ChildItem -Path (Join-Path $repoRoot 'scripts') -Filter '*.sh' -File)
+        $shFiles += @(Get-ChildItem -Path (Join-Path (Join-Path $repoRoot '.claude') 'hooks') -Filter '*.sh' -File)
+        if ($shFiles.Count -eq 0) { return @{ Status = 'unproven'; Detail = 'Zero-Match: keine Shellskripte gefunden' } }
+        foreach ($f in $shFiles) {
+            $r = Invoke-GuardShell '-n' @(($f.FullName -replace '\\', '/'))
+            if ($r.ExitCode -ne 0) {
+                return @{ Status = 'unproven'; Detail = ($f.Name + ' ist nicht POSIX-parsebar: ' + (@($r.Output) -join ' ')) }
+            }
+        }
+        return @{ Status = 'proven'; Detail = ('' + $shFiles.Count + ' Skripte POSIX-parsebar') }
+    } }
+
     @{ Name = 'runner.powershell-syntax.red'; Body = {
         $fx = New-Fixture
         Add-FixtureFile $fx 'broken.ps1' "function Broken {`n"
@@ -1174,9 +1204,8 @@ $cases += @(
         $fx = New-Fixture
         # Unabgeschlossenes Quote: Parserfehler (SC1078, error-Level), sicher
         # oberhalb der -S-warning-Schwelle des Gates. Dazu ein if ohne fi: die
-        # zweite Art Parse-Fehler, fuer die bis C2 der Fall sh-posix.parse-all
-        # jedes Skript mit sh -n las. Beide Dateien muessen gemeldet werden;
-        # shellcheck deckt seitdem allein ab, was nicht parsebar ist (R3).
+        # zweite Art Parse-Fehler, die sh-posix.parse-all mit sh -n findet.
+        # Beide Dateien muessen gemeldet werden (R3-Beleg, C2).
         Add-FixtureFile $fx 'probe.sh' "#!/bin/sh`necho `"unclosed`n"
         Add-FixtureFile $fx 'probe-if.sh' "#!/bin/sh`nif true; then`n  echo open`n"
         $result = Invoke-RunnerGate $fx 'shellcheck'
