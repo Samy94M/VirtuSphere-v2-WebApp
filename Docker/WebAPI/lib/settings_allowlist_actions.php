@@ -40,8 +40,11 @@ function settings_allowlist_handle_action(mysqli $connection, array $user, strin
             return;
         }
         try {
-            repo_api_access_add($connection, $ip, $description, $role);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', $ip, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'allowlisted', 'role' => $role], (int) $user['id']);
+            // W3A (R19): each entry change and its row commit or roll back together.
+            repo_transaction($connection, static function () use ($connection, $ip, $description, $role, $user): void {
+                repo_api_access_add($connection, $ip, $description, $role);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', $ip, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'allowlisted', 'role' => $role], (int) $user['id']);
+            });
             flash_set('success', __t('settings.allowlist_added'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -64,12 +67,14 @@ function settings_allowlist_handle_action(mysqli $connection, array $user, strin
             } elseif (($conflict = repo_api_access_conflict($connection, (string) $entry['ipAddress'], $role, (int) $entry['id'])) !== null) {
                 flash_set('error', __t($conflict === 'legacy_present' ? 'settings.allowlist_ip_legacy_present' : 'settings.allowlist_ip_exists'));
             } else {
-                $before = repo_api_access_set_role($connection, (int) $entry['id'], $role);
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', (string) $entry['ipAddress'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'role_assigned',
-                    'role' => $role,
-                    'previous_role' => (string) ($before['role'] ?? 'none'),
-                ], (int) $user['id']);
+                repo_transaction($connection, static function () use ($connection, $entry, $role, $user): void {
+                    $before = repo_api_access_set_role($connection, (int) $entry['id'], $role);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', (string) $entry['ipAddress'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'role_assigned',
+                        'role' => $role,
+                        'previous_role' => (string) ($before['role'] ?? 'none'),
+                    ], (int) $user['id']);
+                });
                 flash_set('success', __t('settings.allowlist_role_saved'));
             }
         } catch (Throwable $exception) {
@@ -80,11 +85,18 @@ function settings_allowlist_handle_action(mysqli $connection, array $user, strin
     }
 
     try {
-        $entry = repo_api_access_delete($connection, request_int($_POST, 'id'));
+        $id = request_int($_POST, 'id');
+        $entry = repo_transaction($connection, static function () use ($connection, $id, $user): ?array {
+            $entry = repo_api_access_delete($connection, $id);
+            if ($entry !== null) {
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', (string) $entry['ipAddress'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'removed'], (int) $user['id']);
+            }
+
+            return $entry;
+        });
         if ($entry === null) {
             flash_set('error', __t('settings.allowlist_not_found'));
         } else {
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_MACHINE_IP, 'client_ip', (string) $entry['ipAddress'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'removed'], (int) $user['id']);
             flash_set('success', __t('settings.allowlist_removed'));
         }
     } catch (Throwable $exception) {

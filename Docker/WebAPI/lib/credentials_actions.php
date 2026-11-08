@@ -131,17 +131,21 @@ function credentials_after_esxi_save(mysqli $db, string $type, int $credentialId
         return;
     }
     try {
-        $state = repo_esxi_inventory_state($db, $credentialId);
-        $wasPaused = $state !== null && (int) $state['paused_until_credential_change'] === 1;
-        repo_esxi_inventory_clear_pause($db, $credentialId);
-        if ($wasPaused) {
-            // The pause is what stopped every future pull; its end deserves the
-            // same line in the log its start got.
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_RECOVERED, [
-                'action' => 'resumed',
-                'reason' => VIRTUSPHERE_AUDIT_INVENTORY_AUTOMATION_REASON_CREDENTIAL_SAVED,
-            ], $userId);
-        }
+        // W3A (R19): the cleared pause and its row commit together; a refused
+        // row keeps the pause, which the next save or test clears again.
+        repo_transaction($db, static function () use ($db, $credentialId, $userId): void {
+            $state = repo_esxi_inventory_state($db, $credentialId);
+            $wasPaused = $state !== null && (int) $state['paused_until_credential_change'] === 1;
+            repo_esxi_inventory_clear_pause($db, $credentialId);
+            if ($wasPaused) {
+                // The pause is what stopped every future pull; its end deserves the
+                // same line in the log its start got.
+                audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_INVENTORY_AUTOMATION, 'credential', $credentialId, VIRTUSPHERE_AUDIT_RESULT_RECOVERED, [
+                    'action' => 'resumed',
+                    'reason' => VIRTUSPHERE_AUDIT_INVENTORY_AUTOMATION_REASON_CREDENTIAL_SAVED,
+                ], $userId);
+            }
+        });
         // A legacy row with a stored certificate gets the strict probe: the one pull
         // that tells whether that certificate verifies. Every other save is a plain pull.
         $credential = repo_credential($db, $credentialId) ?? [];

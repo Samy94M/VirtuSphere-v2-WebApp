@@ -84,7 +84,7 @@ function deploy_supervisor_switch_main(array $argv): int
         $switch = repo_deploy_switch_supervisor_contract($db, $target, $actor);
         // One audit row per attempt, and the refusal is the interesting one: it
         // names the condition a maintenance window has to satisfy next.
-        audit_event(
+        audit_event_required(
             $db,
             VIRTUSPHERE_AUDIT_EVENT_DEPLOY_SUPERVISOR_CONTRACT,
             'system',
