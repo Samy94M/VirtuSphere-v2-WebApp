@@ -142,19 +142,22 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
         $active = 1;
         $mustChange = 1;
         $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
-        if (auth_user_source_schema_available($db)) {
-            $stmt = $db->prepare('INSERT INTO deploy_users (name, auth_source, password, email, role, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)');
-            $stmt->bind_param('sssssii', $name, $source, $hash, $email, $role, $active, $mustChange);
-        } else {
-            $stmt = $db->prepare('INSERT INTO deploy_users (name, password, email, role, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?)');
-            $stmt->bind_param('ssssii', $name, $hash, $email, $role, $active, $mustChange);
-        }
-        $stmt->execute();
-        $createdId = (int) $stmt->insert_id;
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_CREATED, 'user', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'name' => audit_snippet($name, 191),
-            'source' => VIRTUSPHERE_AUTH_SOURCE_LOCAL,
-        ], (int) $actor['id']);
+        // W3A (R19): the account and its row commit or roll back together.
+        repo_transaction($db, static function () use ($db, $name, $source, $hash, $email, $role, $active, $mustChange, $actor): void {
+            if (auth_user_source_schema_available($db)) {
+                $stmt = $db->prepare('INSERT INTO deploy_users (name, auth_source, password, email, role, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                $stmt->bind_param('sssssii', $name, $source, $hash, $email, $role, $active, $mustChange);
+            } else {
+                $stmt = $db->prepare('INSERT INTO deploy_users (name, password, email, role, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?)');
+                $stmt->bind_param('ssssii', $name, $hash, $email, $role, $active, $mustChange);
+            }
+            $stmt->execute();
+            $createdId = (int) $stmt->insert_id;
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_CREATED, 'user', $createdId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'name' => audit_snippet($name, 191),
+                'source' => VIRTUSPHERE_AUTH_SOURCE_LOCAL,
+            ], (int) $actor['id']);
+        });
         flash_set('success', __t('users.flash_created'));
 
         return true;
@@ -188,7 +191,7 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
             $stmt = $db->prepare('UPDATE deploy_users SET is_active = ?, updated_at = NOW() WHERE id = ?');
             $stmt->bind_param('ii', $active, $targetId);
             $stmt->execute();
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_ACTIVE_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                 'enabled' => $active === 1,
             ], (int) $actor['id']);
 
@@ -221,7 +224,7 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
             $stmt = $db->prepare('UPDATE deploy_users SET role = ?, updated_at = NOW() WHERE id = ?');
             $stmt->bind_param('si', $role, $targetId);
             $stmt->execute();
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_ROLE_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                 'role' => $role,
             ], (int) $actor['id']);
 
@@ -251,26 +254,30 @@ function users_handle_account_action(mysqli $db, array $actor, string $action): 
         }
         $hash = password_hash($password, PASSWORD_DEFAULT);
         $mustChange = 1;
-        if (auth_user_source_schema_available($db)) {
-            $stmt = $db->prepare('UPDATE deploy_users SET password = ?, must_change_password = ?, updated_at = NOW() WHERE id = ? AND auth_source = ?');
-            $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
-            $stmt->bind_param('siis', $hash, $mustChange, $targetId, $source);
-        } else {
-            $stmt = $db->prepare('UPDATE deploy_users SET password = ?, must_change_password = ?, updated_at = NOW() WHERE id = ?');
-            $stmt->bind_param('sii', $hash, $mustChange, $targetId);
-        }
-        $stmt->execute();
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'reset_password',
-        ], (int) $actor['id']);
+        repo_transaction($db, static function () use ($db, $hash, $mustChange, $targetId, $actor): void {
+            if (auth_user_source_schema_available($db)) {
+                $stmt = $db->prepare('UPDATE deploy_users SET password = ?, must_change_password = ?, updated_at = NOW() WHERE id = ? AND auth_source = ?');
+                $source = VIRTUSPHERE_AUTH_SOURCE_LOCAL;
+                $stmt->bind_param('siis', $hash, $mustChange, $targetId, $source);
+            } else {
+                $stmt = $db->prepare('UPDATE deploy_users SET password = ?, must_change_password = ?, updated_at = NOW() WHERE id = ?');
+                $stmt->bind_param('sii', $hash, $mustChange, $targetId);
+            }
+            $stmt->execute();
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'reset_password',
+            ], (int) $actor['id']);
+        });
         flash_set('success', __t('users.flash_password_reset'));
     } else {
         // SEC3 (C-04c): the lock is the failure count per address, not a column;
         // clearing it removes the counted failures from every address.
-        auth_clear_local_login_lock($db, (string) $localTarget['name']);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'cleared_login_lock',
-        ], (int) $actor['id']);
+        repo_transaction($db, static function () use ($db, $localTarget, $targetId, $actor): void {
+            auth_clear_local_login_lock($db, (string) $localTarget['name']);
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_SECURITY_CHANGED, 'user', $targetId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'cleared_login_lock',
+            ], (int) $actor['id']);
+        });
         flash_set('success', __t('users.flash_lock_cleared'));
     }
 

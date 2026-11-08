@@ -267,8 +267,10 @@ foreach ($files as $path) {
         }
         // Only inside a call to one of the audit entry points; the same key in
         // an unrelated array (a credential form, an SSH option map) is fine.
+        // `audit_event_required` is named on its own: `\baudit_event\s*\(` does
+        // not match it, and W3A moved most domain writes onto it.
         if (preg_match(
-            "/\b(?:audit_event|audit|machine_api_audit_warning)\s*\((?:[^;]{0,2000}?)'" . preg_quote($key, '/') . "'\s*=>/s",
+            "/\b(?:audit_event_required|audit_event|audit|machine_api_audit_warning)\s*\((?:[^;]{0,2000}?)'" . preg_quote($key, '/') . "'\s*=>/s",
             $source
         ) === 1) {
             $findings[] = sprintf(
@@ -315,7 +317,7 @@ foreach ($files as $path) {
 
     // A secret-shaped literal handed straight to a log call.
     if (preg_match(
-        '/\b(?:audit_event|audit|machine_api_audit_warning|machine_api_log_warning|error_log)\s*\([^;]{0,400}?(Bearer\s+[A-Za-z0-9._-]{8,}|Basic\s+[A-Za-z0-9+\/=]{12,})/i',
+        '/\b(?:audit_event_required|audit_event|audit|machine_api_audit_warning|machine_api_log_warning|error_log)\s*\([^;]{0,400}?(Bearer\s+[A-Za-z0-9._-]{8,}|Basic\s+[A-Za-z0-9+\/=]{12,})/i',
         $source,
         $sentinel
     ) === 1) {

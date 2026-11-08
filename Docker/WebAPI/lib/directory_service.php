@@ -53,94 +53,29 @@ function directory_observe_controller(mysqli $db, array $controller, int $revisi
     $transport = $result instanceof DirectoryLdapException
         ? $result->transportFailure
         : directory_outcome_is_transport($outcome);
-    $changed = repo_directory_record_controller_outcome(
-        $db,
-        (int) $controller['id'],
-        $revision,
-        $outcome,
-        $transport,
-        $certificate
-    );
-    if ($changed) {
-        audit_event(
+    // W3A (R19): the state transition and its row commit together. A row that
+    // cannot be stored leaves the old state, so the next observation sees the
+    // same transition again instead of a transition nobody recorded.
+    repo_transaction($db, static function () use ($db, $controller, $revision, $outcome, $transport, $certificate): void {
+        $changed = repo_directory_record_controller_outcome(
             $db,
-            VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_STATE,
-            'directory_controller',
             (int) $controller['id'],
-            $outcome === VIRTUSPHERE_DIRECTORY_OUTCOME_OK ? VIRTUSPHERE_AUDIT_RESULT_RECOVERED : VIRTUSPHERE_AUDIT_RESULT_WARNING,
-            ['outcome' => $outcome]
+            $revision,
+            $outcome,
+            $transport,
+            $certificate
         );
-    }
-}
-
-/**
- * Tests one saved controller. This is the only operation that can admit it for
- * login on the current configuration revision.
- *
- * @return array{ok:bool,outcome:string}
- */
-function directory_test_saved_controller(mysqli $db, int $controllerId, int $actorId): array
-{
-    $config = repo_directory_config($db);
-    $controller = repo_directory_controller($db, $controllerId);
-    if ($config === null || $controller === null) {
-        return ['ok' => false, 'outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_INVALID_RESPONSE];
-    }
-    $revision = (int) $config['revision'];
-    try {
-        $runtime = directory_runtime_config($config);
-        $result = directory_ldap_test_controller(directory_controller_endpoint($controller), $runtime);
-        if (!repo_directory_apply_controller_test_success($db, $controllerId, $revision, $result['default_naming_context'], $actorId)) {
-            return ['ok' => false, 'outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_UNAVAILABLE];
+        if ($changed) {
+            audit_event_required(
+                $db,
+                VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_STATE,
+                'directory_controller',
+                (int) $controller['id'],
+                $outcome === VIRTUSPHERE_DIRECTORY_OUTCOME_OK ? VIRTUSPHERE_AUDIT_RESULT_RECOVERED : VIRTUSPHERE_AUDIT_RESULT_WARNING,
+                ['outcome' => $outcome]
+            );
         }
-        directory_observe_controller($db, $controller, $revision, VIRTUSPHERE_DIRECTORY_OUTCOME_OK, $result['certificate']);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_OK,
-        ], $actorId);
-
-        return ['ok' => true, 'outcome' => VIRTUSPHERE_DIRECTORY_OUTCOME_OK];
-    } catch (DirectoryLdapException $exception) {
-        repo_directory_clear_controller_validation($db, $controllerId, $revision, $actorId);
-        directory_observe_controller($db, $controller, $revision, $exception);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_FAILURE, [
-            'outcome' => $exception->outcome,
-        ], $actorId);
-
-        return ['ok' => false, 'outcome' => $exception->outcome];
-    } catch (Throwable) {
-        repo_directory_clear_controller_validation($db, $controllerId, $revision, $actorId);
-        $exception = new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_INVALID_RESPONSE);
-        directory_observe_controller($db, $controller, $revision, $exception);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_TESTED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_FAILURE, [
-            'outcome' => $exception->outcome,
-        ], $actorId);
-
-        return ['ok' => false, 'outcome' => $exception->outcome];
-    }
-}
-
-/**
- * Tests a not-yet-saved configuration while AD is active. The current config
- * remains untouched unless this succeeds; the caller atomically saves it with
- * the returned naming context and controller id.
- *
- * @param array<string,mixed> $candidate
- * @return array{default_naming_context:string,certificate:array{fingerprint:string,not_after:string}}
- */
-function directory_test_candidate(mysqli $db, array $candidate, int $controllerId): array
-{
-    $controller = repo_directory_controller($db, $controllerId);
-    if ($controller === null) {
-        throw new ValidationException(['controller_id' => __t('directory.err_controller_required')]);
-    }
-
-    return directory_ldap_test_controller(directory_controller_endpoint($controller), [
-        'bind_upn' => (string) $candidate['bind_upn'],
-        'bind_password' => (string) $candidate['bind_password'],
-        'ca_certificate_pem' => (string) $candidate['ca_certificate_pem'],
-        'user_search_base_dn' => (string) $candidate['user_search_base_dn'],
-        'default_naming_context' => (string) $candidate['default_naming_context'],
-    ]);
+    });
 }
 
 /**
@@ -378,12 +313,18 @@ function directory_import_candidate(mysqli $db, string $token, string $role, int
     if (empty($entry['enabled'])) {
         throw new ValidationException(['import_token' => __t('directory.err_import_disabled')]);
     }
-    $result = repo_directory_import_user($db, $entry, role_normalize($role));
+    // W3A (R19): the directory read above is the network I/O; the account and
+    // its row commit or roll back together.
+    $result = repo_transaction($db, static function () use ($db, $entry, $role, $actorId): array {
+        $result = repo_directory_import_user($db, $entry, role_normalize($role));
+        if ($result['created']) {
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED, 'user', (int) $result['user_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], $actorId);
+        }
+
+        return $result;
+    });
     if ($result['reason'] === 'name_conflict') {
         throw new ValidationException(['import_token' => __t('directory.err_import_name_conflict')]);
-    }
-    if ($result['created']) {
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_IMPORTED, 'user', (int) $result['user_id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], $actorId);
     }
 
     return $result;
