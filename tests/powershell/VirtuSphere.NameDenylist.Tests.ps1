@@ -374,7 +374,8 @@ Describe 'shipped pattern list .githooks/name-patterns.txt' {
         $clean = @(
             'ip 192.0.2.10 and 198.51.100.7:8021 and 203.0.113.0/24',
             'loopback 127.0.0.1:8080, any 0.0.0.0, mask 255.255.255.0',
-            'version 5.1.17763.316, oid 2.5.4.3, build 10.0.17763.0',
+            'version 5.1.17763.316, oid 2.5.4.3, build 10.0.17763.0, pin pyvmomi==9.1.0.0',
+            'oid 1.3.6.1.4.1.311.21.7 and section 4.1.2.5 and placeholder 1.2.3.4',
             'host srv-a.example.test, dc.example.com, web.invalid',
             'docs https://learn.microsoft.com/de-de/ and https://github.com/x/y',
             'mac 00:00:5E:00:53:01 and AA-BB-CC-DD-EE-01',
@@ -390,6 +391,9 @@ Describe 'shipped pattern list .githooks/name-patterns.txt' {
         $cases = @(
             @{ Label = 'private IPv4'; Text = ('gw ' + '10.' + '200.30.40') },
             @{ Label = 'public IPv4 with prefix'; Text = ('net ' + '8.8.4.' + '0/24') },
+            @{ Label = 'bare public IPv4'; Text = ('dns ' + '8.8.' + '4.4') },
+            @{ Label = 'bare IPv4 in quotes'; Text = ("host='" + '203.0.' + "114.9'") },
+            @{ Label = 'four-part value next to an allowed version'; Text = ('pin ' + '9.1.0.' + '1') },
             @{ Label = 'UNC path'; Text = ('share ' + '\\' + 'filer9\data') },
             @{ Label = 'internal FQDN'; Text = ('host srv9.' + 'acme-corp.' + 'lan') },
             @{ Label = 'public FQDN'; Text = ('host portal.' + 'acme-corp.' + 'de') },

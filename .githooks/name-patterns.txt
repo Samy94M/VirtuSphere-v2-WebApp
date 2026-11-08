@@ -18,15 +18,11 @@
 #   (25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
 
 # --- IPv4 -------------------------------------------------------------------
-# Private Bereiche, CGNAT und Link-Local immer, auch ohne Port oder Praefix.
-re:10\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
-re:172\.(1[6-9]|2[0-9]|3[01])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
-re:192\.168\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
-re:100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
-re:169\.254\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
-# Jede andere IPv4 nur mit Praefixlaenge oder Port: ohne sie gleicht eine
-# Adresse einer Versionsnummer oder OID.
-re:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(/[0-9][0-9]?|:[0-9][0-9]*)
+# Jede IPv4 als ganzes Wort, privat wie oeffentlich, mit oder ohne Port und
+# Praefix. Laengere Punktfolgen (OIDs, vierteilige Versionen mit Fortsetzung)
+# trifft die Wortgrenze nicht; die uebrigen Versions-, Build- und OID-Folgen
+# sind unten einzeln freigegeben.
+re:(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])
 
 # Dokumentationsbereiche (RFC 5737), Loopback, 0.0.0.0, Netzmasken.
 allow:(192\.0\.2|198\.51\.100|203\.0\.113)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(/[0-9][0-9]?|:[0-9][0-9]*)?
@@ -51,6 +47,22 @@ allow:10\.23\.0\.20
 allow:10\.23\.250\.1
 allow:10\.9[01]\.0\.(1|10)
 allow:10\.99\.0\.(1|7|8|42)
+# Einzelne Testwerte ausserhalb privater Bereiche: Platzhalter-Adresse und
+# invertierte Netzmaske.
+allow:1\.2\.3\.4
+allow:0\.255\.255\.255
+# Versions-, Build- und OID-Folgen mit vier Teilen, die wie eine IPv4 aussehen
+# (NS3-Messung auf main). Neue Folgen hier einzeln ergaenzen, nie als Bereich.
+# Composer-Versionen (vendor/composer/installed.json, installed.php):
+allow:(1\.0\.0|1\.0\.5|1\.13\.4|2\.0\.1|2\.0\.4|2\.2\.5|3\.0\.58|3\.1\.3|3\.2\.1|4\.0\.1|4\.2\.1|5\.0\.0|5\.8\.0|6\.0\.0|6\.0\.1|6\.0\.4|7\.0\.0|7\.0\.1|7\.0\.3|7\.1\.8|8\.0\.0|8\.0\.3|8\.1\.2|9\.99\.100|12\.5\.7|12\.5\.31)\.0
+# pyVmomi-Pin und WSL-Version in Tests, requirements.txt und Messnotizen:
+allow:(9\.1\.0|2\.7\.12)\.0
+# X.509-OIDs (RFC 5280, RFC 8410) in vendor/phpseclib:
+allow:2\.5\.4\.(3|4|5|6|7|8|9|10|11|12|13|15|16|17|41|42|43|44|45|46|65|72|97)
+allow:2\.5\.29\.(9|14|15|16|17|18|19|20|21|23|24|27|28|29|30|31|32|33|35|36|37|46|54)
+allow:1\.3\.101\.11[0-3]
+# Abschnittsnummern aus RFCs und ITU-T X.690 in Kommentaren von vendor/phpseclib:
+allow:(4\.1\.1\.2|4\.1\.2\.[256]|4\.2\.1\.[12]|4\.6\.1\.[13]|5\.1\.2\.[456]|8\.1\.1\.3|8\.1\.3\.[26]|8\.6\.4\.2)
 
 # --- UNC-Pfade --------------------------------------------------------------
 # \\host\freigabe roh und als Zeichenkettenliteral mit verdoppelten
