@@ -26,19 +26,57 @@
 .PARAMETER List
     Faelle auflisten, nichts ausfuehren.
 
+.PARAMETER Shard
+    Nur den Shard k von N fahren (Form 'k/N'): jeden N-ten Fall der Auswahl
+    nach -Filter, Round-Robin ab Fall k. Die Zaehler laufen dann ueber die
+    Faelle des Shards. Ein leerer Shard ist ein ungueltiger Aufruf (Exit 3).
+
+.PARAMETER Parallel
+    N Shard-Prozesse gleichzeitig starten (Standard 1 = seriell im selben
+    Prozess). Der Elternprozess gibt jede Zeile der Kinder sofort mit dem
+    Praefix '[Shard k/N]' weiter, meldet je Shard '[k/N] RUN' und das
+    Shard-Ergebnis und fasst die Exitcodes zusammen: 1 vor 2 vor 0. Ein Kind
+    ohne vollstaendige Abschlusszeile zaehlt als infra. N wird auf die Zahl
+    der ausgewaehlten Faelle begrenzt.
+
 .EXAMPLE
     powershell -NoProfile -File scripts\test-guards.ps1
+
+.EXAMPLE
+    powershell -NoProfile -File scripts\test-guards.ps1 -Parallel 4
 #>
 [CmdletBinding()]
 param(
     [string[]]$Filter,
-    [switch]$List
+    [switch]$List,
+    [string]$Shard = '',
+    [int]$Parallel = 1
 )
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
 
 if ($Filter) { $Filter = @($Filter | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }) }
+
+# Aufrufpruefung vor jedem Werkzeug- oder Verzeichniszugriff: Exit 3 laut Kopf.
+$shardIndex = 0
+$shardCount = 0
+if ($Shard -ne '') {
+    if ($Shard -notmatch '^([1-9][0-9]*)/([1-9][0-9]*)$' -or [int]$Matches[1] -gt [int]$Matches[2]) {
+        Write-Host ("test-guards.ps1: -Shard erwartet 'k/N' mit 1 <= k <= N, nicht '" + $Shard + "'") -ForegroundColor Red
+        exit 3
+    }
+    $shardIndex = [int]$Matches[1]
+    $shardCount = [int]$Matches[2]
+}
+if ($Parallel -lt 1 -or $Parallel -gt 16) {
+    Write-Host ('test-guards.ps1: -Parallel erwartet 1 bis 16, nicht ' + $Parallel) -ForegroundColor Red
+    exit 3
+}
+if ($Parallel -gt 1 -and $shardCount -gt 0) {
+    Write-Host 'test-guards.ps1: -Parallel und -Shard schliessen sich aus (der Elternprozess vergibt die Shards)' -ForegroundColor Red
+    exit 3
+}
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Split-Path $scriptDir -Parent) -replace '\\', '/'
@@ -1626,6 +1664,20 @@ if ($Filter) {
     }
 }
 
+# Round-Robin ueber die Reihenfolge der Auswahl: Fall i (ab 0) gehoert zu Shard
+# (i mod N) + 1. Die Familien liegen im Katalog beieinander; so verteilt sich
+# auch eine schwere Familie (doc-semantics) auf alle Shards.
+$selectedTotal = $selected.Count
+if ($shardCount -gt 0) {
+    $selected = @(for ($i = 0; $i -lt $selected.Count; $i++) {
+            if (($i % $shardCount) -eq ($shardIndex - 1)) { $selected[$i] }
+        })
+    if ($selected.Count -eq 0) {
+        Write-Host ('test-guards.ps1: Shard {0}/{1} ist leer ({2} Fall/Faelle ausgewaehlt)' -f $shardIndex, $shardCount, $selectedTotal) -ForegroundColor Red
+        exit 3
+    }
+}
+
 if ($List) {
     Write-Host ('{0} Guard-Faelle:' -f $selected.Count)
     foreach ($c in $selected) { Write-Host ('  ' + $c.Name) }
@@ -1644,30 +1696,132 @@ $unproven = 0
 $infra = 0
 $caseNumber = 0
 $caseTotal = $selected.Count
+$invariant = [System.Globalization.CultureInfo]::InvariantCulture
 
+function Format-GuardSeconds {
+    param([System.Diagnostics.Stopwatch]$Watch)
+    return $Watch.Elapsed.TotalSeconds.ToString('0.0', $invariant) + 's'
+}
+
+# Abschlusszeile eines Laufs; der Elternprozess liest sie aus jedem Shard zurueck.
+$summaryPattern = '^Guards: (\d+) proven, (\d+) unproven, (\d+) infra => Exit (\d+)'
+
+# --- Elternprozess: N Shards gleichzeitig ---------------------------------------
+$shardWorkers = [Math]::Min($Parallel, $selected.Count)
+if ($shardWorkers -gt 1) {
+    . (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'child-streams.ps1')
+    $workers = @()
+    $doneCases = 0
+    $overall = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        Write-Host ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle in {1} Shards' -f $selected.Count, $shardWorkers) -ForegroundColor Cyan
+        for ($k = 1; $k -le $shardWorkers; $k++) {
+            $argumentLine = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Shard ' + $k + '/' + $shardWorkers
+            if ($Filter) { $argumentLine += ' -Filter "' + ($Filter -join ',') + '"' }
+            $shardCases = 0
+            for ($i = $k - 1; $i -lt $selected.Count; $i += $shardWorkers) { $shardCases++ }
+            Write-Host ('[{0}/{1}] RUN  Shard {0}/{1} ({2} Fall/Faelle)' -f $k, $shardWorkers, $shardCases) -ForegroundColor Cyan
+            $worker = Start-StreamedChild -Exe $hostShell -ArgumentLine $argumentLine `
+                -OutPath (Join-Path $workRoot ('shard-' + $k + '.out')) -ErrPath (Join-Path $workRoot ('shard-' + $k + '.err'))
+            $worker.Index = $k
+            $worker.Cases = $shardCases
+            $worker.Summary = $null
+            $workers += $worker
+        }
+
+        # Jede vollstaendige Kindzeile sofort weitergeben; Ergebniszeilen bekommen
+        # den Gesamtzaehler, die Abschlusszeile wird fuer die Zusammenfassung gemerkt.
+        function Send-ShardLines {
+            param($Worker, [switch]$Final)
+            foreach ($line in @(Read-StreamedChildLines $Worker -Final:$Final)) {
+                if ($line -eq '') { continue }
+                $suffix = ''
+                if ($line -match '^\[\d+/\d+\] (proven|unproven|infra) ') {
+                    $script:doneCases = $script:doneCases + 1
+                    $suffix = (' | gesamt {0}/{1}' -f $script:doneCases, $selected.Count)
+                }
+                if ($line -match $summaryPattern) { $Worker.Summary = $Matches }
+                Write-Host ('[Shard {0}/{1}] {2}{3}' -f $Worker.Index, $shardWorkers, $line, $suffix)
+            }
+        }
+
+        while (@($workers | Where-Object { -not $_.Finished }).Count -gt 0) {
+            foreach ($worker in @($workers | Where-Object { -not $_.Finished })) {
+                Send-ShardLines $worker
+                if (-not (Test-StreamedChildExited $worker)) { continue }
+                Send-ShardLines $worker -Final
+                foreach ($line in @(Close-StreamedChild $worker)) {
+                    Write-Host ('[Shard {0}/{1}] stderr: {2}' -f $worker.Index, $shardWorkers, $line) -ForegroundColor Yellow
+                }
+                $childExit = $worker.ExitCode
+                $summary = $worker.Summary
+                $complete = ($null -ne $summary) -and (([int]$summary[1] + [int]$summary[2] + [int]$summary[3]) -eq $worker.Cases)
+                if ($complete) {
+                    $proven += [int]$summary[1]
+                    $unproven += [int]$summary[2]
+                    $infra += [int]$summary[3]
+                }
+                $word = 'proven'
+                $color = 'Green'
+                if ($childExit -eq 1 -or ($complete -and [int]$summary[2] -gt 0)) {
+                    $word = 'unproven'
+                    $color = 'Red'
+                    if (-not $complete) { $unproven += 1 }
+                } elseif ($childExit -ne 0 -or -not $complete -or [int]$summary[3] -gt 0) {
+                    $word = 'infra'
+                    $color = 'Yellow'
+                    if (-not $complete) { $infra += 1 }
+                }
+                $detail = 'Abschlusszeile fehlt oder unvollstaendig'
+                if ($complete) { $detail = ('{0} proven, {1} unproven, {2} infra' -f $summary[1], $summary[2], $summary[3]) }
+                Write-Host ('[{0}/{1}] {2} Shard {0}/{1} ({3}) - {4}, Exit {5}' -f $worker.Index, $shardWorkers, $word, (Format-GuardSeconds $worker.Watch), $detail, $childExit) -ForegroundColor $color
+            }
+            if (@($workers | Where-Object { -not $_.Finished }).Count -gt 0) { Start-Sleep -Milliseconds 250 }
+        }
+    } finally {
+        # Nur bei Abbruch des Elternprozesses wirksam: die eigenen Kinder samt Baum.
+        Stop-StreamedChildren $workers
+        Remove-Item -Recurse -Force -Path $workRoot -ErrorAction SilentlyContinue
+    }
+    $overall.Stop()
+    $exitCode = 0
+    if ($infra -gt 0) { $exitCode = 2 }
+    if ($unproven -gt 0) { $exitCode = 1 }
+    Write-Host ''
+    Write-Host ('Guards: {0} proven, {1} unproven, {2} infra => Exit {3} ({4} Shards, {5})' -f $proven, $unproven, $infra, $exitCode, $shardWorkers, (Format-GuardSeconds $overall)) `
+        -ForegroundColor $(if ($exitCode -eq 0) { 'Green' } elseif ($exitCode -eq 1) { 'Red' } else { 'Yellow' })
+    exit $exitCode
+}
+
+# --- Ein Prozess: Faelle nacheinander ---------------------------------------------
 try {
-    Write-Host ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle' -f $selected.Count) -ForegroundColor Cyan
+    $header = ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle' -f $selected.Count)
+    if ($shardCount -gt 0) { $header += (' (Shard {0}/{1} von {2})' -f $shardIndex, $shardCount, $selectedTotal) }
+    Write-Host $header -ForegroundColor Cyan
     foreach ($case in $selected) {
         $caseNumber = $caseNumber + 1
         Write-Host ('[{0}/{1}] RUN  {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Cyan
         $verdict = $null
+        $caseWatch = [System.Diagnostics.Stopwatch]::StartNew()
         try {
             $verdict = & $case.Body
         } catch {
             $verdict = @{ Status = 'infra'; Detail = ('Exception: ' + $_.Exception.Message) }
         }
+        $caseWatch.Stop()
+        $seconds = Format-GuardSeconds $caseWatch
         switch ($verdict.Status) {
             'proven' {
                 $proven = $proven + 1
-                Write-Host ('[{0}/{1}] proven   {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Green
+                Write-Host ('[{0}/{1}] proven   {2} ({3})' -f $caseNumber, $caseTotal, $case.Name, $seconds) -ForegroundColor Green
             }
             'infra' {
                 $infra = $infra + 1
-                Write-Host ('[{0}/{1}] infra    {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Yellow
+                Write-Host ('[{0}/{1}] infra    {2} ({3}) - {4}' -f $caseNumber, $caseTotal, $case.Name, $seconds, $verdict.Detail) -ForegroundColor Yellow
             }
             default {
                 $unproven = $unproven + 1
-                Write-Host ('[{0}/{1}] unproven {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Red
+                Write-Host ('[{0}/{1}] unproven {2} ({3}) - {4}' -f $caseNumber, $caseTotal, $case.Name, $seconds, $verdict.Detail) -ForegroundColor Red
             }
         }
     }

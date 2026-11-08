@@ -23,6 +23,17 @@
 .PARAMETER SkipTests
     Nur PSScriptAnalyzer fahren.
 
+.PARAMETER Partitions
+    Die Pester-Suite in so vielen Kindprozessen gleichzeitig fahren (Standard
+    3, hoechstens so viele wie Testdateien; 1 = ein Prozess wie bis C2). Die
+    Dateien werden nach ihrem Gewicht verteilt (siehe Get-PesterFileWeight),
+    nie nach einer Namensliste. Zaehler, gescheiterte Container und die
+    Coverage der Kinder werden zu einem Ergebnis vereinigt; Floor, Ausgabe
+    und Exitcodes sind dieselben wie im Einzelprozess.
+
+.PARAMETER PartitionSpec
+    Intern: Pfad der Auftragsdatei eines Kindprozesses. Nicht von Hand setzen.
+
 .EXAMPLE
     powershell -NoProfile -File scripts\run-pester.ps1
 
@@ -30,12 +41,16 @@
     Exitcodes: 0 alles gruen; 1 Analyzer-Befunde oder rote Tests; 3 ein
     Toolmodul fehlt (Infrastruktur, nicht Befund). check.ps1 unterscheidet
     fail/infrastructure_error ausschliesslich ueber diesen Code, nie ueber
-    Textmuster im Output: Testnamen duerfen jedes Wort enthalten.
+    Textmuster im Output: Testnamen duerfen jedes Wort enthalten. Ein
+    Kindprozess ohne Ergebnisdatei gilt wie ein fehlendes Ergebnisobjekt als
+    Infrastruktur (3), nie als gruen.
 #>
 [CmdletBinding()]
 param(
     [switch]$SkipAnalyzer,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [ValidateRange(1, 16)][int]$Partitions = 3,
+    [string]$PartitionSpec = ''
 )
 
 Set-StrictMode -Version 1.0
@@ -84,6 +99,159 @@ function Get-PesterContainerErrorLine {
     } catch {
         Write-Debug $_
         return ''
+    }
+}
+
+# Das Haertungsregister (Tag 'Haertung') ist absichtlich rot, bis der jeweilige
+# Fix steht; Begruendung im Pester-Abschnitt. Eine Quelle fuer Einzel- und
+# Kindprozess.
+$excludedTag = 'Haertung'
+
+# Coverage-Befehle eines Laufs, gezaehlt je Position (Datei, Start, Ende): die
+# Position ist die Identitaet, ueber die sich die Kinder exakt vereinigen
+# lassen. Kompakt fuer die Ergebnisdatei: eine Dateitabelle und je Position
+# @(Dateiindex, Startzeile, Startspalte, Endzeile, Endspalte, analysiert, ausgefuehrt).
+function ConvertTo-PesterCoverageTally {
+    param($Coverage)
+    $files = New-Object System.Collections.Generic.List[string]
+    $tally = @{}
+    foreach ($pair in @(@{ List = $Coverage.CommandsExecuted; Hit = 1 }, @{ List = $Coverage.CommandsMissed; Hit = 0 })) {
+        foreach ($command in @($pair.List)) {
+            if ($null -eq $command) { continue }
+            $fileIndex = $files.IndexOf([string]$command.File)
+            if ($fileIndex -lt 0) { $files.Add([string]$command.File); $fileIndex = $files.Count - 1 }
+            $key = ('{0}|{1}|{2}|{3}|{4}' -f $fileIndex, $command.StartLine, $command.StartColumn, $command.EndLine, $command.EndColumn)
+            if (-not $tally.ContainsKey($key)) {
+                $tally[$key] = @($fileIndex, [int]$command.StartLine, [int]$command.StartColumn, [int]$command.EndLine, [int]$command.EndColumn, 0, 0)
+            }
+            $tally[$key][5] = $tally[$key][5] + 1
+            $tally[$key][6] = $tally[$key][6] + $pair.Hit
+        }
+    }
+    return [ordered]@{ files = @($files); entries = @(foreach ($entry in $tally.Values) { , $entry }) }
+}
+
+# --- Kindprozess einer Partition --------------------------------------------
+# Faehrt genau die Dateien seines Auftrags mit derselben Konfiguration wie der
+# Einzelprozess und schreibt das Run-Objekt als JSON. Klassifiziert wird nur im
+# Elternprozess; hier zaehlt allein, ob ein Ergebnis entstanden ist.
+if ($PartitionSpec -ne '') {
+    try {
+        $spec = Get-Content -Raw -LiteralPath $PartitionSpec | ConvertFrom-Json
+        Import-Module $spec.pesterPath -ErrorAction Stop
+        $config = New-PesterConfiguration
+        $config.Run.Path = [string[]]@($spec.files)
+        $config.Run.PassThru = $true
+        $config.Output.Verbosity = 'Detailed'
+        $config.Filter.ExcludeTag = $excludedTag
+        if ($null -ne $spec.coverage) {
+            $config.CodeCoverage.Enabled = $true
+            $config.CodeCoverage.Path = [string[]]@($spec.coverage.paths)
+            $config.CodeCoverage.OutputPath = [string]$spec.coverage.outputPath
+        }
+        $result = Invoke-Pester -Configuration $config
+    } catch {
+        Write-Host ('Pester-Teil: infrastructure_error: {0}' -f $_.Exception.Message) -ForegroundColor Red
+        exit 3
+    }
+    $run = @($result) | Where-Object { $null -ne $_ -and $_.PSObject.Properties['Result'] -and $_.PSObject.Properties['Containers'] } | Select-Object -Last 1
+    if ($null -eq $run) {
+        Write-Host 'Pester-Teil: infrastructure_error: Invoke-Pester lieferte kein Ergebnisobjekt' -ForegroundColor Red
+        exit 3
+    }
+    $coverageOut = $null
+    $runCoverage = Get-PesterRunValue $run 'CodeCoverage'
+    if ($null -ne $runCoverage) { $coverageOut = ConvertTo-PesterCoverageTally $runCoverage }
+    $partResult = [ordered]@{
+        result                = [string](Get-PesterRunValue $run 'Result')
+        totalCount            = [int](Get-PesterRunValue $run 'TotalCount')
+        passedCount           = [int](Get-PesterRunValue $run 'PassedCount')
+        failedCount           = [int](Get-PesterRunValue $run 'FailedCount')
+        failedContainersCount = [int](Get-PesterRunValue $run 'FailedContainersCount')
+        failedBlocksCount     = [int](Get-PesterRunValue $run 'FailedBlocksCount')
+        containers            = @(foreach ($container in @($run.Containers)) {
+                if ($null -eq $container) { continue }
+                [ordered]@{ item = [string]$container.Item; result = [string]$container.Result; error = (Get-PesterContainerErrorLine $container) }
+            })
+        coverage              = $coverageOut
+    }
+    # Erst vollstaendig schreiben, dann umbenennen: der Elternprozess liest nie
+    # eine halbe Datei.
+    $partial = [string]$spec.resultPath + '.partial'
+    [System.IO.File]::WriteAllText($partial, (ConvertTo-Json -InputObject $partResult -Depth 6 -Compress), (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $partial -Destination ([string]$spec.resultPath) -Force
+    exit 0
+}
+
+# Gewicht einer Testdatei fuer die Verteilung auf Partitionen: ihre Groesse in
+# Bytes. Abgeleitet, nicht gelistet: eine neue Datei wird ohne Pflege verteilt.
+function Get-PesterFileWeight {
+    param([System.IO.FileInfo]$File)
+    return [double]$File.Length
+}
+
+# Verteilung nach der LPT-Regel: schwerste Datei zuerst in die leichteste
+# Partition. Leere Partitionen entstehen nicht (Anzahl <= Dateien).
+function Get-PesterPartitionPlan {
+    param([System.IO.FileInfo[]]$Files, [int]$Count)
+    $parts = @(for ($i = 0; $i -lt $Count; $i++) { @{ Files = New-Object System.Collections.Generic.List[string]; Weight = 0.0 } })
+    foreach ($file in @($Files | Sort-Object @{ Expression = { Get-PesterFileWeight $_ }; Descending = $true }, FullName)) {
+        $target = $parts | Sort-Object { $_.Weight } | Select-Object -First 1
+        $target.Files.Add($file.FullName)
+        $target.Weight += (Get-PesterFileWeight $file)
+    }
+    return $parts
+}
+
+# Vereinigt die Ergebnisse der Kinder zu einem Objekt mit den Eigenschaften, die
+# die Klassifikation unten vom Run-Objekt liest. Gesamtergebnis wie bei Pester:
+# Failed vor Passed vor NotRun. Coverage: je Position die analysierte Anzahl
+# und die groesste ausgefuehrte Anzahl eines Kindes, begrenzt auf die analysierte.
+function Merge-PesterPartitionResult {
+    param([object[]]$Parts, [bool]$CoverageConfigured)
+    $results = @($Parts | ForEach-Object { $_.result })
+    $merged = 'NotRun'
+    if ($results -contains 'Failed') { $merged = 'Failed' } elseif ($results -contains 'Passed') { $merged = 'Passed' }
+    $coverage = $null
+    if ($CoverageConfigured -and @($Parts | Where-Object { $null -eq $_.coverage }).Count -eq 0) {
+        $analyzed = @{}
+        $hit = @{}
+        foreach ($part in $Parts) {
+            $files = @($part.coverage.files)
+            foreach ($entry in @($part.coverage.entries)) {
+                if ($null -eq $entry) { continue }
+                $key = ('{0}|{1}|{2}|{3}|{4}' -f $files[[int]$entry[0]], $entry[1], $entry[2], $entry[3], $entry[4])
+                $analyzed[$key] = [Math]::Max([int]$analyzed[$key], [int]$entry[5])
+                $hit[$key] = [Math]::Max([int]$hit[$key], [int]$entry[6])
+            }
+        }
+        $analyzedTotal = 0
+        $hitTotal = 0
+        foreach ($key in $analyzed.Keys) {
+            $analyzedTotal += $analyzed[$key]
+            $hitTotal += [Math]::Min($analyzed[$key], $hit[$key])
+        }
+        $percent = 0.0
+        if ($analyzedTotal -gt 0) { $percent = ($hitTotal / $analyzedTotal) * 100 }
+        $coverage = [pscustomobject]@{ CoveragePercent = $percent; CommandsAnalyzedCount = $analyzedTotal; CommandsExecutedCount = $hitTotal }
+    }
+    $sum = { param($Name) $total = 0; foreach ($part in $Parts) { $total += [int]$part.$Name }; $total }
+    return [pscustomobject]@{
+        Result                = $merged
+        TotalCount            = (& $sum 'totalCount')
+        PassedCount           = (& $sum 'passedCount')
+        FailedCount           = (& $sum 'failedCount')
+        FailedContainersCount = (& $sum 'failedContainersCount')
+        FailedBlocksCount     = (& $sum 'failedBlocksCount')
+        Containers            = @(foreach ($part in $Parts) {
+                foreach ($container in @($part.containers)) {
+                    if ($null -eq $container) { continue }
+                    $errors = @()
+                    if ([string]$container.error -ne '') { $errors = @([string]$container.error) }
+                    [pscustomobject]@{ Item = [string]$container.item; Result = [string]$container.result; ErrorRecord = $errors }
+                }
+            })
+        CodeCoverage          = $coverage
     }
 }
 
@@ -202,7 +370,7 @@ if (-not $SkipTests) {
     # 2026-08, keine Regression. Es darf das Gate deshalb nicht blockieren,
     # sonst haengt jeder unabhaengige Hotfix hinter einer Aufraeumaktion. Die
     # offene Zahl wird unten trotzdem gedruckt - siehe die Begruendung dort.
-    $config.Filter.ExcludeTag = 'Haertung'
+    $config.Filter.ExcludeTag = $excludedTag
 
     # Coverage-Ratchet (AP5): die Common-Module tragen die ganze wiederver-
     # wendete Logik der SYSTEM-Skripte; ihr Deckungsgrad darf nur steigen.
@@ -233,9 +401,74 @@ if (-not $SkipTests) {
         $config.CodeCoverage.OutputPath = Join-Path ([System.IO.Path]::GetTempPath()) 'vs-pester-coverage.xml'
     }
 
-    try { $result = Invoke-Pester -Configuration $config } catch {
-        Write-Host ('[{0}/{1}] infrastructure_error {2}: {3}' -f $unitPosition, $unitTotal, $unitName, $_.Exception.Message) -ForegroundColor Red
-        exit 3
+    $testFiles = @(Get-ChildItem -LiteralPath $testRoot -Recurse -File -Filter '*.Tests.ps1' | Sort-Object FullName)
+    $partitionCount = [Math]::Min($Partitions, $testFiles.Count)
+    if ($partitionCount -le 1) {
+        try { $result = Invoke-Pester -Configuration $config } catch {
+            Write-Host ('[{0}/{1}] infrastructure_error {2}: {3}' -f $unitPosition, $unitTotal, $unitName, $_.Exception.Message) -ForegroundColor Red
+            exit 3
+        }
+    } else {
+        # --- Partitionen: K Kindprozesse, Zeilen live mit Praefix [Teil k/K] ---
+        . (Join-Path (Join-Path (Join-Path $PSScriptRoot 'lib') 'check') 'child-streams.ps1')
+        $partRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('vs-pester-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $partRoot -ErrorAction Stop | Out-Null
+        $engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        $plan = @(Get-PesterPartitionPlan -Files $testFiles -Count $partitionCount)
+        $children = @()
+        $parts = @()
+        $partMissing = @()
+        try {
+            for ($k = 1; $k -le $partitionCount; $k++) {
+                $resultPath = Join-Path $partRoot ('part-' + $k + '.json')
+                $specData = [ordered]@{ pesterPath = [string]$pester.Path; files = @($plan[$k - 1].Files); resultPath = $resultPath; coverage = $null }
+                if ($null -ne $coverageFloor) {
+                    $specData.coverage = [ordered]@{ paths = $coveragePaths; outputPath = (Join-Path $partRoot ('coverage-' + $k + '.xml')) }
+                }
+                $specPath = Join-Path $partRoot ('part-' + $k + '.spec.json')
+                [System.IO.File]::WriteAllText($specPath, (ConvertTo-Json -InputObject $specData -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
+                Write-Host ('[{0}/{1}] RUN  Pester-Teil {0}/{1} ({2} Dateien)' -f $k, $partitionCount, $plan[$k - 1].Files.Count) -ForegroundColor Cyan
+                $child = Start-StreamedChild -Exe $engine `
+                    -ArgumentLine ('-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -PartitionSpec "' + $specPath + '"') `
+                    -OutPath (Join-Path $partRoot ('part-' + $k + '.out')) -ErrPath (Join-Path $partRoot ('part-' + $k + '.err'))
+                $child.Index = $k
+                $child.ResultPath = $resultPath
+                $children += $child
+            }
+            while (@($children | Where-Object { -not $_.Finished }).Count -gt 0) {
+                foreach ($child in @($children | Where-Object { -not $_.Finished })) {
+                    foreach ($line in @(Read-StreamedChildLines $child)) { Write-Host ('[Teil {0}/{1}] {2}' -f $child.Index, $partitionCount, $line) }
+                    if (-not (Test-StreamedChildExited $child)) { continue }
+                    foreach ($line in @(Read-StreamedChildLines $child -Final)) { Write-Host ('[Teil {0}/{1}] {2}' -f $child.Index, $partitionCount, $line) }
+                    foreach ($line in @(Close-StreamedChild $child)) { Write-Host ('[Teil {0}/{1}] stderr: {2}' -f $child.Index, $partitionCount, $line) -ForegroundColor Yellow }
+                    $seconds = $child.Watch.Elapsed.TotalSeconds.ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture)
+                    $part = $null
+                    if ((Test-Path -LiteralPath $child.ResultPath) -and $child.ExitCode -eq 0) {
+                        try { $part = Get-Content -Raw -LiteralPath $child.ResultPath | ConvertFrom-Json } catch { $part = $null }
+                    }
+                    if ($null -eq $part) {
+                        $partMissing += $child.Index
+                        Write-Host ('[{0}/{1}] infrastructure_error Pester-Teil {0}/{1}: kein Ergebnis (Exit {2}, {3}s)' -f $child.Index, $partitionCount, $child.ExitCode, $seconds) -ForegroundColor Red
+                        continue
+                    }
+                    $parts += $part
+                    $partWord = 'pass'
+                    $partColor = 'Green'
+                    if ($part.result -eq 'Failed' -or $part.failedCount -gt 0 -or $part.failedContainersCount -gt 0 -or $part.failedBlocksCount -gt 0) { $partWord = 'fail'; $partColor = 'Red' }
+                    Write-Host ('[{0}/{1}] {2} Pester-Teil {0}/{1}: {3} Test(s), {4} rot ({5}s)' -f $child.Index, $partitionCount, $partWord, $part.totalCount, $part.failedCount, $seconds) -ForegroundColor $partColor
+                }
+                if (@($children | Where-Object { -not $_.Finished }).Count -gt 0) { Start-Sleep -Milliseconds 250 }
+            }
+        } finally {
+            # Nur bei Abbruch wirksam: die eigenen Kinder samt Baum beenden.
+            Stop-StreamedChildren $children
+            Remove-Item -Recurse -Force -LiteralPath $partRoot -ErrorAction SilentlyContinue
+        }
+        if ($partMissing.Count -gt 0) {
+            Write-Host ('[{0}/{1}] infrastructure_error {2}: Pester-Teil(e) {3} ohne Ergebnis' -f $unitPosition, $unitTotal, $unitName, ($partMissing -join ', ')) -ForegroundColor Red
+            exit 3
+        }
+        $result = Merge-PesterPartitionResult -Parts $parts -CoverageConfigured ($null -ne $coverageFloor)
     }
 
     # Nur das Run-Objekt klassifizieren. Invoke-Pester kann neben dem Ergebnis

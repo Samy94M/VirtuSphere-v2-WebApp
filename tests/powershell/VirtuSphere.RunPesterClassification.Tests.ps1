@@ -66,6 +66,38 @@ function New-StubRun {
 
 function Invoke-Pester {
     param($Configuration)
+    # Partitionsszenarien: das Ergebnis haengt an den Dateien des Auftrags.
+    # alpha, beta und gamma treffen je einen anderen von vier Coverage-Befehlen.
+    if ([string]$env:VS_STUB_SCENARIO -like 'partition-*') {
+        # Ein Verzeichnis (Einzelprozess) steht wie bei Pester fuer seine Testdateien.
+        $items = @($Configuration.Run.Path | ForEach-Object {
+                if (Test-Path -LiteralPath ([string]$_) -PathType Container) {
+                    Get-ChildItem -LiteralPath ([string]$_) -Filter '*.Tests.ps1' | Sort-Object Name | ForEach-Object { $_.Name }
+                } else { Split-Path ([string]$_) -Leaf }
+            })
+        Write-Host ('stub ran ' + ($items -join ','))
+        if ($env:VS_STUB_SCENARIO -eq 'partition-crash' -and $items -contains 'gamma.Tests.ps1') { [Environment]::Exit(9) }
+        $containers = @(foreach ($item in $items) {
+                $broken = ($env:VS_STUB_SCENARIO -eq 'partition-container-fails' -and $item -eq 'beta.Tests.ps1')
+                $errors = @()
+                if ($broken) { $errors = @(New-StubError 'Discovery broke in beta') }
+                [pscustomobject]@{ Item = $item; Result = $(if ($broken) { 'Failed' } else { 'Passed' }); ErrorRecord = $errors }
+            })
+        $failedContainers = @($containers | Where-Object { $_.Result -eq 'Failed' }).Count
+        $run = New-StubRun -Result $(if ($failedContainers -gt 0) { 'Failed' } else { 'Passed' }) -Total $items.Count -Passed ($items.Count - $failedContainers) `
+            -Failed 0 -FailedContainers $failedContainers -FailedBlocks 0 -Containers $containers
+        if ($Configuration.CodeCoverage.Enabled) {
+            $hitLines = @(foreach ($item in $items) { @{ 'alpha.Tests.ps1' = 1; 'beta.Tests.ps1' = 2; 'gamma.Tests.ps1' = 3 }[$item] })
+            $commands = @(1..4 | ForEach-Object { [pscustomobject]@{ File = 'C:\fake\Common.ps1'; StartLine = $_; StartColumn = 1; EndLine = $_; EndColumn = 9 } })
+            $hit = @($commands | Where-Object { $hitLines -contains $_.StartLine })
+            $run.CodeCoverage = [pscustomobject]@{
+                CoveragePercent  = ($hit.Count / 4) * 100
+                CommandsExecuted = $hit
+                CommandsMissed   = @($commands | Where-Object { $hitLines -notcontains $_.StartLine })
+            }
+        }
+        return $run
+    }
     switch ([string]$env:VS_STUB_SCENARIO) {
         'healthy' {
             return New-StubRun -Result 'Passed' -Total 3 -Passed 3 -Failed 0 -FailedContainers 0 -FailedBlocks 0 -Containers @(
@@ -99,10 +131,13 @@ function Invoke-Pester {
     # Gefaelschtes Repo: Kopie des echten Runners, Lockdatei nur mit Pester-Version
     # (optional mit Coverage-Floor), ein Dummy-Test und ein leeres Powershell-MECM.
     function New-FakeRepo {
-        param([string]$Root, [bool]$WithCoverageFloor)
+        param([string]$Root, [bool]$WithCoverageFloor, [string[]]$ExtraTests = @())
         $scriptsDir = Join-Path $Root 'scripts'
         New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
         Copy-Item -LiteralPath $script:RealRunner -Destination (Join-Path $scriptsDir 'run-pester.ps1') -Force
+        $checkLib = Join-Path (Join-Path $scriptsDir 'lib') 'check'
+        New-Item -ItemType Directory -Path $checkLib -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') 'child-streams.ps1') -Destination $checkLib -Force
         $lock = '{ "version": 1, "powershellModules": { "Pester": "' + $script:PesterVersion + '" }'
         if ($WithCoverageFloor) { $lock += ', "pesterCoverageFloorPercent": 55' }
         $lock += ' }'
@@ -112,22 +147,29 @@ function Invoke-Pester {
         $dummy = @'
 Describe 'Dummy' { It 'laeuft' { $true | Should -BeTrue } }
 '@
-        [System.IO.File]::WriteAllText((Join-Path $testsDir 'Dummy.Tests.ps1'), $dummy, $script:Utf8)
+        if ($ExtraTests.Count -gt 0) {
+            # Partitionsfaelle: gleich grosse Dateien, je eine je Teil.
+            foreach ($name in $ExtraTests) { [System.IO.File]::WriteAllText((Join-Path $testsDir ($name + '.Tests.ps1')), $dummy, $script:Utf8) }
+        } else {
+            [System.IO.File]::WriteAllText((Join-Path $testsDir 'Dummy.Tests.ps1'), $dummy, $script:Utf8)
+        }
         New-Item -ItemType Directory -Path (Join-Path $Root 'Powershell-MECM') -Force | Out-Null
     }
 
     $script:PlainRoot = Join-Path $TestDrive 'plain'
     $script:FloorRoot = Join-Path $TestDrive 'floor'
+    $script:PartitionRoot = Join-Path $TestDrive 'partition'
     New-FakeRepo -Root $script:PlainRoot -WithCoverageFloor $false
     New-FakeRepo -Root $script:FloorRoot -WithCoverageFloor $true
+    New-FakeRepo -Root $script:PartitionRoot -WithCoverageFloor $true -ExtraTests @('alpha', 'beta', 'gamma')
 
     # Startet den Runner als Kindprozess. Das Testdouble steht nur in der Umgebung
     # dieses Kindes vorn im Modulpfad; die Umgebung der Suite bleibt unberuehrt.
     function Invoke-StubRunner {
-        param([string]$Root, [string]$Scenario)
+        param([string]$Root, [string]$Scenario, [string]$ExtraArguments = '')
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $script:EngineExe
-        $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path (Join-Path $Root 'scripts') 'run-pester.ps1') + '" -SkipAnalyzer'
+        $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path (Join-Path $Root 'scripts') 'run-pester.ps1') + '" -SkipAnalyzer ' + $ExtraArguments
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
@@ -187,5 +229,42 @@ Describe 'run-pester.ps1 classifies the blocking Pester run' {
         $result.ExitCode | Should -Be 1
         $result.Output | Should -Match 'Coverage-Ergebnis fehlt'
         $result.Output | Should -Not -Match 'pass Pester'
+    }
+}
+
+Describe 'run-pester.ps1 partitions the Pester suite into child processes' {
+    It 'streams every part, unites the counts and the coverage like one process' {
+        $result = Invoke-StubRunner -Root $script:PartitionRoot -Scenario 'partition-healthy'
+        $result.ExitCode | Should -Be 0
+        foreach ($k in 1..3) {
+            $result.Output | Should -Match ('\[{0}/3\] RUN  Pester-Teil {0}/3 \(1 Dateien\)' -f $k)
+            $result.Output | Should -Match ('\[Teil {0}/3\] stub ran (alpha|beta|gamma)\.Tests\.ps1' -f $k)
+            $result.Output | Should -Match ('\[{0}/3\] pass Pester-Teil {0}/3: 1 Test\(s\), 0 rot \(\d+\.\ds\)' -f $k)
+        }
+        # Jeder Teil allein deckt 25 % ab; vereinigt sind es drei von vier Befehlen.
+        $result.Output | Should -Match 'Coverage 75% \(Floor 55%\)'
+        $result.Output | Should -Match 'pass Pester \(tests\\powershell\): 3 Test\(s\) gruen'
+
+        $single = Invoke-StubRunner -Root $script:PartitionRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 1'
+        $single.ExitCode | Should -Be 0
+        $single.Output | Should -Not -Match 'Pester-Teil'
+        $single.Output | Should -Match 'Coverage 75% \(Floor 55%\)'
+    }
+
+    It 'fails the run when a container of one part failed and names it' {
+        $result = Invoke-StubRunner -Root $script:PartitionRoot -Scenario 'partition-container-fails'
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'fail Pester-Teil \d/3'
+        $result.Output | Should -Match 'Container gescheitert: beta\.Tests\.ps1: Discovery broke in beta'
+        $result.Output | Should -Match '\] fail Pester \(tests\\powershell\): 0 Test\(s\) rot, 1 Container gescheitert'
+        $result.Output | Should -Not -Match 'pass Pester \('
+    }
+
+    It 'reports a part that ends without a result as infrastructure error, never as green' {
+        $result = Invoke-StubRunner -Root $script:PartitionRoot -Scenario 'partition-crash'
+        $result.ExitCode | Should -Be 3
+        $result.Output | Should -Match 'infrastructure_error Pester-Teil \d/3: kein Ergebnis \(Exit 9'
+        $result.Output | Should -Match 'infrastructure_error Pester \(tests\\powershell\): Pester-Teil\(e\) \d ohne Ergebnis'
+        $result.Output | Should -Not -Match 'pass Pester \('
     }
 }
