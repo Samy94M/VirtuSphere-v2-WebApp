@@ -144,6 +144,11 @@ function auth_schema_features_present(mysqli $db, array $features): bool
 
         return true;
     }
+    if (count($unknown) === 1) {
+        auth_schema_remember($db, $unknown[0], false);
+
+        return false;
+    }
     $present = true;
     foreach ($unknown as $feature) {
         $exists = auth_schema_names_resolve($db, [$feature]);

@@ -43,8 +43,9 @@ final class AuthSchemaFallbackTest extends TestCase
         $this->userName = self::PREFIX . bin2hex(random_bytes(3));
         $hash = password_hash($this->password, PASSWORD_DEFAULT);
         $role = VIRTUSPHERE_ROLE_USER;
-        $stmt = $this->db->prepare('INSERT INTO deploy_users (name, password, role, is_active, must_change_password) VALUES (?, ?, ?, 1, 0)');
-        $stmt->bind_param('sss', $this->userName, $hash, $role);
+        $email = $this->userName . '@example.test';
+        $stmt = $this->db->prepare('INSERT INTO deploy_users (name, email, password, role, is_active, must_change_password) VALUES (?, ?, ?, ?, 1, 0)');
+        $stmt->bind_param('ssss', $this->userName, $email, $hash, $role);
         $stmt->execute();
         $this->userId = (int) $this->db->insert_id;
 
@@ -242,6 +243,7 @@ final class AuthSchemaFallbackTest extends TestCase
         $this->shadowLegacyAttempts($this->connection);
         $connection = $this->connection;
 
+        $rolledBack = false;
         try {
             repo_transaction($connection, function () use ($connection): void {
                 $connection->query("INSERT INTO deploy_login_attempts (username, ip_address, success) VALUES ('c3-probe', '" . self::CLIENT_IP . "', 0)");
@@ -250,24 +252,24 @@ final class AuthSchemaFallbackTest extends TestCase
 
                 throw new RuntimeException('roll back');
             });
-            self::fail('the transaction must roll back');
         } catch (RuntimeException $exception) {
-            self::assertSame('roll back', $exception->getMessage());
+            $rolledBack = $exception->getMessage() === 'roll back';
         }
 
+        self::assertTrue($rolledBack, 'the transaction must roll back on the planned exception');
         self::assertSame(0, (int) repo_scalar($connection, 'SELECT COUNT(*) FROM deploy_login_attempts'), 'the failed try neither committed nor split the transaction');
     }
 
     public function testAnotherDatabaseErrorPropagatesUnchanged(): void
     {
-        $legacyRan = false;
+        $legacyCalls = new ArrayObject();
         try {
             auth_schema_attempt(
                 $this->connection,
                 [VIRTUSPHERE_SCHEMA_USER_SOURCE],
                 static fn (): never => throw new mysqli_sql_exception('synthetic lock wait timeout', 1205),
-                static function () use (&$legacyRan): string {
-                    $legacyRan = true;
+                static function () use ($legacyCalls): string {
+                    $legacyCalls->append('legacy');
 
                     return 'legacy';
                 },
@@ -276,7 +278,7 @@ final class AuthSchemaFallbackTest extends TestCase
         } catch (mysqli_sql_exception $exception) {
             self::assertSame(1205, $exception->getCode());
         }
-        self::assertFalse($legacyRan);
+        self::assertCount(0, $legacyCalls, 'the older form must not run');
         self::assertNull(auth_schema_known($this->connection, VIRTUSPHERE_SCHEMA_USER_SOURCE), 'a foreign error is no verdict');
     }
 
