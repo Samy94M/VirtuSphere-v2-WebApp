@@ -109,8 +109,9 @@ allow:([a-z0-9-]+\.)*nist\.gov
 # WMI-Namensraum site_<code> und Zuweisungen an SiteCode/site_code.
 re:site_[a-z0-9][a-z0-9][a-z0-9]
 re:site_?code["' ]*(=>|=|:)?[ ]*["'][a-z0-9][a-z0-9][a-z0-9]["']
-allow:site_(xyz|x99)
-allow:site_?code["' ]*(=>|=|:)?[ ]*["'](xyz|x99)["']
+# Testcodes; p01 und ps1 vom Nutzer am 08.11.2026 als synthetisch bestaetigt.
+allow:site_(xyz|x99|p01|ps1)
+allow:site_?code["' ]*(=>|=|:)?[ ]*["'](xyz|x99|p01|ps1)["']
 
 # --- MAC-Adressen -------------------------------------------------------------
 # Sechs Hex-Paare mit ':' oder '-'.

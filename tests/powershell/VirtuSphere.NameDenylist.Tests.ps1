@@ -410,6 +410,18 @@ Describe 'shipped pattern list .githooks/name-patterns.txt' {
         }
     }
 
+    It 'matches site_<code> only as a whole three-character word' {
+        # Longer identifiers that start like a site namespace stay clean.
+        $r = Test-StagedText $script:Shipped "SITE_HEALTH site_critical site_hint `$SITE_WARNING`n" $script:ShippedEnv
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        Assert-Git $script:Shipped @('reset', '-q', '--hard', 'HEAD') | Out-Null
+        # A three-character code at the end of the word hits (assembled at run time).
+        $r = Test-StagedText $script:Shipped ('ns root\sms\' + 'site_' + "K4M`n") $script:ShippedEnv
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match 'TREFFER: probe\.txt:1: name-patterns\.txt:[0-9]+'
+        $r.Output | Should -Not -Match 'K4M'
+    }
+
     It 'lets this repository''s pattern list, script and tests pass themselves' {
         foreach ($path in @('.githooks/name-patterns.txt', '.githooks/name-denylist.template.txt', 'scripts/check-name-denylist.sh', 'tests/powershell/VirtuSphere.NameDenylist.Tests.ps1')) {
             $text = [IO.File]::ReadAllText((Join-Path $script:RepoRoot $path))
