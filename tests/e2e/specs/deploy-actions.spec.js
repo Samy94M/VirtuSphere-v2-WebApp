@@ -8,6 +8,7 @@ const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
 const { waitForLiveVerdict } = require('../lib/deploy-live');
+const { submitAndWaitForNavigation } = require('../lib/navigation');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -340,10 +341,7 @@ test('cancel: Cancel keeps the job queued, Confirm cancels it', async ({ page })
 
   await cancelButton.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/deploy\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'deploy.php');
   const after = jobRow(jobId);
   expect(after.status, 'the job is cancelled').toBe('cancelled');
   expect(after.cancelled_at, 'the cancellation is timestamped').not.toBeNull();
@@ -385,10 +383,10 @@ echo 'GROUP=' . $result['group_id'];
 
   await groupCancel.click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/deploy\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  // Not waitForURL(/deploy\.php/): the page already is deploy.php, so that wait
+  // ended before the browser had sent the POST, and the DB read below raced it
+  // (WebKit, C4 matrix run 08.11.2026: read at 221.35 s, POST sent at 221.41 s).
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'deploy.php');
   for (const job of missionJobs(seed.missionId)) {
     expect(job.status, 'every queued slot is cancelled').toBe('cancelled');
   }

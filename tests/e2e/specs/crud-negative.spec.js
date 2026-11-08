@@ -6,24 +6,14 @@
 
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
-const { execFileSync } = require('node:child_process');
+const php = require('../lib/php');
 
 test.use({ storageState: ROLES.admin.storageState });
 
-const PHP_CONTAINER = process.env.VIRTUSPHERE_PHP_CONTAINER || 'virtusphere-v2-webapp-php-1';
 const MARK = 'e2eneg';
 
 function runPhp(body) {
-  const php =
-    '<?php\n' +
-    'require_once "/var/www/html/lib/bootstrap.php";\n' +
-    'require_once "/var/www/html/lib/repo/credentials.php";\n' +
-    body;
-  return execFileSync('docker', ['exec', '-i', PHP_CONTAINER, 'php'], {
-    input: php,
-    encoding: 'utf8',
-    timeout: 15000,
-  });
+  return php.runPhp(body, ['lib/repo/credentials.php'], { timeout: 15000 });
 }
 
 /**

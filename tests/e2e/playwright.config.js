@@ -39,9 +39,12 @@ module.exports = defineConfig({
   // write into one folder, so the last gate to run erased the report of the one
   // that had actually failed. A red matrix was then undiagnosable, which is
   // exactly the situation the report exists for.
+  // The exec profile (C4) comes last: it writes a copy into the HTML report
+  // folder, which the HTML reporter clears when it writes.
   reporter: [
     ['list'],
     ['html', { open: 'never', outputFolder: process.env.VIRTUSPHERE_E2E_REPORT_DIR || 'playwright-report' }],
+    ['./lib/exec-profile-reporter.js'],
   ],
   timeout: 30000,
   expect: { timeout: 7000 },
