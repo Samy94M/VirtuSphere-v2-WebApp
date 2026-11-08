@@ -46,6 +46,9 @@ BeforeAll {
     function Invoke-Sh {
         param([Parameter(Mandatory)][string]$Script, [string[]]$Arguments = @())
         $oldPath = $env:PATH
+        # run-pester.ps1 runs with Stop; under Windows PowerShell 5.1 every
+        # stderr line of a native command would then end the test early.
+        $ErrorActionPreference = 'Continue'
         try {
             $env:PATH = (Split-Path $script:ShExe -Parent) + [IO.Path]::PathSeparator + $oldPath
             $output = @(& $script:ShExe ($Script -replace '\\', '/') @Arguments 2>&1 | ForEach-Object { [string]$_ })
