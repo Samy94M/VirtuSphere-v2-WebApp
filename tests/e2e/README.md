@@ -36,7 +36,9 @@ The `setup` project seeds the `e2e_user` account (role `user`) through the PHP c
 
 A page in `lib/pages.js` that only renders something concrete with a parameter carries a `query` builder; the ids come from `lib/matrix-seed.js`, which both the health and the a11y matrix seed once per file under their own prefix. That is what puts `mission_details.php`, `vm_edit.php` and `deploy.php` *with* a mission into both matrices: without a mission the deploy page has neither a storage table nor warning boxes in the DOM at all.
 
-DB assertions (later specs) go through `lib/db.js`, which shells into the MySQL container with `docker exec` because its port is deliberately unpublished.
+Seeds and DB proofs go through `lib/php.js` (`runPhp`, `phpJson`): a PHP snippet with the app bootstrap, run inside the PHP container. A snippet does not cost its own `docker exec` (C4): each Playwright worker process keeps one long-lived `docker exec -i <php> php -r <loop>` per container user (`lib/exec-channel.js`, a worker thread behind a synchronous `Atomics.wait` call), and the loop starts a fresh `php` process for every snippet (`lib/php-channel-loop.js`), so no state carries over from one snippet to the next. A channel that does not start, dies, answers out of protocol or overruns fails the call; the next call opens a new channel, and nothing falls back silently. `VIRTUSPHERE_E2E_EXEC_CHANNEL=0` returns to one `docker exec` per call for comparison runs. `lib/db.js` (direct `mysql` in the MySQL container, whose port is deliberately unpublished) has no caller today and keeps one `docker exec` per statement.
+
+Every call is counted: the run writes `test-results/exec-profile.json` (calls, `docker exec` processes, waiting time and its distribution per spec, project and transport) and a copy into the run's HTML report folder, which survives the next gate.
 
 ## Environment overrides
 
@@ -47,3 +49,4 @@ DB assertions (later specs) go through `lib/db.js`, which shells into the MySQL 
 | `VIRTUSPHERE_ADMIN_USER` / `VIRTUSPHERE_ADMIN_PASS` | `admin` / `admin12345678` |
 | `VIRTUSPHERE_PHP_CONTAINER` | `virtusphere-v2-webapp-php-1` |
 | `VIRTUSPHERE_MYSQL_CONTAINER` | `virtusphere-v2-webapp-mysql-1` |
+| `VIRTUSPHERE_E2E_EXEC_CHANNEL` | on; `0` runs one `docker exec` per seed/proof call |
