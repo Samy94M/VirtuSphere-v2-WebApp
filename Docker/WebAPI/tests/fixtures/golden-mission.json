@@ -64,7 +64,7 @@
     "ansible_credential": {
         "username": "ansible"
     },
-    "api_base_url": "http://10.10.10.10:8021",
+    "api_base_url": "http://198.51.100.10:8021",
     "expected": {
         "accounts": {
             "esxi_hostname": "esxi-01.example.invalid",
@@ -74,7 +74,7 @@
             "esxi_validate_certs": false,
             "esxi_ca_bundle_path": "",
             "ansible_username": "ansible",
-            "apiUrl": "http://10.10.10.10:8021"
+            "apiUrl": "http://198.51.100.10:8021"
         },
         "serverlist": {
             "vm_configurations": [

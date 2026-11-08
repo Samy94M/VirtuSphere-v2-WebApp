@@ -159,7 +159,7 @@ final class VmHistoryReaderTest extends TestCase
         for ($i = 0; $i < 10; $i++) {
             repo_record_vm_status_event($this->db, $this->vm, 'ready', 'not_ready', '2/5 Registered', 'seed');
             $expected[] = VIRTUSPHERE_VM_TIMELINE_STATUS . '#' . $this->db->insert_id;
-            repo_execute($this->db, 'INSERT INTO deploy_client_events (vm_id, mac, phase, event, client_ip, created_at) VALUES (?, ?, ?, ?, ?, ?)', 'isssss', [$this->vm, '02:00:00:00:F3:01', 'os', 'started', '10.0.0.1', self::T]);
+            repo_execute($this->db, 'INSERT INTO deploy_client_events (vm_id, mac, phase, event, client_ip, created_at) VALUES (?, ?, ?, ?, ?, ?)', 'isssss', [$this->vm, '02:00:00:00:F3:01', 'os', 'started', '192.0.2.1', self::T]);
             $expected[] = VIRTUSPHERE_VM_TIMELINE_CLIENT . '#' . $this->db->insert_id;
         }
         repo_execute($this->db, 'UPDATE deploy_vm_status_events SET created_at = ? WHERE vm_id = ?', 'si', [self::T, $this->vm]);
@@ -205,7 +205,7 @@ final class VmHistoryReaderTest extends TestCase
             $this->db,
             'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?)',
             'issssss',
-            [$this->vm, '10.0.0.31', '255.255.255.0', '10.0.0.1', '02:00:00:00:F3:02', 'dhcp', 'vmxnet3']
+            [$this->vm, '192.0.2.31', '255.255.255.0', '192.0.2.1', '02:00:00:00:F3:02', 'dhcp', 'vmxnet3']
         );
         $device = (string) repo_scalar($this->db, 'SELECT LOWER(BIN_TO_UUID(package_report_generation)) FROM deploy_vms WHERE id = ?', 'i', [$this->vm]);
         $acceptance = (string) repo_scalar($this->db, 'SELECT LOWER(BIN_TO_UUID(acceptance_generation)) FROM deploy_package_report_state WHERE id = 1');

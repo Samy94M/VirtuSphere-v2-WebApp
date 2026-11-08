@@ -246,6 +246,55 @@ function Save-DocFragmentCommit {
     }
 }
 
+# name-denylist prueft origin/main..HEAD. Die Fixture ist ein Git-Repo mit einem
+# Basis-Commit, auf den refs/remotes/origin/main zeigt (ohne -WithoutBase fehlt
+# der Ref), und einem zweiten Commit mit $Content. Der Treffer kommt aus einer
+# privaten Liste in der Fixture (VIRTUSPHERE_NAME_DENYLIST); ihr Eintrag wird
+# erst zur Laufzeit zusammengesetzt, damit dieses Skript ihn nicht selbst traegt.
+# Ohne git: $null, der Fall wird infra.
+function New-NameDenylistRepo {
+    param([string]$Content, [switch]$WithoutBase)
+    if (-not (Test-Command 'git')) { return $null }
+    $fx = New-Fixture
+    Add-FixtureFile $fx 'README.md' "base`n"
+    foreach ($gitArguments in @(
+        @('init', '-q', '.'), @('config', 'user.email', 'guard@example.test'), @('config', 'user.name', 'guard'),
+        @('config', 'core.autocrlf', 'false'), @('config', 'commit.gpgsign', 'false'), @('config', 'core.hooksPath', 'no-hooks'),
+        @('add', '-A'), @('commit', '-qm', 'base')
+    )) {
+        $r = Invoke-Tool 'git' (@('-C', $fx) + $gitArguments)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitArguments -join ' ') + ' in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+    if (-not $WithoutBase) {
+        $r = Invoke-Tool 'git' @('-C', $fx, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        if ($r.ExitCode -ne 0) { throw ('git update-ref in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+    Add-FixtureFile $fx 'docs/change.md' $Content
+    foreach ($gitArguments in @(@('add', '-A'), @('commit', '-qm', 'change'))) {
+        $r = Invoke-Tool 'git' (@('-C', $fx) + $gitArguments)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitArguments -join ' ') + ' in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+    return $fx
+}
+
+function Get-NameDenylistProbe { return ('guard' + '-probe-' + 'name') }
+
+# Runner-Gate name-denylist gegen eine Fixture, mit einer privaten Liste aus
+# genau dem Probeeintrag.
+function Invoke-NameDenylistGate {
+    param([string]$FixtureRoot)
+    if (-not $FixtureRoot) { return $null }
+    $list = Join-Path $FixtureRoot 'private-denylist.txt'
+    [System.IO.File]::WriteAllText($list, ((Get-NameDenylistProbe) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    $prevList = $env:VIRTUSPHERE_NAME_DENYLIST
+    $env:VIRTUSPHERE_NAME_DENYLIST = ($list -replace '\\', '/')
+    try {
+        return Invoke-RunnerGate $FixtureRoot 'name-denylist'
+    } finally {
+        $env:VIRTUSPHERE_NAME_DENYLIST = $prevList
+    }
+}
+
 # --- Bewertung ------------------------------------------------------------------
 function Assert-Guard {
     param($Result, [int[]]$ExpectExit, [string]$ExpectPattern = '', [switch]$InfraOnExit2)
@@ -637,6 +686,18 @@ $cases = @(
         $fx = New-DocFragmentRepo -WithoutArchiveMarker
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.no-archive\]'
+    } }
+
+    # name-denylist: das Runner-Gate selbst (Bereich, Exitcode, Basis). Was das
+    # Skript als Treffer erkennt, beweist tests/powershell/VirtuSphere.NameDenylist.Tests.ps1.
+    @{ Name = 'name-denylist.runner-clean'; Body = {
+        Assert-Guard (Invoke-NameDenylistGate (New-NameDenylistRepo "clean change`n")) @(0) 'origin/main\.\.HEAD: 1 Commit\(s\) ohne Treffer'
+    } }
+    @{ Name = 'name-denylist.runner-hit'; Body = {
+        Assert-Guard (Invoke-NameDenylistGate (New-NameDenylistRepo ('host ' + (Get-NameDenylistProbe) + "`n"))) @(1) '1 von 1 Commit\(s\) mit Treffer'
+    } }
+    @{ Name = 'name-denylist.runner-no-base'; Body = {
+        Assert-Guard (Invoke-NameDenylistGate (New-NameDenylistRepo "clean change`n" -WithoutBase)) @(2) 'Basis origin/main fehlt'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {

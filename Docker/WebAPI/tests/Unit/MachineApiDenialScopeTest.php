@@ -16,17 +16,17 @@ final class MachineApiDenialScopeTest extends TestCase
 {
     public function testAnAllowlistRefusalIsScopedToTheIpWithTheNotAllowlistedSuffix(): void
     {
-        self::assertSame('10.0.0.5|n', machine_api_denial_throttle_scope('10.0.0.5', VIRTUSPHERE_MACHINE_API_DENY_NOT_ALLOWLISTED));
+        self::assertSame('192.0.2.5|n', machine_api_denial_throttle_scope('192.0.2.5', VIRTUSPHERE_MACHINE_API_DENY_NOT_ALLOWLISTED));
     }
 
     public function testARoleRefusalIsScopedToTheIpWithTheRoleSuffix(): void
     {
-        self::assertSame('10.0.0.5|r', machine_api_denial_throttle_scope('10.0.0.5', VIRTUSPHERE_MACHINE_API_DENY_ROLE));
+        self::assertSame('192.0.2.5|r', machine_api_denial_throttle_scope('192.0.2.5', VIRTUSPHERE_MACHINE_API_DENY_ROLE));
     }
 
     public function testWithoutACauseTheScopeStaysTheBareIp(): void
     {
-        self::assertSame('10.0.0.5', machine_api_denial_throttle_scope('10.0.0.5', null));
+        self::assertSame('192.0.2.5', machine_api_denial_throttle_scope('192.0.2.5', null));
     }
 
     public function testAnEmptyIpStaysEmptyForEveryCause(): void
@@ -38,14 +38,14 @@ final class MachineApiDenialScopeTest extends TestCase
 
     public function testAForeignCauseDoesNotInventASuffix(): void
     {
-        self::assertSame('10.0.0.5', machine_api_denial_throttle_scope('10.0.0.5', 'some_other_cause'));
+        self::assertSame('192.0.2.5', machine_api_denial_throttle_scope('192.0.2.5', 'some_other_cause'));
     }
 
     public function testTheTwoCausesOfOneIpAreTwoScopes(): void
     {
         self::assertNotSame(
-            machine_api_denial_throttle_scope('10.0.0.5', VIRTUSPHERE_MACHINE_API_DENY_NOT_ALLOWLISTED),
-            machine_api_denial_throttle_scope('10.0.0.5', VIRTUSPHERE_MACHINE_API_DENY_ROLE)
+            machine_api_denial_throttle_scope('192.0.2.5', VIRTUSPHERE_MACHINE_API_DENY_NOT_ALLOWLISTED),
+            machine_api_denial_throttle_scope('192.0.2.5', VIRTUSPHERE_MACHINE_API_DENY_ROLE)
         );
     }
 

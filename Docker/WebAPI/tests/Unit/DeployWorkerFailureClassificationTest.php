@@ -34,7 +34,7 @@ final class DeployWorkerFailureClassificationTest extends TestCase
             // is qualified as Ansible-host-originated (Etappe 7): both phases
             // sit entirely on the Portal-to-Ansible-host leg, so a bare
             // `unreachable`/`dns`/`auth` would misname who to fix.
-            'ssh: refused' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'Connection refused by 10.0.0.5', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE],
+            'ssh: refused' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'Connection refused by 192.0.2.5', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE],
             'ssh: dns' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'php_network_getaddresses: getaddrinfo failed', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_DNS],
             'ssh: auth' => [VIRTUSPHERE_DEPLOY_PHASE_SSH, 'Permission denied (publickey,password)', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_AUTH],
             'transport: timeout' => [VIRTUSPHERE_DEPLOY_PHASE_TRANSPORT, 'Read timed out after 30s', VIRTUSPHERE_INVENTORY_ERROR_ANSIBLE_UNREACHABLE],

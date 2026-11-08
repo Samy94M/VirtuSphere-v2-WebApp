@@ -234,6 +234,39 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'CHANGELOG und Register nur als Fragmente' 'neuer Eintrag am alten Ort oder kaputtes Fragment'
     }
 
+    # NS3/W3B: Namensschutz ueber jeden Commit, den ein Merge oder Push nach
+    # main mitbringt (origin/main..HEAD): Nachricht, hinzugefuegte Zeilen und
+    # Dateinamen, auch ein spaeter wieder entfernter Wert. Dieselbe Pruefung wie
+    # die Hooks, dazu fuer Commits, die nie einen Hook sahen. Kein Docker-
+    # Fallback: im Tooling-Container fehlen Repo-Historie und Musterliste neben
+    # dem Skript. Exit 2 (Liste fehlt oder ist ungueltig) ist rot: die
+    # Musterliste ist getrackt, und das Skript schliesst bewusst ab.
+    Add-Gate -Name 'name-denylist' -Lanes $allLanes -Kind 'native' -Body {
+        if (-not $shExe) { return New-InfraResult 'kein sh verfuegbar (Git Bash noetig)' }
+        if (-not (Test-Command 'git')) { return New-InfraResult 'git nicht gefunden' }
+        $base = 'origin/main'
+        $probe = Invoke-Tool 'git' @('-C', $repoRoot, 'rev-parse', '--verify', '--quiet', ($base + '^{commit}'))
+        if ($probe.ExitCode -ne 0) {
+            return New-InfraResult ('Basis {0} fehlt im Repo; ohne sie ist der Bereich nicht ableitbar (git fetch origin)' -f $base) $probe.Output
+        }
+        $range = $base + '..HEAD'
+        Push-Location -LiteralPath $repoRoot
+        try {
+            $r = Invoke-CheckShell 'check-name-denylist.sh' @('--range', $range)
+        } finally {
+            Pop-Location
+        }
+        if ($r.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $r) $r.Output }
+        $last = @($r.Output | Where-Object { $_ -match 'Commit\(s\)|keine Commits' } | Select-Object -Last 1)
+        $summary = if ($last.Count -gt 0) { $last[0].Trim() } else { '' }
+        switch ($r.ExitCode) {
+            0 { return New-PassResult ('{0}: {1}' -f $range, $summary) $r.Output }
+            1 { return New-FailResult ('{0}: {1} Wert ersetzen, Commit neu schreiben' -f $range, $summary) $r.Output }
+            2 { return New-FailResult 'Musterliste oder private Namensliste fehlt oder ist ungueltig (fail closed)' $r.Output }
+            default { return New-InfraResult ('Namensschutz ohne Ergebnis (exit {0})' -f $r.ExitCode) $r.Output }
+        }
+    }
+
     Add-Gate -Name 'csp-patterns' -Lanes $allLanes -Kind 'native' -Body {
         $r = Invoke-CheckShell 'lint-csp-patterns.sh' @('--worktree')
         if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }

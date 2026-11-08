@@ -79,7 +79,9 @@ services:
       # Sized (SEC1, C-01): nginx buffers request bodies and large upstream
       # answers in /var/cache/nginx, and tmpfs pages count against mem_limit.
       # 128m holds five bodies at client_max_body_size (24m); a fuller cache
-      # fails that one request instead of the whole container. /var/run only
+      # fails that one request instead of the whole container. default.conf
+      # names this spool (client_body_temp_path), and
+      # MissionImportUploadLimitContractTest derives both numbers (B4). /var/run only
       # holds the pid file; nginx writes nothing to /tmp.
       - /var/cache/nginx:size=128m
       - /var/run:size=1m

@@ -120,14 +120,14 @@ final class InventorySelectFieldTest extends TestCase
         $options = $this->options(['ds-shared', 'ds-local'], [
             'buckets' => [
                 ['scope' => 'all', 'credentials' => [], 'names' => ['ds-shared'], 'free_by_key' => ['ds-shared' => null], 'unusable_by_key' => []],
-                ['scope' => 'only', 'credentials' => [['id' => 2, 'name' => 'esxi-02', 'host' => '10.0.5.12']], 'names' => ['ds-local'], 'free_by_key' => ['ds-local' => null], 'unusable_by_key' => []],
+                ['scope' => 'only', 'credentials' => [['id' => 2, 'name' => 'esxi-02', 'host' => '198.51.100.12']], 'names' => ['ds-local'], 'free_by_key' => ['ds-local' => null], 'unusable_by_key' => []],
             ],
         ]);
         $html = $this->render($options, ['value' => 'ds-shared']);
 
         self::assertSame(2, substr_count($html, '<optgroup'));
         self::assertStringContainsString(__t('common.inventory_bucket_all'), $html);
-        self::assertStringContainsString('esxi-02 (10.0.5.12)', $html, 'the address is what makes "esxi1..esxi6" usable');
+        self::assertStringContainsString('esxi-02 (198.51.100.12)', $html, 'the address is what makes "esxi1..esxi6" usable');
         self::assertSame(1, substr_count($html, 'value="ds-shared"'));
         self::assertSame(1, substr_count($html, 'selected'));
     }

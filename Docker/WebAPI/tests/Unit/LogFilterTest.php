@@ -62,10 +62,10 @@ final class LogFilterTest extends TestCase
     /** The struct itself is what the repository is handed; nothing unpacks it. */
     public function testTheStructCarriesEveryFieldTheRepositoryReads(): void
     {
-        $filter = log_filter_from_query(['tab' => VIRTUSPHERE_LOG_TAB_SECURITY, 'q' => 'bob', 'ip' => '10.0.0.5']);
+        $filter = log_filter_from_query(['tab' => VIRTUSPHERE_LOG_TAB_SECURITY, 'q' => 'bob', 'ip' => '192.0.2.5']);
 
         self::assertSame('bob', $filter['search']);
-        self::assertSame('10.0.0.5', $filter['ip']);
+        self::assertSame('192.0.2.5', $filter['ip']);
         self::assertSame(VIRTUSPHERE_LOG_TABS[VIRTUSPHERE_LOG_TAB_SECURITY], $filter['categories']);
         self::assertFalse(function_exists('log_filter_repo_args'), 'the unpacked argument list is gone for good');
     }
@@ -77,8 +77,8 @@ final class LogFilterTest extends TestCase
      */
     public function testCanonicalFormIsIndependentOfParameterOrder(): void
     {
-        $a = log_filter_from_query(['tab' => VIRTUSPHERE_LOG_TAB_SECURITY, 'q' => 'bob', 'ip' => '10.0.0.5']);
-        $b = log_filter_from_query(['ip' => '10.0.0.5', 'q' => 'bob', 'tab' => VIRTUSPHERE_LOG_TAB_SECURITY]);
+        $a = log_filter_from_query(['tab' => VIRTUSPHERE_LOG_TAB_SECURITY, 'q' => 'bob', 'ip' => '192.0.2.5']);
+        $b = log_filter_from_query(['ip' => '192.0.2.5', 'q' => 'bob', 'tab' => VIRTUSPHERE_LOG_TAB_SECURITY]);
 
         self::assertSame(log_filter_canonical($a), log_filter_canonical($b));
     }
@@ -133,13 +133,13 @@ final class LogFilterTest extends TestCase
         $filter = log_filter_from_query([
             'tab' => VIRTUSPHERE_LOG_TAB_SECURITY,
             'q' => 'bob',
-            'ip' => '10.0.0.5',
+            'ip' => '192.0.2.5',
             'category' => VIRTUSPHERE_LOG_CATEGORY_AUTH,
         ]);
 
         $page = log_filter_url($filter, ['before' => 123]);
         $export = log_filter_url($filter, ['export' => 'csv']);
-        foreach (['tab=' . VIRTUSPHERE_LOG_TAB_SECURITY, 'q=bob', 'ip=10.0.0.5', 'category=' . VIRTUSPHERE_LOG_CATEGORY_AUTH] as $part) {
+        foreach (['tab=' . VIRTUSPHERE_LOG_TAB_SECURITY, 'q=bob', 'ip=192.0.2.5', 'category=' . VIRTUSPHERE_LOG_CATEGORY_AUTH] as $part) {
             self::assertStringContainsString($part, $page);
             self::assertStringContainsString($part, $export);
         }
@@ -204,7 +204,7 @@ final class LogFilterTest extends TestCase
 
         foreach ([
             ['q' => 'bob'],
-            ['ip' => '10.0.0.5'],
+            ['ip' => '192.0.2.5'],
             ['category' => VIRTUSPHERE_LOG_CATEGORY_AUTH],
             ['from' => '2026-01-01'],
             ['to' => '2026-01-01'],
@@ -358,7 +358,7 @@ final class LogFilterTest extends TestCase
         $filter = log_filter_from_query([
             'tab' => VIRTUSPHERE_LOG_TAB_SECURITY,
             'q' => 'bob',
-            'ip' => '10.0.0.5',
+            'ip' => '192.0.2.5',
             'category' => VIRTUSPHERE_LOG_CATEGORY_AUTH,
             'from' => '2026-07-01',
             'to' => '2026-07-02',

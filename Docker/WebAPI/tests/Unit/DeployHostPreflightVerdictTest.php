@@ -23,11 +23,11 @@ final class DeployHostPreflightVerdictTest extends TestCase
     {
         foreach ([VIRTUSPHERE_DEPLOY_MODE_FULL, 'powercycle', 'export'] as $mode) {
             try {
-                deploy_worker_host_preflight_verdict($mode, 0, $this->allowlist('denied 10.0.0.7'));
+                deploy_worker_host_preflight_verdict($mode, 0, $this->allowlist('denied 192.0.2.7'));
                 self::fail($mode . ' passed a denied allowlist');
             } catch (DeployWorkerConfigurationBlocked $blocked) {
-                self::assertSame(deploy_host_preflight_allowlist_result('10.0.0.7'), $blocked->result);
-                self::assertStringContainsString('10.0.0.7', $blocked->getMessage());
+                self::assertSame(deploy_host_preflight_allowlist_result('192.0.2.7'), $blocked->result);
+                self::assertStringContainsString('192.0.2.7', $blocked->getMessage());
             }
         }
     }
@@ -37,7 +37,7 @@ final class DeployHostPreflightVerdictTest extends TestCase
         // K20-A2: an IP listed only as MECM server is on the allowlist, so "not
         // on the allowlist" alone sends the operator to the wrong fix.
         try {
-            deploy_worker_host_preflight_verdict('export', 0, $this->allowlist('denied 10.0.0.20'));
+            deploy_worker_host_preflight_verdict('export', 0, $this->allowlist('denied 192.0.2.20'));
             self::fail('an export from an Ansible host without the Ansible host role passed');
         } catch (DeployWorkerConfigurationBlocked $blocked) {
             self::assertStringContainsString('or is not listed with the Ansible host role', $blocked->getMessage());
@@ -47,7 +47,7 @@ final class DeployHostPreflightVerdictTest extends TestCase
     public function testModesWithoutAMacImportIgnoreTheVerdict(): void
     {
         foreach (['create', 'start', VIRTUSPHERE_DEPLOY_MODE_AUTOSTART] as $mode) {
-            deploy_worker_host_preflight_verdict($mode, 0, $this->allowlist('denied 10.0.0.7'));
+            deploy_worker_host_preflight_verdict($mode, 0, $this->allowlist('denied 192.0.2.7'));
         }
         $this->addToAssertionCount(1);
     }
@@ -58,7 +58,7 @@ final class DeployHostPreflightVerdictTest extends TestCase
         deploy_worker_host_preflight_verdict(VIRTUSPHERE_DEPLOY_MODE_FULL, 0, $this->allowlist('unknown'));
         deploy_worker_host_preflight_verdict(VIRTUSPHERE_DEPLOY_MODE_FULL, 0, '');
         // The last line wins, exactly as ansible_preflight_allowlist_verdict() reads it.
-        deploy_worker_host_preflight_verdict(VIRTUSPHERE_DEPLOY_MODE_FULL, 0, $this->allowlist('denied 10.0.0.7') . $this->allowlist('ok'));
+        deploy_worker_host_preflight_verdict(VIRTUSPHERE_DEPLOY_MODE_FULL, 0, $this->allowlist('denied 192.0.2.7') . $this->allowlist('ok'));
         $this->addToAssertionCount(1);
     }
 
@@ -76,14 +76,14 @@ final class DeployHostPreflightVerdictTest extends TestCase
 
     public function testStoredResultIsStrictlyDecoded(): void
     {
-        $json = json_encode(deploy_host_preflight_allowlist_result('10.0.0.7'), JSON_THROW_ON_ERROR);
-        self::assertSame(['blocker' => VIRTUSPHERE_DEPLOY_HOST_PREFLIGHT_ALLOWLIST_DENIED, 'ip' => '10.0.0.7'], deploy_host_preflight_decode_result($json));
+        $json = json_encode(deploy_host_preflight_allowlist_result('192.0.2.7'), JSON_THROW_ON_ERROR);
+        self::assertSame(['blocker' => VIRTUSPHERE_DEPLOY_HOST_PREFLIGHT_ALLOWLIST_DENIED, 'ip' => '192.0.2.7'], deploy_host_preflight_decode_result($json));
         self::assertSame('', deploy_host_preflight_allowlist_result('not-an-ip')['ip']);
 
-        $tampered = deploy_host_preflight_allowlist_result('10.0.0.7');
+        $tampered = deploy_host_preflight_allowlist_result('192.0.2.7');
         $tampered['ip'] = '<script>';
         self::assertNull(deploy_host_preflight_decode_result(json_encode($tampered, JSON_THROW_ON_ERROR)));
-        $extra = deploy_host_preflight_allowlist_result('10.0.0.7') + ['more' => 1];
+        $extra = deploy_host_preflight_allowlist_result('192.0.2.7') + ['more' => 1];
         self::assertNull(deploy_host_preflight_decode_result(json_encode($extra, JSON_THROW_ON_ERROR)));
         self::assertNull(deploy_host_preflight_decode_result(null));
     }
@@ -93,9 +93,9 @@ final class DeployHostPreflightVerdictTest extends TestCase
         // The worker stores the block through the same encoder as the network
         // preflight, which bounds row lists; a bounded host result was rejected
         // by its strict decoder and the job page lost its link.
-        $result = deploy_host_preflight_allowlist_result('10.0.0.7');
+        $result = deploy_host_preflight_allowlist_result('192.0.2.7');
         self::assertSame(
-            ['blocker' => VIRTUSPHERE_DEPLOY_HOST_PREFLIGHT_ALLOWLIST_DENIED, 'ip' => '10.0.0.7'],
+            ['blocker' => VIRTUSPHERE_DEPLOY_HOST_PREFLIGHT_ALLOWLIST_DENIED, 'ip' => '192.0.2.7'],
             deploy_host_preflight_decode_result(repo_encode_deploy_preflight_result($result))
         );
         $network = vm_network_preflight_result_contract(VIRTUSPHERE_DEPLOY_MODE_FULL, [], [], [18]);
@@ -109,11 +109,11 @@ final class DeployHostPreflightVerdictTest extends TestCase
             'id' => 7,
             'mission_id' => 3,
             'status' => VIRTUSPHERE_DEPLOY_STATUS_FAILED,
-            'result_json' => json_encode(deploy_host_preflight_allowlist_result('10.0.0.7'), JSON_THROW_ON_ERROR),
+            'result_json' => json_encode(deploy_host_preflight_allowlist_result('192.0.2.7'), JSON_THROW_ON_ERROR),
             'terminal_reason_code' => VIRTUSPHERE_DEPLOY_TERMINAL_REASON_CONFIGURATION_BLOCKED,
         ];
         $view = deploy_terminal_presenter($job);
-        self::assertSame(__t('deploy.result_allowlist_denied', ['ip' => '10.0.0.7']), $view['result']['text']);
+        self::assertSame(__t('deploy.result_allowlist_denied', ['ip' => '192.0.2.7']), $view['result']['text']);
         self::assertTrue($view['result']['structured']);
 
         $link = 'href="' . htmlspecialchars(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API), ENT_QUOTES) . '"';

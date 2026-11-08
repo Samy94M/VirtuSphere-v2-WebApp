@@ -58,7 +58,7 @@ final class VmNetworkContractTest extends TestCase
     public function testFingerprintIsVersionedOrderedAndNormalizesPreservedMac(): void
     {
         $left = [
-            ['id' => 2, 'vlan' => 'Prod', 'mode' => 'static', 'type' => 'vmxnet3', 'ip' => '10.0.0.2', 'mac' => 'AA-BB-CC-DD-EE-FF'],
+            ['id' => 2, 'vlan' => 'Prod', 'mode' => 'static', 'type' => 'vmxnet3', 'ip' => '192.0.2.2', 'mac' => 'AA-BB-CC-DD-EE-FF'],
             ['id' => 3, 'vlan' => 'WDS', 'mode' => 'dhcp', 'type' => 'e1000e', 'mac' => ''],
         ];
         $normalized = $left;

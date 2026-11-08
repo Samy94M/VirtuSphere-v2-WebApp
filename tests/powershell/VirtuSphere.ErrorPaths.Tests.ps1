@@ -934,7 +934,7 @@ Describe 'MECM-Installer: Abschlusstext folgt dem Modus (MI1)' {
         @($named.Steps | Where-Object { $_ -match 'install-VirtuSphere-Clients\.ps1' -and $_ -match [regex]::Escape($script:ClientConfigPath) }).Count | Should -Be 1
         $named.Notes.Count | Should -Be 0
 
-        $ip = Get-Closing -Mode 'install' -Blocked $false -WebApiHost '10.0.0.5' -IsIp $true
+        $ip = Get-Closing -Mode 'install' -Blocked $false -WebApiHost '192.0.2.5' -IsIp $true
         ($ip.Steps -join ' | ') | Should -Not -Match 'DNS-Eintrag'
     }
 

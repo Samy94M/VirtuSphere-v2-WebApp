@@ -60,7 +60,7 @@ final class VmIdentityCollisionTest extends TestCase
                 'vm_cpu' => 4,
                 'vm_ram' => 8192,
             ],
-            [['ip' => '10.90.0.10', 'subnet' => '255.255.255.0', 'gateway' => '10.90.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN90', 'mac' => '']],
+            [['ip' => '198.51.100.10', 'subnet' => '255.255.255.0', 'gateway' => '198.51.100.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN90', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 80, 'disk_type' => 'thin']],
             [],
             '',

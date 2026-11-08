@@ -150,7 +150,7 @@ final class VmEvidenceReaderTest extends TestCase
             $this->db,
             'INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, mac, mode, type) VALUES (?, ?, ?, ?, ?, ?, ?)',
             'issssss',
-            [$vm, '10.0.0.21', '255.255.255.0', '10.0.0.1', self::PACKAGE_MAC, 'dhcp', 'vmxnet3']
+            [$vm, '192.0.2.21', '255.255.255.0', '192.0.2.1', self::PACKAGE_MAC, 'dhcp', 'vmxnet3']
         );
 
         $base = $this->packageBase($vm);

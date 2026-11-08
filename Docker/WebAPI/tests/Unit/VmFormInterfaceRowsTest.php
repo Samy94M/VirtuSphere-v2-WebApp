@@ -54,10 +54,10 @@ final class VmFormInterfaceRowsTest extends TestCase
     {
         $rows = vm_parse_interfaces([[
             'id' => '7',
-            'ip' => '10.9.9.10',
+            'ip' => '203.0.113.10',
             'subnet' => '255.255.255.0',
-            'gateway' => '10.9.9.1',
-            'dns1' => '10.9.9.2',
+            'gateway' => '203.0.113.1',
+            'dns1' => '203.0.113.2',
             'dns2' => '',
             'vlan' => 'VLAN20',
             'mode' => 'static',
@@ -66,7 +66,7 @@ final class VmFormInterfaceRowsTest extends TestCase
 
         self::assertCount(1, $rows);
         self::assertSame(7, $rows[0]['id']);
-        self::assertSame('10.9.9.10', $rows[0]['ip']);
+        self::assertSame('203.0.113.10', $rows[0]['ip']);
         self::assertSame('VLAN20', $rows[0]['vlan']);
         self::assertSame('static', $rows[0]['mode']);
         self::assertSame('e1000e', $rows[0]['type']);

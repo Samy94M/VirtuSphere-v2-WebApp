@@ -40,7 +40,7 @@
     bisherigen Stand (Entscheidung MC-R4, verengt am 15.10.2026).
 
 .PARAMETER WebApi
-    Adresse der VirtuSphere-WebApp, z. B. "virtusphere.lan:8021" oder "10.0.0.5:8021".
+    Adresse der VirtuSphere-WebApp, z. B. "virtusphere.lan:8021" oder "192.0.2.5:8021".
 
 .PARAMETER PackagesRoot
     Wurzel der Paketablage auf dem MECM-Server. Standard: D:\VirtuSphere\Packages.

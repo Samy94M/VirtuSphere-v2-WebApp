@@ -34,19 +34,11 @@ allow:172\.17\.0\.[01](/16)?
 allow:172\.31\.0\.0(/16)?
 allow:192\.168\.0\.0(/16|/20)?
 allow:10\.250\.0\.0(/24)?
-# Einzelne synthetische Testwerte in privaten Bereichen (Tests, Fixtures,
-# Platzhalter); NS2 hat echte Altwerte durch einen Teil davon ersetzt.
-allow:10\.0\.0\.(1|2|5|6|7|8|9|10|11|12|20|21|30|31|40|44)(:[0-9][0-9]*)?
-allow:10\.0\.1\.(1|10)
-allow:10\.0\.5\.(11|12|13|21|22)
-allow:10\.1\.2\.(3|4)
-allow:10\.9\.9\.(1|2|10)
-allow:10\.10\.10\.10(:[0-9][0-9]*)?
-allow:10\.20\.30\.40
-allow:10\.23\.0\.20
-allow:10\.23\.250\.1
-allow:10\.9[01]\.0\.(1|10)
-allow:10\.99\.0\.(1|7|8|42)
+# Einzelne synthetische Testwerte in privaten Bereichen, nur noch in den
+# e2e-Specs (W3B hat Tests, Fixtures und Platzhalter auf RFC 5737 umgestellt;
+# die e2e-Specs folgen, dann entfallen diese Zeilen).
+allow:10\.0\.0\.(1|5|8|9)(:[0-9][0-9]*)?
+allow:10\.99\.0\.(7|8|42)
 # Einzelne Testwerte ausserhalb privater Bereiche: Platzhalter-Adresse und
 # invertierte Netzmaske.
 allow:1\.2\.3\.4

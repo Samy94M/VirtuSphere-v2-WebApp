@@ -216,7 +216,7 @@ final class AutostartPropagationTest extends TestCase
                 'vm_domain' => 'dc.example.com',
                 'vm_guest_id' => 'windows2019srv_64Guest',
             ],
-            [['ip' => '10.0.0.9', 'subnet' => '255.255.255.0', 'gateway' => '10.0.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'PHPUNIT-AUTOSTART-VLAN']],
+            [['ip' => '192.0.2.9', 'subnet' => '255.255.255.0', 'gateway' => '192.0.2.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'PHPUNIT-AUTOSTART-VLAN']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',
