@@ -39,6 +39,11 @@
     ohne vollstaendige Abschlusszeile zaehlt als infra. N wird auf die Zahl
     der ausgewaehlten Faelle begrenzt.
 
+.PARAMETER UnitJUnit
+    JUnit-Bericht des Gates phpunit-unit derselben Lane. Dann prueft der Fall
+    portal-require-closure.probes die Closure-Proben darin, statt sie ein
+    weiteres Mal zu fahren. Ohne Angabe faehrt er sie selbst.
+
 .EXAMPLE
     powershell -NoProfile -File scripts\test-guards.ps1
 
@@ -50,7 +55,8 @@ param(
     [string[]]$Filter,
     [switch]$List,
     [string]$Shard = '',
-    [int]$Parallel = 1
+    [int]$Parallel = 1,
+    [string]$UnitJUnit = ''
 )
 
 Set-StrictMode -Version 1.0
@@ -614,17 +620,11 @@ $cases = @(
         Save-DocFragmentCommit $fx
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.new-entry\]'
     } }
-    @{ Name = 'doc-fragments.unreleased-section'; Body = {
-        $fx = New-DocFragmentRepo
-        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
-        $file = Join-Path $fx 'docs/CHANGELOG.md'
-        $text = [System.IO.File]::ReadAllText($file)
-        $heading = $text.IndexOf("`n## ")
-        if ($heading -lt 0) { throw 'Mutationsanker nicht gefunden in docs/CHANGELOG.md: erste Ueberschrift' }
-        $text = $text.Insert($heading + 1, "## Noch in keinem Release`n`n")
-        [System.IO.File]::WriteAllText($file, $text, (New-Object System.Text.UTF8Encoding($false)))
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.unreleased-section\]'
-    } }
+    # unreleased-section, fragment-format und no-git beweist
+    # tests/powershell/VirtuSphere.DocFragments.Tests.ps1 gegen dasselbe Skript
+    # mit derselben Diagnose-ID (R4, C2: je Regel abgeschaltet, Pester-Fall rot).
+    # Hier bleiben gruen, Fixture-Kontrolle, je eine Mutation der beiden Haelften
+    # (CHANGELOG und Archivregister) auf den echten Quellen und Zero-Match.
     @{ Name = 'doc-fragments.archive-entry'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
@@ -633,20 +633,10 @@ $cases = @(
         Save-DocFragmentCommit $fx
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.archive-entry\]'
     } }
-    @{ Name = 'doc-fragments.fragment-format'; Body = {
-        $fx = New-DocFragmentRepo
-        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
-        Add-FixtureFile $fx 'docs/changelog.d/x1.md' "Free paragraph.`n"
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.fragment-format\]'
-    } }
     @{ Name = 'doc-fragments.zero-match'; Body = {
         $fx = New-DocFragmentRepo -WithoutArchiveMarker
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.no-archive\]'
-    } }
-    @{ Name = 'doc-fragments.no-git'; Body = {
-        $fx = New-Fixture $docFragmentFixtureFiles
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(2) '\[doc-fragments\.no-git\]'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {
@@ -991,20 +981,6 @@ function zz_guard_ok(mysqli $db): void
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'lint-csp-patterns.sh') @('--worktree') $fx) @(2) '\[csp\.no-git\]'
     } }
 
-    @{ Name = 'sh-posix.parse-all'; Body = {
-        if (-not $shExe) { return @{ Status = 'infra'; Detail = 'sh fehlt' } }
-        $shFiles = @(Get-ChildItem -Path (Join-Path $repoRoot 'scripts') -Filter '*.sh' -File)
-        $shFiles += @(Get-ChildItem -Path (Join-Path (Join-Path $repoRoot '.claude') 'hooks') -Filter '*.sh' -File)
-        if ($shFiles.Count -eq 0) { return @{ Status = 'unproven'; Detail = 'Zero-Match: keine Shellskripte gefunden' } }
-        foreach ($f in $shFiles) {
-            $r = Invoke-GuardShell '-n' @(($f.FullName -replace '\\', '/'))
-            if ($r.ExitCode -ne 0) {
-                return @{ Status = 'unproven'; Detail = ($f.Name + ' ist nicht POSIX-parsebar: ' + (@($r.Output) -join ' ')) }
-            }
-        }
-        return @{ Status = 'proven'; Detail = ('' + $shFiles.Count + ' Skripte POSIX-parsebar') }
-    } }
-
     @{ Name = 'runner.powershell-syntax.red'; Body = {
         $fx = New-Fixture
         Add-FixtureFile $fx 'broken.ps1' "function Broken {`n"
@@ -1197,9 +1173,16 @@ $cases += @(
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-Fixture
         # Unabgeschlossenes Quote: Parserfehler (SC1078, error-Level), sicher
-        # oberhalb der -S-warning-Schwelle des Gates.
+        # oberhalb der -S-warning-Schwelle des Gates. Dazu ein if ohne fi: die
+        # zweite Art Parse-Fehler, fuer die bis C2 der Fall sh-posix.parse-all
+        # jedes Skript mit sh -n las. Beide Dateien muessen gemeldet werden;
+        # shellcheck deckt seitdem allein ab, was nicht parsebar ist (R3).
         Add-FixtureFile $fx 'probe.sh' "#!/bin/sh`necho `"unclosed`n"
-        Assert-Guard (Invoke-RunnerGate $fx 'shellcheck') @(1) -InfraOnExit2
+        Add-FixtureFile $fx 'probe-if.sh' "#!/bin/sh`nif true; then`n  echo open`n"
+        $result = Invoke-RunnerGate $fx 'shellcheck'
+        $verdict = Assert-Guard $result @(1) -InfraOnExit2
+        if ($verdict.Status -ne 'proven') { return $verdict }
+        Assert-Guard $result @(1) 'probe-if\.sh'
     } }
     @{ Name = 'runner.yaml-roundtrip.drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
@@ -1637,8 +1620,37 @@ $cases += @(
     } }
 )
 
+# Die Closure-Proben laufen schon im Gate phpunit-unit derselben Lane (R1, C2).
+# Mit -UnitJUnit liest der Fall dessen JUnit-Bericht statt die beiden Klassen ein
+# drittes Mal zu fahren: jede test*-Methode beider Dateien (aus dem Quelltext
+# abgeleitet, keine Liste) muss dort stehen und gruen sein, ohne Skip. Ohne
+# Bericht (Harness allein gestartet) faehrt der Fall die Klassen selbst.
+$closureProbeFiles = @('Docker/WebAPI/tests/Static/PortalClosureAnalysisTest.php', 'Docker/WebAPI/tests/Static/PortalRequireClosureContractTest.php')
+function Test-ClosureProbesInJUnit {
+    param([string]$JUnitPath)
+    try { [xml]$report = [System.IO.File]::ReadAllText($JUnitPath) } catch {
+        return @{ Status = 'infra'; Detail = ('JUnit-Bericht nicht lesbar: ' + $JUnitPath) }
+    }
+    foreach ($relative in $closureProbeFiles) {
+        $class = [System.IO.Path]::GetFileNameWithoutExtension($relative)
+        $source = [System.IO.File]::ReadAllText((Join-Path $repoRoot $relative))
+        $expected = @([regex]::Matches($source, 'public function (test\w+)\s*\(') | ForEach-Object { $_.Groups[1].Value })
+        if ($expected.Count -eq 0) { return @{ Status = 'unproven'; Detail = ('keine test-Methode in ' + $relative + ' (Zero-Match)') } }
+        $cases = @($report.SelectNodes("//testcase[@class='" + $class + "']"))
+        $seen = @($cases | ForEach-Object { ([string]$_.name -split ' with data set ')[0] })
+        $missing = @($expected | Where-Object { $seen -notcontains $_ })
+        if ($missing.Count -gt 0) { return @{ Status = 'unproven'; Detail = ($class + ': fehlt im JUnit-Bericht von phpunit-unit: ' + ($missing -join ', ')) } }
+        $bad = @($cases | Where-Object { $_.SelectSingleNode('failure|error|skipped') } | ForEach-Object { [string]$_.name })
+        if ($bad.Count -gt 0) { return @{ Status = 'unproven'; Detail = ($class + ': rot oder uebersprungen: ' + ($bad -join ', ')) } }
+    }
+    return @{ Status = 'proven'; Detail = '' }
+}
 $cases += @(
     @{ Name = 'portal-require-closure.probes'; Body = {
+        if ($UnitJUnit -ne '') {
+            if (-not (Test-Path -LiteralPath $UnitJUnit -PathType Leaf)) { return @{ Status = 'infra'; Detail = ('JUnit-Bericht fehlt: ' + $UnitJUnit) } }
+            return Test-ClosureProbesInJUnit $UnitJUnit
+        }
         if (-not $phpImageAvailable) { throw 'INFRA: PHP test image unavailable' }
         $result = Invoke-Tool 'docker' @('run', '--rm', '--network', 'none',
             '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
@@ -1718,6 +1730,7 @@ if ($shardWorkers -gt 1) {
         for ($k = 1; $k -le $shardWorkers; $k++) {
             $argumentLine = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Shard ' + $k + '/' + $shardWorkers
             if ($Filter) { $argumentLine += ' -Filter "' + ($Filter -join ',') + '"' }
+            if ($UnitJUnit -ne '') { $argumentLine += ' -UnitJUnit "' + $UnitJUnit + '"' }
             $shardCases = 0
             for ($i = $k - 1; $i -lt $selected.Count; $i += $shardWorkers) { $shardCases++ }
             Write-Host ('[{0}/{1}] RUN  Shard {0}/{1} ({2} Fall/Faelle)' -f $k, $shardWorkers, $shardCases) -ForegroundColor Cyan

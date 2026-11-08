@@ -110,3 +110,79 @@ Describe 'test-guards.ps1 shards and parallel shard processes' {
         $result.Output | Should -Match 'Guards: 1 proven, 0 unproven, 1 infra => Exit 2'
     }
 }
+
+# R1 (C2): die Closure-Proben werden im JUnit-Bericht von phpunit-unit
+# nachgewiesen statt ein drittes Mal gefahren. Echter Harness, synthetische
+# Berichte; die erwarteten Methoden kommen wie im Harness aus dem Quelltext.
+Describe 'portal-require-closure.probes reads the phpunit-unit JUnit report' {
+    BeforeAll {
+        $script:RealHarness = Join-Path (Join-Path $script:RepoRoot 'scripts') 'test-guards.ps1'
+        $script:ProbeFiles = @('PortalClosureAnalysisTest', 'PortalRequireClosureContractTest')
+        function New-ProbeReport {
+            param([string]$Path, [string]$Drop = '', [string]$Child = '')
+            $cases = foreach ($class in $script:ProbeFiles) {
+                $source = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot ('Docker/WebAPI/tests/Static/' + $class + '.php'))
+                foreach ($m in [regex]::Matches($source, 'public function (test\w+)\s*\(')) {
+                    $name = $m.Groups[1].Value
+                    if ($name -eq $Drop) { continue }
+                    if ($Child -ne '' -and $name -eq 'testZeroEntrypointsAreAContractError') {
+                        '<testcase name="' + $name + '" class="' + $class + '"><' + $Child + ' message="x"/></testcase>'
+                    } else {
+                        '<testcase name="' + $name + '" class="' + $class + '"/>'
+                    }
+                }
+            }
+            $xml = '<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="unit">' + ($cases -join '') + '</testsuite></testsuites>'
+            [System.IO.File]::WriteAllText($Path, $xml, $script:Utf8)
+        }
+        function Invoke-ProbeCase {
+            param([string]$Report)
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $script:EngineExe
+            $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $script:RealHarness + '" -Filter portal-require-closure -UnitJUnit "' + $Report + '"'
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.CreateNoWindow = $true
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrText = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            $exitCode = $process.ExitCode
+            $process.Dispose()
+            return @{ ExitCode = $exitCode; Output = ([string]$stdoutTask.Result + "`n" + $stderrText) }
+        }
+    }
+
+    It 'proves the probes when every test method of both classes is green in the report' {
+        $report = Join-Path $TestDrive 'green.xml'
+        New-ProbeReport -Path $report
+        $result = Invoke-ProbeCase $report
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'proven   portal-require-closure\.probes \(\d+\.\ds\)'
+    }
+
+    It 'does not prove them when a test method is missing from the report' {
+        $report = Join-Path $TestDrive 'missing.xml'
+        New-ProbeReport -Path $report -Drop 'testDashboardRegressionMutationRemovesItsRealModuleEdge'
+        $result = Invoke-ProbeCase $report
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'fehlt im JUnit-Bericht von phpunit-unit: testDashboardRegressionMutationRemovesItsRealModuleEdge'
+    }
+
+    It 'does not prove them when a probe failed or was skipped' {
+        foreach ($child in @('failure', 'error', 'skipped')) {
+            $report = Join-Path $TestDrive ($child + '.xml')
+            New-ProbeReport -Path $report -Child $child
+            $result = Invoke-ProbeCase $report
+            $result.ExitCode | Should -Be 1 -Because $child
+            $result.Output | Should -Match 'rot oder uebersprungen: testZeroEntrypointsAreAContractError'
+        }
+    }
+
+    It 'reports a missing report as infrastructure, not as proven' {
+        $result = Invoke-ProbeCase (Join-Path $TestDrive 'absent.xml')
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -Match 'infra    portal-require-closure\.probes .* JUnit-Bericht fehlt'
+    }
+}
