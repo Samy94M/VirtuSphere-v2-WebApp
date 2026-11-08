@@ -75,39 +75,73 @@ final class AuditTransactionOwnershipContractTest extends TestCase
     /** The owner: audit_event_required() itself calls audit_event(). */
     private const OWNER = 'lib/repo/log.php::audit_event_required';
 
-    /** @var array<string,list<Node>>|null */
-    private static ?array $trees = null;
+    /**
+     * What the scan keeps: compact facts per call, never the trees. Holding every
+     * parsed file with parent links at once exhausts the unit suite's memory limit.
+     *
+     * @var array{files:array<string,true>,declared:array<string,true>,sites:array<string,array<string,array{function:string,lexical:bool}>>,audit:list<array{name:string,file:string,function:string,lexical:bool,line:int,event:string}>}|null
+     */
+    private static ?array $facts = null;
 
     private static function webRoot(): string
     {
         return dirname(__DIR__, 2);
     }
 
-    /** @return array<string,list<Node>> relative path => statements with parent links */
-    private static function trees(): array
+    /**
+     * One pass over the web root outside tests/, vendor/, logs/ and lang/ (catalogs, no
+     * code). Each file is parsed, reduced to facts and dropped before the next one.
+     *
+     * @return array{files:array<string,true>,declared:array<string,true>,sites:array<string,array<string,array{function:string,lexical:bool}>>,audit:list<array{name:string,file:string,function:string,lexical:bool,line:int,event:string}>}
+     */
+    private static function facts(): array
     {
-        if (self::$trees !== null) {
-            return self::$trees;
+        if (self::$facts !== null) {
+            return self::$facts;
         }
         $parser = (new ParserFactory())->createForNewestSupportedVersion();
+        $finder = new NodeFinder();
         $root = self::webRoot();
-        $trees = [];
+        $facts = ['files' => [], 'declared' => [], 'sites' => [], 'audit' => []];
         $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
         foreach ($files as $file) {
             if (!$file instanceof SplFileInfo || $file->getExtension() !== 'php') {
                 continue;
             }
             $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
-            if (preg_match('#^(tests|vendor|logs)/#', $relative) === 1) {
+            if (preg_match('#^(tests|vendor|logs|lang)/#', $relative) === 1) {
                 continue;
             }
             $nodes = $parser->parse((string) file_get_contents($file->getPathname())) ?? [];
-            $traverser = new NodeTraverser(new ParentConnectingVisitor());
-            $trees[$relative] = $traverser->traverse($nodes);
+            $nodes = (new NodeTraverser(new ParentConnectingVisitor()))->traverse($nodes);
+            $facts['files'][$relative] = true;
+            foreach ($finder->findInstanceOf($nodes, Node\Stmt\Function_::class) as $function) {
+                $facts['declared'][strtolower($function->name->toString())] = true;
+            }
+            foreach ($finder->findInstanceOf($nodes, Node\Expr\FuncCall::class) as $call) {
+                $name = self::calledName($call);
+                if ($name === null) {
+                    continue;
+                }
+                $scope = self::scope($call);
+                $facts['sites'][$name][$scope['function'] . '|' . ($scope['lexical'] ? '1' : '0')] = $scope;
+                if ($name === 'audit_event' || $name === 'audit_event_required') {
+                    $facts['audit'][] = [
+                        'name' => $name,
+                        'file' => $relative,
+                        'function' => $scope['function'],
+                        'lexical' => $scope['lexical'],
+                        'line' => $call->getStartLine(),
+                        'event' => self::eventOf($call),
+                    ];
+                }
+            }
+            // Parent links are reference cycles; free them before the next file.
+            unset($nodes);
+            gc_collect_cycles();
         }
-        ksort($trees);
 
-        return self::$trees = $trees;
+        return self::$facts = $facts;
     }
 
     private static function calledName(Node\Expr\FuncCall $call): ?string
@@ -143,22 +177,10 @@ final class AuditTransactionOwnershipContractTest extends TestCase
         return ['function' => '{main}', 'lexical' => $lexical];
     }
 
-    /** @return list<array{file:string,function:string,lexical:bool,call:Node\Expr\FuncCall}> */
+    /** @return list<array{name:string,file:string,function:string,lexical:bool,line:int,event:string}> */
     private static function calls(string $name): array
     {
-        $finder = new NodeFinder();
-        $found = [];
-        foreach (self::trees() as $file => $nodes) {
-            foreach ($finder->findInstanceOf($nodes, Node\Expr\FuncCall::class) as $call) {
-                if (self::calledName($call) !== $name) {
-                    continue;
-                }
-                $scope = self::scope($call);
-                $found[] = ['file' => $file, 'function' => $scope['function'], 'lexical' => $scope['lexical'], 'call' => $call];
-            }
-        }
-
-        return $found;
+        return array_values(array_filter(self::facts()['audit'], static fn (array $site): bool => $site['name'] === $name));
     }
 
     /**
@@ -170,22 +192,8 @@ final class AuditTransactionOwnershipContractTest extends TestCase
      */
     private static function transactionalFunctions(): array
     {
-        $finder = new NodeFinder();
-        $declared = [];
-        foreach (self::trees() as $nodes) {
-            foreach ($finder->findInstanceOf($nodes, Node\Stmt\Function_::class) as $function) {
-                $declared[strtolower($function->name->toString())] = true;
-            }
-        }
-        $sites = [];
-        foreach (self::trees() as $nodes) {
-            foreach ($finder->findInstanceOf($nodes, Node\Expr\FuncCall::class) as $call) {
-                $name = self::calledName($call);
-                if ($name !== null && isset($declared[$name])) {
-                    $sites[$name][] = self::scope($call);
-                }
-            }
-        }
+        $facts = self::facts();
+        $sites = array_intersect_key($facts['sites'], $facts['declared']);
 
         $transactional = [];
         do {
@@ -221,9 +229,9 @@ final class AuditTransactionOwnershipContractTest extends TestCase
     public function testTheScanSeesTheWholeWebRoot(): void
     {
         // Zero-match guard: a scan that finds nothing reads exactly like a clean tree.
-        $trees = self::trees();
+        $files = self::facts()['files'];
         foreach (['lib/settings_actions.php', 'lib/users_admin.php', 'lib/repo/log.php', 'portal/vms.php', 'mecm_packages.php'] as $file) {
-            self::assertArrayHasKey($file, $trees, $file . ' must be scanned');
+            self::assertArrayHasKey($file, $files, $file . ' must be scanned');
         }
         self::assertGreaterThan(40, count(self::calls('audit_event_required')));
         self::assertGreaterThan(20, count(self::calls('audit_event')));
@@ -237,7 +245,7 @@ final class AuditTransactionOwnershipContractTest extends TestCase
             if ($site['lexical'] || isset($transactional[strtolower($site['function'])])) {
                 continue;
             }
-            $outside[] = sprintf('%s:%d (%s)', $site['file'], $site['call']->getStartLine(), $site['function']);
+            $outside[] = sprintf('%s:%d (%s)', $site['file'], $site['line'], $site['function']);
         }
 
         self::assertSame([], $outside, 'audit_event_required() outside any repo_transaction(): it would throw at run time');
@@ -251,9 +259,9 @@ final class AuditTransactionOwnershipContractTest extends TestCase
             if ($site['file'] . '::' . $site['function'] === self::OWNER) {
                 continue;
             }
-            $key = $site['file'] . '::' . $site['function'] . '::' . self::eventOf($site['call']);
+            $key = $site['file'] . '::' . $site['function'] . '::' . $site['event'];
             $found[$key] = ($found[$key] ?? 0) + 1;
-            $lines[$key][] = $site['call']->getStartLine();
+            $lines[$key][] = $site['line'];
         }
 
         $listed = array_map(static fn (array $entry): int => $entry['count'], self::UNCHECKED);
@@ -357,7 +365,7 @@ final class AuditTransactionOwnershipContractTest extends TestCase
     {
         $wrappers = [];
         foreach (self::calls('audit_event') as $site) {
-            if (self::eventOf($site['call']) === '*' && $site['file'] . '::' . $site['function'] !== self::OWNER) {
+            if ($site['event'] === '*' &&$site['file'] . '::' . $site['function'] !== self::OWNER) {
                 $wrappers[] = $site['file'] . '::' . $site['function'];
             }
         }
