@@ -85,7 +85,12 @@ function Stop-StreamedChildren {
             $child.Stream = $null
         }
         if (-not $child.Process.HasExited) {
-            & taskkill.exe /T /F /PID $child.Process.Id 2>&1 | Out-Null
+            if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+                & taskkill.exe /T /F /PID $child.Process.Id 2>&1 | Out-Null
+            } else {
+                # pwsh on Linux (CI): no taskkill; the child itself by its PID.
+                Stop-Process -Id $child.Process.Id -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 }

@@ -1809,19 +1809,21 @@ try {
             $verdict = @{ Status = 'infra'; Detail = ('Exception: ' + $_.Exception.Message) }
         }
         $caseWatch.Stop()
-        $seconds = Format-GuardSeconds $caseWatch
+        # Die Dauer haengt hinter dem Fallnamen; die Zeilenform davor bleibt die
+        # vertraute (ProgressReporting liest sie).
+        $seconds = ' (' + (Format-GuardSeconds $caseWatch) + ')'
         switch ($verdict.Status) {
             'proven' {
                 $proven = $proven + 1
-                Write-Host ('[{0}/{1}] proven   {2} ({3})' -f $caseNumber, $caseTotal, $case.Name, $seconds) -ForegroundColor Green
+                Write-Host (('[{0}/{1}] proven   {2}' -f $caseNumber, $caseTotal, $case.Name) + $seconds) -ForegroundColor Green
             }
             'infra' {
                 $infra = $infra + 1
-                Write-Host ('[{0}/{1}] infra    {2} ({3}) - {4}' -f $caseNumber, $caseTotal, $case.Name, $seconds, $verdict.Detail) -ForegroundColor Yellow
+                Write-Host (('[{0}/{1}] infra    {2}' -f $caseNumber, $caseTotal, $case.Name) + $seconds + ' - ' + $verdict.Detail) -ForegroundColor Yellow
             }
             default {
                 $unproven = $unproven + 1
-                Write-Host ('[{0}/{1}] unproven {2} ({3}) - {4}' -f $caseNumber, $caseTotal, $case.Name, $seconds, $verdict.Detail) -ForegroundColor Red
+                Write-Host (('[{0}/{1}] unproven {2}' -f $caseNumber, $caseTotal, $case.Name) + $seconds + ' - ' + $verdict.Detail) -ForegroundColor Red
             }
         }
     }
