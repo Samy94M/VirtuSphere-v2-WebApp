@@ -158,7 +158,7 @@ flowchart TD
 
 ## Site Health
 
-Fragt den Status der konfigurierten MECM-Site ab und meldet ihn als Ampel. Gemeldet werden nur Site-Code, Provider und der Rohstatus, nie der Text der MECM-Statusmeldung.
+Fragt den Status der konfigurierten MECM-Site ab und meldet ihn als Ampel. Gemeldet werden nur Site-Code, Provider und der Rohstatus, bei Warnung oder kritisch dazu die Zahl der Rollen und Komponenten je Typname und Status (`site_parts`), nie ein Servername und nie der Text der MECM-Statusmeldung.
 
 ```mermaid
 flowchart TD
@@ -171,6 +171,9 @@ flowchart TD
   QA -->|ja| E{"Genau ein Eintrag mit Status?"}
   E -->|nein| U3["„unknown“ (query_failed)"] --> R
   E -->|ja| M["Status 0 „ok“, 1 „warning“ (site_warning), 2 „fail“ (site_critical), sonst „unknown“"]
-  M --> R["„completed“ melden mit Site-Code, Provider und Rohstatus; Pause = Takt (Standard 300 s)"]
+  M --> W{"Warnung oder kritisch?"}
+  W -->|nein| R
+  W -->|ja| T["SMS_SiteSystemSummarizer und SMS_ComponentSummarizer (Since 12:00:00 AM) mit Status ungleich 0 lesen, je Typname und Status zählen; scheitert das, WARN-Zeile und ohne Teile weiter"] --> R
+  R["„completed“ melden mit Site-Code, Provider, Rohstatus und gegebenenfalls site_parts; Pause = Takt (Standard 300 s)"]
   R -.->|nächster Lauf| S
 ```

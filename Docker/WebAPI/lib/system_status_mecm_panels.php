@@ -12,6 +12,8 @@ require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
 require_once __DIR__ . '/help_page.php';
+// The site-health card and the overview badge (split by domain, ADR-0006).
+require_once __DIR__ . '/system_status_mecm_site_panel.php';
 
 /** Presentation only: a start report is not proof that the process is still alive. */
 function system_status_run_badge(string $state, bool $started): string
@@ -63,27 +65,6 @@ function system_status_autoimporter_findings(string $detail, ?bool $distribution
         }
     }
     return $findings;
-}
-
-// Maps a reportRun error category (sync or site) to a localized label.
-function system_status_run_error_label(?string $category): string
-{
-    return match ($category) {
-        VIRTUSPHERE_RUN_ERROR_PORTAL_UNREACHABLE => __t('system_status.err_portal_unreachable'),
-        VIRTUSPHERE_RUN_ERROR_MECM_UNAVAILABLE => __t('system_status.err_mecm_unavailable'),
-        VIRTUSPHERE_RUN_ERROR_PARTIAL_FAILURE => __t('system_status.err_partial_failure'),
-        VIRTUSPHERE_RUN_ERROR_SOURCE_MISSING => __t('system_status.err_source_missing'),
-        VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT => __t('system_status.err_catalog_conflict'),
-        VIRTUSPHERE_RUN_ERROR_JOURNAL_BLOCKED => __t('system_status.err_journal_blocked'),
-        VIRTUSPHERE_RUN_ERROR_PORTAL_REJECTED => __t('system_status.err_portal_rejected'),
-        VIRTUSPHERE_RUN_ERROR_SOURCE_CHANGING => __t('system_status.err_source_changing'),
-        VIRTUSPHERE_RUN_ERROR_SITE_WARNING => __t('system_status.err_site_warning'),
-        VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL => __t('system_status.err_site_critical'),
-        VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED => __t('system_status.err_provider_access_denied'),
-        VIRTUSPHERE_RUN_ERROR_PROVIDER_UNREACHABLE => __t('system_status.err_provider_unreachable'),
-        VIRTUSPHERE_RUN_ERROR_QUERY_FAILED => __t('system_status.err_query_failed'),
-        default => '',
-    };
 }
 
 // Localized label for one summary counter key.
@@ -138,7 +119,8 @@ function system_status_run_reporter_note(array $row): string
 function system_status_render_mecm(array $snapshot, array $user): void
 {
     $syncState = (string) $snapshot['mecm_sync']['state'];
-    $siteState = (string) $snapshot['mecm_site']['state'];
+    // The site heading speaks the site's own words (lib/mecm_site_assessment.php).
+    $siteState = (string) ($snapshot['mecm_site']['site_state'] ?? 'none');
     // `unknown` for a whole group means no source there has ever reported. On a
     // brand-new install both groups are unknown, so a single setup empty-state
     // replaces four repeated repair instructions; the rows drop their per-row
@@ -203,7 +185,7 @@ function system_status_render_mecm(array $snapshot, array $user): void
         </div>
 
         <div class="status-subgroup">
-            <h3><?php echo h(__t('system_status.mecm_site_heading')); ?> <?php echo heartbeat_badge($siteState); ?></h3>
+            <h3><?php echo h(__t('system_status.mecm_site_heading')); ?> <?php echo mecm_site_badge($siteState); ?></h3>
             <p class="muted"><?php echo h(__t('system_status.mecm_site_hint')); ?></p>
             <?php system_status_render_site($snapshot['mecm_site']['rows']); ?>
         </div>
@@ -315,68 +297,4 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false,
         <?php } ?>
     </div>
     <?php
-}
-
-/**
- * The MECM site-status card: site code, SMS provider, the official MECM state
- * badge, the check/healthy/failure timestamps, the report interval and a hint
- * that distinguishes MECM warning (yellow), MECM critical (red) and the grey
- * provider faults (unreachable, access denied) from each other in text.
- *
- * @param list<array{source:string,row:array|null,state:string,result_state?:string,reporter_state?:string}> $rows
- */
-function system_status_render_site(array $rows): void
-{
-    $entry = $rows[0] ?? null;
-    $row = $entry['row'] ?? null;
-    if ($row === null) {
-        ?><div class="empty-state"><p><?php echo h(__t('system_status.mecm_site_empty')); ?></p></div><?php
-        return;
-    }
-    $state = (string) ($entry['result_state'] ?? $entry['state'] ?? 'unknown');
-    $reporterState = (string) ($entry['reporter_state'] ?? ($state === 'stale' ? 'warning' : ($state === 'unknown' ? 'unknown' : 'ok')));
-    $summary = !empty($row['last_summary']) ? json_decode((string) $row['last_summary'], true) : [];
-    $siteCode = is_array($summary) && isset($summary['site_code']) ? (string) $summary['site_code'] : '';
-    $provider = is_array($summary) && isset($summary['provider']) ? (string) $summary['provider'] : '';
-    $errorCategory = isset($row['last_error_category']) ? (string) $row['last_error_category'] : '';
-    $errorLabel = system_status_run_error_label($errorCategory);
-    $detail = trim((string) ($row['last_detail'] ?? ''));
-    ?>
-    <article class="status-row">
-        <?php if ($state === 'stale') { ?><p class="status-action"><?php echo h(__t('system_status.site_historical_result')); ?></p><?php } ?>
-        <?php
-        // Fixed facts, with reporter availability separate from the result. This card used
-        // to be the one whose only child was the list, so neither the
-        // space-between of the old head nor its first-child rule applied and the
-        // block sat left while the job cards sat right: an asymmetry that was
-        // pure accident and read as a difference in kind.
-        echo system_status_fact_list([
-            ['label' => __t('system_status.site_reporter_label'), 'html' => $reporterState === 'warning'
-                ? portal_badge('warning', __t('system_status.site_reporter_overdue')) : heartbeat_badge($reporterState)],
-            ['label' => __t('system_status.site_code_label'), 'html' => $siteCode !== '' ? '<code>' . h($siteCode) . '</code>' : '&mdash;'],
-            ['label' => __t('system_status.site_provider_label'), 'html' => $provider !== '' ? '<code>' . h($provider) . '</code>' : '&mdash;'],
-            ['label' => __t('system_status.site_state_label'), 'html' => heartbeat_badge($state) . ($errorLabel !== '' ? ' <span>' . h($errorLabel) . '</span>' : '')],
-            ['label' => __t('system_status.site_last_check'), 'html' => system_status_fact_time($row['last_result_at'] ?? null)],
-            ['label' => __t('system_status.site_last_healthy'), 'html' => system_status_fact_time($row['last_success_at'] ?? null)],
-            ['label' => __t('system_status.th_last_failure'), 'html' => system_status_fact_time($row['last_failure_at'] ?? null)],
-            ['label' => __t('system_status.site_interval'), 'html' => h(portal_format_duration((int) $row['interval_seconds']))],
-        ]);
-        ?>
-        <?php $hint = system_status_site_hint($errorCategory); if ($hint !== '') { ?><p class="status-action"><?php echo h($hint); ?></p><?php } ?>
-        <?php if ($detail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details><?php } ?>
-    </article>
-    <?php
-}
-
-// Site-status feedback: MECM warning and critical both point at the MECM
-// console; the grey provider faults point at the provider and its SYSTEM rights.
-function system_status_site_hint(string $category): string
-{
-    return match ($category) {
-        VIRTUSPHERE_RUN_ERROR_SITE_WARNING, VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL => __t('system_status.site_hint_console'),
-        VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED => __t('system_status.site_hint_access_denied'),
-        VIRTUSPHERE_RUN_ERROR_PROVIDER_UNREACHABLE => __t('system_status.site_hint_provider_unreachable'),
-        VIRTUSPHERE_RUN_ERROR_QUERY_FAILED => __t('system_status.site_hint_query_failed'),
-        default => '',
-    };
 }

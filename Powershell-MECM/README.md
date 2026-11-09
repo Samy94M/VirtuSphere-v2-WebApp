@@ -558,14 +558,25 @@ ist entfernt, ADR-0018 Amendment 2026-07-23):
   Die Abfrage läuft per CIM, ein ConfigurationManager-Modul wird nicht geladen.
   Die Provider-Ermittlung liest höchstens ein bereits vorhandenes
   CMSite-Laufwerk.
-- Reine Statusabbildung: `0` = OK (grün), `1` = Warnung (gelb), `2` = kritisch
-  (rot), jeder andere Rohwert = unbekannt (grau). Sendet ausschließlich
-  `completed`-Berichte, kein `started`.
+- Reine Statusabbildung: `0` = OK, `1` = Warnung, `2` = kritisch, jeder andere
+  Rohwert = unbekannt. Sendet ausschließlich `completed`-Berichte, kein
+  `started`. Die Farbe bestimmt das Portal: Status 2 ist rot, außer die
+  mitgesendeten Teile zeigen vollständig, dass nur unterstützende Rollen oder
+  Komponenten kritisch sind (dann gelb „Eingeschränkt“).
 - Providerfehler (nicht erreichbar, Zugriff verweigert, Abfrage fehlgeschlagen)
-  werden als `unknown` (grau) gemeldet; Rot ist exklusiv dem von MECM bestätigten
-  Status 2 vorbehalten. `provider_unreachable` erst nach zwei aufeinanderfolgenden
+  werden als `unknown` (grau) gemeldet; Rot setzt immer den von MECM bestätigten
+  Status 2 voraus. `provider_unreachable` erst nach zwei aufeinanderfolgenden
   Fehlversuchen, damit ein MECM-Reboot nicht sofort einen Fehler ins Portal
   schreibt.
+- Bei Warnung oder kritisch (ab `site-health/1.1`) zählt die Aufgabe zusätzlich,
+  welche Standortsystemrollen (`SMS_SiteSystemSummarizer`) und Komponenten
+  (`SMS_ComponentSummarizer`, Konsolenansicht „Since 12:00:00 AM“) MECM so
+  bewertet, je Typname und Status, ohne Servernamen und Meldungstexte, und
+  sendet das als `site_parts`. Ob ein Teil Kern oder unterstützend ist,
+  entscheidet allein das Portal (`lib/mecm_site_assessment.php`); sind nur
+  unterstützende Teile kritisch, zeigt es „Eingeschränkt“ (gelb) statt
+  „Kritisch“ (ADR-0018 Amendment 2026-11-09). Scheitert diese Detailabfrage,
+  steht eine WARN-Zeile im Tageslog und das Urteil geht unverändert raus.
 
 **Provider und Intervall (Registry, `HKLM:\SOFTWARE\VirtuSphere\MECM`):**
 

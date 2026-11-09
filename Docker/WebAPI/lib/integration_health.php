@@ -116,7 +116,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         'rows' => $rows,
         'by_source' => $bySource,
         'mecm_sync' => ['rows' => $syncRows, 'state' => repo_integration_worst_state($syncRows), 'report_count' => $syncReportCount, 'has_reports' => $syncReportCount > 0],
-        'mecm_site' => ['rows' => $siteRows, 'state' => repo_integration_worst_state($siteRows), 'report_count' => $siteReportCount, 'has_reports' => $siteReportCount > 0],
+        'mecm_site' => ['rows' => $siteRows, 'state' => repo_integration_worst_state($siteRows), 'site_state' => integration_health_site_group_state($siteRows), 'report_count' => $siteReportCount, 'has_reports' => $siteReportCount > 0],
         'mecm' => ['rows' => $mecmRows, 'state' => repo_integration_worst_state($mecmRows)],
         'internal' => ['rows' => $internalRows, 'state' => repo_integration_worst_state($internalRows)],
         'mecm_fresh_ips' => $freshIps,
@@ -153,7 +153,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
  * Keep reporter availability separate from the retained site verdict. Both
  * cards and dashboard receive these axes at the snapshot's one clock value.
  * @param list<array{source:string,row:array|null,state:string}> $rows
- * @return list<array{source:string,row:array|null,state:string,result_state?:string,reporter_state?:string}>
+ * @return list<array{source:string,row:array|null,state:string,result_state?:string,site_state?:string,reporter_state?:string}>
  */
 function integration_health_site_evidence_rows(array $rows, int $now): array
 {
@@ -162,12 +162,37 @@ function integration_health_site_evidence_rows(array $rows, int $now): array
             continue;
         }
         $entry['result_state'] = virtusphere_site_completed_state($entry['row'], $now);
+        $entry['site_state'] = virtusphere_site_state($entry['row'], $now);
         $entry['reporter_state'] = virtusphere_site_reporter_state($entry['row'], $now);
         $entry['state'] = $entry['reporter_state'] === 'warning' ? 'warning' : $entry['result_state'];
     }
     unset($entry);
 
     return $rows;
+}
+
+/**
+ * The one state the group heading and the Dashboard tile show for the MECM
+ * site, in the site's own words: `none` before any report, `overdue` while the
+ * reporter is late (the reporter axis, not a MECM verdict), otherwise the
+ * assessed verdict (ok, warning, limited, critical, unknown).
+ *
+ * @param list<array{source:string,row:array|null,state:string,site_state?:string,reporter_state?:string}> $rows
+ */
+function integration_health_site_group_state(array $rows): string
+{
+    foreach ($rows as $entry) {
+        if (($entry['row'] ?? null) === null) {
+            continue;
+        }
+        if (($entry['reporter_state'] ?? '') === 'warning') {
+            return 'overdue';
+        }
+
+        return (string) ($entry['site_state'] ?? VIRTUSPHERE_MECM_SITE_VERDICT_UNKNOWN);
+    }
+
+    return 'none';
 }
 
 /**

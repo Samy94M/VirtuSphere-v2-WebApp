@@ -47,15 +47,18 @@ echo 'RESTORED';
 }
 
 // Replaces the mecm-site-health row with one V2 completed report of the given
-// outcome/category (no summary, so no JSON escaping in the seed).
-function seedSite(outcome, category) {
+// outcome/category. An optional summary (with site_parts, MSB) travels as
+// base64, so the seed needs no JSON escaping.
+function seedSite(outcome, category, summary = null) {
+  const encoded = summary === null ? '' : Buffer.from(JSON.stringify(summary), 'utf8').toString('base64');
   runPhp(`
 $db = db();
 $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'mecm-site-health'");
-$stmt = $db->prepare("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_result_at, last_failure_at, last_status, last_event, last_error_category, report_version, interval_seconds, last_ip, beat_count) VALUES ('mecm-site-health', NOW(), NOW(), NOW(), NOW(), ?, 'completed', ?, 2, 300, '10.0.0.5', 1)");
+$stmt = $db->prepare("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_result_at, last_failure_at, last_status, last_event, last_error_category, report_version, interval_seconds, last_ip, beat_count, last_summary) VALUES ('mecm-site-health', NOW(), NOW(), NOW(), NOW(), ?, 'completed', ?, 2, 300, '10.0.0.5', 1, ?)");
 $outcome = '${outcome}';
 $category = '${category}';
-$stmt->bind_param('ss', $outcome, $category);
+$summary = '${encoded}' === '' ? null : base64_decode('${encoded}');
+$stmt->bind_param('sss', $outcome, $category, $summary);
 $stmt->execute();
 echo 'SEEDED';
 `);
@@ -168,6 +171,36 @@ test('MECM site: a confirmed critical is red, a provider fault is grey not criti
     await expect(page.locator('#mecm')).toContainText(/Providerzugriff verweigert|Provider access denied/);
     await expect(page.locator('#mecm')).not.toContainText(/Monitoring, System Status/);
     await expect(page.locator('#mecm')).not.toContainText(/MECM meldet kritisch|MECM reports critical/);
+  } finally {
+    restoreSite(snapshot);
+  }
+});
+
+test('MECM site: only supporting parts critical reads limited, with the parts by type (MSB)', async ({ page }) => {
+  const snapshot = siteSnapshot();
+  try {
+    // Synthetic: MECM status 2 where only distribution and discovery parts are critical.
+    seedSite('fail', 'site_critical', {
+      site_code: 'P01',
+      raw_status: 2,
+      site_parts: {
+        roles: [{ name: 'SMS Distribution Point', status: 2, count: 4 }],
+        components: [{ name: 'SMS_DISTRIBUTION_MANAGER', status: 2, count: 1 }],
+        omitted: 0,
+      },
+    });
+    await page.goto('system_status.php');
+    const mecm = page.locator('#mecm');
+    await expect(mecm).toContainText(/Eingeschränkt|Degraded/);
+    await expect(mecm).toContainText(/MECM meldet kritisch|MECM reports critical/);
+    await expect(mecm).toContainText(/Verteilungspunkt|Distribution point/);
+    await expect(mecm.locator('.status-subgroup').nth(1).locator('table code')).toHaveText('SMS_DISTRIBUTION_MANAGER');
+    // The site subgroup (the second one) never uses the reporter words.
+    await expect(mecm.locator('.status-subgroup').nth(1)).not.toContainText(/Ausgefallen|\bDown\b|Verzögert|Delayed/);
+
+    await page.goto('dashboard.php');
+    const siteRow = page.locator('a.card.kpi .signal-row').filter({ hasText: /MECM-Site|MECM site/ });
+    await expect(siteRow.locator('.badge')).toHaveText(/Eingeschränkt|Degraded/);
   } finally {
     restoreSite(snapshot);
   }

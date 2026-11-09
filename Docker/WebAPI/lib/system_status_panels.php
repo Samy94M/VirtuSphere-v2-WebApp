@@ -43,7 +43,7 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
 {
     $cards = [
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE, __t('system_status.overview_deploy_service'), $serviceSnapshot, 'deploy'],
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM, __t('system_status.overview_mecm'), $snapshot['mecm']['state'], 'heartbeat'],
+        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM, __t('system_status.overview_mecm'), '', 'mecm'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE, __t('system_status.overview_ansible'), $snapshot['ansible']['state'] ?? 'unknown', 'ansible'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI, __t('system_status.overview_esxi'), $snapshot['esxi']['state'] ?? 'unknown', 'esxi'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS, __t('system_status.overview_deviations'), '', 'deviations'],
@@ -72,6 +72,7 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
                         ? portal_badge('neutral', __t('system_status.service_unknown'))
                         : portal_badge((string) $state['badge'], deploy_service_summary_label($state)),
                     'directory' => directory_state_badge((string) $state),
+                    'mecm' => system_status_mecm_overview_badge($snapshot),
                     default => heartbeat_badge((string) $state),
                 };
                 ?>

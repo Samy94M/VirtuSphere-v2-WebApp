@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/mecm_site_assessment.php';
+
 const VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS = 300;
 
 function virtusphere_evidence_timestamp(?string $value, int $now): ?int
@@ -126,22 +128,28 @@ function virtusphere_site_reporter_state(array $row, ?int $now = null): string
     return $freshness === 'stale' ? 'warning' : $freshness;
 }
 
-/** Site evidence never invents MECM criticality from age or provider faults. */
+/**
+ * Site evidence never invents MECM criticality from age or provider faults. A
+ * critical MECM verdict whose critical parts are all supporting types ranks as
+ * a warning ("limited"), see lib/mecm_site_assessment.php.
+ */
 function virtusphere_site_completed_state(array $row, ?int $now = null): string
+{
+    $state = virtusphere_site_state($row, $now);
+
+    return in_array($state, ['stale', 'unknown'], true) ? $state : mecm_site_verdict_rank_state($state);
+}
+
+/**
+ * The site state in its own words (ok, warning, limited, critical, unknown) or
+ * the freshness (stale, unknown) when the last result is no current evidence.
+ */
+function virtusphere_site_state(array $row, ?int $now = null): string
 {
     $freshness = virtusphere_site_evidence_freshness($row, $now);
     if ($freshness !== 'ok') {
         return $freshness;
     }
-    $category = (string) ($row['last_error_category'] ?? '');
-    if ($category === VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL) {
-        return 'danger';
-    }
-    if ($category === VIRTUSPHERE_RUN_ERROR_SITE_WARNING
-        || (string) ($row['last_status'] ?? '') === VIRTUSPHERE_RUN_OUTCOME_WARNING
-    ) {
-        return 'warning';
-    }
 
-    return (string) ($row['last_status'] ?? '') === VIRTUSPHERE_RUN_OUTCOME_OK ? 'ok' : 'unknown';
+    return mecm_site_assessment($row)['verdict'];
 }

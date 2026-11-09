@@ -111,3 +111,24 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
     </div>
     <?php
 }
+
+// Maps a reportRun error category (sync or site) to a localized label.
+function system_status_run_error_label(?string $category): string
+{
+    return match ($category) {
+        VIRTUSPHERE_RUN_ERROR_PORTAL_UNREACHABLE => __t('system_status.err_portal_unreachable'),
+        VIRTUSPHERE_RUN_ERROR_MECM_UNAVAILABLE => __t('system_status.err_mecm_unavailable'),
+        VIRTUSPHERE_RUN_ERROR_PARTIAL_FAILURE => __t('system_status.err_partial_failure'),
+        VIRTUSPHERE_RUN_ERROR_SOURCE_MISSING => __t('system_status.err_source_missing'),
+        VIRTUSPHERE_RUN_ERROR_CATALOG_CONFLICT => __t('system_status.err_catalog_conflict'),
+        VIRTUSPHERE_RUN_ERROR_JOURNAL_BLOCKED => __t('system_status.err_journal_blocked'),
+        VIRTUSPHERE_RUN_ERROR_PORTAL_REJECTED => __t('system_status.err_portal_rejected'),
+        VIRTUSPHERE_RUN_ERROR_SOURCE_CHANGING => __t('system_status.err_source_changing'),
+        VIRTUSPHERE_RUN_ERROR_SITE_WARNING => __t('system_status.err_site_warning'),
+        VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL => __t('system_status.err_site_critical'),
+        VIRTUSPHERE_RUN_ERROR_PROVIDER_ACCESS_DENIED => __t('system_status.err_provider_access_denied'),
+        VIRTUSPHERE_RUN_ERROR_PROVIDER_UNREACHABLE => __t('system_status.err_provider_unreachable'),
+        VIRTUSPHERE_RUN_ERROR_QUERY_FAILED => __t('system_status.err_query_failed'),
+        default => '',
+    };
+}
