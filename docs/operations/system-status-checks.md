@@ -11,7 +11,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 | Ansible-Test | Volltest je Ansible-Zugang, manuell oder geplant | je Zugang | schlechteste Zeile |
 | ESXi-Inventar | Inventarabruf je ESXi-Zugang | je Zugang | schlechteste Zeile |
 | Abweichungen | Missionen und VMs gegen den Inventar-Cache | Anzahl Befunde | Anzahl |
-| Interne Dienste | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Zeile |
+| Interne Dienste | Wartungsdienst und Deploy-Worker; darunter Hostzustand aus dem Backup-Statuskanal | je Dienst; Hostzustand je Zeile | schlechteste Dienstzeile |
 | Active Directory | LDAPS-Konfiguration und Domänencontroller | je Controller | Gesamtzustand |
 
 Über der Übersicht stehen vier Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; die Backups sind nicht verschlüsselt (`backup_encryption_finding()`, kein Zertifikat hinterlegt oder der letzte erfolgreiche Lauf nicht an das hinterlegte verschlüsselt); Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`); offene ESXi-Zugangsdateien auf einem Ansible-Host (`repo_remote_secret_notice_groups()`). Der letzte Hinweis hat eine Gruppe je Zugang und Ziel. Sie erscheint, wenn eine ihrer Zeilen älter als 24 Stunden ist, sofort bei einem gelöschten Zugang oder einem Ziel, das nicht mehr zum Zugang passt. Laufende Leases und aktive Aufträge zählen nicht. Die Gruppe nennt die vollständige Anzahl, die älteste Zeile, Host und Grund. Benutzer mit `credentials.manage` bestätigen dort eine Gruppe mit Begründung; das ist dieselbe Bestätigung wie unter dem Zugang auf der Seite Zugangsdaten. Für `system.config` verlinkt jeder der ersten drei Hinweise die Einstellung, die ihn behebt.
@@ -207,6 +207,23 @@ flowchart TD
   C -->|über Intervall mal Gefahrfaktor| RD
   C -->|über Intervall mal Warnfaktor| YL["Verzögert (gelb)"]
   C -->|frisch| GR["OK (grün)"]
+```
+
+Unter den Dienstzeilen steht der Block **Hostzustand** (`lib/system_status_backup_panels.php`). Seine Zeilen haben je eine eigene Plakette und ändern die Ampel der Kachel nicht: Es sind Hinweise des Docker-Hosts, kein Dienstzustand. Quelle ist der Backup-Statuskanal (`docs/operations/backup.md`): Backup aus `backup_status_read()` mit den Zuständen der Backup-Karte, Restore-Test aus `backup_drill_status_read()` (schreibt `scripts/restore-drill-record.sh`), Prüfsummen aus `backup_scrub_status_read()` (schreibt `scripts/backup-scrub.sh`). Die Zertifikatszeile erscheint nur, solange `https_listener_live()` gilt. Ein fehlender, unlesbarer oder in der Zukunft datierter Nachweis heißt „Unbekannt“, nie „OK“.
+
+```mermaid
+flowchart TD
+  D{"Restore-Test: bestandener Drill nachgewiesen?"} -->|nein| DU["Unbekannt (grau)"]
+  D -->|ja| DA{"Alter in ganzen Tagen ab VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS?"}
+  DA -->|ja| DF["Fällig (gelb)"]
+  DA -->|nein| DO["OK (grün)"]
+  S{"Prüfsummen: gültiges Ergebnis mit mindestens einem Satz?"} -->|nein| SU["Unbekannt (grau)"]
+  S -->|ja| SF{"Ein Satz weicht ab?"}
+  SF -->|ja| SA["Abweichung (rot)"]
+  SF -->|nein| SO["OK (grün)"]
+  H{"Zertifikat: Restlaufzeit?"} -->|abgelaufen| HA["Abgelaufen (rot)"]
+  H -->|bis VIRTUSPHERE_HTTPS_CERT_EXPIRY_WARN_DAYS| HB["Läuft bald ab (gelb)"]
+  H -->|länger| HO["OK (grün)"]
 ```
 
 ## Active Directory

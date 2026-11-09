@@ -231,6 +231,14 @@
     color: var(--muted);
 }
 
+/* A hint that names its fix links it inside the muted prose (R11), and the
+   link colour alone is not distinguishable there (WCAG 1.4.1, axe
+   link-in-text-block), as for `.alert a` and `.table-empty a`. */
+.status-action a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 /* The failure message of a status source: an alert that belongs to the card it
    sits in, not a floating page-level one, so it takes the danger colour and
    border of .alert-error without the glass surface and the bottom margin.

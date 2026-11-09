@@ -4,16 +4,19 @@ declare(strict_types=1);
 
 // The internal-services half of the System status page: the heartbeat rows of
 // the workers plus the shared Ampel legend, which explains all three
-// vocabularies the page renders and therefore closes the page (ADR-0006).
+// vocabularies the page renders and therefore closes the page (ADR-0006). The
+// host-state rows (backup, restore drill, checksums, certificate) follow the
+// heartbeat rows inside the same section; they carry their own badges.
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/system_status_backup_panels.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
 
 /** @param array<string,mixed> $snapshot */
 function system_status_render_internal(array $snapshot, array $user): void
 {
     ?>
-    <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL); ?>"><div class="section-heading-actions"><div><h2><?php echo h(__t('system_status.internal_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.internal_hint')); ?></p></div><?php if (can('users.manage', $user)) { ?><a class="button button-secondary" href="<?php echo h(log_category_url(VIRTUSPHERE_LOG_CATEGORY_SYSTEM)); ?>"><?php echo h(__t('system_status.internal_logs')); ?></a><?php } ?></div><?php system_status_render_source_rows($snapshot['internal']['rows']); ?></section>
+    <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL); ?>"><div class="section-heading-actions"><div><h2><?php echo h(__t('system_status.internal_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.internal_hint')); ?></p></div><?php if (can('users.manage', $user)) { ?><a class="button button-secondary" href="<?php echo h(log_category_url(VIRTUSPHERE_LOG_CATEGORY_SYSTEM)); ?>"><?php echo h(__t('system_status.internal_logs')); ?></a><?php } ?></div><?php system_status_render_source_rows($snapshot['internal']['rows']); ?><?php system_status_render_backup_rows(system_status_backup_panel_data(), $user); ?></section>
     <?php
     // The page renders three Ampeln with three vocabularies (heartbeat sources,
     // ESXi credentials, Ansible credentials); the legend explains all three, or

@@ -83,10 +83,13 @@ Jeder Lauf hängt eine JSON-Zeile an `Docker/backups/status/backup-status.jsonl`
 
 Nur dieses Unterverzeichnis wird read-only in den PHP-Container gemountet (`./Docker/backups/status:/var/backups/virtusphere-status:ro`), nie die Dumps oder das Config-Tar (das die `.env` mit dem DB-Root-Passwort enthält). Ein Dump-Download über das Portal gibt es bewusst nicht. Der Missions-Export (JSON) ist ein Transportweg zwischen Umgebungen, der Listen-Export (CSV) nur ein Tabellen-Export für Berichte; beides ist kein Backup und kein Restore-Pfad.
 
-Das Portal liest den Kanal an genau einer Stelle (`lib/backup_status.php`) und zeigt:
+Neben der Statuszeile der Backupläufe liegen im selben Verzeichnis zwei Nachweise, die nie in `backup-status.jsonl` landen (eine Drill-Zeile dort läse das Portal als Backuplauf): `restore-drill.jsonl` (je bestandenem Drill eine Zeile `ts`, `status` = `ok`, `backup_ts`, `root_commit`; auf 90 Zeilen gekappt) schreibt `scripts/restore-drill-record.sh`, siehe „Nachweis im Portal“; `backup-scrub.json` (ein Objekt `ts`, `status`, `sets_checked`, `sets_failed`, `failed_sets`, `duration_s`, atomar ersetzt) schreibt `scripts/backup-scrub.sh`, siehe „Prüfsummen-Scrub“.
+
+Das Portal liest die Backupläufe an genau einer Stelle (`lib/backup_status.php`), die beiden Nachweise in `lib/backup_evidence.php`, und zeigt:
 
 - **Backup-Karte** auf der Einstellungen-Seite (`settings.php`, Gate `system.config`): Zustand, Zeitplan samt Fundort, letzter Lauf, Alter, nächster Lauf, Überfälligkeitsgrenze, Größen, freier Speicher, Aufbewahrung. Darunter stehen nur der Einrichtungs-Befehl für den Cron-Zeitplan und ein Link in die Hilfe (Tab "Architektur"), die Ablauf, Ablageort und Restore-Weg erklärt; der frühere aufklappbare Erklärtext war ein Duplikat dieser Hilfe-Abschnitte.
 - **Dashboard-Banner** für Admins, sobald der Zustand nicht `ok` ist (fail-soft; ein defekter Reader legt keine Seite lahm).
+- **Systemstatus**, Abschnitt „Interne Dienste“, Block „Hostzustand“: je eine Zeile für Backup (Zustand, letzter Lauf), Restore-Test (letzter nachgewiesener Erfolg „vor N Tagen“, geprüfter Stand; Hinweis „Fällig“ ab `VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS` Tagen), Prüfsummen (letzte Prüfung, Ergebnis) und, nur solange nginx HTTPS ausliefert, das HTTPS-Zertifikat (Ablaufdatum, Hinweis ab `VIRTUSPHERE_HTTPS_CERT_EXPIRY_WARN_DAYS` Tagen). Fehlt ein Nachweis, steht „Unbekannt“, nie „OK“. Die Zeilen ändern die Ampel der Kachel „Interne Dienste“ nicht.
 - **health.php** meldet den Backupzustand nicht; es liefert nur `status`, `db` und `php`. Backupzustand und -alter stehen ausschließlich im Portal.
 
 Abgeleitete Zustände (Schwere `failed` > `stale` > `disk_low`): `ok`, `failed` (letzter Lauf gescheitert), `stale` (der erwartete Lauf blieb samt Kulanzzeit aus), `disk_low` (freier Speicher unter 10 %), `unknown` (kein lesbarer Status: Skript lief nie oder der Mount fehlt).
@@ -156,6 +159,18 @@ Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, 
 
 Kadenz: Release-Lane des kanonischen Runners (`scripts/check.ps1 -Lane Release`, Gate `restore-drill`), nach jedem Schema-Meilenstein, mindestens monatlich und als Migrations-Probelauf vor jedem Update mit neuen Migrationen.
 
+### Nachweis im Portal
+
+Der Drill selbst schreibt keinen Nachweis. Damit der Systemstatus den letzten Restore-Test zeigt, den Drill über den Nachweis-Aufruf starten:
+
+```sh
+sudo sh scripts/restore-drill-record.sh
+```
+
+Er startet `scripts/restore_test.sh` unverändert, mit denselben Argumenten und Umgebungsvariablen (also auch `VIRTUSPHERE_RESTORE_BACKUP_DIR`), und gibt dessen Ausgabe und Exitcode weiter. Eigene Restore-Logik hat er nicht. Nur bei Exitcode 0 hängt er eine Zeile an `status/restore-drill.jsonl` in dem Backupverzeichnis an, das der Drill in seiner Zeile `Restore-Drill Quelle` nennt. Ein Befund (1) oder eine fehlende Voraussetzung (2) schreibt nichts. Bestand der Drill, ließ sich der Nachweis aber nicht schreiben, endet der Aufruf mit 2 und `[drill-record.not-written]`; das Portal bleibt dann bei „Unbekannt“.
+
+Läuft der Drill auf einem anderen Rechner (etwa weil dort der private Schlüssel für verschlüsselte Backups liegt), entsteht der Nachweis dort und nicht auf dem App-Host. Der Systemstatus zeigt dann ehrlich „Unbekannt“.
+
 ### Migrations-Probelauf mit dem neuen Stand
 
 Der Drill vor einem Update ([Update-Runbook](update.md), Schritt 3.2) beweist, dass das Backup des **laufenden** Stands wiederherstellbar ist. Die Migrationen des neuen Releases laufen dabei nie. Auf echte Daten treffen sie sonst erst im Wartungsfenster, und ab der ersten Klasse-C-Migration ([Upgrade-Recovery](upgrade-recovery.md)) bleibt dort nur der Restore. Der Probelauf ist derselbe Drill mit dem Code des neuen Stands als Prüfroot und dem vorhandenen Backup als Quelle: Er spielt eine Kopie der echten Daten in die Wegwerf-Umgebung ein, wendet alle offenen Migrationen an und vergleicht das Ergebnis mit dem `struktur.sql` des neuen Stands. Datenabhängige Fehler (Zeilen, die eine neue Einschränkung verletzen; Laufzeit) zeigen sich so vor dem Fenster.
@@ -170,7 +185,7 @@ Der Drill vor einem Update ([Update-Runbook](update.md), Schritt 3.2) beweist, d
    sudo VIRTUSPHERE_RESTORE_BACKUP_DIR=/opt/VirtuSphere-v2-WebApp/Docker/backups sh scripts/restore_test.sh
    ```
 
-   Quelle ist das jüngste Tripel dort, in der Regel das nächtliche aus dem Zeitplan. Der Drill mountet das Verzeichnis in keinen Container und schreibt, verschiebt oder löscht dort nichts. Entschlüsselte Archive und die archivierte `.env` liegen nur im Wegwerf-Arbeitsverzeichnis, das der Cleanup entfernt. Platzbedarf während des Laufs: die entpackte Datenbank im Docker-Datenbereich und bei verschlüsseltem Backup die entschlüsselten Archive im Temp-Verzeichnis; beides ist nach dem Lauf wieder frei.
+   Quelle ist das jüngste Tripel dort, in der Regel das nächtliche aus dem Zeitplan. Der Drill mountet das Verzeichnis in keinen Container und schreibt, verschiebt oder löscht dort nichts. Nur wer ihn über `scripts/restore-drill-record.sh` startet, bekommt nach bestandenem Drill eine Zeile in `status/restore-drill.jsonl` dieses Verzeichnisses („Nachweis im Portal“). Entschlüsselte Archive und die archivierte `.env` liegen nur im Wegwerf-Arbeitsverzeichnis, das der Cleanup entfernt. Platzbedarf während des Laufs: die entpackte Datenbank im Docker-Datenbereich und bei verschlüsseltem Backup die entschlüsselten Archive im Temp-Verzeichnis; beides ist nach dem Lauf wieder frei.
 3. Die Zeile `Restore-Drill Quelle` prüfen: `Pruefroot-Commit` muss der Commit des neuen Stands sein, ohne `(Arbeitsbaum geaendert)`. Steht dort `unbekannt`, den Commit mit `git -C <neuer-Klon> rev-parse HEAD` von Hand zum Ergebnis notieren.
 
 Vorab findet der Drill die Images über ihre Namen, also in der Regel die laufenden; die Zeile `Restore-Drill Images` nennt ihre IDs. Ein Wechsel des PHP- oder MySQL-Images ist damit erst im zweiten Lauf im Fenster geprüft.
@@ -180,6 +195,20 @@ Grün (`Restore-Drill OK`, Exitcode 0) heißt: Die Migrationen des neuen Stands 
 **Im Fenster** läuft derselbe Drill ein zweites Mal ([Update-Runbook](update.md), Schritt 3.6a): nach dem Umstellen des Checkouts und dem Laden der neuen Images, vor dem Migrationsschritt. Prüfroot und Backupverzeichnis sind dann wieder derselbe Checkout, die Variable entfällt, und Quelle ist das eben geschriebene Backup. Rot heißt dort Abbruch vor der Migration, solange der Rückweg noch „alte Quellen und Images zurück“ ist.
 
 `Docker/scripts/backup.sh` und `Docker/scripts/restore.sh` sind stillgelegt: Ein zweiter, unvalidierter Pfad wäre gefährlich, deshalb brechen sie absichtlich mit einem Verweis hierher ab.
+
+## Prüfsummen-Scrub
+
+Zwischen Backup und Drill prüft nichts die Altbestände auf Bitfehler oder Teilschreiben. Das macht der Scrub, nur lesend:
+
+```sh
+sudo sh scripts/backup-scrub.sh
+```
+
+Er liest jedes `manifest-<ts>.sha256` in `Docker/backups/` und vergleicht die Ist-Hashes der gelisteten Archive mit denen, die `backup.sh` beim Lauf geschrieben hat. Ein Satz gilt nur, wenn sein Manifest genau Dump und Konfigurationsarchiv desselben Zeitstempels nennt. Verschlüsselte Sätze prüft er ohne Schlüssel, weil das Manifest die `.cms`-Dateien hasht. Kein Backup wird geändert, verschoben oder gelöscht; geschrieben wird nur `status/backup-scrub.json`. Fortschritt je Satz als `[n/total]`.
+
+Der Scrub nimmt die Backup-Sperre nicht, weil `backup.sh` bei belegter Sperre abbricht. Rotiert ein laufendes Backup einen alten Satz weg, zählt dieser Satz nicht. Exitcodes: 0 alle Sätze stimmen; 1 mindestens ein Satz weicht ab oder ist unvollständig (`failed_sets` nennt die Zeitstempel; diese Sätze nicht für einen Restore verwenden); 2 fehlende Voraussetzung (kein Satz, `sha256sum` fehlt, Datei ohne `sudo` nicht lesbar), dann bleibt das vorige Ergebnis stehen.
+
+Einen eigenen Zeitplan richtet das Skript nicht ein. Sinnvoll ist ein Lauf zusammen mit dem monatlichen Drill.
 
 ## Echter Restore (Desaster-Fall)
 
