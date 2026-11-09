@@ -905,8 +905,8 @@ Site-Health verwendet nur den in `MECM_SiteCode` gespeicherten Code. Fehlt er,
 ist der exakte Treffer nicht eindeutig oder ist der Rohstatus unlesbar, bleibt
 die Anzeige grau. Rot entsteht ausschließlich aus Rohstatus 2, aber nicht jeder
 Rohstatus 2 ist rot: Meldet der Reporter, dass nur unterstützende Rollen und
-Komponenten kritisch sind (etwa Verteilungspunkte, Verteilungs-Manager,
-Erkennung), zeigt das Portal „Eingeschränkt“ (gelb). Die Einordnung je Typ
+Komponenten kritisch sind (etwa Verteilungspunkte oder Erkennung), zeigt das
+Portal „Eingeschränkt“ (gelb). Die Einordnung je Typ
 steht in einer Tabelle (`lib/mecm_site_assessment.php`, Gründe im Register
 `docs/register/2026-11-09-MSB.md`); ein unbekannter Typ behält das MECM-Urteil.
 Zustand und Zählung gelten nur für die konfigurierte Site, deren Code die Karte
@@ -1033,6 +1033,58 @@ unterstützende Teile kritisch sind; dann gelb „Eingeschränkt“. Providerfeh
 voraus. „Nicht erreichbar" wird erst nach zwei aufeinanderfolgenden
 Fehlversuchen gemeldet, damit ein MECM-Reboot nicht sofort einen Fehler ins Portal
 schreibt.
+
+#### Wie MECM den Standort rot färbt
+
+MECM leitet den Standortzustand aus zwei Zusammenfassungen ab, die die Konsole
+unter Monitoring, System Status zeigt ([L-STATUS]):
+
+- **Komponentenstatus:** MECM zählt die Statusmeldungen jeder Komponente im
+  Schwellenzeitraum, standardmäßig „Since 00:00:00“; um Mitternacht setzt MECM
+  die Zähler zurück. Standardschwellen für Fehlermeldungen: ab 1 Warnung, ab 5
+  kritisch (Warnmeldungen 10/50, Informationsmeldungen 2000/5000).
+- **Standortsystemstatus:** je Standortsystem und Speicherobjekt, unter anderem
+  nach freiem Platz (Standard: Warnung unter 10 GB, kritisch unter 5 GB).
+
+Nicht erreichbare Verteilungspunkte erscheinen deshalb doppelt: als kritische
+Rolle `SMS Distribution Point` und über die Fehlermeldungen, die der
+Verteilungs-Manager beim Verteilen an sie schreibt. Der Weg zu Grün führt über die
+Verteilungspunkte: wieder erreichbar machen oder aus MECM entfernen. Der
+Komponentenzähler sinkt erst mit dem Zurücksetzen um Mitternacht; bis dahin
+bleibt eine Komponente auf ihrem Tageswert, auch wenn die Ursache behoben ist.
+
+#### Einordnung der Rollen und Komponenten
+
+Bei Warnung oder kritisch zählt der Reporter die Rollen und Komponenten, die MECM
+als Warnung oder kritisch führt, je Typname. Das Portal ordnet jeden Typ über eine Tabelle
+ein (SSoT: `VIRTUSPHERE_MECM_SITE_PART_TYPES` in
+`Docker/WebAPI/lib/mecm_site_assessment.php`; ein Test hält diese Übersicht
+gleich). Kernteil heißt: Fällt er aus, stehen Standortbetrieb, Datenbank,
+Richtlinien, Clientverwaltung oder der Paketimport. Unterstützend heißt: Eine
+einzelne Funktion fällt aus, der Standort arbeitet weiter. Ein Typ, der hier
+fehlt, behält das MECM-Urteil. „Eingeschränkt“ (gelb) gilt nur, wenn die Liste
+vollständig ist und jeder kritische Teil unterstützend ist; sonst „Kritisch“
+(rot), mit den kritischen Teilen in der Tabelle der Standortkarte.
+
+| Art | Typen | Einordnung | Begründung | Quellen |
+|---|---|---|---|---|
+| Rolle | `SMS Site Server`, `SMS SQL Server`, `SMS Provider`, `SMS Management Point` | Kernteil | Standortserver, Standortdatenbank, Schnittstelle für Konsole und Skripte, Richtlinien für alle Clients | [L-ROLE], [L-CONTENT] |
+| Rolle | `SMS Distribution Point`, `SMS Software Update Point`, `SMS SRS Reporting Point`, `SMS Fallback Status Point`, `SMS Dmp Connector`, `SMS Cloud Proxy Connector`, `SMS State Migration Point`, `SMS Endpoint Protection Point` | unterstützend | Inhalt (Clients nutzen andere Verteilungspunkte), Updates, Berichte, Fallbackstatus, Dienstverbindung, Cloudgateway, Benutzerzustand, Endpoint Protection | [L-ROLE], [L-CONTENT], [L-LOG] |
+| Komponente | `SMS_EXECUTIVE`, `SMS_SITE_COMPONENT_MANAGER`, `SMS_SITE_CONTROL_MANAGER`, `SMS_HIERARCHY_MANAGER`, `SMS_DATABASE_NOTIFICATION_MONITOR`, `SMS_POLICY_PROVIDER`, `SMS_MP_CONTROL_MANAGER`, `SMS_STATE_SYSTEM`, `SMS_STATUS_MANAGER`, `SMS_CERTIFICATE_MANAGER` | Kernteil | Dienst aller Komponenten, Standortkonfiguration, Datenbankauslöser, Richtlinien, Verwaltungspunkt, Status, Zertifikate | [L-LOG] |
+| Komponente | `SMS_DISTRIBUTION_MANAGER` | Kernteil | Nutzerentscheid (Register MSB): Ohne ihn erreicht kein Inhalt einen Verteilungspunkt, der Paketimport stockt | [L-LOG], [L-CONTENT] |
+| Komponente | `SMS_PACKAGE_TRANSFER_MANAGER`, `SMS_AD_SYSTEM_DISCOVERY_AGENT`, `SMS_AD_USER_DISCOVERY_AGENT`, `SMS_AD_SECURITY_GROUP_DISCOVERY_AGENT`, `SMS_AD_FOREST_DISCOVERY_MANAGER`, `SMS_NETWORK_DISCOVERY` | unterstützend | Übertragung an entfernte Verteilungspunkte, Erkennung neuer Objekte; bestehende Clients laufen weiter | [L-LOG] |
+| Komponente | `SMS_SERVICE_CONNECTOR`, `SMS_CLOUDCONNECTION`, `SMS_DMP_DOWNLOADER`, `SMS_DMP_UPLOADER`, `SMS_CLOUD_PROXYCONNECTOR` | unterstützend | Dienstverbindungspunkt, Clouddienste, Cloudgateway; im Air-Gap erwartbar gestört, wird gezeigt, nicht unterdrückt | [L-LOG], [KB-WSFB] |
+| Komponente | `SMS_WSUS_SYNC_MANAGER`, `SMS_WSUS_CONTROL_MANAGER`, `SMS_WSUS_CONFIGURATION_MANAGER`, `SMS_SRS_REPORTING_POINT`, `SMS_FALLBACK_STATUS_POINT`, `SMS_ENDPOINT_PROTECTION_MANAGER`, `SMS_SOFTWARE_METERING_PROCESSOR`, `SMS_INVENTORY_DATA_LOADER` | unterstützend | Softwareupdates, Berichte, Fallbackstatus, Endpoint Protection, Softwaremessung, Inventur | [L-LOG] |
+| Komponente | `SMS_SITE_BACKUP`, `SMS_SITE_VSS_WRITER`, `SMS_COMPONENT_STATUS_SUMMARIZER`, `SMS_SITE_SYSTEM_STATUS_SUMMARIZER` | unterstützend | Sicherung und Statuszusammenfassung; der Betrieb läuft weiter | [L-LOG], [L-STATUS] |
+
+Nicht eingeordnet bleiben unter anderem `SMS Site System` und
+`SMS Component Server` (Basisrollen jedes Standortsystems, Zweck nicht belegt).
+Gründe je Zeile und weitere Quellen stehen im Register
+`docs/register/2026-11-09-MSB.md`. Die Kürzel verweisen auf dessen
+Quellenliste mit den vollständigen Adressen: [L-STATUS] Statussystem und
+Schwellen, [L-ROLE] Rollennamen, [L-CONTENT] Inhaltsverwaltung, [L-LOG]
+Logdateien je Komponente (alle Microsoft Learn), [KB-WSFB] Microsoft Store for
+Business (Microsoft Support).
 
 Provider und Intervall sind Registry-owned (`HKLM:\SOFTWARE\VirtuSphere\MECM`),
 keine Portal-Settings:

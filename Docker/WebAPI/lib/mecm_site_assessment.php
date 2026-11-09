@@ -67,7 +67,9 @@ const VIRTUSPHERE_MECM_SITE_PART_TYPES = [
         'SMS_STATE_SYSTEM' => ['class' => VIRTUSPHERE_MECM_SITE_PART_CORE],
         'SMS_STATUS_MANAGER' => ['class' => VIRTUSPHERE_MECM_SITE_PART_CORE],
         'SMS_CERTIFICATE_MANAGER' => ['class' => VIRTUSPHERE_MECM_SITE_PART_CORE],
-        'SMS_DISTRIBUTION_MANAGER' => ['class' => VIRTUSPHERE_MECM_SITE_PART_SUPPORTING],
+        // User decision 09.11.: without it no content reaches any DP, so the
+        // package import stalls; core although the DPs themselves are supporting.
+        'SMS_DISTRIBUTION_MANAGER' => ['class' => VIRTUSPHERE_MECM_SITE_PART_CORE],
         'SMS_PACKAGE_TRANSFER_MANAGER' => ['class' => VIRTUSPHERE_MECM_SITE_PART_SUPPORTING],
         'SMS_AD_SYSTEM_DISCOVERY_AGENT' => ['class' => VIRTUSPHERE_MECM_SITE_PART_SUPPORTING],
         'SMS_AD_USER_DISCOVERY_AGENT' => ['class' => VIRTUSPHERE_MECM_SITE_PART_SUPPORTING],

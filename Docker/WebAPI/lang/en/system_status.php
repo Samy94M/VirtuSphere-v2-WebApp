@@ -395,7 +395,7 @@ return [
     'site_state_limited' => 'Degraded',
     'site_state_critical' => 'Critical',
     'site_state_unknown' => 'Unknown',
-    'site_hint_limited' => 'Only supporting parts are critical. The site works; single functions such as content distribution, discovery or cloud connection are degraded. Check the details in the MECM console under Monitoring, System Status.',
+    'site_hint_limited' => 'Only supporting parts are critical. The site works; single functions such as individual distribution points, discovery or the cloud connection are degraded. Check the details in the MECM console under Monitoring, System Status.',
     'site_parts_none' => 'No details reported: older scripts on the MECM server or a failed detail query (local site health log). The MECM verdict applies.',
     'site_parts_omitted' => 'The reporter did not send :count further entries. The MECM verdict therefore applies.',
     'site_parts_unexplained' => 'MECM reports critical but names no critical role and no critical component. The MECM verdict applies.',

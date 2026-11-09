@@ -337,10 +337,13 @@ exactly as before: the danger threshold decides between yellow and red.
 **Why.** The site card showed MECM's summarized status 2 with the reporter
 liveness words of `heartbeat_badge()`, "Ausgefallen"/"Down" (and "Verzögert"
 for status 1), and said nothing about *what* MECM rated critical. On the target
-site the whole MECM area was red while only distribution points, the
-distribution manager, AD system discovery and cloud/service connection parts
-were critical; no core part was affected. The user ruled out a list of known
-systems: the answer has to work on any site without configuration.
+site the whole MECM area was red while distribution points, the distribution
+manager and AD system discovery were critical and cloud/service connection parts
+had warnings. The user ruled out a list of known systems: the answer has to work
+on any site without configuration. The user rates the distribution manager as a
+core part (without it no content reaches a DP), so that site stays red, now
+with its cause named on the card; the way back to green is repairing or
+removing the DPs, and MECM resets its component counts at midnight.
 
 **Wire (additive).** A completed `mecm-site-health` report may carry a
 top-level `site_parts` object: `roles` (`SMS_SiteSystemSummarizer.Role`) and

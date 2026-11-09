@@ -50,8 +50,11 @@ final class MecmSiteAssessmentTest extends TestCase
         ];
     }
 
-    /** The situation of 09.11.2026, synthetic: only distribution, discovery and cloud parts. */
-    private function supportingOnly(): array
+    /**
+     * The situation of 09.11.2026, synthetic: DPs, the distribution manager and
+     * AD discovery critical; cloud, hierarchy and service connector warnings.
+     */
+    private function siteCase(int $distributionManagerStatus = 2): array
     {
         return [
             'roles' => [
@@ -60,12 +63,39 @@ final class MecmSiteAssessmentTest extends TestCase
             ],
             'components' => [
                 ['name' => 'SMS_AD_SYSTEM_DISCOVERY_AGENT', 'status' => 2, 'count' => 1],
-                ['name' => 'SMS_DISTRIBUTION_MANAGER', 'status' => 2, 'count' => 1],
+                ['name' => 'SMS_DISTRIBUTION_MANAGER', 'status' => $distributionManagerStatus, 'count' => 1],
                 ['name' => 'SMS_CLOUDCONNECTION', 'status' => 1, 'count' => 1],
                 ['name' => 'SMS_HIERARCHY_MANAGER', 'status' => 1, 'count' => 1],
                 ['name' => 'SMS_SERVICE_CONNECTOR', 'status' => 1, 'count' => 1],
             ],
         ];
+    }
+
+    /** The same site once the distribution manager is down to a warning. */
+    private function supportingOnly(): array
+    {
+        return $this->siteCase(1);
+    }
+
+    public function testTheSiteCaseStaysCriticalBecauseTheDistributionManagerIsCore(): void
+    {
+        $row = $this->row(VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL, $this->siteCase());
+        $a = mecm_site_assessment($row);
+        self::assertSame(VIRTUSPHERE_MECM_SITE_VERDICT_CRITICAL, $a['verdict']);
+        self::assertTrue($a['explained'], 'red with a named cause, not an unexplained red');
+        self::assertSame(['roles' => 4, 'components' => 2], $a['critical']);
+        self::assertSame('danger', virtusphere_site_completed_state($row, self::NOW));
+
+        $entries = integration_health_site_evidence_rows([
+            ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH, 'row' => $row, 'state' => 'unknown'],
+        ], self::NOW);
+        ob_start();
+        system_status_render_site($entries);
+        $html = (string) ob_get_clean();
+        self::assertStringContainsString('>Kritisch<', $html);
+        self::assertStringContainsString('4 Rollen kritisch, 2 Komponenten kritisch', $html);
+        self::assertMatchesRegularExpression('#<code>SMS_DISTRIBUTION_MANAGER</code>(?:(?!</tr>).)*Kernteil#s', $html, 'the class sits in the same table row');
+        self::assertStringNotContainsString(h(__t('system_status.site_hint_limited')), $html);
     }
 
     public function testOnlySupportingPartsCriticalIsLimitedWithCounts(): void
@@ -74,8 +104,8 @@ final class MecmSiteAssessmentTest extends TestCase
         self::assertSame(VIRTUSPHERE_MECM_SITE_VERDICT_LIMITED, $a['verdict']);
         self::assertSame(VIRTUSPHERE_MECM_SITE_VERDICT_CRITICAL, $a['reported']);
         self::assertTrue($a['explained']);
-        self::assertSame(['roles' => 4, 'components' => 2], $a['critical']);
-        self::assertSame(['roles' => 1, 'components' => 3], $a['warning']);
+        self::assertSame(['roles' => 4, 'components' => 1], $a['critical']);
+        self::assertSame(['roles' => 1, 'components' => 4], $a['warning']);
         self::assertSame('SMS Distribution Point', $a['parts'][0]['name'], 'the most critical type comes first');
         self::assertSame(['critical' => 4, 'warning' => 1], ['critical' => $a['parts'][0]['critical'], 'warning' => $a['parts'][0]['warning']]);
         self::assertSame('warning', virtusphere_site_completed_state($this->row(VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL, $this->supportingOnly()), self::NOW));
@@ -182,7 +212,8 @@ final class MecmSiteAssessmentTest extends TestCase
         foreach (['SMS Site Server', 'SMS SQL Server', 'SMS Provider', 'SMS Management Point'] as $role) {
             self::assertSame(VIRTUSPHERE_MECM_SITE_PART_CORE, mecm_site_part_class(VIRTUSPHERE_SITE_PART_KIND_ROLES, $role), $role);
         }
-        foreach (['SMS_EXECUTIVE', 'SMS_SITE_COMPONENT_MANAGER'] as $component) {
+        // SMS_DISTRIBUTION_MANAGER: user decision 09.11. (no content reaches any DP without it).
+        foreach (['SMS_EXECUTIVE', 'SMS_SITE_COMPONENT_MANAGER', 'SMS_DISTRIBUTION_MANAGER'] as $component) {
             self::assertSame(VIRTUSPHERE_MECM_SITE_PART_CORE, mecm_site_part_class(VIRTUSPHERE_SITE_PART_KIND_COMPONENTS, $component), $component);
         }
         foreach (['SMS Distribution Point', 'SMS Software Update Point', 'SMS Dmp Connector', 'SMS Cloud Proxy Connector'] as $role) {
@@ -190,13 +221,48 @@ final class MecmSiteAssessmentTest extends TestCase
         }
         // Service connection point and cloud services stay supporting also in an
         // air gap: shown as degraded, never hidden (coordinator decision 09.11.).
-        foreach (['SMS_DISTRIBUTION_MANAGER', 'SMS_AD_SYSTEM_DISCOVERY_AGENT', 'SMS_SERVICE_CONNECTOR', 'SMS_CLOUDCONNECTION', 'SMS_CLOUD_PROXYCONNECTOR', 'SMS_WSUS_SYNC_MANAGER'] as $component) {
+        foreach (['SMS_PACKAGE_TRANSFER_MANAGER', 'SMS_AD_SYSTEM_DISCOVERY_AGENT', 'SMS_SERVICE_CONNECTOR', 'SMS_CLOUDCONNECTION', 'SMS_CLOUD_PROXYCONNECTOR', 'SMS_WSUS_SYNC_MANAGER'] as $component) {
             self::assertSame(VIRTUSPHERE_MECM_SITE_PART_SUPPORTING, mecm_site_part_class(VIRTUSPHERE_SITE_PART_KIND_COMPONENTS, $component), $component);
         }
         // Not proven by a source: stays unclassified, so MECM's verdict applies.
         foreach (['SMS Site System', 'SMS Component Server'] as $role) {
             self::assertSame(VIRTUSPHERE_MECM_SITE_PART_UNCLASSIFIED, mecm_site_part_class(VIRTUSPHERE_SITE_PART_KIND_ROLES, $role), $role);
         }
+    }
+
+    /**
+     * The operations handbook shows the type table to the operator. It is
+     * derived from the SSoT here, so a reclassification without the doc fails.
+     */
+    public function testTheHandbookTableMirrorsTheTypeTable(): void
+    {
+        $doc = dirname(__DIR__, 4) . '/docs/operations/mecm-integration.md';
+        self::assertFileExists($doc);
+        $text = (string) file_get_contents($doc);
+        self::assertSame(1, preg_match('/^#### Einordnung der Rollen und Komponenten\n(.*?)(?=^#{2,4} |^Provider und Intervall)/ms', $text, $m), 'section missing');
+        $kinds = ['Rolle' => VIRTUSPHERE_SITE_PART_KIND_ROLES, 'Komponente' => VIRTUSPHERE_SITE_PART_KIND_COMPONENTS];
+        $classes = ['Kernteil' => VIRTUSPHERE_MECM_SITE_PART_CORE, 'unterstützend' => VIRTUSPHERE_MECM_SITE_PART_SUPPORTING];
+        $documented = [VIRTUSPHERE_SITE_PART_KIND_ROLES => [], VIRTUSPHERE_SITE_PART_KIND_COMPONENTS => []];
+        foreach (explode("\n", $m[1]) as $line) {
+            $cells = array_map('trim', explode('|', trim($line, " |")));
+            if (count($cells) < 3 || !isset($kinds[$cells[0]])) {
+                continue;
+            }
+            self::assertArrayHasKey($cells[2], $classes, $line);
+            preg_match_all('/`([^`]+)`/', $cells[1], $names);
+            self::assertNotSame([], $names[1], $line);
+            foreach ($names[1] as $name) {
+                self::assertArrayNotHasKey($name, $documented[$kinds[$cells[0]]], 'listed twice: ' . $name);
+                $documented[$kinds[$cells[0]]][$name] = $classes[$cells[2]];
+            }
+        }
+        $expected = [];
+        foreach (VIRTUSPHERE_MECM_SITE_PART_TYPES as $kind => $types) {
+            $expected[$kind] = array_map(static fn (array $type): string => $type['class'], $types);
+            ksort($expected[$kind]);
+            ksort($documented[$kind]);
+        }
+        self::assertSame($expected, $documented);
     }
 
     public function testTheCardSpeaksTheSitesOwnWordsAndNamesTheParts(): void
@@ -212,9 +278,9 @@ final class MecmSiteAssessmentTest extends TestCase
         $html = (string) ob_get_clean();
         self::assertStringContainsString('Eingeschränkt', $html);
         self::assertStringContainsString(h(__t('system_status.err_site_critical')), $html, 'what MECM itself reported stays visible');
-        self::assertStringContainsString('4 Rollen kritisch, 2 Komponenten kritisch, 1 Rolle mit Warnung, 3 Komponenten mit Warnung', $html);
+        self::assertStringContainsString('4 Rollen kritisch, 1 Komponente kritisch, 1 Rolle mit Warnung, 4 Komponenten mit Warnung', $html);
         self::assertStringContainsString('Verteilungspunkt', $html);
-        self::assertStringContainsString('<code>SMS_DISTRIBUTION_MANAGER</code>', $html);
+        self::assertStringContainsString('<code>SMS_AD_SYSTEM_DISCOVERY_AGENT</code>', $html);
         self::assertStringContainsString('Unterstützend', $html);
         self::assertStringContainsString(h(__t('system_status.site_hint_limited')), $html);
         self::assertStringNotContainsString('Ausgefallen', $html);

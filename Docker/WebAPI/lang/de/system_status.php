@@ -396,7 +396,7 @@ return [
     'site_state_limited' => 'Eingeschränkt',
     'site_state_critical' => 'Kritisch',
     'site_state_unknown' => 'Unbekannt',
-    'site_hint_limited' => 'Kritisch sind nur unterstützende Teile. Der Standort arbeitet, einzelne Funktionen wie Inhaltsverteilung, Erkennung oder Cloudanbindung sind eingeschränkt. Details in der MECM-Konsole unter Monitoring, System Status prüfen.',
+    'site_hint_limited' => 'Kritisch sind nur unterstützende Teile. Der Standort arbeitet, einzelne Funktionen wie einzelne Verteilungspunkte, die Erkennung oder die Cloudanbindung sind eingeschränkt. Details in der MECM-Konsole unter Monitoring, System Status prüfen.',
     'site_parts_none' => 'Keine Einzelheiten gemeldet: ältere Skripte auf dem MECM-Server oder fehlgeschlagene Detailabfrage (lokales Site-Health-Log). Es gilt das MECM-Urteil.',
     'site_parts_omitted' => ':count weitere Einträge hat der Reporter nicht übertragen. Deshalb gilt das MECM-Urteil.',
     'site_parts_unexplained' => 'MECM meldet kritisch, nennt aber keine kritische Rolle und keine kritische Komponente. Es gilt das MECM-Urteil.',

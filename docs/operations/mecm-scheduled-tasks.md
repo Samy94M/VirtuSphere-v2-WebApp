@@ -176,4 +176,7 @@ flowchart TD
   W -->|ja| T["SMS_SiteSystemSummarizer und SMS_ComponentSummarizer (Since 12:00:00 AM) mit Status ungleich 0 lesen, je Typname und Status zählen; scheitert das, WARN-Zeile und ohne Teile weiter"] --> R
   R["„completed“ melden mit Site-Code, Provider, Rohstatus und gegebenenfalls site_parts; Pause = Takt (Standard 300 s)"]
   R -.->|nächster Lauf| S
+  R -.->|Anzeige| PB["Portal ordnet ein: Status 2 mit vollständiger Liste, in der nur unterstützende Teile kritisch sind, wird „Eingeschränkt“ (gelb), sonst „Kritisch“ (rot); siehe system-status-checks.md"]
 ```
+
+Der Reporter bewertet nicht, er zählt nur. Welcher Typ Kernteil oder unterstützend ist, steht in der Einordnungstabelle in `mecm-integration.md` (Abschnitt „Einordnung der Rollen und Komponenten“).

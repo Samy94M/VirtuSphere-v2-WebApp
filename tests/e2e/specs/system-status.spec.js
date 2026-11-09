@@ -179,13 +179,13 @@ test('MECM site: a confirmed critical is red, a provider fault is grey not criti
 test('MECM site: only supporting parts critical reads limited, with the parts by type (MSB)', async ({ page }) => {
   const snapshot = siteSnapshot();
   try {
-    // Synthetic: MECM status 2 where only distribution and discovery parts are critical.
+    // Synthetic: MECM status 2 where only DPs and AD discovery are critical.
     seedSite('fail', 'site_critical', {
       site_code: 'P01',
       raw_status: 2,
       site_parts: {
         roles: [{ name: 'SMS Distribution Point', status: 2, count: 4 }],
-        components: [{ name: 'SMS_DISTRIBUTION_MANAGER', status: 2, count: 1 }],
+        components: [{ name: 'SMS_AD_SYSTEM_DISCOVERY_AGENT', status: 2, count: 1 }],
         omitted: 0,
       },
     });
@@ -194,7 +194,7 @@ test('MECM site: only supporting parts critical reads limited, with the parts by
     await expect(mecm).toContainText(/Eingeschränkt|Degraded/);
     await expect(mecm).toContainText(/MECM meldet kritisch|MECM reports critical/);
     await expect(mecm).toContainText(/Verteilungspunkt|Distribution point/);
-    await expect(mecm.locator('.status-subgroup').nth(1).locator('table code')).toHaveText('SMS_DISTRIBUTION_MANAGER');
+    await expect(mecm.locator('.status-subgroup').nth(1).locator('table code')).toHaveText('SMS_AD_SYSTEM_DISCOVERY_AGENT');
     // The site subgroup (the second one) never uses the reporter words.
     await expect(mecm.locator('.status-subgroup').nth(1)).not.toContainText(/Ausgefallen|\bDown\b|Verzögert|Delayed/);
 
