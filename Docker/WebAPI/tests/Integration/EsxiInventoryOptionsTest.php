@@ -54,13 +54,13 @@ final class EsxiInventoryOptionsTest extends TestCase
 
     public function testTheGroupsCarryTheCredentialHostAndTheFreeSpaceOfEachRow(): void
     {
-        $id = $this->credential('solo', '10.0.5.11');
+        $id = $this->credential('solo', '198.51.100.11');
         $this->datastores($id, ['ds-a' => 400, 'ds-b' => null]);
 
         $group = $this->ownGroups()[$id];
 
         self::assertSame(self::PREFIX . 'solo', $group['credential_name']);
-        self::assertSame('10.0.5.11', $group['credential_host'], 'the address is what makes a fleet of "esxi1".."esxi6" usable');
+        self::assertSame('198.51.100.11', $group['credential_host'], 'the address is what makes a fleet of "esxi1".."esxi6" usable');
         self::assertSame(['ds-a', 'ds-b'], $group['names']);
         self::assertSame(400, $group['free_by_key']['ds-a']);
         self::assertNull($group['free_by_key']['ds-b'], 'a row without a number stays without one');
@@ -73,9 +73,9 @@ final class EsxiInventoryOptionsTest extends TestCase
         // kind": a host that pulled and genuinely has no datastore still belongs
         // in the count, or every datastore of the others is promoted to "present
         // everywhere" while a whole host is missing from the denominator.
-        $proven = $this->credential('proven', '10.0.5.11');
-        $silent = $this->credential('silent', '10.0.5.12');
-        $emptyButPulled = $this->credential('pulled-empty', '10.0.5.13');
+        $proven = $this->credential('proven', '198.51.100.11');
+        $silent = $this->credential('silent', '198.51.100.12');
+        $emptyButPulled = $this->credential('pulled-empty', '198.51.100.13');
         $this->datastores($proven, ['ds-a' => 100]);
         $this->recordSuccess($proven);
         $this->recordSuccess($emptyButPulled);
@@ -97,8 +97,8 @@ final class EsxiInventoryOptionsTest extends TestCase
 
     public function testAMixedFleetBucketsBySharedAndLocalAndNamesTheHost(): void
     {
-        $a = $this->credential('esxi-a', '10.0.5.11');
-        $b = $this->credential('esxi-b', '10.0.5.12');
+        $a = $this->credential('esxi-a', '198.51.100.11');
+        $b = $this->credential('esxi-b', '198.51.100.12');
         $this->datastores($a, ['ds-shared' => 900, 'ds-local-a' => 300]);
         $this->datastores($b, ['ds-shared' => 400]);
         $this->recordSuccess($a);
@@ -109,12 +109,12 @@ final class EsxiInventoryOptionsTest extends TestCase
         self::assertSame([['all', ['ds-shared']], ['only', ['ds-local-a']]], $this->scopes($buckets));
         self::assertSame(400, $buckets[0]['free_by_key']['ds-shared'], 'the tightest host wins while the target is open');
         self::assertSame([self::PREFIX . 'esxi-a'], array_column($buckets[1]['credentials'], 'name'));
-        self::assertSame('10.0.5.11', $buckets[1]['credentials'][0]['host']);
+        self::assertSame('198.51.100.11', $buckets[1]['credentials'][0]['host']);
     }
 
     public function testAMaintenanceMetaSurvivesTheRoundTripAndWithdrawsTheNumber(): void
     {
-        $id = $this->credential('maint', '10.0.5.11');
+        $id = $this->credential('maint', '198.51.100.11');
         $this->datastores($id, ['ds-work' => 500, 'ds-fine' => 700], ['ds-work' => ['maintenance' => 'inMaintenance']]);
         $this->recordSuccess($id);
 
@@ -135,8 +135,8 @@ final class EsxiInventoryOptionsTest extends TestCase
     {
         // The B6 shape: one query for every credential and every kind the deploy
         // page compares, instead of a full inventory read inside a loop.
-        $a = $this->credential('bulk-a', '10.0.5.11');
-        $b = $this->credential('bulk-b', '10.0.5.12');
+        $a = $this->credential('bulk-a', '198.51.100.11');
+        $b = $this->credential('bulk-b', '198.51.100.12');
         $this->datastores($a, ['DataStore-A' => 1]);
         $this->networks($a, [self::PREFIX . 'vlan-a']);
         $this->networks($b, [self::PREFIX . 'vlan-b']);
@@ -158,8 +158,8 @@ final class EsxiInventoryOptionsTest extends TestCase
         // mission-level deviation warning, a value missing from ONE host to the
         // per-host box. Naming it in both would make the operator read two
         // different explanations of one problem and act on the wrong one.
-        $a = $this->credential('esxi-a', '10.0.5.11');
-        $b = $this->credential('esxi-b', '10.0.5.12');
+        $a = $this->credential('esxi-a', '198.51.100.11');
+        $b = $this->credential('esxi-b', '198.51.100.12');
         $this->datastores($a, [self::PREFIX . 'ds-only-a' => 100]);
         $this->datastores($b, [self::PREFIX . 'ds-shared' => 100]);
         $this->networks($a, [self::PREFIX . 'vlan-known']);
@@ -209,8 +209,8 @@ final class EsxiInventoryOptionsTest extends TestCase
 
     public function testHistoricalEvidenceRemainsDiagnosticButDoesNotDriveCurrentWarnings(): void
     {
-        $a = $this->credential('historical-a', '10.0.5.21');
-        $b = $this->credential('historical-b', '10.0.5.22');
+        $a = $this->credential('historical-a', '198.51.100.21');
+        $b = $this->credential('historical-b', '198.51.100.22');
         foreach ([$a, $b] as $credentialId) {
             $this->datastores($credentialId, [self::PREFIX . 'ds-known' => 100]);
             $this->networks($credentialId, [self::PREFIX . 'vlan-known']);

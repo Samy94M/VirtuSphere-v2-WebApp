@@ -14,7 +14,7 @@
 #   sh scripts/install-backup-schedule.sh --show                     # aktuellen Eintrag zeigen
 #   sudo sh scripts/install-backup-schedule.sh --remove
 #
-# Danach einmal manuell pruefen: sh scripts/backup.sh
+# Danach einmal manuell pruefen: sudo sh scripts/backup.sh
 set -eu
 
 PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -109,5 +109,5 @@ echo "  Benutzer:  $RUN_AS"
 echo "  Verzeichnis: $PROJECT_DIR"
 echo "  Log:       $LOG_FILE"
 echo
-echo "Naechster Schritt: einmal 'sh scripts/backup.sh' laufen lassen."
+echo "Naechster Schritt: einmal 'sudo sh scripts/backup.sh' laufen lassen."
 echo "Die Backup-Karte im Portal zeigt danach Zeitplan, Quelle und naechsten Lauf."

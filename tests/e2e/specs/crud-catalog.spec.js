@@ -6,6 +6,7 @@
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
+const { submitAndWaitForNavigation } = require('../lib/navigation');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -66,10 +67,7 @@ echo 'SEEDED';
 
   await row.locator('button[name="action"][value="delete"]').click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/os\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'os.php');
   expect(rowCount('deploy_os', 'os_name', name), 'Confirm deleted the OS').toBe(0);
 });
 
@@ -100,10 +98,7 @@ echo 'SEEDED';
 
   await row.locator('button[type="submit"]').click();
   await expect(dialog).toBeVisible();
-  await Promise.all([
-    page.waitForURL(/vlans\.php/),
-    dialog.locator('[data-confirm-accept]').click(),
-  ]);
+  await submitAndWaitForNavigation(page, dialog.locator('[data-confirm-accept]'), 'vlans.php');
   expect(rowCount('deploy_vlan', 'vlan_name', name), 'Confirm deleted the VLAN').toBe(0);
 });
 

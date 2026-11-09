@@ -231,6 +231,87 @@ final class MissionImportUploadLimitContractTest extends TestCase
     }
 
     /**
+     * The memory side of the ceiling (B4). Each body above
+     * client_body_buffer_size is spooled to client_body_temp_path before PHP
+     * runs. That path must lie on a sized tmpfs of the web server (a full
+     * tmpfs fails one request, an unsized one or the read-only root fails the
+     * container or every upload), and the tmpfs must hold several bodies at
+     * the ceiling, or concurrent legitimate uploads (MAC callbacks during a
+     * deploy, a mission import) start failing once the ceiling rises. Both
+     * numbers are derived here, not listed: raising post_max_size and with it
+     * client_max_body_size demands the larger tmpfs in the same change.
+     */
+    public function testTheBodySpoolIsASizedTmpfsThatHoldsSeveralBodies(): void
+    {
+        $minimumBodies = 5;
+        $confPath = dirname(__DIR__, 3) . '/nginx/default.conf';
+        $composePath = dirname(__DIR__, 4) . '/docker-compose.yml';
+        foreach ([$confPath, $composePath] as $path) {
+            if (!is_file($path)) {
+                self::markTestSkipped(basename($path) . ' is not visible from this runtime');
+            }
+        }
+        $conf = (string) file_get_contents($confPath);
+        $generated = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/https_config.php');
+
+        self::assertSame(
+            1,
+            preg_match_all('/^client_body_temp_path\s+(\S+)\s*;/m', $conf, $paths),
+            'Docker/nginx/default.conf must name client_body_temp_path exactly once, in http context, so the '
+                . 'generated HTTPS block inherits it and the spool does not depend on the base image'
+        );
+        self::assertSame(
+            0,
+            preg_match('/client_body_temp_path/', $generated),
+            'the generated HTTPS block must inherit the body spool from default.conf, not name its own'
+        );
+        self::assertSame(
+            1,
+            preg_match('/^client_body_buffer_size\s+(\d+[kKmM]?)\s*;/m', $conf, $buffer),
+            'Docker/nginx/default.conf must name client_body_buffer_size, the in-memory part of the body budget'
+        );
+        self::assertLessThanOrEqual(
+            64 * 1024,
+            $this->shorthandToBytes($buffer[1]),
+            'client_body_buffer_size keeps every body up to it in worker memory per connection; keep it small'
+        );
+        $spool = rtrim($paths[1][0], '/');
+
+        $compose = (string) file_get_contents($composePath);
+        self::assertSame(
+            1,
+            preg_match('/^  webserver:\n(.*?)(?=^  [a-z][a-z0-9_-]*:\n|\z)/ms', $compose, $service),
+            'no webserver service found in docker-compose.yml'
+        );
+        preg_match_all('/^\s+-\s+([^\s:]+):size=(\d+[kKmMgG])\s*$/m', $service[1], $mounts, PREG_SET_ORDER);
+        $tmpfsBytes = null;
+        foreach ($mounts as $mount) {
+            $target = rtrim($mount[1], '/');
+            if ($spool === $target || str_starts_with($spool, $target . '/')) {
+                $tmpfsBytes = $this->shorthandToBytes($mount[2]);
+            }
+        }
+        self::assertNotNull(
+            $tmpfsBytes,
+            sprintf('client_body_temp_path %s lies on no sized tmpfs of the webserver service', $spool)
+        );
+
+        foreach ($this->nginxLimits() as $label => $limit) {
+            self::assertGreaterThanOrEqual(
+                $minimumBodies * $limit,
+                $tmpfsBytes,
+                sprintf(
+                    'the body spool tmpfs (%d B) holds fewer than %d bodies at client_max_body_size in %s (%d B)',
+                    $tmpfsBytes,
+                    $minimumBodies,
+                    $label,
+                    $limit
+                )
+            );
+        }
+    }
+
+    /**
      * The form's early-detection hint. It must sit BEFORE the file input (PHP
      * ignores it otherwise) and take its value from the constant, never from a
      * number typed into the markup.

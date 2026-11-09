@@ -186,7 +186,7 @@ Describe 'New-VsClientNetworkPlan (vollstaendige Vorabvalidierung)' {
     BeforeAll {
         $script:NetworkAdapter1 = [pscustomobject]@{ MacAddress = '00-11-22-33-44-55'; Status = 'Up'; PhysicalMediaType = '802.3'; ifIndex = 7; Name = 'Ethernet' }
         $script:NetworkAdapter2 = [pscustomobject]@{ MacAddress = '00-11-22-33-44-66'; Status = 'Up'; PhysicalMediaType = '802.3'; ifIndex = 8; Name = 'Ethernet 2' }
-        $script:StaticTarget = [pscustomobject]@{ Mac = '00:11:22:33:44:55'; Name = 'Server'; Mode = 'static'; Ip = '10.0.0.10'; Subnet = '24'; Gateway = '10.0.0.1'; Dns1 = '10.0.0.2'; Dns2 = '' }
+        $script:StaticTarget = [pscustomobject]@{ Mac = '00:11:22:33:44:55'; Name = 'Server'; Mode = 'static'; Ip = '192.0.2.10'; Subnet = '24'; Gateway = '192.0.2.1'; Dns1 = '192.0.2.2'; Dns2 = '' }
         $script:DhcpTarget = [pscustomobject]@{ Mac = '00:11:22:33:44:66'; Name = 'Backup'; Mode = 'dhcp'; Ip = ''; Subnet = ''; Gateway = ''; Dns1 = ''; Dns2 = '' }
 
         function script:Get-NetworkPlanForTest {
@@ -240,7 +240,7 @@ Describe 'New-VsClientNetworkPlan (vollstaendige Vorabvalidierung)' {
     }
 
     It 'blockiert doppelte MACs, Down-Adapter und mehrere Gateways' {
-        $secondStatic = [pscustomobject]@{ Mac = '00:11:22:33:44:66'; Name = 'Backup'; Mode = 'static'; Ip = '10.0.1.10'; Subnet = '24'; Gateway = '10.0.1.1'; Dns1 = ''; Dns2 = '' }
+        $secondStatic = [pscustomobject]@{ Mac = '00:11:22:33:44:66'; Name = 'Backup'; Mode = 'static'; Ip = '198.51.100.10'; Subnet = '24'; Gateway = '198.51.100.1'; Dns1 = ''; Dns2 = '' }
         $down = [pscustomobject]@{ MacAddress = '00-11-22-33-44-66'; Status = 'Down'; PhysicalMediaType = '802.3'; ifIndex = 8; Name = 'Ethernet 2' }
         $plan = Get-NetworkPlanForTest -Targets @($script:StaticTarget, $secondStatic) -Adapters @($script:NetworkAdapter1, $down, $down)
         $plan.Valid | Should -BeFalse
@@ -914,7 +914,7 @@ Describe 'Convert-VsWebApi' {
     It 'strippt Schema, Trailing-Slash und Leerraum: <raw>' -ForEach @(
         @{ raw = 'http://virtusphere.lan:8021';   expected = 'virtusphere.lan:8021' }
         @{ raw = 'https://virtusphere.lan:8443/';  expected = 'virtusphere.lan:8443' }
-        @{ raw = '  HTTP://10.0.0.5:8021  ';        expected = '10.0.0.5:8021' }
+        @{ raw = '  HTTP://192.0.2.5:8021  ';        expected = '192.0.2.5:8021' }
         @{ raw = 'virtusphere.lan';                 expected = 'virtusphere.lan' }
     ) {
         Invoke-InFileScope -Path $script:MecmCommon -Arguments @($raw) -Body { param($r) Convert-VsWebApi $r } | Should -Be $expected

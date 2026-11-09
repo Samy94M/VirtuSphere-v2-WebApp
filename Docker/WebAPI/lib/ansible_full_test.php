@@ -187,7 +187,7 @@ function ansible_full_test_store_result(
         if ($userId === null) {
             $testContext['scheduled'] = true;
         }
-        if (!audit_event(
+        audit_event_required(
             $connection,
             VIRTUSPHERE_AUDIT_EVENT_CREDENTIAL_TESTED,
             'credential',
@@ -195,9 +195,7 @@ function ansible_full_test_store_result(
             $testResult,
             $testContext,
             $userId
-        )) {
-            throw new RuntimeException('Credential test audit could not be stored.');
-        }
+        );
 
         return $stored;
     });

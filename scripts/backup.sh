@@ -57,8 +57,8 @@
 # bzw. Cron-Datei), nicht ein separat gepflegter Sollwert; die Anzeige kann
 # also nicht vom tatsaechlichen Zeitplan abweichen.
 #
-# Einrichten: sh scripts/install-backup-schedule.sh (schreibt /etc/cron.d/virtusphere-backup).
-# Restore-Probe: sh scripts/restore_test.sh (siehe docs/operations/backup.md).
+# Einrichten: sudo sh scripts/install-backup-schedule.sh (schreibt /etc/cron.d/virtusphere-backup).
+# Restore-Probe: sudo sh scripts/restore_test.sh (siehe docs/operations/backup.md).
 set -eu
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd -P)

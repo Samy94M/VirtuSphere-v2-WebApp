@@ -370,7 +370,7 @@ final class SystemStatusPanelBranchTest extends TestCase
             $stateRow['evidence_current'] = true;
         }
         $snapshot = ['ansible' => ['interval_hours' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'rows' => [[
-            'credential' => ['id' => 5, 'name' => 'ansible-01', 'host' => '10.0.0.9'],
+            'credential' => ['id' => 5, 'name' => 'ansible-01', 'host' => '192.0.2.9'],
             'state_row' => $stateRow,
             'state' => $state,
             'last_mission_job' => $lastMissionJob,

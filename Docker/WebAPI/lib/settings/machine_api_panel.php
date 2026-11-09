@@ -83,7 +83,7 @@ require_once __DIR__ . '/../machine_api_roles.php';
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="allow_create">
                 <label><?php echo h(__t('settings.allowlist_th_ip')); ?>
-                    <input name="ip_address" value="<?php echo h(form_old('allowlist', 'ip_address', '')); ?>"<?php echo form_control_attrs('allowlist', 'ip_address'); ?> placeholder="10.0.0.10" required>
+                    <input name="ip_address" value="<?php echo h(form_old('allowlist', 'ip_address', '')); ?>"<?php echo form_control_attrs('allowlist', 'ip_address'); ?> placeholder="192.0.2.10" required>
                     <?php echo form_error_html('allowlist', 'ip_address'); ?>
                 </label>
                 <label><?php echo h(__t('settings.allowlist_th_role')); ?>

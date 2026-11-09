@@ -59,8 +59,11 @@ function settings_handle_post(mysqli $connection, array $user): never
     if ($action === 'save_api') {
         try {
             $apiBaseUrl = ansible_normalize_api_base_url(request_string($_POST, 'api_base_url'));
-            repo_set_setting($connection, VIRTUSPHERE_SETTING_API_BASE_URL, $apiBaseUrl);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'deploy_api_base_url', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'updated'], (int) $user['id']);
+            // W3A (R19): the setting and its row commit or roll back together.
+            repo_transaction($connection, static function () use ($connection, $apiBaseUrl, $user): void {
+                repo_set_setting($connection, VIRTUSPHERE_SETTING_API_BASE_URL, $apiBaseUrl);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'deploy_api_base_url', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'updated'], (int) $user['id']);
+            });
             flash_set('success', __t('settings.saved'));
         } catch (InvalidArgumentException $exception) {
             $message = __t('settings.api_base_url_invalid');
@@ -73,8 +76,10 @@ function settings_handle_post(mysqli $connection, array $user): never
         }
     } elseif ($action === 'clear_api') {
         try {
-            repo_delete_setting($connection, VIRTUSPHERE_SETTING_API_BASE_URL);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'deploy_api_base_url', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $user): void {
+                repo_delete_setting($connection, VIRTUSPHERE_SETTING_API_BASE_URL);
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'deploy_api_base_url', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
+            });
             flash_set('success', __t('settings.api_base_url_reset_done'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -87,11 +92,13 @@ function settings_handle_post(mysqli $connection, array $user): never
             flash_set('error', $message);
         } else {
             try {
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_PORTAL_TIMEZONE, $timezone);
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'portal_timezone', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'updated',
-                    'new_value' => $timezone,
-                ], (int) $user['id']);
+                repo_transaction($connection, static function () use ($connection, $timezone, $user): void {
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_PORTAL_TIMEZONE, $timezone);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'portal_timezone', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'updated',
+                        'new_value' => $timezone,
+                    ], (int) $user['id']);
+                });
                 flash_set('success', __t('settings.timezone_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -108,11 +115,9 @@ function settings_handle_post(mysqli $connection, array $user): never
             try {
                 repo_transaction($connection, static function () use ($connection, $hours, $user): void {
                     repo_set_setting($connection, VIRTUSPHERE_SETTING_ANSIBLE_TEST_INTERVAL_HOURS, (string) $hours);
-                    if (!audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting',
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting',
                         VIRTUSPHERE_SETTING_ANSIBLE_TEST_INTERVAL_HOURS, VIRTUSPHERE_AUDIT_RESULT_SUCCESS,
-                        ['action' => 'updated', 'new_value' => (string) $hours], (int) $user['id'])) {
-                        throw new RuntimeException('Ansible interval audit could not be stored.');
-                    }
+                        ['action' => 'updated', 'new_value' => (string) $hours], (int) $user['id']);
                 });
                 flash_set('success', __t('settings.saved'));
             } catch (Throwable $exception) {
@@ -145,25 +150,27 @@ function settings_handle_post(mysqli $connection, array $user): never
             flash_set('error', (string) reset($errors));
         } else {
             try {
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS, (string) $hours);
-                $oldSelection = (int) repo_setting_value($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '0');
-                if (count($resolution['credentials']) > 1) {
-                    repo_set_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, (string) $selection);
-                } else {
-                    repo_delete_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);
-                    $selection = 0;
-                }
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'esxi_inventory_interval_hours', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'updated',
-                    'new_value' => (string) $hours,
-                ], (int) $user['id']);
-                if ($oldSelection !== $selection) {
-                    audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'esxi_inventory_ansible_credential', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                repo_transaction($connection, static function () use ($connection, $hours, $resolution, $selection, $user): void {
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS, (string) $hours);
+                    $oldSelection = (int) repo_setting_value($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, '0');
+                    if (count($resolution['credentials']) > 1) {
+                        repo_set_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL, (string) $selection);
+                    } else {
+                        repo_delete_setting($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_ANSIBLE_CREDENTIAL);
+                        $selection = 0;
+                    }
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'esxi_inventory_interval_hours', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                         'action' => 'updated',
-                        'old_value' => (string) $oldSelection,
-                        'new_value' => (string) $selection,
+                        'new_value' => (string) $hours,
                     ], (int) $user['id']);
-                }
+                    if ($oldSelection !== $selection) {
+                        audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'esxi_inventory_ansible_credential', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                            'action' => 'updated',
+                            'old_value' => (string) $oldSelection,
+                            'new_value' => (string) $selection,
+                        ], (int) $user['id']);
+                    }
+                });
                 flash_set('success', __t('settings.esxi_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -177,11 +184,13 @@ function settings_handle_post(mysqli $connection, array $user): never
             flash_set('error', $message);
         } else {
             try {
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_SESSION_LIFETIME_MINUTES, (string) $minutes);
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'session_lifetime_minutes', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'updated',
-                    'new_value' => (string) $minutes,
-                ], (int) $user['id']);
+                repo_transaction($connection, static function () use ($connection, $minutes, $user): void {
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_SESSION_LIFETIME_MINUTES, (string) $minutes);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'session_lifetime_minutes', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'updated',
+                        'new_value' => (string) $minutes,
+                    ], (int) $user['id']);
+                });
                 flash_set('success', __t('settings.session_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -195,11 +204,13 @@ function settings_handle_post(mysqli $connection, array $user): never
             flash_set('error', $message);
         } else {
             try {
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_PASSWORD_MIN_LENGTH, (string) $minLength);
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'password_min_length', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'updated',
-                    'new_value' => (string) $minLength,
-                ], (int) $user['id']);
+                repo_transaction($connection, static function () use ($connection, $minLength, $user): void {
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_PASSWORD_MIN_LENGTH, (string) $minLength);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'password_min_length', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'updated',
+                        'new_value' => (string) $minLength,
+                    ], (int) $user['id']);
+                });
                 flash_set('success', __t('settings.password_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));
@@ -250,7 +261,7 @@ function settings_handle_post(mysqli $connection, array $user): never
                 throw new ValidationException(['https_enabled' => __t('settings.https_err_no_material')]);
             }
             $redirectWasOn = false;
-            repo_transaction($connection, function () use ($connection, $enable, &$redirectWasOn): void {
+            repo_transaction($connection, function () use ($connection, $enable, $user, &$redirectWasOn): void {
                 if (directory_schema_available($connection)) {
                     directory_lock_activation_state($connection);
                     if (!$enable && directory_is_enabled($connection)) {
@@ -263,13 +274,16 @@ function settings_handle_post(mysqli $connection, array $user): never
                     // Never leave a redirect pointing at a listener that is gone.
                     repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, '0');
                 }
+                // W3A: the row records the setting, so it commits with it. The
+                // generated nginx block follows after the commit, as before; a
+                // failed render reports an error while the setting stays recorded.
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'https', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'enabled_state_changed',
+                    'enabled' => $enable,
+                    'redirect_disabled' => $redirectWasOn,
+                ], (int) $user['id']);
             });
             https_apply_state($connection);
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'https', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'enabled_state_changed',
-                'enabled' => $enable,
-                'redirect_disabled' => $redirectWasOn,
-            ], (int) $user['id']);
             flash_set('success', $enable ? __t('settings.https_enabled_on') : (!$redirectWasOn ? __t('settings.https_enabled_off') : __t('settings.https_enabled_off_redirect')));
         } catch (ValidationException $exception) {
             flash_set('error', portal_error_message($exception));
@@ -279,7 +293,7 @@ function settings_handle_post(mysqli $connection, array $user): never
     } elseif ($action === 'save_https_redirect') {
         $enable = ($_POST['https_redirect_enabled'] ?? '') === '1';
         try {
-            repo_transaction($connection, function () use ($connection, $enable): void {
+            repo_transaction($connection, function () use ($connection, $enable, $user): void {
                 if (directory_schema_available($connection)) {
                     directory_lock_activation_state($connection);
                     if (!$enable && directory_is_enabled($connection)) {
@@ -290,11 +304,11 @@ function settings_handle_post(mysqli $connection, array $user): never
                     throw new ValidationException(['https_redirect_enabled' => __t('settings.https_err_redirect_requires')]);
                 }
                 repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_REDIRECT_ENABLED, $enable ? '1' : '0');
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'http_to_https_redirect', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'enabled_state_changed',
+                    'enabled' => $enable,
+                ], (int) $user['id']);
             });
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'http_to_https_redirect', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'enabled_state_changed',
-                'enabled' => $enable,
-            ], (int) $user['id']);
             flash_set('success', $enable ? __t('settings.https_redirect_on') : __t('settings.https_redirect_off'));
         } catch (ValidationException $exception) {
             flash_set('error', portal_error_message($exception));
@@ -304,11 +318,13 @@ function settings_handle_post(mysqli $connection, array $user): never
     } elseif ($action === 'save_https_hsts') {
         $enable = ($_POST['https_hsts_enabled'] ?? '') === '1';
         try {
-            repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_HSTS_ENABLED, $enable ? '1' : '0');
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'hsts', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'enabled_state_changed',
-                'enabled' => $enable,
-            ], (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $enable, $user): void {
+                repo_set_setting($connection, VIRTUSPHERE_SETTING_HTTPS_HSTS_ENABLED, $enable ? '1' : '0');
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'hsts', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'enabled_state_changed',
+                    'enabled' => $enable,
+                ], (int) $user['id']);
+            });
             flash_set('success', $enable ? __t('settings.https_hsts_on') : __t('settings.https_hsts_off'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -317,17 +333,23 @@ function settings_handle_post(mysqli $connection, array $user): never
         try {
             // Plaintext is shown exactly once and never stored (ADR-0018).
             $token = bin2hex(random_bytes(16));
-            repo_set_setting($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH, hash('sha256', $token));
+            repo_transaction($connection, static function () use ($connection, $token, $user): void {
+                repo_set_setting($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH, hash('sha256', $token));
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN, 'setting', 'machine_report_token', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'generated'], (int) $user['id']);
+            });
+            // Only a committed hash may be shown: a rolled-back one would hand
+            // out a token the endpoint never accepts.
             $_SESSION['machine_report_token_once'] = $token;
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN, 'setting', 'machine_report_token', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'generated'], (int) $user['id']);
             flash_set('success', __t('settings.report_token_generated'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
         }
     } elseif ($action === 'clear_token') {
         try {
-            repo_set_setting($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH, '');
-            audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN, 'setting', 'machine_report_token', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
+            repo_transaction($connection, static function () use ($connection, $user): void {
+                repo_set_setting($connection, VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH, '');
+                audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_REPORT_TOKEN, 'setting', 'machine_report_token', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
+            });
             flash_set('success', __t('settings.report_token_cleared'));
         } catch (Throwable $exception) {
             flash_set('error', portal_error_message($exception));
@@ -345,11 +367,13 @@ function settings_handle_post(mysqli $connection, array $user): never
             flash_set('error', $message);
         } else {
             try {
-                repo_set_setting($connection, VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD, (string) $threshold);
-                audit_event($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'package_retire_threshold_percent', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                    'action' => 'updated',
-                    'new_value' => (string) $threshold,
-                ], (int) $user['id']);
+                repo_transaction($connection, static function () use ($connection, $threshold, $user): void {
+                    repo_set_setting($connection, VIRTUSPHERE_SETTING_PACKAGE_RETIRE_THRESHOLD, (string) $threshold);
+                    audit_event_required($connection, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'package_retire_threshold_percent', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                        'action' => 'updated',
+                        'new_value' => (string) $threshold,
+                    ], (int) $user['id']);
+                });
                 flash_set('success', __t('settings.retire_threshold_saved'));
             } catch (Throwable $exception) {
                 flash_set('error', portal_error_message($exception));

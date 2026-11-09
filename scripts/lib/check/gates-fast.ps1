@@ -97,42 +97,60 @@ function Register-FastCheckGates {
         New-FailResult ('Haertungs-Contract verletzt (exit ' + $r.ExitCode + ')') $r.Output
     }
 
+    # C1: php-lint (Container-Weg), phpunit-unit, phpstan und die ansible-*-Gates
+    # lesen den geprueften Pruefstand dieses Laufs (Get-FastGateSource,
+    # runtime.ps1) statt der 9p-Freigabe des Arbeitsbaums (A26).
     Add-Gate -Name 'php-lint' -Lanes $allLanes -Kind 'container' -Body {
         $r = $null
+        $source = $null
         if ((Test-Command 'php') -and $shExe) {
             $r = Invoke-CheckShell 'php-lint-all.sh' @()
         } elseif ((Test-Command 'docker') -and (Test-DockerImage $toolImages.php)) {
-            $r = Invoke-Tool 'docker' @('run', '--rm',
-                '-v', ($scriptDir + ':/checker:ro'),
-                '-v', ($repoRoot + ':/checkroot:ro'),
+            $source = Get-FastGateSource
+            if ($source.Outcome) { return $source.Outcome }
+            $r = Invoke-Tool 'docker' (@('run', '--rm',
+                '-v', ($scriptDir + ':/checker:ro')) + (Get-FastSourceMountArgs $source '/checkroot') + @(
                 '-e', 'VIRTUSPHERE_CHECK_ROOT=/checkroot',
-                $toolImages.php, 'sh', '/checker/php-lint-all.sh')
+                $toolImages.php, 'sh', '/checker/php-lint-all.sh'))
         } else {
             return New-InfraResult 'weder Host-PHP+sh noch Projekt-Image verfuegbar'
         }
         if ($r.ExitCode -eq 9) { return New-InfraResult 'php-lint fand keine Dateien oder kein php (Zero-Match)' $r.Output }
-        Format-ToolResult $r (@($r.Output) -join '; ') 'php -l meldet Syntaxfehler'
+        Add-FastSourceNote (Format-ToolResult $r (@($r.Output) -join '; ') 'php -l meldet Syntaxfehler') $source
     }
 
     Add-Gate -Name 'phpunit-unit' -Lanes $allLanes -Kind 'container' -Body {
         if (-not (Test-DockerImage $toolImages.php)) { return New-InfraResult ('Projekt-Image {0} fehlt' -f $toolImages.php) }
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
         $qaAppEnvFile = Get-QaAppEnvFile
-        # docker run mit vollem Repo-Mount statt exec in den App-Container: die
+        # docker run mit vollem Repo statt exec in den App-Container: die
         # Repo-Level-Contract-Tests (nginx/php-Config) sehen sonst ihre Dateien
-        # nicht und wuerden skippen; die Fast-Lane laeuft ohne Skips.
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
+        # nicht und wuerden skippen; die Fast-Lane laeuft ohne Skips. Das Repo
+        # ist der Pruefstand dieses Laufs, beschreibbar wie bei phpunit-full,
+        # weil Docker darin die Mountpunkte fuer tmpfs und .env anlegt.
+        $r = Invoke-Tool 'docker' (@('run', '--rm') + (Get-FastSourceMountArgs $source '/repo' -Writable) + @('-w', '/repo/Docker/WebAPI',
             '-v', (($artifactDir -replace '\\', '/') + ':/qa-evidence'),
             '--tmpfs', '/repo/Docker/WebAPI/var:mode=1777', '--tmpfs', '/repo/Docker/WebAPI/logs:mode=1777',
             '-v', ($qaAppEnvFile + ':/repo/.env:ro'), '-v', ($qaAppEnvFile + ':/repo/Docker/WebAPI/.env:ro'),
             $toolImages.php, 'php', 'vendor/bin/phpunit', '--testsuite', 'unit', '--fail-on-skipped',
-            '--log-junit', '/qa-evidence/phpunit-unit.xml')
-        Format-ToolResult $r 'Unit/Static-Suite gruen (ohne Skips)' 'PHPUnit Unit/Static rot oder geskippt'
+            '--log-junit', '/qa-evidence/phpunit-unit.xml'))
+        Add-FastSourceNote (Format-ToolResult $r 'Unit/Static-Suite gruen (ohne Skips)' 'PHPUnit Unit/Static rot oder geskippt') $source
     }
 
     Add-Gate -Name 'phpstan' -Lanes $allLanes -Kind 'container' -Body {
-        $r = Invoke-AppComposer @('run', 'stan')
+        if (-not (Test-DockerImage $toolImages.php)) { return New-InfraResult ('weder Container {0} noch Image {1} verfuegbar' -f $phpContainer, $toolImages.php) }
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
+        # Ergebniscache je Checkout ausserhalb der Release-Lane, unter flock
+        # (Get-PhpStanCacheSetup, runtime.ps1). Der Pruefstand ist
+        # schreibgeschuetzt; PHPStan braucht weder .env noch var/ oder logs/.
+        $cache = Get-PhpStanCacheSetup -Lane $Lane
+        if ($cache.Outcome) { return $cache.Outcome }
+        $r = Invoke-AppComposer @('run', 'stan', '--', '-vv') -Mounts ((Get-FastSourceMountArgs $source '/repo') + $cache.Mounts) -Command $cache.Command
         if ($null -eq $r) { return New-InfraResult ('weder Container {0} noch Image {1} verfuegbar' -f $phpContainer, $toolImages.php) }
-        Format-ToolResult $r 'PHPStan gruen (Baseline-Ratchet)' 'PHPStan meldet neue Befunde'
+        $state = Get-PhpStanCacheState -Output $r.Output -Mode $cache.Mode
+        Add-FastSourceNote (Format-ToolResult $r ('PHPStan gruen (Baseline-Ratchet); ' + $state) ('PHPStan meldet neue Befunde; ' + $state)) $source
     }
 
     Add-Gate -Name 'composer-validate' -Lanes $allLanes -Kind 'container' -Body {
@@ -214,6 +232,39 @@ function Register-FastCheckGates {
         if ($null -eq $r) { return New-InfraResult 'kein sh verfuegbar (Git Bash oder Docker noetig)' }
         if ((@($r.Output) -join ' ') -match '\[doc-fragments\.no-git\]') { return New-InfraResult 'Fragment-Waechter ohne Git-Historie' $r.Output }
         Format-ToolResult $r 'CHANGELOG und Register nur als Fragmente' 'neuer Eintrag am alten Ort oder kaputtes Fragment'
+    }
+
+    # NS3/W3B: Namensschutz ueber jeden Commit, den ein Merge oder Push nach
+    # main mitbringt (origin/main..HEAD): Nachricht, hinzugefuegte Zeilen und
+    # Dateinamen, auch ein spaeter wieder entfernter Wert. Dieselbe Pruefung wie
+    # die Hooks, dazu fuer Commits, die nie einen Hook sahen. Kein Docker-
+    # Fallback: im Tooling-Container fehlen Repo-Historie und Musterliste neben
+    # dem Skript. Exit 2 (Liste fehlt oder ist ungueltig) ist rot: die
+    # Musterliste ist getrackt, und das Skript schliesst bewusst ab.
+    Add-Gate -Name 'name-denylist' -Lanes $allLanes -Kind 'native' -Body {
+        if (-not $shExe) { return New-InfraResult 'kein sh verfuegbar (Git Bash noetig)' }
+        if (-not (Test-Command 'git')) { return New-InfraResult 'git nicht gefunden' }
+        $base = 'origin/main'
+        $probe = Invoke-Tool 'git' @('-C', $repoRoot, 'rev-parse', '--verify', '--quiet', ($base + '^{commit}'))
+        if ($probe.ExitCode -ne 0) {
+            return New-InfraResult ('Basis {0} fehlt im Repo; ohne sie ist der Bereich nicht ableitbar (git fetch origin)' -f $base) $probe.Output
+        }
+        $range = $base + '..HEAD'
+        Push-Location -LiteralPath $repoRoot
+        try {
+            $r = Invoke-CheckShell 'check-name-denylist.sh' @('--range', $range)
+        } finally {
+            Pop-Location
+        }
+        if ($r.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $r) $r.Output }
+        $last = @($r.Output | Where-Object { $_ -match 'Commit\(s\)|keine Commits' } | Select-Object -Last 1)
+        $summary = if ($last.Count -gt 0) { $last[0].Trim() } else { '' }
+        switch ($r.ExitCode) {
+            0 { return New-PassResult ('{0}: {1}' -f $range, $summary) $r.Output }
+            1 { return New-FailResult ('{0}: {1} Wert ersetzen, Commit neu schreiben' -f $range, $summary) $r.Output }
+            2 { return New-FailResult 'Musterliste oder private Namensliste fehlt oder ist ungueltig (fail closed)' $r.Output }
+            default { return New-InfraResult ('Namensschutz ohne Ergebnis (exit {0})' -f $r.ExitCode) $r.Output }
+        }
     }
 
     Add-Gate -Name 'csp-patterns' -Lanes $allLanes -Kind 'native' -Body {
@@ -317,33 +368,24 @@ function Register-FastCheckGates {
         Format-ToolResult $r 'GitHub-Workflows sauber' 'actionlint meldet Befunde'
     }
 
-    Add-Gate -Name 'ansible-syntax' -Lanes $allLanes -Kind 'container' -Body {
-        $playbooks = @(Get-ChildItem -Path (Join-Path $repoRoot 'Ansible') -Filter '*_playbook.yml' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
-        if ($playbooks.Count -eq 0) { return New-InfraResult 'keine Playbooks unter Ansible/ gefunden (Zero-Match)' }
-        if (-not (Test-DockerImage $toolImages.ansible)) {
-            return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
-        }
-        $bad = @()
-        foreach ($pb in $playbooks) {
-            $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo/Ansible', $toolImages.ansible, 'ansible-playbook', '--syntax-check', $pb)
-            if ($r.ExitCode -ne 0) { $bad += $r.Output }
-        }
-        if ($bad.Count -gt 0) { return New-FailResult 'Playbook-Syntaxcheck rot' $bad }
-        New-PassResult ("{0} Playbook(s) syntaktisch sauber" -f $playbooks.Count)
-    }
-
+    # Ein eigenes Gate ansible-syntax (ansible-playbook --syntax-check je Playbook)
+    # entfiel mit C2 (R2, Nutzerentscheid 08.11.2026): ansible-lint --strict fuehrt
+    # den Syntaxcheck selbst aus und wurde per Mutation bei YAML-Fehler und
+    # unbekanntem Play-Schluesselwort rot (docs/register/2026-11-08-C2.md).
     Add-Gate -Name 'ansible-lint' -Lanes $allLanes -Kind 'container' -Body {
         if (-not (Test-Path (Join-Path $repoRoot 'Ansible'))) { return New-InfraResult 'kein Ansible/ unter dem Pruef-Root (Zero-Match)' }
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo', $toolImages.ansible, 'ansible-lint', '--strict', 'Ansible/')
-        Format-ToolResult $r 'ansible-lint --strict sauber' 'ansible-lint meldet Befunde'
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
+        $r = Invoke-Tool 'docker' (@('run', '--rm') + (Get-FastSourceMountArgs $source '/repo') + @('-w', '/repo', $toolImages.ansible, 'ansible-lint', '--strict', 'Ansible/'))
+        Add-FastSourceNote (Format-ToolResult $r 'ansible-lint --strict sauber' 'ansible-lint meldet Befunde') $source
     }
 
     Add-Gate -Name 'ansible-module-contract' -Lanes $allLanes -Kind 'container' -Body {
-        # ansible-syntax und ansible-lint lesen die Playbooks; keiner der beiden ruft
-        # ein Modul auf. Genau dort lag der Befund: jedes benutzte community.vmware-
+        # ansible-lint (mit Syntaxcheck) liest die Playbooks, ruft aber
+        # kein Modul auf. Genau dort lag der Befund: jedes benutzte community.vmware-
         # Modul importiert vmware_rest_client, der ohne die Python-Bibliothek
         # `requests` abbricht - und die stand weder in der QA-Toolchain noch in den
         # dokumentierten Host-Voraussetzungen. Auf einem nach Doku aufgesetzten
@@ -361,9 +403,11 @@ function Register-FastCheckGates {
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'sh', '/repo/Docker/qa-ansible/module-contract.sh')
-        Format-ToolResult $r 'Module und vollstaendiger Collection-Lock stimmen' 'Modul- oder Collection-Lock-Vertrag verletzt'
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
+        $r = Invoke-Tool 'docker' (@('run', '--rm') + (Get-FastSourceMountArgs $source '/repo') + @('-w', '/repo',
+            $toolImages.ansible, 'sh', '/repo/Docker/qa-ansible/module-contract.sh'))
+        Add-FastSourceNote (Format-ToolResult $r 'Module und vollstaendiger Collection-Lock stimmen' 'Modul- oder Collection-Lock-Vertrag verletzt') $source
     }
 
     Add-Gate -Name 'ansible-powercycle-selection' -Lanes $allLanes -Kind 'container' -Body {
@@ -387,17 +431,19 @@ function Register-FastCheckGates {
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
         # Die Arbeiterzahl der Vertragsskripte (QL2) reicht der Runner aus der
         # Host-Umgebung durch; ungesetzt gilt der Standard des Skripts.
-        $container = @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo', '-e', 'VIRTUSPHERE_QA_CONTRACT_WORKERS', $toolImages.ansible)
-        Invoke-ContractSteps -OkDetail 'Powercycle-Auswahl, Powercycle-Ablauf und Wiederholung von Export, Start und Autostart bewiesen' -Steps @(
+        $container = @('run', '--rm') + (Get-FastSourceMountArgs $source '/repo') + @('-w', '/repo', '-e', 'VIRTUSPHERE_QA_CONTRACT_WORKERS', $toolImages.ansible)
+        Add-FastSourceNote -Source $source -Outcome (Invoke-ContractSteps -OkDetail 'Powercycle-Auswahl, Powercycle-Ablauf und Wiederholung von Export, Start und Autostart bewiesen' -Steps @(
             @{ Label = 'Auswahl'; FailDetail = 'Powercycle-Auswahl weicht vom Vertrag ab'
                Arguments = $container + @('ansible-playbook', '/repo/Docker/qa-ansible/powercycle-selection-fixtures.yml') },
             @{ Label = 'Ablauf'; FailDetail = 'Powercycle-Ablauf weicht vom Vertrag ab'; Live = $true; ResultWord = 'pass'
                Arguments = $container + @('python', '/repo/Docker/qa-ansible/powercycle-sequence-contract.py') },
             @{ Label = 'Wiederholung'; FailDetail = 'Export-, Start- oder Autostart-Wiederholung weicht vom Vertrag ab'; Live = $true; ResultWord = 'pass'
                Arguments = $container + @('python', '/repo/Docker/qa-ansible/esxi-step-retry-contract.py') }
-        )
+        ))
     }
 
     Add-Gate -Name 'ansible-create-async' -Lanes $allLanes -Kind 'container' -Body {
@@ -420,11 +466,13 @@ function Register-FastCheckGates {
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
-        $container = @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo', '-e', 'VIRTUSPHERE_QA_CONTRACT_WORKERS', $toolImages.ansible)
-        Invoke-ContractSteps -OkDetail 'Async-Start, Produktionsstatus, Ergebniswahrheit und Cleanup bewiesen' -Steps @(
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
+        $container = @('run', '--rm') + (Get-FastSourceMountArgs $source '/repo') + @('-w', '/repo', '-e', 'VIRTUSPHERE_QA_CONTRACT_WORKERS', $toolImages.ansible)
+        Add-FastSourceNote -Source $source -Outcome (Invoke-ContractSteps -OkDetail 'Async-Start, Produktionsstatus, Ergebniswahrheit und Cleanup bewiesen' -Steps @(
             @{ Label = 'Create-Async'; FailDetail = 'Async-Vertrag des per-VM-Create verletzt'; Live = $true; ResultWord = 'PASS'
                Arguments = $container + @('python3', '/repo/Docker/qa-ansible/create-async-contract.py', '/repo') }
-        )
+        ))
     }
 
     Add-Gate -Name 'ansible-output-buffering' -Lanes $allLanes -Kind 'container' -Body {
@@ -447,10 +495,12 @@ function Register-FastCheckGates {
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/output-buffering-probe.py')
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
+        $r = Invoke-Tool 'docker' (@('run', '--rm') + (Get-FastSourceMountArgs $source '/repo') + @('-w', '/repo',
+            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/output-buffering-probe.py'))
         if ($r.ExitCode -eq 2) { return New-InfraResult 'Buffering-Probe ohne brauchbare Umgebung (Fixture/ansible-playbook)' $r.Output }
-        Format-ToolResult $r 'Ausgabe kommt ohne PYTHONUNBUFFERED gesammelt, mit ihr laufend' 'Buffering-Vertrag der Playbookausgabe verletzt'
+        Add-FastSourceNote (Format-ToolResult $r 'Ausgabe kommt ohne PYTHONUNBUFFERED gesammelt, mit ihr laufend' 'Buffering-Vertrag der Playbookausgabe verletzt') $source
     }
 
     Add-Gate -Name 'ansible-vars-files-lifetime' -Lanes $allLanes -Kind 'container' -Body {
@@ -473,10 +523,12 @@ function Register-FastCheckGates {
         if (-not (Test-DockerImage $toolImages.ansible)) {
             return New-InfraResult ('QA-Ansible-Image {0} fehlt (docker build -f Docker/qa-ansible/Dockerfile -t virtusphere-qa-ansible:latest .)' -f $toolImages.ansible)
         }
-        $r = Invoke-Tool 'docker' @('run', '--rm', '--network', 'none', '-v', ($repoRoot + ':/repo:ro'), '-w', '/repo',
-            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/vars-files-lifetime-probe.py')
+        $source = Get-FastGateSource
+        if ($source.Outcome) { return $source.Outcome }
+        $r = Invoke-Tool 'docker' (@('run', '--rm', '--network', 'none') + (Get-FastSourceMountArgs $source '/repo') + @('-w', '/repo',
+            $toolImages.ansible, 'python3', '/repo/Docker/qa-ansible/vars-files-lifetime-probe.py'))
         if ($r.ExitCode -eq 2) { return New-InfraResult 'vars_files-Probe ohne brauchbare Umgebung (Fixture, ansible-playbook oder Kontrollfall)' $r.Output }
-        Format-ToolResult $r 'vars_files je Task gelesen, Playbook ohne Leser endet vor dem naechsten Task' 'Grundlage des Loeschens von accounts.yml verletzt'
+        Add-FastSourceNote (Format-ToolResult $r 'vars_files je Task gelesen, Playbook ohne Leser endet vor dem naechsten Task' 'Grundlage des Loeschens von accounts.yml verletzt') $source
     }
 
     Add-Gate -Name 'host-secret-cleanup' -Lanes $allLanes -Kind 'container' -Body {

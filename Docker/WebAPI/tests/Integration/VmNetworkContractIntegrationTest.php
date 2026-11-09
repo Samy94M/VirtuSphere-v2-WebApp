@@ -147,7 +147,7 @@ final class VmNetworkContractIntegrationTest extends TestCase
         self::addToAssertionCount(1);
 
         $changed = $current;
-        $changed[0]['ip'] = '10.0.0.44';
+        $changed[0]['ip'] = '192.0.2.44';
         try {
             repo_transaction($this->db, function () use ($changed): void {
                 repo_fetch_one($this->db, 'SELECT id FROM deploy_missions WHERE id = ? FOR UPDATE', 'i', [$this->missionId]);

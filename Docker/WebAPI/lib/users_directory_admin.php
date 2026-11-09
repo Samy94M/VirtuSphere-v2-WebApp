@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/directory_config.php';
+require_once __DIR__ . '/directory_controller_test.php';
 require_once __DIR__ . '/directory_service.php';
 require_once __DIR__ . '/repo/directory.php';
 require_once __DIR__ . '/users_page.php';
@@ -47,24 +48,31 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
             $candidate['default_naming_context'] = $test['default_naming_context'];
             $certificate = $test['certificate'];
         }
+        // W3A (R19): the candidate test above is the network I/O and runs before
+        // any lock. The save, the controller observation and the row are one
+        // transaction, so a refused row leaves the previous configuration.
         try {
-            $revision = repo_directory_save_config($db, $candidate, $actorId, $testedControllerId, $expectedRevision);
+            $revision = repo_transaction($db, static function () use ($db, $candidate, $actorId, $testedControllerId, $expectedRevision, $certificate): int {
+                $revision = repo_directory_save_config($db, $candidate, $actorId, $testedControllerId, $expectedRevision);
+                if ($testedControllerId !== null) {
+                    $controller = repo_directory_controller($db, $testedControllerId);
+                    if ($controller !== null) {
+                        directory_observe_controller($db, $controller, $revision, VIRTUSPHERE_DIRECTORY_OUTCOME_OK, $certificate);
+                    }
+                }
+                audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'saved',
+                    'revision' => $revision,
+                ], $actorId);
+
+                return $revision;
+            });
         } catch (RuntimeException $exception) {
             if ($exception->getMessage() === 'directory_config_stale') {
                 throw new ValidationException(['expected_revision' => __t('directory.err_config_stale')]);
             }
             throw $exception;
         }
-        if ($testedControllerId !== null) {
-            $controller = repo_directory_controller($db, $testedControllerId);
-            if ($controller !== null) {
-                directory_observe_controller($db, $controller, $revision, VIRTUSPHERE_DIRECTORY_OUTCOME_OK, $certificate);
-            }
-        }
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'saved',
-            'revision' => $revision,
-        ], $actorId);
         $untested = count(array_filter(repo_directory_controllers($db), static fn (array $row): bool =>
             (int) $row['enabled'] === 1 && (int) ($row['validated_revision'] ?? 0) !== $revision));
         flash_set($untested > 0 ? 'warning' : 'success', __t('directory.flash_config_saved', ['count' => $untested]));
@@ -87,12 +95,14 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         if ($errors !== []) {
             throw new ValidationException($errors);
         }
-        $controllerId = repo_directory_add_controller($db, $host, $port, $actorId);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'added',
-            'host' => $host,
-            'port' => $port,
-        ], $actorId);
+        repo_transaction($db, static function () use ($db, $host, $port, $actorId): void {
+            $controllerId = repo_directory_add_controller($db, $host, $port, $actorId);
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'added',
+                'host' => $host,
+                'port' => $port,
+            ], $actorId);
+        });
         flash_set('success', __t('directory.flash_controller_added'));
 
         return true;
@@ -109,7 +119,17 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
     if ($action === 'directory_set_controller_enabled') {
         $controllerId = request_int($_POST, 'controller_id');
         $enable = request_int($_POST, 'enabled') === 1;
-        $result = repo_directory_change_controller_enabled($db, $controllerId, $enable, $actorId);
+        $result = repo_transaction($db, static function () use ($db, $controllerId, $enable, $actorId): string {
+            $result = repo_directory_change_controller_enabled($db, $controllerId, $enable, $actorId);
+            if ($result === 'ok') {
+                audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'enabled_state_changed',
+                    'enabled' => $enable,
+                ], $actorId);
+            }
+
+            return $result;
+        });
         if ($result === 'missing') {
             throw new ValidationException(['controller_id' => __t('directory.err_controller_missing')]);
         }
@@ -119,10 +139,6 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         if ($result === 'last_controller') {
             throw new ValidationException(['controller_id' => __t('directory.err_last_controller')]);
         }
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'enabled_state_changed',
-            'enabled' => $enable,
-        ], $actorId);
         flash_set('success', $enable ? __t('directory.flash_controller_enabled') : __t('directory.flash_controller_disabled'));
 
         return true;
@@ -130,26 +146,34 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
     if ($action === 'directory_move_controller') {
         $controllerId = request_int($_POST, 'controller_id');
         $direction = request_string($_POST, 'direction') === 'up' ? -1 : 1;
-        repo_directory_move_controller($db, $controllerId, $direction, $actorId);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'priority_changed',
-        ], $actorId);
+        repo_transaction($db, static function () use ($db, $controllerId, $direction, $actorId): void {
+            repo_directory_move_controller($db, $controllerId, $direction, $actorId);
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'priority_changed',
+            ], $actorId);
+        });
         flash_set('success', __t('directory.flash_controller_moved'));
 
         return true;
     }
     if ($action === 'directory_delete_controller') {
         $controllerId = request_int($_POST, 'controller_id');
-        $result = repo_directory_delete_controller_guarded($db, $controllerId);
+        $result = repo_transaction($db, static function () use ($db, $controllerId, $actorId): string {
+            $result = repo_directory_delete_controller_guarded($db, $controllerId);
+            if ($result === 'ok') {
+                audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'deleted',
+                ], $actorId);
+            }
+
+            return $result;
+        });
         if ($result === 'missing') {
             throw new ValidationException(['controller_id' => __t('directory.err_controller_missing')]);
         }
         if ($result === 'last_controller') {
             throw new ValidationException(['controller_id' => __t('directory.err_last_controller')]);
         }
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONTROLLER_CHANGED, 'directory_controller', $controllerId, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'deleted',
-        ], $actorId);
         flash_set('success', __t('directory.flash_controller_deleted'));
 
         return true;
@@ -165,7 +189,7 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
                 }
             }
             repo_directory_set_config_enabled($db, $enable, $actorId);
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_LOGIN_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_LOGIN_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
                 'enabled' => $enable,
             ], $actorId);
         });
@@ -174,11 +198,13 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
         return true;
     }
     if ($action === 'directory_delete_config') {
-        repo_directory_delete_config($db);
+        repo_transaction($db, static function () use ($db, $actorId): void {
+            repo_directory_delete_config($db);
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                'action' => 'deleted',
+            ], $actorId);
+        });
         unset($_SESSION['directory_import_candidates'], $_SESSION['directory_search_display']);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_CONFIG_CHANGED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-            'action' => 'deleted',
-        ], $actorId);
         flash_set('success', __t('directory.flash_config_deleted'));
 
         return true;
@@ -215,8 +241,12 @@ function users_directory_handle_action(mysqli $db, array $actor, string $action)
             throw new ValidationException(['user_id' => __t('users.err_user_missing')]);
         }
         $entry = directory_find_user_by_guid($db, (string) $target['ad_object_guid']);
-        repo_directory_update_user_cache($db, (int) $target['id'], $entry);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED, 'user', (int) $target['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], $actorId);
+        // The directory read above is the network I/O; only the cache write and
+        // its row share the transaction.
+        repo_transaction($db, static function () use ($db, $target, $entry, $actorId): void {
+            repo_directory_update_user_cache($db, (int) $target['id'], $entry);
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_USER_DIRECTORY_SYNCED, 'user', (int) $target['id'], VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [], $actorId);
+        });
         flash_set('success', __t('directory.flash_user_synced'));
 
         return true;

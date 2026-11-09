@@ -135,7 +135,7 @@ final class DeployScheduleEnqueueTest extends TestCase
     /** Baseline red counterprobe: this uses the pre-existing queue API only. */
     public function testEmptyUserSelectionExpandsBeforeUnboundVmsAreSkipped(): void
     {
-        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '192.0.2.30', false);
         $jobId = repo_create_deploy_job($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'start'], null);
 
         $payload = $this->payload($jobId);
@@ -149,7 +149,7 @@ final class DeployScheduleEnqueueTest extends TestCase
     /** Baseline red counterprobe: explicit scopes keep eligible VMs and record skipped IDs. */
     public function testExplicitSelectionSkipsOnlyItsUnboundMember(): void
     {
-        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '192.0.2.30', false);
         $boundId = (int) $this->db->query('SELECT id FROM deploy_vms WHERE mission_id = ' . $this->missionId . ' AND vm_instance_uuid IS NOT NULL ORDER BY id LIMIT 1')->fetch_assoc()['id'];
         $jobId = repo_create_deploy_job($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'start', 'vm_ids' => [$boundId, $unboundId]], null);
 
@@ -161,7 +161,7 @@ final class DeployScheduleEnqueueTest extends TestCase
     /** The group API is an existing behavior surface and must use the same eligibility resolver. */
     public function testStaggeredGroupCountsOnlyEligibleVmsAndCarriesTheSkippedDiagnosis(): void
     {
-        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '192.0.2.30', false);
         $eligibleIds = array_map('intval', array_column($this->db->query(
             'SELECT id FROM deploy_vms WHERE mission_id = ' . $this->missionId . ' AND vm_instance_uuid IS NOT NULL ORDER BY vm_name'
         )->fetch_all(MYSQLI_ASSOC), 'id'));
@@ -181,7 +181,7 @@ final class DeployScheduleEnqueueTest extends TestCase
     /** Current-branch structural probe for the sentinel that prevents [] from widening to a mission. */
     public function testAllSkippedSelectionPersistsAnExplicitEmptyRunnableScope(): void
     {
-        $unboundId = $this->makeVm('PHPUNITSCHNEW', '10.0.0.30', false);
+        $unboundId = $this->makeVm('PHPUNITSCHNEW', '192.0.2.30', false);
         $jobId = repo_create_deploy_job($this->db, $this->missionId, 1, $this->esxiId, $this->ansibleId, ['mode' => 'start', 'vm_ids' => [$unboundId]], null);
 
         $payload = $this->payload($jobId);
@@ -206,7 +206,7 @@ final class DeployScheduleEnqueueTest extends TestCase
             $this->missionId,
             null,
             ['vm_name' => $name, 'vm_hostname' => $name, 'vm_os' => 'Windows Server 2019', 'vm_domain' => 'dc.example.com', 'vm_guest_id' => 'windows2019srv_64Guest'],
-            [['ip' => $ip, 'subnet' => '255.255.255.0', 'gateway' => '10.0.0.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
+            [['ip' => $ip, 'subnet' => '255.255.255.0', 'gateway' => '192.0.2.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'VLAN10', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',

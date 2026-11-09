@@ -66,7 +66,7 @@ final class DeployEnqueueRaceTest extends TestCase
             $this->missionId,
             null,
             ['vm_name' => 'PHPUNITRACE1', 'vm_hostname' => 'PHPUNITRACE1', 'vm_os' => 'Windows Server 2019', 'vm_domain' => 'dc.example.com', 'vm_guest_id' => 'windows2019srv_64Guest'],
-            [['ip' => '10.9.9.10', 'subnet' => '255.255.255.0', 'gateway' => '10.9.9.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'WDS', 'mac' => '']],
+            [['ip' => '203.0.113.10', 'subnet' => '255.255.255.0', 'gateway' => '203.0.113.1', 'mode' => 'static', 'type' => 'vmxnet3', 'vlan' => 'WDS', 'mac' => '']],
             [['disk_name' => 'System', 'disk_size' => 40, 'disk_type' => 'thick']],
             [],
             '',

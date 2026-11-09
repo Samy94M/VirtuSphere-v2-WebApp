@@ -95,7 +95,9 @@ require_once __DIR__ . '/../system_status.php';
             <h3 id="help-status-device-causes" tabindex="-1"><?php echo h(__t('help_system_status.system_status_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_identity_p1')); ?></p>
             <ul>
-                <?php for ($identityCause = 1; $identityCause <= 9; $identityCause++) { ?>
+                <?php // Die Anzahl folgt den Katalogschluesseln, nicht einer Zahl hier. ?>
+                <?php $identityCauseCount = Lang::countNumbered('help_system_status.system_status_identity_'); ?>
+                <?php for ($identityCause = 1; $identityCause <= $identityCauseCount; $identityCause++) { ?>
                     <li><?php echo h(__t('help_system_status.system_status_identity_' . $identityCause, [
                         'max' => VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH,
                     ])); ?></li>

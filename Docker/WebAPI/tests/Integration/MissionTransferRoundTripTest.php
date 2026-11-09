@@ -52,8 +52,8 @@ final class MissionTransferRoundTripTest extends TestCase
             'hypervisor_datacenter' => 'DC1',
             'domain' => 'dc.example.com',
         ], true);
-        $this->makeVm($sourceId, 'PHPUNITXFER1', '10.0.0.5', '00:11:22:33:44:55', $packageId);
-        $this->makeVm($sourceId, 'PHPUNITXFER2', '10.0.0.6', 'AA:BB:CC:DD:EE:FF', $packageId);
+        $this->makeVm($sourceId, 'PHPUNITXFER1', '192.0.2.5', '00:11:22:33:44:55', $packageId);
+        $this->makeVm($sourceId, 'PHPUNITXFER2', '192.0.2.6', 'AA:BB:CC:DD:EE:FF', $packageId);
 
         $payload = mission_export_payload($this->db, $sourceId);
         self::assertSame(VIRTUSPHERE_MISSION_EXPORT_VERSION, $payload['format_version']);
@@ -99,7 +99,7 @@ final class MissionTransferRoundTripTest extends TestCase
             'hypervisor_datacenter' => 'DC1',
             'domain' => 'dc.example.com',
         ], true);
-        $this->makeVm($sourceId, 'PHPUNITXFER3', '10.0.0.7', '00:11:22:33:44:66', 0);
+        $this->makeVm($sourceId, 'PHPUNITXFER3', '192.0.2.7', '00:11:22:33:44:66', 0);
 
         $payload = mission_export_payload($this->db, $sourceId);
 
@@ -232,7 +232,7 @@ final class MissionTransferRoundTripTest extends TestCase
             'hypervisor_datacenter' => 'DC1',
             'domain' => 'dc.example.com',
         ], true);
-        $this->makeVm($sourceId, 'PHPUNITXFER4', '10.0.0.8', '00:11:22:33:44:77', 0);
+        $this->makeVm($sourceId, 'PHPUNITXFER4', '192.0.2.8', '00:11:22:33:44:77', 0);
 
         $payload = mission_export_payload($this->db, $sourceId);
         $report = mission_import($this->db, $payload, self::PREFIX . 'dst3', true);
@@ -254,7 +254,7 @@ final class MissionTransferRoundTripTest extends TestCase
             'hypervisor_datacenter' => 'DC1',
             'domain' => 'dc.example.com',
         ], true);
-        $this->makeVm($sourceId, 'PHPUNITXFER5', '10.0.0.9', '00:11:22:33:44:88', 0);
+        $this->makeVm($sourceId, 'PHPUNITXFER5', '192.0.2.9', '00:11:22:33:44:88', 0);
 
         $payload = mission_export_payload($this->db, $sourceId);
         $report = mission_import($this->db, $payload, self::PREFIX . 'dst4', true);
@@ -324,7 +324,7 @@ final class MissionTransferRoundTripTest extends TestCase
             [[
                 'ip' => $ip,
                 'subnet' => '255.255.255.0',
-                'gateway' => '10.0.0.1',
+                'gateway' => '192.0.2.1',
                 'mode' => 'static',
                 'type' => 'vmxnet3',
                 'vlan' => 'PHPUNIT-XFER-VLAN',

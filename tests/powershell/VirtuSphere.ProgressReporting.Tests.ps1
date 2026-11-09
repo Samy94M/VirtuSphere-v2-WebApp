@@ -363,7 +363,34 @@ Describe 'Visible progress reporting contract' {
         $script:GuardRunner | Should -Match "Name = 'portal-require-closure.probes'"
         $script:GuardRunner | Should -Match '--fail-on-empty-test-suite'
         $script:GuardRunner | Should -Match 'Zero entrypoints are a contract error'
-        (Get-Content -Raw (Join-Path $script:RepoRoot 'scripts/lib/check/gates-integration.ps1')) | Should -Match "test-guards\.ps1'\)\) -Live"
+        $integration = Get-Content -Raw (Join-Path $script:RepoRoot 'scripts/lib/check/gates-integration.ps1')
+        $integration | Should -Match "test-guards\.ps1'\), '-Parallel', '4'\)"
+        $integration | Should -Match 'Invoke-Tool \$hostExe \$guardArguments -Live'
+        # R1 (C2): mit dem JUnit-Bericht von phpunit-unit liest der Fall die
+        # Proben dort, ohne Bericht faehrt er sie selbst.
+        $integration | Should -Match "Join-Path \`$artifactDir 'phpunit-unit\.xml'"
+        $script:GuardRunner | Should -Match 'function Test-ClosureProbesInJUnit'
+    }
+
+    # C2: der Harness in N Shard-Prozessen ist ein eigener Ausfuehrungsweg. Er
+    # meldet jeden Shard davor und danach und reicht die Zaehler der Kinder
+    # verschachtelt mit Praefix weiter, die Ergebniszeilen mit Gesamtzaehler.
+    It 'reports every guard shard before and after it and passes the nested case counters on' {
+        $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] RUN  Shard \{0\}/\{1\} \(\{2\} Fall/Faelle\)'"
+        $script:GuardRunner | Should -Match "'\[\{0\}/\{1\}\] \{2\} Shard \{0\}/\{1\} \(\{3\}\) - \{4\}, Exit \{5\}'"
+        $script:GuardRunner | Should -Match "'\[Shard \{0\}/\{1\}\] \{2\}\{3\}'"
+        $script:GuardRunner | Should -Match "' \| gesamt \{0\}/\{1\}'"
+    }
+
+    # C2: die Pester-Suite in K Kindprozessen; jeder Teil wird davor und danach
+    # gemeldet, die Zeilen der Kinder laufen mit Praefix live weiter.
+    It 'reports every Pester part before and after it and streams its lines' {
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] RUN  Pester-Teil \{0\}/\{1\} \(\{2\} Dateien\)'"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] \{2\} Pester-Teil \{0\}/\{1\}: \{3\} Test\(s\), \{4\} rot \(\{5\}s\)'"
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] infrastructure_error Pester-Teil \{0\}/\{1\}: kein Ergebnis"
+        $script:PowerShellRunner | Should -Match "'\[Teil \{0\}/\{1\}\] \{2\}'"
+        $streams = Get-Content -Raw (Join-Path $script:RepoRoot 'scripts/lib/check/child-streams.ps1')
+        $streams | Should -Match 'function Read-StreamedChildLines'
     }
 
     It 'reports every restore and backup phase before and after execution' {

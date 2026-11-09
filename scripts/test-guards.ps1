@@ -26,19 +26,63 @@
 .PARAMETER List
     Faelle auflisten, nichts ausfuehren.
 
+.PARAMETER Shard
+    Nur den Shard k von N fahren (Form 'k/N'): jeden N-ten Fall der Auswahl
+    nach -Filter, Round-Robin ab Fall k. Die Zaehler laufen dann ueber die
+    Faelle des Shards. Ein leerer Shard ist ein ungueltiger Aufruf (Exit 3).
+
+.PARAMETER Parallel
+    N Shard-Prozesse gleichzeitig starten (Standard 1 = seriell im selben
+    Prozess). Der Elternprozess gibt jede Zeile der Kinder sofort mit dem
+    Praefix '[Shard k/N]' weiter, meldet je Shard '[k/N] RUN' und das
+    Shard-Ergebnis und fasst die Exitcodes zusammen: 1 vor 2 vor 0. Ein Kind
+    ohne vollstaendige Abschlusszeile zaehlt als infra. N wird auf die Zahl
+    der ausgewaehlten Faelle begrenzt.
+
+.PARAMETER UnitJUnit
+    JUnit-Bericht des Gates phpunit-unit derselben Lane. Dann prueft der Fall
+    portal-require-closure.probes die Closure-Proben darin, statt sie ein
+    weiteres Mal zu fahren. Ohne Angabe faehrt er sie selbst.
+
 .EXAMPLE
     powershell -NoProfile -File scripts\test-guards.ps1
+
+.EXAMPLE
+    powershell -NoProfile -File scripts\test-guards.ps1 -Parallel 4
 #>
 [CmdletBinding()]
 param(
     [string[]]$Filter,
-    [switch]$List
+    [switch]$List,
+    [string]$Shard = '',
+    [int]$Parallel = 1,
+    [string]$UnitJUnit = ''
 )
 
 Set-StrictMode -Version 1.0
 $ErrorActionPreference = 'Stop'
 
 if ($Filter) { $Filter = @($Filter | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }) }
+
+# Aufrufpruefung vor jedem Werkzeug- oder Verzeichniszugriff: Exit 3 laut Kopf.
+$shardIndex = 0
+$shardCount = 0
+if ($Shard -ne '') {
+    if ($Shard -notmatch '^([1-9][0-9]*)/([1-9][0-9]*)$' -or [int]$Matches[1] -gt [int]$Matches[2]) {
+        Write-Host ("test-guards.ps1: -Shard erwartet 'k/N' mit 1 <= k <= N, nicht '" + $Shard + "'") -ForegroundColor Red
+        exit 3
+    }
+    $shardIndex = [int]$Matches[1]
+    $shardCount = [int]$Matches[2]
+}
+if ($Parallel -lt 1 -or $Parallel -gt 16) {
+    Write-Host ('test-guards.ps1: -Parallel erwartet 1 bis 16, nicht ' + $Parallel) -ForegroundColor Red
+    exit 3
+}
+if ($Parallel -gt 1 -and $shardCount -gt 0) {
+    Write-Host 'test-guards.ps1: -Parallel und -Shard schliessen sich aus (der Elternprozess vergibt die Shards)' -ForegroundColor Red
+    exit 3
+}
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Split-Path $scriptDir -Parent) -replace '\\', '/'
@@ -199,6 +243,55 @@ function Save-DocFragmentCommit {
     foreach ($gitArguments in @(@('add', '-A'), @('commit', '-qm', 'mutation'))) {
         $r = Invoke-Tool 'git' (@('-C', $FixtureRoot) + $gitArguments)
         if ($r.ExitCode -ne 0) { throw ('git ' + ($gitArguments -join ' ') + ' in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+}
+
+# name-denylist prueft origin/main..HEAD. Die Fixture ist ein Git-Repo mit einem
+# Basis-Commit, auf den refs/remotes/origin/main zeigt (ohne -WithoutBase fehlt
+# der Ref), und einem zweiten Commit mit $Content. Der Treffer kommt aus einer
+# privaten Liste in der Fixture (VIRTUSPHERE_NAME_DENYLIST); ihr Eintrag wird
+# erst zur Laufzeit zusammengesetzt, damit dieses Skript ihn nicht selbst traegt.
+# Ohne git: $null, der Fall wird infra.
+function New-NameDenylistRepo {
+    param([string]$Content, [switch]$WithoutBase)
+    if (-not (Test-Command 'git')) { return $null }
+    $fx = New-Fixture
+    Add-FixtureFile $fx 'README.md' "base`n"
+    foreach ($gitArguments in @(
+        @('init', '-q', '.'), @('config', 'user.email', 'guard@example.test'), @('config', 'user.name', 'guard'),
+        @('config', 'core.autocrlf', 'false'), @('config', 'commit.gpgsign', 'false'), @('config', 'core.hooksPath', 'no-hooks'),
+        @('add', '-A'), @('commit', '-qm', 'base')
+    )) {
+        $r = Invoke-Tool 'git' (@('-C', $fx) + $gitArguments)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitArguments -join ' ') + ' in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+    if (-not $WithoutBase) {
+        $r = Invoke-Tool 'git' @('-C', $fx, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        if ($r.ExitCode -ne 0) { throw ('git update-ref in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+    Add-FixtureFile $fx 'docs/change.md' $Content
+    foreach ($gitArguments in @(@('add', '-A'), @('commit', '-qm', 'change'))) {
+        $r = Invoke-Tool 'git' (@('-C', $fx) + $gitArguments)
+        if ($r.ExitCode -ne 0) { throw ('git ' + ($gitArguments -join ' ') + ' in der Fixture: ' + (@($r.Output) -join ' ')) }
+    }
+    return $fx
+}
+
+function Get-NameDenylistProbe { return ('guard' + '-probe-' + 'name') }
+
+# Runner-Gate name-denylist gegen eine Fixture, mit einer privaten Liste aus
+# genau dem Probeeintrag.
+function Invoke-NameDenylistGate {
+    param([string]$FixtureRoot)
+    if (-not $FixtureRoot) { return $null }
+    $list = Join-Path $FixtureRoot 'private-denylist.txt'
+    [System.IO.File]::WriteAllText($list, ((Get-NameDenylistProbe) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    $prevList = $env:VIRTUSPHERE_NAME_DENYLIST
+    $env:VIRTUSPHERE_NAME_DENYLIST = ($list -replace '\\', '/')
+    try {
+        return Invoke-RunnerGate $FixtureRoot 'name-denylist'
+    } finally {
+        $env:VIRTUSPHERE_NAME_DENYLIST = $prevList
     }
 }
 
@@ -576,17 +669,11 @@ $cases = @(
         Save-DocFragmentCommit $fx
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.new-entry\]'
     } }
-    @{ Name = 'doc-fragments.unreleased-section'; Body = {
-        $fx = New-DocFragmentRepo
-        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
-        $file = Join-Path $fx 'docs/CHANGELOG.md'
-        $text = [System.IO.File]::ReadAllText($file)
-        $heading = $text.IndexOf("`n## ")
-        if ($heading -lt 0) { throw 'Mutationsanker nicht gefunden in docs/CHANGELOG.md: erste Ueberschrift' }
-        $text = $text.Insert($heading + 1, "## Noch in keinem Release`n`n")
-        [System.IO.File]::WriteAllText($file, $text, (New-Object System.Text.UTF8Encoding($false)))
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.unreleased-section\]'
-    } }
+    # unreleased-section, fragment-format und no-git beweist
+    # tests/powershell/VirtuSphere.DocFragments.Tests.ps1 gegen dasselbe Skript
+    # mit derselben Diagnose-ID (R4, C2: je Regel abgeschaltet, Pester-Fall rot).
+    # Hier bleiben gruen, Fixture-Kontrolle, je eine Mutation der beiden Haelften
+    # (CHANGELOG und Archivregister) auf den echten Quellen und Zero-Match.
     @{ Name = 'doc-fragments.archive-entry'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
@@ -595,20 +682,22 @@ $cases = @(
         Save-DocFragmentCommit $fx
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.archive-entry\]'
     } }
-    @{ Name = 'doc-fragments.fragment-format'; Body = {
-        $fx = New-DocFragmentRepo
-        if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
-        Add-FixtureFile $fx 'docs/changelog.d/x1.md' "Free paragraph.`n"
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.fragment-format\]'
-    } }
     @{ Name = 'doc-fragments.zero-match'; Body = {
         $fx = New-DocFragmentRepo -WithoutArchiveMarker
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(1) '\[doc-fragments\.no-archive\]'
     } }
-    @{ Name = 'doc-fragments.no-git'; Body = {
-        $fx = New-Fixture $docFragmentFixtureFiles
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(2) '\[doc-fragments\.no-git\]'
+
+    # name-denylist: das Runner-Gate selbst (Bereich, Exitcode, Basis). Was das
+    # Skript als Treffer erkennt, beweist tests/powershell/VirtuSphere.NameDenylist.Tests.ps1.
+    @{ Name = 'name-denylist.runner-clean'; Body = {
+        Assert-Guard (Invoke-NameDenylistGate (New-NameDenylistRepo "clean change`n")) @(0) 'origin/main\.\.HEAD: 1 Commit\(s\) ohne Treffer'
+    } }
+    @{ Name = 'name-denylist.runner-hit'; Body = {
+        Assert-Guard (Invoke-NameDenylistGate (New-NameDenylistRepo ('host ' + (Get-NameDenylistProbe) + "`n"))) @(1) '1 von 1 Commit\(s\) mit Treffer'
+    } }
+    @{ Name = 'name-denylist.runner-no-base'; Body = {
+        Assert-Guard (Invoke-NameDenylistGate (New-NameDenylistRepo "clean change`n" -WithoutBase)) @(2) 'Basis origin/main fehlt'
     } }
 
     @{ Name = 'lang-audit.green'; Body = {
@@ -953,20 +1042,6 @@ function zz_guard_ok(mysqli $db): void
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'lint-csp-patterns.sh') @('--worktree') $fx) @(2) '\[csp\.no-git\]'
     } }
 
-    @{ Name = 'sh-posix.parse-all'; Body = {
-        if (-not $shExe) { return @{ Status = 'infra'; Detail = 'sh fehlt' } }
-        $shFiles = @(Get-ChildItem -Path (Join-Path $repoRoot 'scripts') -Filter '*.sh' -File)
-        $shFiles += @(Get-ChildItem -Path (Join-Path (Join-Path $repoRoot '.claude') 'hooks') -Filter '*.sh' -File)
-        if ($shFiles.Count -eq 0) { return @{ Status = 'unproven'; Detail = 'Zero-Match: keine Shellskripte gefunden' } }
-        foreach ($f in $shFiles) {
-            $r = Invoke-GuardShell '-n' @(($f.FullName -replace '\\', '/'))
-            if ($r.ExitCode -ne 0) {
-                return @{ Status = 'unproven'; Detail = ($f.Name + ' ist nicht POSIX-parsebar: ' + (@($r.Output) -join ' ')) }
-            }
-        }
-        return @{ Status = 'proven'; Detail = ('' + $shFiles.Count + ' Skripte POSIX-parsebar') }
-    } }
-
     @{ Name = 'runner.powershell-syntax.red'; Body = {
         $fx = New-Fixture
         Add-FixtureFile $fx 'broken.ps1' "function Broken {`n"
@@ -1159,9 +1234,16 @@ $cases += @(
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
         $fx = New-Fixture
         # Unabgeschlossenes Quote: Parserfehler (SC1078, error-Level), sicher
-        # oberhalb der -S-warning-Schwelle des Gates.
+        # oberhalb der -S-warning-Schwelle des Gates. Dazu ein if ohne fi: die
+        # zweite Art Parse-Fehler, fuer die bis C2 der Fall sh-posix.parse-all
+        # jedes Skript mit sh -n las. Beide Dateien muessen gemeldet werden;
+        # shellcheck deckt seitdem allein ab, was nicht parsebar ist (R3).
         Add-FixtureFile $fx 'probe.sh' "#!/bin/sh`necho `"unclosed`n"
-        Assert-Guard (Invoke-RunnerGate $fx 'shellcheck') @(1) -InfraOnExit2
+        Add-FixtureFile $fx 'probe-if.sh' "#!/bin/sh`nif true; then`n  echo open`n"
+        $result = Invoke-RunnerGate $fx 'shellcheck'
+        $verdict = Assert-Guard $result @(1) -InfraOnExit2
+        if ($verdict.Status -ne 'proven') { return $verdict }
+        Assert-Guard $result @(1) 'probe-if\.sh'
     } }
     @{ Name = 'runner.yaml-roundtrip.drift'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
@@ -1599,8 +1681,37 @@ $cases += @(
     } }
 )
 
+# Die Closure-Proben laufen schon im Gate phpunit-unit derselben Lane (R1, C2).
+# Mit -UnitJUnit liest der Fall dessen JUnit-Bericht statt die beiden Klassen ein
+# drittes Mal zu fahren: jede test*-Methode beider Dateien (aus dem Quelltext
+# abgeleitet, keine Liste) muss dort stehen und gruen sein, ohne Skip. Ohne
+# Bericht (Harness allein gestartet) faehrt der Fall die Klassen selbst.
+$closureProbeFiles = @('Docker/WebAPI/tests/Static/PortalClosureAnalysisTest.php', 'Docker/WebAPI/tests/Static/PortalRequireClosureContractTest.php')
+function Test-ClosureProbesInJUnit {
+    param([string]$JUnitPath)
+    try { [xml]$report = [System.IO.File]::ReadAllText($JUnitPath) } catch {
+        return @{ Status = 'infra'; Detail = ('JUnit-Bericht nicht lesbar: ' + $JUnitPath) }
+    }
+    foreach ($relative in $closureProbeFiles) {
+        $class = [System.IO.Path]::GetFileNameWithoutExtension($relative)
+        $source = [System.IO.File]::ReadAllText((Join-Path $repoRoot $relative))
+        $expected = @([regex]::Matches($source, 'public function (test\w+)\s*\(') | ForEach-Object { $_.Groups[1].Value })
+        if ($expected.Count -eq 0) { return @{ Status = 'unproven'; Detail = ('keine test-Methode in ' + $relative + ' (Zero-Match)') } }
+        $cases = @($report.SelectNodes("//testcase[@class='" + $class + "']"))
+        $seen = @($cases | ForEach-Object { ([string]$_.name -split ' with data set ')[0] })
+        $missing = @($expected | Where-Object { $seen -notcontains $_ })
+        if ($missing.Count -gt 0) { return @{ Status = 'unproven'; Detail = ($class + ': fehlt im JUnit-Bericht von phpunit-unit: ' + ($missing -join ', ')) } }
+        $bad = @($cases | Where-Object { $_.SelectSingleNode('failure|error|skipped') } | ForEach-Object { [string]$_.name })
+        if ($bad.Count -gt 0) { return @{ Status = 'unproven'; Detail = ($class + ': rot oder uebersprungen: ' + ($bad -join ', ')) } }
+    }
+    return @{ Status = 'proven'; Detail = '' }
+}
 $cases += @(
     @{ Name = 'portal-require-closure.probes'; Body = {
+        if ($UnitJUnit -ne '') {
+            if (-not (Test-Path -LiteralPath $UnitJUnit -PathType Leaf)) { return @{ Status = 'infra'; Detail = ('JUnit-Bericht fehlt: ' + $UnitJUnit) } }
+            return Test-ClosureProbesInJUnit $UnitJUnit
+        }
         if (-not $phpImageAvailable) { throw 'INFRA: PHP test image unavailable' }
         $result = Invoke-Tool 'docker' @('run', '--rm', '--network', 'none',
             '-v', ($repoRoot + ':/repo'), '-w', '/repo/Docker/WebAPI',
@@ -1626,6 +1737,20 @@ if ($Filter) {
     }
 }
 
+# Round-Robin ueber die Reihenfolge der Auswahl: Fall i (ab 0) gehoert zu Shard
+# (i mod N) + 1. Die Familien liegen im Katalog beieinander; so verteilt sich
+# auch eine schwere Familie (doc-semantics) auf alle Shards.
+$selectedTotal = $selected.Count
+if ($shardCount -gt 0) {
+    $selected = @(for ($i = 0; $i -lt $selected.Count; $i++) {
+            if (($i % $shardCount) -eq ($shardIndex - 1)) { $selected[$i] }
+        })
+    if ($selected.Count -eq 0) {
+        Write-Host ('test-guards.ps1: Shard {0}/{1} ist leer ({2} Fall/Faelle ausgewaehlt)' -f $shardIndex, $shardCount, $selectedTotal) -ForegroundColor Red
+        exit 3
+    }
+}
+
 if ($List) {
     Write-Host ('{0} Guard-Faelle:' -f $selected.Count)
     foreach ($c in $selected) { Write-Host ('  ' + $c.Name) }
@@ -1644,30 +1769,135 @@ $unproven = 0
 $infra = 0
 $caseNumber = 0
 $caseTotal = $selected.Count
+$invariant = [System.Globalization.CultureInfo]::InvariantCulture
 
+function Format-GuardSeconds {
+    param([System.Diagnostics.Stopwatch]$Watch)
+    return $Watch.Elapsed.TotalSeconds.ToString('0.0', $invariant) + 's'
+}
+
+# Abschlusszeile eines Laufs; der Elternprozess liest sie aus jedem Shard zurueck.
+$summaryPattern = '^Guards: (\d+) proven, (\d+) unproven, (\d+) infra => Exit (\d+)'
+
+# --- Elternprozess: N Shards gleichzeitig ---------------------------------------
+$shardWorkers = [Math]::Min($Parallel, $selected.Count)
+if ($shardWorkers -gt 1) {
+    . (Join-Path (Join-Path (Join-Path $scriptDir 'lib') 'check') 'child-streams.ps1')
+    $workers = @()
+    $doneCases = 0
+    $overall = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        Write-Host ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle in {1} Shards' -f $selected.Count, $shardWorkers) -ForegroundColor Cyan
+        for ($k = 1; $k -le $shardWorkers; $k++) {
+            $argumentLine = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Shard ' + $k + '/' + $shardWorkers
+            if ($Filter) { $argumentLine += ' -Filter "' + ($Filter -join ',') + '"' }
+            if ($UnitJUnit -ne '') { $argumentLine += ' -UnitJUnit "' + $UnitJUnit + '"' }
+            $shardCases = 0
+            for ($i = $k - 1; $i -lt $selected.Count; $i += $shardWorkers) { $shardCases++ }
+            Write-Host ('[{0}/{1}] RUN  Shard {0}/{1} ({2} Fall/Faelle)' -f $k, $shardWorkers, $shardCases) -ForegroundColor Cyan
+            $worker = Start-StreamedChild -Exe $hostShell -ArgumentLine $argumentLine `
+                -OutPath (Join-Path $workRoot ('shard-' + $k + '.out')) -ErrPath (Join-Path $workRoot ('shard-' + $k + '.err'))
+            $worker.Index = $k
+            $worker.Cases = $shardCases
+            $worker.Summary = $null
+            $workers += $worker
+        }
+
+        # Jede vollstaendige Kindzeile sofort weitergeben; Ergebniszeilen bekommen
+        # den Gesamtzaehler, die Abschlusszeile wird fuer die Zusammenfassung gemerkt.
+        function Send-ShardLines {
+            param($Worker, [switch]$Final)
+            foreach ($line in @(Read-StreamedChildLines $Worker -Final:$Final)) {
+                if ($line -eq '') { continue }
+                $suffix = ''
+                if ($line -match '^\[\d+/\d+\] (proven|unproven|infra) ') {
+                    $script:doneCases = $script:doneCases + 1
+                    $suffix = (' | gesamt {0}/{1}' -f $script:doneCases, $selected.Count)
+                }
+                if ($line -match $summaryPattern) { $Worker.Summary = $Matches }
+                Write-Host ('[Shard {0}/{1}] {2}{3}' -f $Worker.Index, $shardWorkers, $line, $suffix)
+            }
+        }
+
+        while (@($workers | Where-Object { -not $_.Finished }).Count -gt 0) {
+            foreach ($worker in @($workers | Where-Object { -not $_.Finished })) {
+                Send-ShardLines $worker
+                if (-not (Test-StreamedChildExited $worker)) { continue }
+                Send-ShardLines $worker -Final
+                foreach ($line in @(Close-StreamedChild $worker)) {
+                    Write-Host ('[Shard {0}/{1}] stderr: {2}' -f $worker.Index, $shardWorkers, $line) -ForegroundColor Yellow
+                }
+                $childExit = $worker.ExitCode
+                $summary = $worker.Summary
+                $complete = ($null -ne $summary) -and (([int]$summary[1] + [int]$summary[2] + [int]$summary[3]) -eq $worker.Cases)
+                if ($complete) {
+                    $proven += [int]$summary[1]
+                    $unproven += [int]$summary[2]
+                    $infra += [int]$summary[3]
+                }
+                $word = 'proven'
+                $color = 'Green'
+                if ($childExit -eq 1 -or ($complete -and [int]$summary[2] -gt 0)) {
+                    $word = 'unproven'
+                    $color = 'Red'
+                    if (-not $complete) { $unproven += 1 }
+                } elseif ($childExit -ne 0 -or -not $complete -or [int]$summary[3] -gt 0) {
+                    $word = 'infra'
+                    $color = 'Yellow'
+                    if (-not $complete) { $infra += 1 }
+                }
+                $detail = 'Abschlusszeile fehlt oder unvollstaendig'
+                if ($complete) { $detail = ('{0} proven, {1} unproven, {2} infra' -f $summary[1], $summary[2], $summary[3]) }
+                Write-Host ('[{0}/{1}] {2} Shard {0}/{1} ({3}) - {4}, Exit {5}' -f $worker.Index, $shardWorkers, $word, (Format-GuardSeconds $worker.Watch), $detail, $childExit) -ForegroundColor $color
+            }
+            if (@($workers | Where-Object { -not $_.Finished }).Count -gt 0) { Start-Sleep -Milliseconds 250 }
+        }
+    } finally {
+        # Nur bei Abbruch des Elternprozesses wirksam: die eigenen Kinder samt Baum.
+        Stop-StreamedChildren $workers
+        Remove-Item -Recurse -Force -Path $workRoot -ErrorAction SilentlyContinue
+    }
+    $overall.Stop()
+    $exitCode = 0
+    if ($infra -gt 0) { $exitCode = 2 }
+    if ($unproven -gt 0) { $exitCode = 1 }
+    Write-Host ''
+    Write-Host ('Guards: {0} proven, {1} unproven, {2} infra => Exit {3} ({4} Shards, {5})' -f $proven, $unproven, $infra, $exitCode, $shardWorkers, (Format-GuardSeconds $overall)) `
+        -ForegroundColor $(if ($exitCode -eq 0) { 'Green' } elseif ($exitCode -eq 1) { 'Red' } else { 'Yellow' })
+    exit $exitCode
+}
+
+# --- Ein Prozess: Faelle nacheinander ---------------------------------------------
 try {
-    Write-Host ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle' -f $selected.Count) -ForegroundColor Cyan
+    $header = ('==> VirtuSphere test-guards.ps1 - {0} Fall/Faelle' -f $selected.Count)
+    if ($shardCount -gt 0) { $header += (' (Shard {0}/{1} von {2})' -f $shardIndex, $shardCount, $selectedTotal) }
+    Write-Host $header -ForegroundColor Cyan
     foreach ($case in $selected) {
         $caseNumber = $caseNumber + 1
         Write-Host ('[{0}/{1}] RUN  {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Cyan
         $verdict = $null
+        $caseWatch = [System.Diagnostics.Stopwatch]::StartNew()
         try {
             $verdict = & $case.Body
         } catch {
             $verdict = @{ Status = 'infra'; Detail = ('Exception: ' + $_.Exception.Message) }
         }
+        $caseWatch.Stop()
+        # Die Dauer haengt hinter dem Fallnamen; die Zeilenform davor bleibt die
+        # vertraute (ProgressReporting liest sie).
+        $seconds = ' (' + (Format-GuardSeconds $caseWatch) + ')'
         switch ($verdict.Status) {
             'proven' {
                 $proven = $proven + 1
-                Write-Host ('[{0}/{1}] proven   {2}' -f $caseNumber, $caseTotal, $case.Name) -ForegroundColor Green
+                Write-Host (('[{0}/{1}] proven   {2}' -f $caseNumber, $caseTotal, $case.Name) + $seconds) -ForegroundColor Green
             }
             'infra' {
                 $infra = $infra + 1
-                Write-Host ('[{0}/{1}] infra    {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Yellow
+                Write-Host (('[{0}/{1}] infra    {2}' -f $caseNumber, $caseTotal, $case.Name) + $seconds + ' - ' + $verdict.Detail) -ForegroundColor Yellow
             }
             default {
                 $unproven = $unproven + 1
-                Write-Host ('[{0}/{1}] unproven {2} - {3}' -f $caseNumber, $caseTotal, $case.Name, $verdict.Detail) -ForegroundColor Red
+                Write-Host (('[{0}/{1}] unproven {2}' -f $caseNumber, $caseTotal, $case.Name) + $seconds + ' - ' + $verdict.Detail) -ForegroundColor Red
             }
         }
     }

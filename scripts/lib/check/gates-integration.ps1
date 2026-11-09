@@ -352,7 +352,16 @@ function Register-IntegrationCheckGates {
     Add-Gate -Name 'guard-harness' -Lanes $intRel -Kind 'native' -Body {
         $hostExe = 'powershell'
         if ($PSVersionTable.PSEdition -eq 'Core') { $hostExe = 'pwsh' }
-        $r = Invoke-Tool $hostExe @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'test-guards.ps1')) -Live
+        # Vier Shard-Prozesse (C2): die Faelle sind unabhaengig, jeder Prozess hat
+        # sein eigenes Laufverzeichnis; der Harness fasst die Exitcodes zusammen
+        # (1 vor 2 vor 0) und gibt die Zeilen jedes Shards sofort weiter.
+        $guardArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $scriptDir 'test-guards.ps1'), '-Parallel', '4')
+        # Hat phpunit-unit in diesem Lauf seinen JUnit-Bericht geschrieben, weist
+        # der Harness die Closure-Proben darin nach, statt sie ein drittes Mal zu
+        # fahren (R1); sonst faehrt er sie selbst.
+        $unitJUnit = Join-Path $artifactDir 'phpunit-unit.xml'
+        if (Test-Path -LiteralPath $unitJUnit -PathType Leaf) { $guardArguments += @('-UnitJUnit', $unitJUnit) }
+        $r = Invoke-Tool $hostExe $guardArguments -Live
         if ($r.ExitCode -eq 2) { return New-InfraResult 'Guard-Harness ohne vollstaendige Umgebung' $r.Output }
         Format-ToolResult $r 'alle Guards positiv/negativ/zero-match bewiesen' 'Guard-Harness meldet unbewiesene Guards'
     }

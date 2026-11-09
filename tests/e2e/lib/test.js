@@ -1,5 +1,6 @@
 // The `test` every spec imports (M1). It is Playwright's own test plus one
-// automatic fixture that renews the role logins.
+// automatic fixture that renews the role logins, and a worker fixture that
+// tells the exec profile (lib/exec-profile.js) which project the worker runs.
 //
 // Why: the setup project logs in once per run, and the portal ends a session
 // 3600 s after login no matter how active it is (lib/auth.php). One
@@ -29,6 +30,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const base = require('@playwright/test');
 const { ROLES, AUTH_DIR, refreshStorageState } = require('./auth');
+const profile = require('./exec-profile');
 
 // Far below the 3600 s session lifetime.
 const REFRESH_AFTER_MS = 20 * 60 * 1000;
@@ -52,6 +54,11 @@ function renewalDue(marker, project, now) {
 }
 
 const test = base.test.extend({
+  // Names this worker's project in the exec profile (C4), before any hook seeds.
+  execProfileProject: [async ({}, use, workerInfo) => {
+    profile.setProject(workerInfo.project.name);
+    await use();
+  }, { scope: 'worker', auto: true }],
   roleLogins: [async ({ browser }, use, testInfo) => {
     const project = testInfo.project.name;
     if (renewalDue(readMarker(), project, Date.now())) {

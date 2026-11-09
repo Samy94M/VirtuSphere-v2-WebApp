@@ -223,7 +223,7 @@ final class AnsiblePlaybookVariableContractTest extends TestCase
             ['host' => 'esxi01.example.invalid', 'port' => 443, 'username' => 'root'],
             'secret',
             ['username' => 'ansible'],
-            'http://10.10.10.10:8021'
+            'http://198.51.100.10:8021'
         );
         preg_match_all('/^([A-Za-z_]\w*):/m', $yaml, $matches);
         self::assertContains('esxi_hostname', $matches[1]);

@@ -109,7 +109,7 @@ function inventory_bucket_label(array $bucket): string
 }
 
 /**
- * "esxi-prod-02 (10.0.5.12)". The address is dropped when the credential has
+ * "esxi-prod-02 (198.51.100.12)". The address is dropped when the credential has
  * none; a trailing empty bracket would state a fact nobody has.
  *
  * @param array{name:string, host:string} $credential

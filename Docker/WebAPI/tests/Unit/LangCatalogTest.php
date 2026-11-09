@@ -56,6 +56,43 @@ final class LangCatalogTest extends TestCase
         self::assertSame([], array_values(array_unique($missing)));
     }
 
+    public function testNumberedHelpListsRenderEveryCatalogKeyWithoutAGap(): void
+    {
+        // The identity-cause help loops to Lang::countNumbered() instead of a
+        // written count; a gap in the numbering would end the loop early and
+        // hide every later key, so the keys must run 1..n without a hole.
+        $prefix = 'help_system_status.system_status_identity_';
+        $counts = [];
+        foreach (Lang::LOCALES as $locale) {
+            $numbers = [];
+            foreach (array_keys($this->catalog($locale)) as $key) {
+                if (preg_match('/^' . preg_quote($prefix, '/') . '(\d+)$/', $key, $match) === 1) {
+                    $numbers[] = (int) $match[1];
+                }
+            }
+            sort($numbers);
+            self::assertNotSame([], $numbers, $locale . ': no numbered key under ' . $prefix);
+            self::assertSame(range(1, count($numbers)), $numbers, $locale . ': numbered keys must run 1..n without a gap');
+            $counts[$locale] = Lang::countNumbered($prefix, $locale);
+            self::assertSame(count($numbers), $counts[$locale], $locale . ': countNumbered must reach the last key');
+        }
+        self::assertSame($counts['de'], $counts['en']);
+
+        $template = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/help/system_status.php');
+        self::assertStringContainsString("Lang::countNumbered('" . $prefix . "')", $template);
+        self::assertDoesNotMatchRegularExpression('/\$identityCause\s*<=\s*\d/', $template, 'the loop bound must not be a written number');
+    }
+
+    public function testCountNumberedIsZeroForAnAbsentPrefixAndFallsBackForAnUnknownLocale(): void
+    {
+        self::assertSame(0, Lang::countNumbered('help_system_status.no_such_numbered_key_', 'de'));
+        // An unknown locale falls back to the default catalog, as getIn() does.
+        self::assertSame(
+            Lang::countNumbered('help_system_status.system_status_identity_', 'de'),
+            Lang::countNumbered('help_system_status.system_status_identity_', 'xx')
+        );
+    }
+
     /**
      * @return list<string>
      */

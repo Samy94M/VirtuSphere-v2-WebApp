@@ -151,18 +151,23 @@ function backup_encryption_handle_action(mysqli $db, array $user, string $action
     try {
         if ($action === 'save_backup_certificate') {
             $certificate = backup_encryption_parse_certificate(request_string($_POST, 'backup_certificate'));
-            repo_set_setting($db, VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, $certificate['pem']);
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
-                'action' => 'updated',
-                'old_value' => $previous === null ? 'none' : substr($previous['fingerprint'], 0, 16),
-                'new_value' => substr($certificate['fingerprint'], 0, 16),
-            ], (int) $user['id']);
+            // W3A (R19): the setting and its row commit or roll back together.
+            repo_transaction($db, static function () use ($db, $certificate, $previous, $user): void {
+                repo_set_setting($db, VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, $certificate['pem']);
+                audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, [
+                    'action' => 'updated',
+                    'old_value' => $previous === null ? 'none' : substr($previous['fingerprint'], 0, 16),
+                    'new_value' => substr($certificate['fingerprint'], 0, 16),
+                ], (int) $user['id']);
+            });
             flash_set('success', __t('settings.backup_cert_saved'));
 
             return;
         }
-        repo_delete_setting($db, VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE);
-        audit_event($db, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
+        repo_transaction($db, static function () use ($db, $user): void {
+            repo_delete_setting($db, VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE);
+            audit_event_required($db, VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', VIRTUSPHERE_SETTING_BACKUP_ENCRYPTION_CERTIFICATE, VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'cleared'], (int) $user['id']);
+        });
         flash_set('success', __t('settings.backup_cert_removed'));
     } catch (ValidationException $exception) {
         // The pasted text is never echoed back: it may be the private key the

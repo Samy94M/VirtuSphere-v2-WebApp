@@ -29,7 +29,7 @@ final class CredentialsTestActionTest extends TestCase
 
     public function testAllowlistWarningPointsAtTheMachineApiTab(): void
     {
-        $action = credentials_test_action($this->makeResult(true, VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST, ['ip' => '10.0.0.5']));
+        $action = credentials_test_action($this->makeResult(true, VIRTUSPHERE_CREDENTIAL_TEST_ALLOWLIST, ['ip' => '192.0.2.5']));
         self::assertNotNull($action);
         self::assertSame('settings.php#panel-machine-api', $action['url']);
         self::assertNotSame('', $action['label']);

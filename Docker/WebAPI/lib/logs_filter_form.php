@@ -112,7 +112,7 @@ function logs_filter_option(string $value, string $label, string $current): stri
  *
  * Both halves are load-bearing; the reasons are in this file's header. The
  * parameter is named `$code` rather than the more obvious word, because
- * AuditProducerContractTest refuses a credential-shaped parameter on anything
+ * the audit-contract gate (token-sink) refuses a credential-shaped parameter on anything
  * whose name contains `log`, and it is right to: the signature is the boundary,
  * not today's call sites.
  */

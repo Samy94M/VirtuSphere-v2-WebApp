@@ -2,8 +2,13 @@
 // The container's port is deliberately unpublished (the DB must not be reachable
 // on the LAN), so a shelled-out mysql client is the honest path and needs no
 // compose change (ADR-0028).
+//
+// No spec calls this today (C4, 08.11.2026): every seed and proof goes through
+// lib/php.js. The call is counted in the exec profile like runPhp, so a new
+// caller shows up there; it keeps one `docker exec` per statement.
 
 const { execFileSync } = require('node:child_process');
+const profile = require('./exec-profile');
 
 const CONTAINER = process.env.VIRTUSPHERE_MYSQL_CONTAINER || 'virtusphere-v2-webapp-mysql-1';
 const DB_NAME = process.env.DB_NAME || 'deploymentcenter';
@@ -18,14 +23,14 @@ function query(sql) {
     'MYSQL_PWD="$MYSQL_PASSWORD" mysql --batch --raw -u"$MYSQL_USER" "' + DB_NAME + '" -e ' +
     shellQuote(sql);
 
-  const out = execFileSync(
+  const out = profile.timed({ helper: 'db.query', transport: 'exec', container: CONTAINER }, () => execFileSync(
     'docker',
     ['exec', CONTAINER, 'sh', '-c', script],
     // Generous: under the release browser matrix (Firefox/WebKit/Edge) the docker
     // daemon can slow enough that a 15s exec times out (spawnSync ETIMEDOUT) on
     // Edge. 60s keeps the seed/proof robust without masking a real hang.
     { encoding: 'utf8', timeout: 60000 }
-  );
+  ));
 
   return parseTsv(out);
 }

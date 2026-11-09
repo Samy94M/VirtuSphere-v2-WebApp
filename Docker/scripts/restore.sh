@@ -4,5 +4,5 @@
 # Verifikation. Der kanonische, bewiesene Weg ist der Restore-Drill
 # scripts/restore_test.sh plus das Disaster-Recovery-Runbook in
 # docs/operations/backup.md. Dieses Skript schlaegt absichtlich hart fehl.
-echo "FEHLER: Docker/scripts/restore.sh ist stillgelegt. Restore-Probe: sh scripts/restore_test.sh; Ernstfall: docs/operations/backup.md (Disaster Recovery)." >&2
+echo "FEHLER: Docker/scripts/restore.sh ist stillgelegt. Restore-Probe: sudo sh scripts/restore_test.sh; Ernstfall: docs/operations/backup.md (Disaster Recovery)." >&2
 exit 2

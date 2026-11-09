@@ -40,15 +40,15 @@ flowchart TD
     ready[Bereit] -->|Worker markiert die VM| deploying[Wird bereitgestellt]
     deploying -.->|Erfolg ohne MAC-Ergebnis oder Abbruch: Vorzustand| ready
     deploying -->|Auftrag scheitert| failed[Fehlgeschlagen]
-    deployed -->|Auftrag scheitert, auch ohne Markierung| failed
-    os_installing -->|Auftrag scheitert, auch ohne Markierung| failed
-    os_installed -->|Auftrag scheitert, auch ohne Markierung| failed
     failed -->|neuer Auftrag| deploying
     deploying -->|MAC-Rückruf| deployed[Bereitgestellt]
     deployed -->|Device-Sync meldet die ResourceID| os_installing[Betriebssystem wird installiert]
     os_installing -->|Client-Ready-ACK| os_installed[Betriebssystem installiert]
     deployed -->|Client-Ready-ACK vor dem Device-Sync| os_installed
     os_installed -.->|MECM-ID zurücksetzen| deployed
+    deployed -->|Auftrag scheitert, auch ohne Markierung| failed
+    os_installing -->|Auftrag scheitert, auch ohne Markierung| failed
+    os_installed -->|Auftrag scheitert, auch ohne Markierung| failed
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     classDef blocked fill:#fef2f2,stroke:#b91c1c,color:#0f172a;
     class initializing,ready,deploying,deployed,os_installing,os_installed step;

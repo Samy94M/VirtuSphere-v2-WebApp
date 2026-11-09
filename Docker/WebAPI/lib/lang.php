@@ -113,6 +113,26 @@ final class Lang
     }
 
     /**
+     * How many keys `<prefix>1`, `<prefix>2`, ... a catalog holds without a gap
+     * (active locale, or the given one). For lists numbered in the catalog: the
+     * template loops to this count instead of writing it down, so an added item
+     * cannot stay unrendered. Before Lang::load() the active count is 0.
+     */
+    public static function countNumbered(string $prefix, ?string $locale = null): int
+    {
+        if ($locale !== null && !in_array($locale, self::LOCALES, true)) {
+            $locale = self::DEFAULT_LOCALE;
+        }
+        $strings = $locale === null ? self::$strings : self::catalog($locale);
+        $count = 0;
+        while (isset($strings[$prefix . ($count + 1)])) {
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
      * Fills :placeholders in one pass. strtr() tries the longest key first, so
      * :page cannot eat the start of :pages, and a filled-in value is never
      * searched again for a later placeholder.
