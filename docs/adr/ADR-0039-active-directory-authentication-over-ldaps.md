@@ -115,3 +115,63 @@ require without a matching file, and the existing action/tab and rendered-id
 contracts continue to walk the complete owner set. Future form work therefore
 extends a focused tab owner without silently escaping CSRF, confirmation,
 redirect or deep-link coverage.
+
+## Amendment (2026-11-09): review findings, session revalidation and wall clock
+
+Source status 2026-11-08. Current Microsoft documentation states that LDAP
+signing and channel binding do not apply to a Simple Bind inside LDAPS: signing
+concerns SASL without TLS, and channel binding has no effect on Simple Bind
+over TLS. Windows Server 2025 enforces signing and sets channel binding to
+"When supported" for new deployments; TLS 1.3 may be negotiated. This removes
+the documentation inconsistency named in the context, but not the activation
+gate: Gate 0B still proves sign-in against the effective target policy, now
+with the step list in
+`docs/audits/2026-08-13-ldaps-target-ad-validation-protocol.md` and the
+read-only probe `scripts/gate0b-tls-probe.php`.
+
+Package N1a extends the decision without changing its boundaries:
+
+- **Input admission.** A password with a NUL byte, an AD password over
+  `VIRTUSPHERE_DIRECTORY_PASSWORD_MAX_BYTES` and an AD name that is not a valid
+  UPN are refused before any counter or LDAP contact. The same limit applies
+  to a newly saved search-account password.
+- **Session revalidation.** The periodic GUID recheck now also ends a session
+  when AD reports the account locked (`msDS-User-Account-Control-Computed`) or
+  when `pwdLastSet` differs from the value stored at sign-in. The local
+  authorization cache is written before the decision. Sessions from before
+  the change learn their baseline on the first successful recheck. A locally
+  deactivated portal account ends its session for good with a typed
+  `auth.session_ended` row; a later reactivation does not revive it.
+- **Strict attributes.** `userAccountControl` and `pwdLastSet` must be present
+  and parseable on every user entry; otherwise the result is
+  `invalid_response`, never an enabled default.
+- **Typed bind reasons.** Only the `data <hex>` sub-code is taken from the
+  controller diagnostic, in exactly one reader, and mapped to a closed
+  vocabulary. The text itself is never stored, logged or shown. A user
+  rejection keeps the generic sign-in message and records the typed reason in
+  the security log only. A search-account rejection still opens the revision
+  circuit breaker; its stored reason now says whether the password expired,
+  the account is disabled or expired, or locked.
+- **Timeouts.** `LDAP_OPT_TIMEOUT` clamps every synchronous answer wait to the
+  remaining request deadline, so a controller that completes TLS and then
+  stays silent costs at most the answer budget. PHP-FPM
+  `request_terminate_timeout` equals nginx `fastcgi_read_timeout` (300 s) as a
+  hard wall clock for any request; `request_slowlog_timeout` (30 s) logs the
+  script name to the container error stream. The FPM master runs without
+  `CAP_DAC_OVERRIDE` and `CAP_SYS_PTRACE`, so there is no slowlog file under
+  `logs/` and no backtrace.
+- **TLS floor fail-closed.** A runtime without the TLS minimum constants is
+  `extension_missing`, not a silent omission. The former
+  `LDAP_OPT_X_TLS_NEWCTX` branch is removed: PHP 8.4 resets the TLS context
+  internally (php-src PR 17940), and the CA-rotation fixture test proves it
+  for the shipped image.
+- **Certificate data.** After a successful directory operation the portal
+  reads the controller certificate through one TLS handshake at most once a
+  day per controller and revision, so a renewed certificate replaces the
+  expiry from the last manual test. A stored expiry in the past with a later
+  successful contact is shown as stale, not as danger.
+
+The 2026-11 hermetic fixture adds a certificate without Server Authentication
+EKU, a TLS 1.1-only endpoint and a controller that stays silent after TLS.
+AD sub-codes cannot be produced by OpenLDAP; their mapping is proven by unit
+tests and on a real controller in Gate 0B step F6.
