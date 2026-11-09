@@ -581,7 +581,8 @@ rein anzeigend und best effort bleiben.
   Eine alte oder zeitlich ungültige Meldung bestätigt keinen aktuellen Erfolg.
   Ein veralteter ehemals kritischer Sitewert bleibt als historischer Befund mit
   Zeitpunkt sichtbar, färbt die Gegenwart aber nicht rot; Rot bleibt einem
-  frischen MECM-bestätigten Status 2 vorbehalten. Ein Providerfehler bleibt
+  frischen MECM-bestätigten Status 2 vorbehalten, der nicht nur unterstützende
+  Teile betrifft (sonst gelb „Eingeschränkt“). Ein Providerfehler bleibt
   unabhängig vom Alter unbekannt. Ein gestarteter Sync zeigt den aktuellen
   Start getrennt vom letzten abgeschlossenen Ergebnis.
 - Abgewiesene Machine-API-Zugriffe erscheinen als historische Ereignisse im
@@ -694,7 +695,8 @@ der Sync-Aufgaben) und der MECM-Site-Status sind getrennt zu lesen.
 |---|---|---|
 | Integration rot/stale, Site-Status grün | MECM läuft, aber die Meldung eines Sync-Reporters ist stark überfällig oder wurde abgelehnt; daraus folgt allein kein Prozesszustand | Lokales Tageslog lesen; fehlen neue Einträge, Aufgabenplanung prüfen und die benannte Aufgabe starten |
 | Integration grün, Site-Status gelb | Datenfluss ok, MECM meldet eine Warnung (Status 1) | MECM-Konsole → Monitoring → System Status |
-| Integration grün, Site-Status rot | Datenfluss ok, MECM meldet Status 2 (kritisch) | MECM-Konsole → Monitoring → System Status; das ist ein MECM-Problem, kein VirtuSphere-Problem |
+| Integration grün, Site-Status gelb „Eingeschränkt“ | Datenfluss ok, MECM meldet Status 2, kritisch sind aber nur unterstützende Rollen oder Komponenten (etwa Verteilungspunkte); die Karte nennt sie | MECM-Konsole → Monitoring → System Status, die genannten Teile prüfen |
+| Integration grün, Site-Status rot „Kritisch“ | Datenfluss ok, MECM meldet Status 2 und ein Kernteil, ein nicht eingeordneter Teil oder eine unvollständige Liste ist betroffen | MECM-Konsole → Monitoring → System Status; das ist ein MECM-Problem, kein VirtuSphere-Problem |
 | Site-Status grau (unbekannt) | Providerfehler (nicht erreichbar oder Zugriff verweigert), **nicht** „MECM kritisch" | Providername und SYSTEM-Berechtigung prüfen (Remote-Provider siehe unten); ein „nicht erreichbar" nach MECM-Reboot löst sich von selbst |
 | Sync-Zeile gelb „Ergebnis: Warnung" | Lauf mit partiellem Fehler (ungültige MAC, fehlende Collection, 409-Schutzschwelle) | Detailtext der Zeile und MECM-Log lesen |
 | Sync-Zeile gelb „Legacy: Ergebnis nicht bestätigt" | Alt-Skript sendet nur Heartbeats, kein Ergebnis | Installer/Skripte aktualisieren |
@@ -901,7 +903,15 @@ Administratoren-Rechten neu aufgebaut.
 
 Site-Health verwendet nur den in `MECM_SiteCode` gespeicherten Code. Fehlt er,
 ist der exakte Treffer nicht eindeutig oder ist der Rohstatus unlesbar, bleibt
-die Anzeige grau. Rot entsteht ausschließlich aus Rohstatus 2. Laufzeiten der
+die Anzeige grau. Rot entsteht ausschließlich aus Rohstatus 2, aber nicht jeder
+Rohstatus 2 ist rot: Meldet der Reporter, dass nur unterstützende Rollen und
+Komponenten kritisch sind (etwa Verteilungspunkte oder Erkennung), zeigt das
+Portal „Eingeschränkt“ (gelb). Die Einordnung je Typ
+steht in einer Tabelle (`lib/mecm_site_assessment.php`, Gründe im Register
+`docs/register/2026-11-09-MSB.md`); ein unbekannter Typ behält das MECM-Urteil.
+Zustand und Zählung gelten nur für die konfigurierte Site, deren Code die Karte
+nennt; untergeordnete Sites einer Hierarchie und deren Verteilungspunkte zählen
+nicht mit. Laufzeiten der
 vier Aufgaben werden vor dem Integercast auf den Reportvertrag begrenzt; das
 Intervall bezeichnet den Schlafabstand zusätzlich zur Laufzeit und keine exakte
 Wanduhrkadenz.
@@ -923,7 +933,7 @@ zwei Triggern (`AtStartup` **und** stündliche Wiederholung),
 | VirtuSphere MECM Devices Sync | `mecm_new-device-sync.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
 | VirtuSphere MECM Packages Sync | `mecm_Packages-TaskSeq-sync.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
 | VirtuSphere MECM Package Import | `mecm_autoimporter.ps1` | `started`/`completed` je Lauf, Ergebnis + Zähler |
-| VirtuSphere MECM Site Health | `mecm_site-health.ps1` | nur `completed`: Site-Code, Provider, Rohstatus 0/1/2 |
+| VirtuSphere MECM Site Health | `mecm_site-health.ps1` | nur `completed`: Site-Code, Provider, Rohstatus 0/1/2; bei 1/2 zusätzlich `site_parts` (Rollen und Komponenten je Typ und Status) |
 
 Die Abläufe der vier Aufgaben zeigen die Diagramme in [MECM-Serveraufgaben: Abläufe](mecm-scheduled-tasks.md).
 
@@ -1015,12 +1025,66 @@ dieser Eintrag, kommt er mehrfach vor oder ist sein Rohstatus nicht lesbar,
 bleibt das Ergebnis `unknown`; eine andere Site wird nie ersatzweise verwendet.
 Bei eindeutigem Eintrag meldet sie den
 offiziellen MECM-Site-Zustand: `0` = OK (grün), `1` = Warnung (gelb),
-`2` = kritisch (rot), jeder andere Rohwert = unbekannt (grau). Providerfehler
+`2` = kritisch, jeder andere Rohwert = unbekannt (grau). Bei Status 2 zeigt das
+Portal rot „Kritisch“, außer der Reporter belegt vollständig, dass nur
+unterstützende Teile kritisch sind; dann gelb „Eingeschränkt“. Providerfehler
 (nicht erreichbar, Zugriff verweigert, Abfrage fehlgeschlagen) werden als
-`unknown` (grau) gemeldet; Rot ist exklusiv dem MECM-bestätigten Status 2
-vorbehalten. „Nicht erreichbar" wird erst nach zwei aufeinanderfolgenden
+`unknown` (grau) gemeldet; Rot setzt immer den MECM-bestätigten Status 2
+voraus. „Nicht erreichbar" wird erst nach zwei aufeinanderfolgenden
 Fehlversuchen gemeldet, damit ein MECM-Reboot nicht sofort einen Fehler ins Portal
 schreibt.
+
+#### Wie MECM den Standort rot färbt
+
+MECM leitet den Standortzustand aus zwei Zusammenfassungen ab, die die Konsole
+unter Monitoring, System Status zeigt ([L-STATUS]):
+
+- **Komponentenstatus:** MECM zählt die Statusmeldungen jeder Komponente im
+  Schwellenzeitraum, standardmäßig „Since 00:00:00“; um Mitternacht setzt MECM
+  die Zähler zurück. Standardschwellen für Fehlermeldungen: ab 1 Warnung, ab 5
+  kritisch (Warnmeldungen 10/50, Informationsmeldungen 2000/5000).
+- **Standortsystemstatus:** je Standortsystem und Speicherobjekt, unter anderem
+  nach freiem Platz (Standard: Warnung unter 10 GB, kritisch unter 5 GB).
+
+Nicht erreichbare Verteilungspunkte erscheinen deshalb doppelt: als kritische
+Rolle `SMS Distribution Point` und über die Fehlermeldungen, die der
+Verteilungs-Manager beim Verteilen an sie schreibt. Der Weg zu Grün führt über die
+Verteilungspunkte: wieder erreichbar machen oder aus MECM entfernen. Der
+Komponentenzähler sinkt erst mit dem Zurücksetzen um Mitternacht; bis dahin
+bleibt eine Komponente auf ihrem Tageswert, auch wenn die Ursache behoben ist.
+
+#### Einordnung der Rollen und Komponenten
+
+Bei Warnung oder kritisch zählt der Reporter die Rollen und Komponenten, die MECM
+als Warnung oder kritisch führt, je Typname. Das Portal ordnet jeden Typ über eine Tabelle
+ein (SSoT: `VIRTUSPHERE_MECM_SITE_PART_TYPES` in
+`Docker/WebAPI/lib/mecm_site_assessment.php`; ein Test hält diese Übersicht
+gleich). Kernteil heißt: Fällt er aus, stehen Standortbetrieb, Datenbank,
+Richtlinien, Clientverwaltung oder der Paketimport. Unterstützend heißt: Eine
+einzelne Funktion fällt aus, der Standort arbeitet weiter. Ein Typ, der hier
+fehlt, behält das MECM-Urteil. „Eingeschränkt“ (gelb) gilt nur, wenn die Liste
+vollständig ist und jeder kritische Teil unterstützend ist; sonst „Kritisch“
+(rot), mit den kritischen Teilen in der Tabelle der Standortkarte.
+
+| Art | Typen | Einordnung | Begründung | Quellen |
+|---|---|---|---|---|
+| Rolle | `SMS Site Server`, `SMS SQL Server`, `SMS Provider`, `SMS Management Point` | Kernteil | Standortserver, Standortdatenbank, Schnittstelle für Konsole und Skripte, Richtlinien für alle Clients | [L-ROLE], [L-CONTENT] |
+| Rolle | `SMS Distribution Point`, `SMS Software Update Point`, `SMS SRS Reporting Point`, `SMS Fallback Status Point`, `SMS Dmp Connector`, `SMS Cloud Proxy Connector`, `SMS State Migration Point`, `SMS Endpoint Protection Point` | unterstützend | Inhalt (Clients nutzen andere Verteilungspunkte), Updates, Berichte, Fallbackstatus, Dienstverbindung, Cloudgateway, Benutzerzustand, Endpoint Protection | [L-ROLE], [L-CONTENT], [L-LOG] |
+| Komponente | `SMS_EXECUTIVE`, `SMS_SITE_COMPONENT_MANAGER`, `SMS_SITE_CONTROL_MANAGER`, `SMS_HIERARCHY_MANAGER`, `SMS_DATABASE_NOTIFICATION_MONITOR`, `SMS_POLICY_PROVIDER`, `SMS_MP_CONTROL_MANAGER`, `SMS_STATE_SYSTEM`, `SMS_STATUS_MANAGER`, `SMS_CERTIFICATE_MANAGER` | Kernteil | Dienst aller Komponenten, Standortkonfiguration, Datenbankauslöser, Richtlinien, Verwaltungspunkt, Status, Zertifikate | [L-LOG] |
+| Komponente | `SMS_DISTRIBUTION_MANAGER`, `SMS_PACKAGE_TRANSFER_MANAGER` | Kernteil | Nutzerentscheid (Register MSB): Ohne sie erreicht kein Inhalt einen Verteilungspunkt (der Paketübertragungs-Manager bedient Verteilungspunkte auf anderen Servern), der Paketimport stockt | [L-LOG], [L-CONTENT] |
+| Komponente | `SMS_AD_SYSTEM_DISCOVERY_AGENT`, `SMS_AD_USER_DISCOVERY_AGENT`, `SMS_AD_SECURITY_GROUP_DISCOVERY_AGENT`, `SMS_AD_FOREST_DISCOVERY_MANAGER`, `SMS_NETWORK_DISCOVERY` | unterstützend | Erkennung neuer Objekte; bestehende Clients laufen weiter | [L-LOG] |
+| Komponente | `SMS_SERVICE_CONNECTOR`, `SMS_CLOUDCONNECTION`, `SMS_DMP_DOWNLOADER`, `SMS_DMP_UPLOADER`, `SMS_CLOUD_PROXYCONNECTOR` | unterstützend | Dienstverbindungspunkt, Clouddienste, Cloudgateway; im Air-Gap erwartbar gestört, wird gezeigt, nicht unterdrückt | [L-LOG], [KB-WSFB] |
+| Komponente | `SMS_WSUS_SYNC_MANAGER`, `SMS_WSUS_CONTROL_MANAGER`, `SMS_WSUS_CONFIGURATION_MANAGER`, `SMS_SRS_REPORTING_POINT`, `SMS_FALLBACK_STATUS_POINT`, `SMS_ENDPOINT_PROTECTION_MANAGER`, `SMS_SOFTWARE_METERING_PROCESSOR`, `SMS_INVENTORY_DATA_LOADER` | unterstützend | Softwareupdates, Berichte, Fallbackstatus, Endpoint Protection, Softwaremessung, Inventur | [L-LOG] |
+| Komponente | `SMS_SITE_BACKUP`, `SMS_SITE_VSS_WRITER`, `SMS_COMPONENT_STATUS_SUMMARIZER`, `SMS_SITE_SYSTEM_STATUS_SUMMARIZER` | unterstützend | Sicherung und Statuszusammenfassung; der Betrieb läuft weiter | [L-LOG], [L-STATUS] |
+
+Nicht eingeordnet bleiben unter anderem `SMS Site System` und
+`SMS Component Server` (Basisrollen jedes Standortsystems, Zweck nicht belegt).
+Gründe je Zeile und weitere Quellen stehen im Register
+`docs/register/2026-11-09-MSB.md`. Die Kürzel verweisen auf dessen
+Quellenliste mit den vollständigen Adressen: [L-STATUS] Statussystem und
+Schwellen, [L-ROLE] Rollennamen, [L-CONTENT] Inhaltsverwaltung, [L-LOG]
+Logdateien je Komponente (alle Microsoft Learn), [KB-WSFB] Microsoft Store for
+Business (Microsoft Support).
 
 Provider und Intervall sind Registry-owned (`HKLM:\SOFTWARE\VirtuSphere\MECM`),
 keine Portal-Settings:
@@ -1548,8 +1612,9 @@ Schritt eine Aufgabe hängen bleibt, zeigen die Diagramme in
   der MECM-Server aus, bleiben zuerst die Ergebnisberichte der Sync-Aufgaben aus
   (Integration wird stale/rot), und die Site-Health-Aufgabe kann den Provider nicht
   mehr abfragen (MECM-Site wird grau/unbekannt, nicht rot). Ein rotes MECM-Site
-  bedeutet ausschließlich den von MECM selbst bestätigten kritischen Status 2:
-  dann MECM-Konsole → Monitoring → System Status. Ein falsch konfigurierter
+  setzt den von MECM selbst bestätigten kritischen Status 2 voraus, bei dem nicht
+  nur unterstützende Teile betroffen sind: dann MECM-Konsole → Monitoring →
+  System Status. Ein falsch konfigurierter
   Provider oder eine fehlende Berechtigung zeigt sich als grau (Providerfehler),
   nicht als „kritisch".
 

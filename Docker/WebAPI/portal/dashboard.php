@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/repo/missions.php';
 require_once __DIR__ . '/../lib/repo/vms.php';
 require_once __DIR__ . '/../lib/repo/heartbeats.php';
 require_once __DIR__ . '/../lib/integration_health.php';
+require_once __DIR__ . '/../lib/mecm_site_display.php';
 require_once __DIR__ . '/../lib/deploy_service_health.php';
 require_once __DIR__ . '/../lib/system_status.php';
 require_once __DIR__ . '/../lib/client_phase_attention.php';
@@ -38,7 +39,9 @@ $healthSnapshot = integration_health_snapshot($connection);
 // critical MECM site must not present the data flow as failed, and a failed sync
 // must not claim MECM itself is critical (ADR-0018).
 $integrationState = (string) $healthSnapshot['mecm_sync']['state'];
-$mecmSiteState = (string) $healthSnapshot['mecm_site']['state'];
+// The site signal speaks MECM's own words (OK, warning, limited, critical), not the
+// reporter liveness words; an overdue reporter shows as such (ADR-0018 2026-11-09).
+$mecmSiteState = (string) ($healthSnapshot['mecm_site']['site_state'] ?? 'none');
 // Null when no ESXi credential exists: a tile that is permanently grey for a
 // feature nobody configured is noise, so it is not rendered at all.
 $hypervisorWorst = $healthSnapshot['esxi']['state'];
@@ -99,7 +102,7 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
         <?php if ($activeDeploys > 0) { ?>
             <a class="card kpi" href="deploy.php"><span class="muted"><?php echo h(__t('dashboard.kpi_active_deploys')); ?></span><span class="value value-info"><?php echo h($activeDeploys); ?></span></a>
         <?php } ?>
-        <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_system_status')); ?></span><span class="value value-signals"><?php echo portal_signal_row(__t('dashboard.kpi_integration'), $integrationState); ?><?php echo portal_signal_row(__t('dashboard.kpi_mecm_site'), $mecmSiteState); ?></span></a>
+        <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_system_status')); ?></span><span class="value value-signals"><?php echo portal_signal_row(__t('dashboard.kpi_integration'), $integrationState); ?><?php echo portal_signal_row(__t('dashboard.kpi_mecm_site'), '', mecm_site_badge($mecmSiteState)); ?></span></a>
         <?php if ($hypervisorWorst !== null) { ?>
             <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_hypervisor')); ?></span><span class="value"><?php echo esxi_state_badge((string) $hypervisorWorst); ?></span></a>
         <?php } ?>

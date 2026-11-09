@@ -331,3 +331,69 @@ wire field changes. The duration part is capped at
 still completed late cannot hide the next hang for most of a day. Without a
 reported duration only the fixed floors apply. Beyond the grace a run ages out
 exactly as before: the danger threshold decides between yellow and red.
+
+## Amendment (2026-11-09, MSB): the portal reads the MECM site verdict by part type
+
+**Why.** The site card showed MECM's summarized status 2 with the reporter
+liveness words of `heartbeat_badge()`, "Ausgefallen"/"Down" (and "Verzögert"
+for status 1), and said nothing about *what* MECM rated critical. On the target
+site the whole MECM area was red while distribution points, the distribution
+manager and AD system discovery were critical and cloud/service connection parts
+had warnings. The user ruled out a list of known systems: the answer has to work
+on any site without configuration. The user rates the distribution manager and the
+package transfer manager as core parts (without them no content reaches a DP),
+so that site stays red, now
+with its cause named on the card; the way back to green is repairing or
+removing the DPs, and MECM resets its component counts at midnight.
+
+**Wire (additive).** A completed `mecm-site-health` report may carry a
+top-level `site_parts` object: `roles` (`SMS_SiteSystemSummarizer.Role`) and
+`components` (`SMS_ComponentSummarizer.ComponentName`, tally interval of the
+console view "Since 12:00:00 AM") as lists of `{name, status, count}` with
+status 1 or 2, at most `VIRTUSPHERE_SITE_PART_MAX_ENTRIES` per list, plus
+`omitted` for rows the reporter could not send. Names match
+`VIRTUSPHERE_SITE_PART_NAME_PATTERN` (letters, digits, space, `_`, `-`; no dot,
+backslash or at sign), so no FQDN, path or account fits; server names and MECM
+message texts are never read into the report. A top-level field rather than a
+summary key on purpose: an older portal ignores unknown top-level fields (the
+reason MX1 needed its own action) but rejects unknown summary keys. Here a
+dropped object is harmless, because the old portal simply shows the MECM
+verdict, so the new reporter keeps working against it. This portal validates
+the object strictly (`Invalid site_parts`, 400; any other source is refused)
+and stores it inside `last_summary`; no migration. The outcome/category
+binding of the site source is unchanged: the reporter still sends MECM's raw
+verdict.
+
+**Assessment (display only).** `lib/mecm_site_assessment.php` holds the one
+type table (`VIRTUSPHERE_MECM_SITE_PART_TYPES`): each known role and component
+type is a core part or supporting. MECM ok, warning and unknown stay as they
+are. MECM critical becomes "limited" (yellow, "Eingeschränkt"/"Degraded") only
+when the list is complete (`omitted = 0`), at least one part is critical and
+every critical part is a supporting type; an unclassified type, a core part, a
+cut list, a missing list or a critical verdict without a critical part keep
+"critical" (red). The portal therefore never rates a site better than MECM
+without knowing every critical part, and never worse than MECM. A new type is
+one table row; the reasons and sources per row are in
+`docs/register/2026-11-09-MSB.md`. Types the sources do not settle (for
+example `SMS Site System`, `SMS Component Server`) stay unclassified. Service
+connection point and cloud components (`SMS_SERVICE_CONNECTOR`,
+`SMS_CLOUDCONNECTION`) are supporting: in an air gap they show as degraded and
+are never hidden.
+
+**Words.** The site state has its own badge, `mecm_site_badge()`: OK,
+Warnung/Warning, Eingeschränkt/Degraded, Kritisch/Critical, Unbekannt/Unknown.
+The reporter axis stays separate ("Überfällig"/"Overdue", stale evidence
+"Veraltet"/"Stale"). The card adds one line with the counts per kind and a
+table of the affected types with their class; what MECM itself reported
+("MECM meldet kritisch") stays next to the badge. The group heading and the
+Dashboard tile use the same words; the MECM card of the overview strip shows
+the worse of integration and site in that group's own words (on equal rank the
+integration). In the worst-of roll-ups "limited" ranks as
+a warning. This supersedes the sentence "Rot ist exklusiv dem MECM-bestätigten
+kritischen Status 2 vorbehalten" of the 2026-07-23 amendment in one direction
+only: red still requires raw status 2, but raw status 2 is no longer always red.
+
+**Rollout.** Portal first is not required: either order works. The portal
+change shows the new words at once; the counts appear after
+`install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly` brings
+`site-health/1.1`.

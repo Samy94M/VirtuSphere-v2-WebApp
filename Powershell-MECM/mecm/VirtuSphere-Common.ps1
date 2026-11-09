@@ -726,6 +726,19 @@ $script:VsRunSiteErrorOutcome = @{
     'query_failed'           = 'unknown'
 }
 
+# Standortteile (Spiegel VIRTUSPHERE_SITE_PART* in lib/mecm_site_parts.php): Zaehlung
+# der Standortsystemrollen und Komponenten, die MECM selbst als Warnung (1) oder
+# kritisch (2) fuehrt, je Typname und Status. Nur Typnamen, nie Servernamen und
+# nie MECM-Meldungstexte; das Muster laesst keinen Punkt, Backslash oder @ zu.
+# Die Bewertung (Kernteil/unterstuetzend) macht allein das Portal.
+# \A und \z statt ^ und $: $ liesse in .NET einen abschliessenden Zeilenumbruch zu.
+$script:VsSitePartNamePattern = '\A[A-Za-z][A-Za-z0-9 _-]{0,63}\z'
+$script:VsSitePartMaxEntries = 24
+$script:VsSitePartStatuses = @(1, 2)
+# Konsolenansicht "Since 12:00:00 AM" unter Monitoring > Component Status
+# (SMS_ComponentSummarizer verlangt ein TallyInterval in der Abfrage).
+$script:VsComponentTallyInterval = '0001128000100008'
+
 # --- Ursachen eines Warnlaufs ----------------------------------------------
 #
 # Die Systemstatus-Karte zeigt "Datenwarnungen: 3" und klappt darunter das
@@ -2165,6 +2178,8 @@ function Send-VsRunReport {
         [int]$DurationMs,
         [string]$Detail,
         [hashtable]$Summary,
+        # Nur mecm-site-health: Ergebnis von Get-VsMecmSiteParts.
+        [System.Collections.IDictionary]$SiteParts,
         [string]$ScriptVersion
     )
 
@@ -2208,6 +2223,13 @@ function Send-VsRunReport {
             if ($null -ne $summaryClean) { $body['summary'] = $summaryClean }
         }
 
+        # Eigenes Top-Level-Feld, kein Summary-Schluessel: ein aelteres Portal
+        # ignoriert es und nimmt das Urteil trotzdem an.
+        if ($Source -eq 'mecm-site-health' -and $null -ne $SiteParts) {
+            $body['site_parts'] = $SiteParts
+            Limit-VsSitePartsToBody -Body $body
+        }
+
         # Zuletzt, weil die Laenge des Detail-Anteils vom uebrigen Body abhaengt.
         $detailClean = Get-VsReportDetail -Text $Detail -Token $Config.ReportToken
         $detailClean = Limit-VsReportDetailToBody -Detail $detailClean -Body $body
@@ -2217,7 +2239,22 @@ function Send-VsRunReport {
     try {
         Invoke-VsApi -Config $Config -Path '/mecm_report.php?action=reportRun' -Method POST -Body $body -TimeoutSec 5 | Out-Null
     } catch {
-        Write-VsRunReportFailure -ErrorRecord $_
+        # Die Standortteile duerfen das Urteil nie kosten: lehnt ein Portal den
+        # Bericht MIT site_parts ab (400), geht einmal die Basismeldung ohne
+        # Teile raus. Ein Portal mit MSB kennt das Feld, ein aelteres ignoriert
+        # es; der Rueckfall deckt einen Formfehler und Unerwartetes.
+        $status = Get-VsErrorStatusCode -ErrorRecord $_
+        if ($status -eq 400 -and $body.Contains('site_parts')) {
+            Write-VsLog -Level WARN -Message 'Run-Report mit site_parts abgelehnt (400); sende die Basismeldung ohne Standortteile.'
+            $body.Remove('site_parts')
+            try {
+                Invoke-VsApi -Config $Config -Path '/mecm_report.php?action=reportRun' -Method POST -Body $body -TimeoutSec 5 | Out-Null
+            } catch {
+                Write-VsRunReportFailure -ErrorRecord $_
+            }
+        } else {
+            Write-VsRunReportFailure -ErrorRecord $_
+        }
     }
 }
 
@@ -2521,7 +2558,8 @@ function Get-VsProviderMachine {
 # waere ein Modul-Load unnoetig schwer und fehleranfaellig). Liefert immer ein
 # Objekt (wirft nie), mit Site-Code, Provider, numerischem Rohstatus und
 # abgeleitetem Outcome/Kategorie. Reports kopieren nie die MECM-Statusmeldung -
-# nur diese vier Werte.
+# nur diese vier Werte; die Zaehlung der Rollen und Komponenten (site_parts)
+# liefert getrennt Get-VsMecmSiteParts.
 function Get-VsMecmSiteHealth {
     param($Config, [string]$ProviderMachine)
 
@@ -2588,6 +2626,117 @@ function Get-VsMecmSiteHealth {
         $result.ErrorCategory = Get-VsProviderFaultCategory -ErrorRecord $_
         Write-VsLog -Level WARN -Message ('Site-Health: Abfrage fuer Site {0} fehlgeschlagen ({1}): {2}' -f $siteCode, $result.ErrorCategory, (Get-VsErrorDetail -ErrorRecord $_))
         return $result
+    }
+}
+
+# Reine Zaehlung (Pester ohne MECM): Summarizer-Zeilen der konfigurierten Site
+# -> Liste {name, status, count} je Typname und Status 1/2, kritisch zuerst,
+# hoechstens VsSitePartMaxEntries Eintraege. Ein Name ausserhalb des Musters wird
+# nie gesendet, sondern wie jeder abgeschnittene Eintrag in Omitted gezaehlt
+# (Anzahl der nicht uebertragenen Instanzen). Omitted > 0 heisst fuer das
+# Portal: das MECM-Urteil gilt.
+# Gezaehlt werden Instanzen, keine Zeilen: SMS_SiteSystemSummarizer hat je
+# Speicherobjekt (Laufwerk, SQL-DB, SQL-Log) eine Zeile, ein DP mit zwei
+# Laufwerken waere sonst doppelt. Je Typname und Instanz ($InstanceProperty:
+# SiteSystem bzw. MachineName) zaehlt der schlechteste Status einmal. Die
+# Instanz dient nur dem Zusammenfassen und verlaesst die Funktion nie. Fehlt
+# sie, zaehlt die Zeile als eigene Instanz.
+function ConvertTo-VsSitePartList {
+    param(
+        [object[]]$Rows,
+        [Parameter(Mandatory)][string]$NameProperty,
+        [Parameter(Mandatory)][string]$InstanceProperty,
+        [Parameter(Mandatory)][string]$SiteCode
+    )
+    $worst = @{}
+    $omitted = 0
+    $index = 0
+    foreach ($row in @($Rows)) {
+        $index++
+        if ($null -eq $row) { continue }
+        if ([string]$row.SiteCode -ne $SiteCode) { continue }
+        $status = 0
+        if (-not [int]::TryParse([string]$row.Status, [ref]$status)) { continue }
+        if ($script:VsSitePartStatuses -notcontains $status) { continue }
+        $name = [string]$row.$NameProperty
+        $instance = [string]$row.$InstanceProperty
+        if ([string]::IsNullOrEmpty($instance)) { $instance = '#' + $index }
+        # '|' steht nie in einem erlaubten Namen; ein ungueltiger Name wird
+        # unter seinem Rohtext zusammengefasst und spaeter nur gezaehlt.
+        $key = '{0}|{1}' -f $name, $instance
+        if (-not $worst.ContainsKey($key) -or $status -gt [int]$worst[$key].Status) {
+            $worst[$key] = [pscustomobject]@{ Name = $name; Status = $status }
+        }
+    }
+    $counts = @{}
+    foreach ($item in $worst.Values) {
+        # -cnotmatch: wie PHP case-sensitiv (beide Muster nennen ohnehin A-Z und a-z).
+        if ($item.Name -cnotmatch $script:VsSitePartNamePattern) { $omitted++; continue }
+        $key = '{0}|{1}' -f $item.Name, $item.Status
+        if ($counts.ContainsKey($key)) {
+            $counts[$key].count = [int]$counts[$key].count + 1
+        } else {
+            $counts[$key] = [ordered]@{ name = $item.Name; status = [int]$item.Status; count = 1 }
+        }
+    }
+    $sorted = @($counts.Values | Sort-Object -Property `
+        @{ Expression = { [int]$_.status }; Descending = $true },
+        @{ Expression = { [int]$_.count }; Descending = $true },
+        @{ Expression = { [string]$_.name }; Descending = $false })
+    $entries = @($sorted | Select-Object -First $script:VsSitePartMaxEntries)
+    foreach ($dropped in @($sorted | Select-Object -Skip $script:VsSitePartMaxEntries)) {
+        $omitted += [int]$dropped.count
+    }
+    return [pscustomobject]@{ Entries = $entries; Omitted = [int]$omitted }
+}
+
+# Zaehlt die Standortsystemrollen (SMS_SiteSystemSummarizer.Role) und
+# Komponenten (SMS_ComponentSummarizer.ComponentName, Konsolenansicht "Since
+# 12:00:00 AM") mit Status Warnung oder kritisch. Liefert das site_parts-Objekt
+# oder $null, wenn eine der beiden Abfragen scheitert (eine WARN-Zeile): dann
+# zeigt das Portal das MECM-Urteil unveraendert. Wirft nie; das Urteil aus
+# Get-VsMecmSiteHealth bleibt davon unberuehrt. Servernamen (SiteSystem,
+# MachineName) fassen nur lokal Zeilen zusammen und werden nie gesendet;
+# Meldungstexte werden nie gelesen.
+function Get-VsMecmSiteParts {
+    param([Parameter(Mandatory)][string]$SiteCode, [string]$Provider)
+    $cimParams = @{
+        Namespace   = ('root\SMS\site_{0}' -f $SiteCode)
+        ErrorAction = 'Stop'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Provider) -and $Provider -ne $env:COMPUTERNAME) {
+        $cimParams['ComputerName'] = $Provider
+    }
+    try {
+        $roleRows = @(Get-CimInstance @cimParams -ClassName 'SMS_SiteSystemSummarizer' -Filter 'Status <> 0')
+        $componentRows = @(Get-CimInstance @cimParams -ClassName 'SMS_ComponentSummarizer' -Filter ("TallyInterval = '{0}' AND Status <> 0" -f $script:VsComponentTallyInterval))
+    } catch {
+        Write-VsLog -Level WARN -Message ('Site-Health: Rollen-/Komponentenstatus fuer Site {0} nicht lesbar ({1}): {2}' -f $SiteCode, (Get-VsProviderFaultCategory -ErrorRecord $_), (Get-VsErrorDetail -ErrorRecord $_))
+        return $null
+    }
+    $roles = ConvertTo-VsSitePartList -Rows $roleRows -NameProperty 'Role' -InstanceProperty 'SiteSystem' -SiteCode $SiteCode
+    $components = ConvertTo-VsSitePartList -Rows $componentRows -NameProperty 'ComponentName' -InstanceProperty 'MachineName' -SiteCode $SiteCode
+    return [ordered]@{
+        roles      = @($roles.Entries)
+        components = @($components.Entries)
+        omitted    = [int]($roles.Omitted + $components.Omitted)
+    }
+}
+
+# Haelt den Body mit site_parts unter VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES:
+# PowerShell 5.1 serialisiert eingerueckt, 48 lange Namen koennten die Grenze
+# reissen. Entfernt dann je Schritt den letzten Eintrag der laengeren Liste
+# (dort stehen Warnungen und kleine Zaehler) und zaehlt ihn in omitted.
+function Limit-VsSitePartsToBody {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Body)
+    $parts = $Body['site_parts']
+    if ($null -eq $parts) { return }
+    while ((Get-VsRunReportBodyBytes -Body $Body -Detail $null) -gt $script:VsClientEventBodyMaxBytes) {
+        $kind = if (@($parts['components']).Count -ge @($parts['roles']).Count) { 'components' } else { 'roles' }
+        $list = @($parts[$kind])
+        if ($list.Count -eq 0) { $Body.Remove('site_parts'); return }
+        $parts['omitted'] = [int]$parts['omitted'] + [int]$list[$list.Count - 1].count
+        $parts[$kind] = @($list | Select-Object -First ($list.Count - 1))
     }
 }
 

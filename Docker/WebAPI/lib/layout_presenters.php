@@ -60,10 +60,11 @@ function heartbeat_badge(string $state): string
 
 // One labeled signal row for the dashboard's split MECM tile: a short label and
 // its heartbeat badge, stacked so the two MECM signals never collapse into one
-// worst-of. Both label and badge are escaped.
-function portal_signal_row(string $label, string $state): string
+// worst-of. Both label and badge are escaped; the MECM site passes its own
+// rendered badge (mecm_site_badge()), never a heartbeat word.
+function portal_signal_row(string $label, string $state, ?string $badgeHtml = null): string
 {
-    return '<span class="signal-row"><span class="signal-label">' . h($label) . '</span>' . heartbeat_badge($state) . '</span>';
+    return '<span class="signal-row"><span class="signal-label">' . h($label) . '</span>' . ($badgeHtml ?? heartbeat_badge($state)) . '</span>';
 }
 
 /**

@@ -514,15 +514,17 @@ funktionieren ohne MECM weiter.
 4. **Verifikation Systemstatus** (Portal → Systemstatus): Alle vier Aufgaben laufen
    als SYSTEM und melden. Die drei Sync-Quellen zeigen `started`/`completed` mit
    korrekten Zählern (Untergruppe „VirtuSphere-MECM-Integration"), die Site-Health-
-   Aufgabe zeigt den Rohstatus 0/1/2 korrekt (Untergruppe „MECM-Site-Status"). Es
+   Aufgabe zeigt den Standortzustand korrekt (Untergruppe „MECM-Site-Status":
+   OK, Warnung, „Eingeschränkt“ wenn nur unterstützende Teile kritisch sind,
+   sonst „Kritisch“, mit den betroffenen Rollen und Komponenten). Es
    wird **kein** MECM-Ziel als Prüfziel ins Portal getippt und **kein** grüner
    Netzwerkpfad erwartet: das Portal spricht MECM nicht aktiv an. Gegenproben:
    - Provider-Zugriff verweigern oder falschen Provider setzen: MECM-Site wird grau
      (Providerfehler), **nicht** „MECM kritisch".
    - Einen Sync-Task beenden: nur die Integration wird stale/rot, MECM-Site bleibt
      unberührt.
-   - Site-Health-Task beenden: nur MECM-Site wird stale/rot, die Integration bleibt
-     grün.
+   - Site-Health-Task beenden: nur MECM-Site wird gelb („Überfällig“) oder grau
+     („Veraltet“), nie rot; die Integration bleibt grün.
 
    Das ist die erste echte Abnahme von Rückkanal, Wartungsdienst und MECM-Anbindung.
 

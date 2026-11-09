@@ -88,7 +88,7 @@ flowchart TD
 
 Verteilhinweise des Package Import (`package_content_failed`, `package_content_in_progress`) erscheinen auf der Karte, ändern aber das Ergebnis nicht: Die Verteilung an die DPs ist Sache von MECM (AV2), ein Lauf mit nur solchen Hinweisen bleibt grün.
 
-Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt den Reporter gelb. Der letzte Site-Befund bleibt getrennt sichtbar, grau als „Veraltet“ und historisch markiert. Sein Alter behauptet keinen aktuellen kritischen MECM-Zustand. Dashboard und Systemstatus lesen beide Achsen aus demselben Snapshot.
+Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt den Reporter gelb. Der letzte Site-Befund bleibt getrennt sichtbar, grau als „Veraltet“ und historisch markiert. Sein Alter behauptet keinen aktuellen kritischen MECM-Zustand. Dashboard und Systemstatus lesen beide Achsen aus demselben Snapshot. Der Standortzustand hat eigene Wörter (OK, Warnung, Eingeschränkt, Kritisch, Unbekannt), nie die Reporter-Wörter „Verzögert“ oder „Ausgefallen“. Bei MECM-kritisch ordnet das Portal die gemeldeten Rollen und Komponenten je Typ über die Tabelle in `lib/mecm_site_assessment.php` ein (ADR-0018 Amendment 2026-11-09). Die Einordnungstabelle mit Quellen und die MECM-Schwellen (Fehlermeldungen seit Mitternacht) stehen in `mecm-integration.md`, Abschnitte „Wie MECM den Standort rot färbt“ und „Einordnung der Rollen und Komponenten“.
 
 ```mermaid
 flowchart TD
@@ -96,8 +96,10 @@ flowchart TD
   A -->|ja| S{"Letztes Ergebnis älter als die Warnschwelle?"}
   S -->|ja| SS["Reporter überfällig (warning, gelb); letzter Site-Befund Veraltet (stale, grau), historisch"]
   S -->|nein| SC{"MECM-Site-Status?"}
-  SC -->|kritisch| RD["Ausgefallen (rot)"]
-  SC -->|Warnung| YL["Verzögert (gelb)"]
+  SC -->|kritisch| PT{"Teileliste vollständig und jeder kritische Teil unterstützend?"}
+  PT -->|nein, oder keine Liste| RD["Kritisch (rot)"]
+  PT -->|ja| LM["Eingeschränkt (gelb)"]
+  SC -->|Warnung| YL["Warnung (gelb)"]
   SC -->|ok| GR["OK (grün)"]
   SC -->|Provider nicht lesbar oder Abfrage gescheitert| UK
 ```

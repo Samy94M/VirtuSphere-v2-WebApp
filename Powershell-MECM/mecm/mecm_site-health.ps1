@@ -15,7 +15,9 @@
 #  - Selbstheilung statt exit 1, falls die Registry (noch) fehlt
 #  - fire-and-forget: eine nicht zugestellte Meldung stoppt die Schleife nie
 #  - Reports kopieren NIE die volle MECM-Statusmeldung, nur Site-Code, Provider,
-#    numerischen Rohstatus und den abgeleiteten Zustand
+#    numerischen Rohstatus und den abgeleiteten Zustand; bei Warnung/kritisch
+#    dazu die Zahl der Rollen und Komponenten je Typname und Status (site_parts,
+#    nie Servernamen). Kernteil oder unterstuetzend bewertet allein das Portal.
 #  - provider_unreachable wird erst nach ZWEI aufeinanderfolgenden Fehlzyklen
 #    gemeldet, damit ein MECM-Neustart nicht sofort einen Fehler schreibt
 # ============================================================================
@@ -43,7 +45,8 @@ Initialize-VsTls -Config $config
 Write-VsLog -Message '=== Site-Health gestartet ==='
 
 # Skript-Version fuer den Run-Report (script_version, <=32 Zeichen).
-$SCRIPT_VERSION = 'site-health/1.0'
+# 1.1: zusaetzlich site_parts (Rollen-/Komponentenzaehlung je Typ und Status).
+$SCRIPT_VERSION = 'site-health/1.1'
 # Build und Dateisatz aus manifest.json des Installers an die Kennung haengen
 # ("+<Commit>", "-abw" bei abweichender Datei); schreibt eine Logzeile.
 $SCRIPT_VERSION = Resolve-VsReportedScriptVersion -BaseVersion $SCRIPT_VERSION -InstallDir $PSScriptRoot
@@ -64,6 +67,7 @@ while ($true) {
     $outcome = 'unknown'
     $category = 'query_failed'
     $summary = @{}
+    $siteParts = $null
 
     try {
         $health = Get-VsMecmSiteHealth -Config $config
@@ -84,6 +88,17 @@ while ($true) {
         if (-not [string]::IsNullOrWhiteSpace($health.SiteCode)) { $summary['site_code'] = [string]$health.SiteCode }
         if (-not [string]::IsNullOrWhiteSpace($health.Provider)) { $summary['provider'] = [string]$health.Provider }
         if ($null -ne $health.RawStatus) { $summary['raw_status'] = [int]$health.RawStatus }
+
+        # Bei Warnung oder kritisch: WAS MECM so bewertet, gezaehlt je Rollen-
+        # und Komponententyp. Die Bewertung macht das Portal; scheitert die
+        # Detailabfrage, bleibt $siteParts $null und das Urteil unveraendert.
+        if ($outcome -eq 'warning' -or $outcome -eq 'fail') {
+            $siteParts = Get-VsMecmSiteParts -SiteCode ([string]$health.SiteCode) -Provider ([string]$health.Provider)
+            if ($null -ne $siteParts) {
+                Write-VsLog -Message ('Site {0}: {1} Rolleneintraege, {2} Komponenteneintraege mit Warnung/kritisch, {3} nicht uebertragen.' -f `
+                    $health.SiteCode, @($siteParts['roles']).Count, @($siteParts['components']).Count, $siteParts['omitted'])
+            }
+        }
 
         # Bei unknown steht die Kategorie dahinter; die Ursache steht in der
         # WARN-Zeile von Get-VsMecmSiteHealth (Common).
@@ -112,6 +127,7 @@ while ($true) {
         }
         if ($outcome -ne 'ok') { $reportParams['ErrorCategory'] = $category }
         if ($summary.Count -gt 0) { $reportParams['Summary'] = $summary }
+        if ($null -ne $siteParts) { $reportParams['SiteParts'] = $siteParts }
         Send-VsRunReport @reportParams
     }
 

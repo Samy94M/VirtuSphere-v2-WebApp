@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/repo/client_events.php';
+require_once __DIR__ . '/mecm_site_parts.php';
 
 /**
  * @param array<mixed> $data
@@ -102,6 +103,18 @@ function run_report_validate(array $data): array
             return $summaryCheck;
         }
         $summary = $summaryCheck['summary'];
+    }
+
+    // Optional site parts (site-health only). Stored inside the summary so no
+    // column is needed; the wire summary itself still admits only its own keys.
+    if (array_key_exists(VIRTUSPHERE_SITE_PARTS_FIELD, $data) && $data[VIRTUSPHERE_SITE_PARTS_FIELD] !== null) {
+        $siteParts = $source === VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH && is_array($data[VIRTUSPHERE_SITE_PARTS_FIELD])
+            ? mecm_site_parts_shape($data[VIRTUSPHERE_SITE_PARTS_FIELD])
+            : null;
+        if ($siteParts === null) {
+            return ['error' => 'Invalid site_parts', 'status' => 400];
+        }
+        $summary = ($summary ?? []) + [VIRTUSPHERE_SITE_PARTS_FIELD => $siteParts];
     }
 
     $report['outcome'] = $outcome;

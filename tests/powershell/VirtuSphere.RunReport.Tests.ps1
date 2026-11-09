@@ -535,6 +535,84 @@ Describe 'Send-VsRunReport (Payload-Form und Byte-Kuerzung vor dem Senden)' {
     }
 }
 
+# F5 (Audit 2026-11-09): Die Run-Tabellen in Common spiegeln lib/constants.php.
+# Ein Unterschied laesst das Portal jeden Bericht mit 400 ablehnen oder die
+# Kategorie still verwerfen. Der Test loest die PHP-Konstanten selbst auf, damit
+# eine neue Quelle, Kategorie oder ein neuer Schluessel ohne Spiegel auffaellt.
+Describe 'Run-Tabellen spiegeln lib/constants.php (F5)' {
+    BeforeAll {
+        $php = Get-Content -Raw -Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'lib/constants.php')
+        $script:PhpScalars = @{}
+        foreach ($m in [regex]::Matches($php, "const\s+(\w+)\s*=\s*'([^']*)';")) {
+            $script:PhpScalars[$m.Groups[1].Value] = $m.Groups[2].Value
+        }
+        function Resolve-PhpToken {
+            param([string]$Token)
+            $t = $Token.Trim()
+            if ($t -match "\A'([^']*)'\z") { return $Matches[1] }
+            if ($script:PhpScalars.ContainsKey($t)) { return $script:PhpScalars[$t] }
+            throw "Unaufgeloeste PHP-Konstante: $t"
+        }
+        function Get-PhpArrayBody {
+            param([string]$Name)
+            $m = [regex]::Match($php, "(?s)const\s+$Name\s*=\s*\[(.*?)\];")
+            if (-not $m.Success) { throw "Konstante $Name fehlt in lib/constants.php" }
+            return $m.Groups[1].Value
+        }
+        function Get-PhpList {
+            param([string]$Body)
+            @([regex]::Matches(($Body -replace '//[^\n]*', ''), "'[^']*'|[A-Z][A-Z0-9_]+") | ForEach-Object { Resolve-PhpToken $_.Value })
+        }
+        $script:PhpSummaryFields = @{}
+        foreach ($m in [regex]::Matches((Get-PhpArrayBody 'VIRTUSPHERE_RUN_SUMMARY_FIELDS'), "(\w+|'[^']*')\s*=>\s*\[([^\]]*)\]")) {
+            $script:PhpSummaryFields[(Resolve-PhpToken $m.Groups[1].Value)] = @(Get-PhpList $m.Groups[2].Value)
+        }
+        $script:PhpSiteOutcome = @{}
+        foreach ($m in [regex]::Matches((Get-PhpArrayBody 'VIRTUSPHERE_RUN_SITE_ERROR_OUTCOME'), "(\w+|'[^']*')\s*=>\s*(\w+|'[^']*')")) {
+            $script:PhpSiteOutcome[(Resolve-PhpToken $m.Groups[1].Value)] = Resolve-PhpToken $m.Groups[2].Value
+        }
+        $script:PhpStringFields = @(Get-PhpList (Get-PhpArrayBody 'VIRTUSPHERE_RUN_SUMMARY_STRING_FIELDS'))
+        $script:PhpSyncCategories = @(Get-PhpList (Get-PhpArrayBody 'VIRTUSPHERE_RUN_SYNC_ERROR_CATEGORIES'))
+        $script:PsTables = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            [pscustomobject]@{
+                SummaryFields = $script:VsRunSummaryFields
+                StringFields  = $script:VsRunSummaryStringFields
+                SyncCategories = $script:VsRunSyncErrorCategories
+                SiteOutcome   = $script:VsRunSiteErrorOutcome
+            }
+        }
+    }
+
+    It 'der Parser findet alle vier PHP-Tabellen (Schutz gegen leeres Gruen)' {
+        $script:PhpSummaryFields.Count | Should -BeGreaterOrEqual 4
+        $script:PhpSiteOutcome.Count | Should -BeGreaterOrEqual 5
+        $script:PhpStringFields.Count | Should -BeGreaterOrEqual 1
+        $script:PhpSyncCategories.Count | Should -BeGreaterOrEqual 8
+    }
+
+    It 'VsRunSummaryFields hat dieselben Quellen und je Quelle dieselben Schluessel in derselben Reihenfolge' {
+        @($script:PsTables.SummaryFields.Keys | Sort-Object) | Should -Be @($script:PhpSummaryFields.Keys | Sort-Object)
+        foreach ($source in $script:PhpSummaryFields.Keys) {
+            @($script:PsTables.SummaryFields[$source]) | Should -Be $script:PhpSummaryFields[$source] -Because "Quelle $source"
+        }
+    }
+
+    It 'VsRunSummaryStringFields gleicht VIRTUSPHERE_RUN_SUMMARY_STRING_FIELDS' {
+        @($script:PsTables.StringFields) | Should -Be $script:PhpStringFields
+    }
+
+    It 'VsRunSyncErrorCategories gleicht VIRTUSPHERE_RUN_SYNC_ERROR_CATEGORIES' {
+        @($script:PsTables.SyncCategories) | Should -Be $script:PhpSyncCategories
+    }
+
+    It 'VsRunSiteErrorOutcome bindet dieselben Kategorien an dieselben Outcomes' {
+        @($script:PsTables.SiteOutcome.Keys | Sort-Object) | Should -Be @($script:PhpSiteOutcome.Keys | Sort-Object)
+        foreach ($category in $script:PhpSiteOutcome.Keys) {
+            $script:PsTables.SiteOutcome[$category] | Should -Be $script:PhpSiteOutcome[$category] -Because "Kategorie $category"
+        }
+    }
+}
+
 Describe 'Throttle-Konstante ist gepinnt' {
     It '$script:VsReportThrottleSeconds ist gesetzt und positiv' {
         Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsReportThrottleSeconds } | Should -BeGreaterThan 0
