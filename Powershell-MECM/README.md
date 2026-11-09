@@ -810,7 +810,14 @@ Storageansicht ab und setzt nur eindeutige eigene Arbeit fort. Unbekannte
 online-RAW-Platten werden nicht adoptiert oder formatiert. Vorhandene GPT-/MBR-
 Datenplatten werden ausschließlich online geschaltet. Boot-/System-, Read-only,
 Cluster-, größenlose oder mehrdeutige Datenträger sind benannte Fehler; eine VM
-ohne Zusatzplatte bleibt dagegen ein ausdrücklich optionaler Erfolgsfall.
+ohne Zusatzplatte bleibt dagegen ein ausdrücklich optionaler Erfolgsfall. Neue
+Datenplatten erhalten ihren Portalnamen als Bezeichnung (DN1); bestehende
+Datenplatten werden nie umbenannt. Trägt die Systemplatte im Portal einen
+eigenen Namen (`label_custom`), setzt ein eigener Block nach den Datenplatten
+ihn als Bezeichnung des Windows-Laufwerks auf `%SystemDrive%` (DN2), nur bei
+Abweichung, mit Nachlesen und einmal je Rolloutrevision; ohne eigenen Namen
+bleibt die Bezeichnung der Task Sequence, ein Fehlschlag ist eine Warnung
+(`system=skip:<Grund>`). Ablauf und Gründe: `docs/operations/client-flows.md`.
 
 `client_hostname` kürzt und bereinigt den Namen nach den NetBIOS-Regeln und
 **meldet die Abweichung, bricht aber nicht ab**: die verbindliche Prüfung sitzt

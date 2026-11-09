@@ -217,12 +217,14 @@ final class MachineApiWireTest extends TestCase
             ], $this->sortedKeys($payload['interfaces'][0]));
             self::assertSame($fixture['mac'], $payload['interfaces'][0]['mac']);
             // A VM without disk rows gets the one default disk the create
-            // playbook builds, under its default name.
+            // playbook builds. DN2: its name is empty, so nothing is to be set
+            // (volume_label stays a key, null) and the drive keeps its label.
             self::assertSame([[
                 'position' => 0,
                 'scsi_unit' => 0,
                 'size_gb' => (int) VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'],
-                'volume_label' => vm_disk_default_name(1),
+                'volume_label' => null,
+                'label_custom' => false,
             ]], $payload['disks']);
 
             $state = $this->vmState($db, $fixture['vm_id']);
@@ -264,13 +266,52 @@ final class MachineApiWireTest extends TestCase
             self::assertSame([0, 1, 2, 3, 4, 5, 6, 8], array_column($disks, 'scsi_unit'));
             self::assertSame([0, 1, 2, 3, 4, 5, 6, 7], array_column($disks, 'position'));
             self::assertSame([60, 100, 20, 30, 5, 6, 7, 8], array_column($disks, 'size_gb'));
+            // DN2: the stored legacy default 'System' on the system disk is no
+            // name of its own: no label and label_custom false, so the client
+            // keeps the task sequence label (decisions F1, F2).
             self::assertSame(
-                ['System', 'Daten Logs', vm_disk_default_name(3), null, 'D5', 'D6', 'D7', 'Archiv mit einem sehr langen Nam'],
+                [null, 'Daten Logs', vm_disk_default_name(3), null, 'D5', 'D6', 'D7', 'Archiv mit einem sehr langen Nam'],
                 array_column($disks, 'volume_label')
             );
-            self::assertSame(['position', 'scsi_unit', 'size_gb', 'volume_label'], $this->sortedKeys($disks[0]));
+            self::assertSame(
+                [false, true, false, true, true, true, true, true],
+                array_column($disks, 'label_custom')
+            );
+            foreach ($disks as $disk) {
+                self::assertSame(['label_custom', 'position', 'scsi_unit', 'size_gb', 'volume_label'], $this->sortedKeys($disk));
+            }
         } finally {
             $this->deleteClientFixture($db, $fixture['mission_id']);
+        }
+    }
+
+    /**
+     * DN2: a system disk name of the operator's own reaches the client as
+     * label with label_custom true; an auto name moved up ('Disk 2') does not.
+     */
+    public function testDeviceInfosMarksAnOwnSystemDiskName(): void
+    {
+        $db = db(true);
+        foreach ([
+            'own' => ['Ölstand Prüfung', 'Ölstand Prüfung', true],
+            'auto' => ['Disk 2', null, false],
+            'empty' => ['', null, false],
+        ] as $case => [$name, $label, $custom]) {
+            $fixture = $this->createClientFixture($db, 'device-system-' . $case);
+            try {
+                $stmt = $db->prepare('INSERT INTO deploy_disks (vm_id, disk_name, disk_size, disk_type) VALUES (?, ?, 60, \'thin\')');
+                $stmt->bind_param('is', $fixture['vm_id'], $name);
+                $stmt->execute();
+
+                [$status, , $body] = $this->get('/mecm-api.php?action=getDeviceInfos&mac=' . urlencode($fixture['mac']));
+
+                self::assertSame(200, $status, $body);
+                $disk = json_decode($body, true, 512, JSON_THROW_ON_ERROR)['disks'][0];
+                self::assertSame($label, $disk['volume_label'], $case);
+                self::assertSame($custom, $disk['label_custom'], $case);
+            } finally {
+                $this->deleteClientFixture($db, $fixture['mission_id']);
+            }
         }
     }
 

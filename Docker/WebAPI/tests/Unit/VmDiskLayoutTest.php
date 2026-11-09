@@ -71,12 +71,13 @@ final class VmDiskLayoutTest extends TestCase
             'type' => VIRTUSPHERE_VM_DEFAULTS['disk_type'],
         ]], vm_disk_rows([]));
 
+        // DN2: the legacy default 'System' on the system disk reads as no name.
         $vm = ['disks' => [
             ['disk_name' => 'System', 'disk_size' => '80', 'disk_type' => 'THIN'],
             ['disk_name' => ' ', 'disk_size' => '0', 'disk_type' => ''],
         ]];
         self::assertSame([
-            ['name' => 'System', 'size_gb' => 80, 'type' => 'thin'],
+            ['name' => '', 'size_gb' => 80, 'type' => 'thin'],
             ['name' => vm_disk_default_name(2), 'size_gb' => (int) VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'], 'type' => VIRTUSPHERE_VM_DEFAULTS['disk_type']],
         ], vm_disk_rows($vm));
 
@@ -107,8 +108,92 @@ final class VmDiskLayoutTest extends TestCase
         $layout = vm_disk_client_layout(['disks' => $disks]);
 
         self::assertCount(16, $layout);
-        self::assertSame(['position' => 7, 'scsi_unit' => 8, 'size_gb' => 8, 'volume_label' => 'Disk 8'], $layout[7]);
-        self::assertSame(['position' => 15, 'scsi_unit' => null, 'size_gb' => 16, 'volume_label' => 'Disk 16'], $layout[15]);
+        // 'Disk 1' on the system disk is the auto pattern: no label, nothing to rename.
+        self::assertSame(['position' => 0, 'scsi_unit' => 0, 'size_gb' => 1, 'volume_label' => null, 'label_custom' => false], $layout[0]);
+        self::assertSame(['position' => 7, 'scsi_unit' => 8, 'size_gb' => 8, 'volume_label' => 'Disk 8', 'label_custom' => false], $layout[7]);
+        self::assertSame(['position' => 15, 'scsi_unit' => null, 'size_gb' => 16, 'volume_label' => 'Disk 16', 'label_custom' => false], $layout[15]);
+    }
+
+    public function testClientLayoutMarksOnlyAnOwnNameAsCustom(): void
+    {
+        // DN2, F1: the client renames the Windows drive only on label_custom.
+        $layout = static fn (string $system, string $data = 'Daten'): array => vm_disk_client_layout(['disks' => [
+            ['disk_name' => $system, 'disk_size' => 60, 'disk_type' => 'thin'],
+            ['disk_name' => $data, 'disk_size' => 20, 'disk_type' => 'thin'],
+        ]]);
+
+        foreach (['', '   ', 'System', 'Disk 2', 'Disk 9'] as $default) {
+            $row = $layout($default)[0];
+            self::assertFalse($row['label_custom'], $default);
+            self::assertNull($row['volume_label'], $default);
+        }
+        self::assertSame(['position' => 0, 'scsi_unit' => 0, 'size_gb' => 60, 'volume_label' => 'Ölstand Prüfung', 'label_custom' => true], $layout('Ölstand Prüfung')[0]);
+        self::assertSame(['volume_label' => 'system', 'label_custom' => true], array_intersect_key($layout('system')[0], ['volume_label' => 1, 'label_custom' => 1]));
+        // An own name with nothing usable: custom, but no label to set.
+        self::assertSame(['volume_label' => null, 'label_custom' => true], array_intersect_key($layout('???')[0], ['volume_label' => 1, 'label_custom' => 1]));
+
+        // Data disks keep the DN1 behaviour; the flag says whether the name is the default.
+        self::assertSame(['volume_label' => 'Daten', 'label_custom' => true], array_intersect_key($layout('', 'Daten')[1], ['volume_label' => 1, 'label_custom' => 1]));
+        self::assertSame(['volume_label' => 'Disk 2', 'label_custom' => false], array_intersect_key($layout('', '')[1], ['volume_label' => 1, 'label_custom' => 1]));
+        self::assertSame(['volume_label' => 'System', 'label_custom' => true], array_intersect_key($layout('', 'System')[1], ['volume_label' => 1, 'label_custom' => 1]));
+
+        // volume_label stays a key on every entry (the client refuses a list without it).
+        foreach ($layout('') as $row) {
+            self::assertSame(['label_custom', 'position', 'scsi_unit', 'size_gb', 'volume_label'], self::sortedKeys($row));
+        }
+    }
+
+    /** @return list<string> */
+    private static function sortedKeys(array $row): array
+    {
+        $keys = array_keys($row);
+        sort($keys);
+
+        return $keys;
+    }
+
+    public function testStoredNameIsTheOneNormalisation(): void
+    {
+        // DN2: system disk default names are stored empty, data disks unchanged.
+        self::assertSame('', vm_disk_stored_name('', 1));
+        self::assertSame('', vm_disk_stored_name('  ', 1));
+        self::assertSame('', vm_disk_stored_name('System', 1));
+        self::assertSame('', vm_disk_stored_name(' Disk 2 ', 1));
+        self::assertSame('Systemplatte', vm_disk_stored_name(' Systemplatte ', 1));
+        self::assertSame('system', vm_disk_stored_name('system', 1));
+        self::assertSame("\u{00A0}", vm_disk_stored_name("\u{00A0}", 1));
+        self::assertSame('Disk 2', vm_disk_stored_name('', 2));
+        self::assertSame('Disk 3', vm_disk_stored_name('   ', 3));
+        self::assertSame('System', vm_disk_stored_name('System', 2));
+        self::assertSame('Disk 5', vm_disk_stored_name('Disk 5', 2));
+        self::assertSame('Daten', vm_disk_stored_name(' Daten ', 4));
+        self::assertSame('', vm_disk_default_name(1));
+        self::assertSame('Disk 2', vm_disk_default_name(2));
+        self::assertSame('System', VIRTUSPHERE_VM_DEFAULTS['disk_name_legacy_default']);
+    }
+
+    public function testFormParserNeverDropsTheSystemDiskRow(): void
+    {
+        // DN2 (audit L6): an empty first row is the normal case now; dropping
+        // it would move the data disk and its name up to the system disk.
+        require_once dirname(__DIR__, 2) . '/lib/vm_edit_values.php';
+        $parsed = vm_parse_disks([
+            ['disk_name' => '', 'disk_size' => '', 'disk_type' => 'thin'],
+            ['disk_name' => 'Daten', 'disk_size' => '20', 'disk_type' => 'thin'],
+            ['disk_name' => '', 'disk_size' => '', 'disk_type' => 'thin'],
+        ]);
+        self::assertSame([
+            ['disk_name' => '', 'disk_size' => 1, 'disk_type' => 'thin'],
+            ['disk_name' => 'Daten', 'disk_size' => 20, 'disk_type' => 'thin'],
+        ], $parsed);
+
+        self::assertSame('', vm_parse_disks([['disk_name' => 'System', 'disk_size' => '60', 'disk_type' => 'thin']])[0]['disk_name']);
+        self::assertSame('', vm_parse_disks([['disk_name' => 'Disk 2', 'disk_size' => '60', 'disk_type' => 'thin']])[0]['disk_name']);
+        self::assertSame('Disk 2', vm_parse_disks([
+            ['disk_name' => 'C', 'disk_size' => '60', 'disk_type' => 'thin'],
+            ['disk_name' => '', 'disk_size' => '20', 'disk_type' => 'thin'],
+        ])[1]['disk_name']);
+        self::assertSame('', vm_default_disks()[0]['disk_name']);
     }
 
     /** @return array<string,mixed> */
@@ -129,8 +214,17 @@ final class VmDiskLayoutTest extends TestCase
         self::assertSame(VIRTUSPHERE_DISK_VOLUME_LABEL_MAX, $vectors['max']);
         self::assertSame(vm_disk_default_name(1), $vectors['defaults']['first']);
         self::assertSame(vm_disk_default_name(2), $vectors['defaults']['prefix'] . ' 2');
+        self::assertSame(VIRTUSPHERE_VM_DEFAULTS['disk_name_legacy_default'], $vectors['defaults']['legacy_first']);
         self::assertGreaterThan(20, count($vectors['labels']));
         self::assertGreaterThan(8, count($vectors['notices']));
+        self::assertGreaterThan(10, count($vectors['defaults_by_position']));
+    }
+
+    public function testDefaultNameRuleMatchesTheSharedVectors(): void
+    {
+        foreach (self::vectors()['defaults_by_position'] as $vector) {
+            self::assertSame($vector['is_default'], vm_disk_name_is_default($vector['name'], $vector['position']), $vector['why']);
+        }
     }
 
     public function testLabelRuleMatchesTheSharedVectors(): void

@@ -10,12 +10,17 @@ const VIRTUSPHERE_VM_DEFAULTS = [
     'ram_mb' => 4096,
     'cpu_count' => 2,
     'guest_id' => 'windows2019srv_64Guest',
-    'disk_name' => 'System',
+    // DN2: the name the system disk (position 1) carried as a default before
+    // DN2. Every VM saved earlier and every older mission export holds it, so
+    // it counts as "no name of its own" and is never proposed again
+    // (vm_disk_name_is_default()). An empty system disk name keeps the label
+    // the task sequence gave the Windows drive.
+    'disk_name_legacy_default' => 'System',
     // The name proposed for every FURTHER disk row, numbered by its position
-    // (vm_disk_default_name()). It sits next to 'disk_name' rather than in the
-    // form module because the repo validator applies the same rule to rows
-    // arriving from the machine API and the mission import, not just to the
-    // editor's add button.
+    // (vm_disk_default_name()). It sits here rather than in the form module
+    // because the repo validator applies the same rule to rows arriving from
+    // the machine API and the mission import, not just to the editor's add
+    // button.
     'disk_name_prefix' => 'Disk',
     'disk_size_gb' => 50,
     // Eager zeroed: blocks are pre-zeroed at creation, so the first write to a
@@ -188,20 +193,63 @@ function disk_type_label(string $type): string
 
 /**
  * The proposed name for the disk at $position (1-based): the first disk is the
- * system disk, every further one carries its own position.
+ * system disk and gets none (DN2: empty keeps the task sequence label of the
+ * Windows drive), every further one carries its own position.
  *
  * Every row used to be proposed as 'System', because a repeated row inherits
  * the first row's values, so a VM with three disks showed the same name three
- * times and nothing downstream could tell them apart. Three places apply the
- * rule and none of them may hold its own copy: the editor's add button (through
- * the data-autoname-* attributes on the row template), the form parser, and the
- * repo validator that also sees machine-API and import rows.
+ * times and nothing downstream could tell them apart. Callers never apply the
+ * rule themselves: they go through vm_disk_stored_name(), which every writer
+ * (repo validator for editor, machine API, import and copy), the form parser,
+ * the conflict comparison and the disk layout call. The editor's add button
+ * reads it through the data-autoname-* attributes on the row template.
  */
 function vm_disk_default_name(int $position): string
 {
-    return $position <= 1
-        ? VIRTUSPHERE_VM_DEFAULTS['disk_name']
-        : VIRTUSPHERE_VM_DEFAULTS['disk_name_prefix'] . ' ' . $position;
+    return $position <= 1 ? '' : VIRTUSPHERE_VM_DEFAULTS['disk_name_prefix'] . ' ' . $position;
+}
+
+/**
+ * Whether a disk name is no name of the operator's own at $position (1-based),
+ * after trim(). DN2, decisions F2 and F3:
+ *
+ *  - system disk (position 1): empty, the legacy default 'System' (exact case),
+ *    or the auto pattern '<prefix> <n>' for any n. A data disk that moved up
+ *    when the first row was removed keeps its 'Disk 2', and that must not
+ *    become the label of the Windows drive;
+ *  - every further disk: empty or exactly its own default name 'Disk <n>'.
+ *
+ * portal/assets/vm-disk-label.js mirrors it; both run the shared vectors.
+ */
+function vm_disk_name_is_default(string $name, int $position): bool
+{
+    $name = trim($name);
+    if ($name === '') {
+        return true;
+    }
+    if ($position > 1) {
+        return $name === vm_disk_default_name($position);
+    }
+
+    return $name === VIRTUSPHERE_VM_DEFAULTS['disk_name_legacy_default']
+        || preg_match('/^' . preg_quote(VIRTUSPHERE_VM_DEFAULTS['disk_name_prefix'], '/') . ' [0-9]+$/D', $name) === 1;
+}
+
+/**
+ * The one normalisation of a disk name for $position (1-based), applied on
+ * save and on every read that compares or derives from a stored name (DN2):
+ * a system disk name that is a default becomes '' (stored empty, the Windows
+ * drive keeps the task sequence label), an empty data disk name becomes
+ * 'Disk <n>' as before. A name of the operator's own is only trimmed.
+ */
+function vm_disk_stored_name(string $name, int $position): string
+{
+    $name = trim($name);
+    if ($position <= 1) {
+        return vm_disk_name_is_default($name, 1) ? '' : $name;
+    }
+
+    return $name !== '' ? $name : vm_disk_default_name($position);
 }
 
 function virtusphere_guest_os_ids(): array

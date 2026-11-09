@@ -168,11 +168,13 @@ return [
     'disk_type_thick' => 'Thick',
     'disk_type_eagerzeroedthick' => 'Eager Zeroed Thick',
     'disk_type_hint' => 'Der Typ legt fest, wie ESXi den Platz auf dem Datastore belegt: Thin wächst mit dem Verbrauch, Thick reserviert den Platz sofort und nullt jeden Block erst beim ersten Schreibzugriff, Eager Zeroed Thick reserviert ihn sofort und bringt ihn bereits genullt mit. Vorbelegt ist :default. Die Angabe wirkt nur beim Erstellen der VM; bei einer bereits erstellten Festplatte ändert eine Umstellung nichts.',
-    'disk_name_hint' => 'Den Namen übernimmt Windows als Laufwerksbezeichnung, wenn es eine neue Datenplatte einrichtet: höchstens :max Zeichen, Steuerzeichen, das gerade Anführungszeichen und die Zeichen \ / : * ? < > | werden zu Leerzeichen. Ohne eigenen Namen gilt die Vorgabe, etwa „:example“. Bereits eingerichtete Platten und die Systemplatte behalten ihre Bezeichnung.',
+    'disk_name_hint' => 'Den Namen übernimmt Windows als Laufwerksbezeichnung: eine neue Datenplatte, wenn Windows sie einrichtet, und die erste Platte (Systemplatte) als Bezeichnung des Windows-Laufwerks nach der Installation. Höchstens :max Zeichen, Steuerzeichen, das gerade Anführungszeichen und die Zeichen \ / : * ? < > | werden zu Leerzeichen. Eine Datenplatte ohne eigenen Namen erhält die Vorgabe, etwa „:example“. Bleibt der Name der Systemplatte leer, behält Windows die Bezeichnung aus der Task Sequence; „:legacy“ und Vorgabenamen wie „:example“ zählen dort als leer. Bereits eingerichtete Datenplatten behalten ihre Bezeichnung.',
     // NZ1: der Satz direkt am Namensfeld, nur wenn die Windows-Bezeichnung vom Namen abweicht.
     'disk_label_windows' => 'Windows erhält die Bezeichnung „:label“.',
     'disk_label_default' => 'Ohne Namen gilt „:label“, auch als Windows-Bezeichnung.',
     'disk_label_fallback' => 'Kein verwendbares Zeichen: Windows erhält die Bezeichnung VM_Disk_ mit der Datenträgernummer.',
+    // DN2: dasselbe an der Systemplatte, dort bleibt die Bezeichnung aus der Task Sequence.
+    'disk_label_system_fallback' => 'Kein verwendbares Zeichen: Windows behält die Bezeichnung aus der Task Sequence.',
     'hotplug_heading' => 'Hot-Add (CPU/RAM)',
     'cpu_hotplug' => 'CPU-Hot-Add',
     'ram_hotplug' => 'RAM-Hot-Add',

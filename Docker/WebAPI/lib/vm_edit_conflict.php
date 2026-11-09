@@ -131,8 +131,9 @@ function vm_edit_conflict_interface_rows(array $rows): array
 }
 
 /**
- * Disk rows as vm_parse_disks() saves them: empty rows dropped, an unnamed
- * disk named by position, no rows at all as the default disk.
+ * Disk rows as vm_parse_disks() saves them: empty rows after the first
+ * dropped, names through vm_disk_stored_name(), no rows at all as the default
+ * disk.
  *
  * @param array<int|string, mixed> $rows
  * @return list<array{disk_name:string, disk_size:int, disk_type:string}>
@@ -147,11 +148,12 @@ function vm_edit_conflict_disk_rows(array $rows): array
         $name = is_scalar($row['disk_name'] ?? null) ? trim((string) $row['disk_name']) : '';
         $size = is_scalar($row['disk_size'] ?? null) ? (int) $row['disk_size'] : 0;
         $type = is_scalar($row['disk_type'] ?? null) ? strtolower(trim((string) $row['disk_type'])) : '';
-        if ($name === '' && $size <= 0) {
+        if ($name === '' && $size <= 0 && $canonical !== []) {
             continue;
         }
         $canonical[] = [
-            'disk_name' => $name !== '' ? $name : vm_disk_default_name(count($canonical) + 1),
+            // DN2: a stored legacy 'System' and a submitted empty field are the same value.
+            'disk_name' => vm_disk_stored_name($name, count($canonical) + 1),
             'disk_size' => max(1, $size),
             'disk_type' => $type !== '' ? $type : VIRTUSPHERE_VM_DEFAULTS['disk_type'],
         ];

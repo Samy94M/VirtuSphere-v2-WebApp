@@ -1,7 +1,7 @@
 {
-  "_comment": "Shared vectors of the Windows volume label rule (NZ1). VmDiskLayoutTest runs them against lib/vm_disk_layout.php, tests/e2e/tests/disk-label-mirror.test.js against portal/assets/vm-disk-label.js. max and defaults are asserted against the PHP constants. Names are synthetic.",
+  "_comment": "Shared vectors of the Windows volume label rule (NZ1) and the system disk default rule (DN2). VmDiskLayoutTest runs them against lib/vm_disk_layout.php and lib/defaults.php, tests/e2e/tests/disk-label-mirror.test.js against portal/assets/vm-disk-label.js. max and defaults are asserted against the PHP constants. Names are synthetic.",
   "max": 32,
-  "defaults": {"first": "System", "prefix": "Disk"},
+  "defaults": {"first": "", "prefix": "Disk", "legacy_first": "System"},
   "labels": [
     {"why": "plain name", "name": "Daten", "label": "Daten"},
     {"why": "German umlauts stay", "name": "Ölstand Prüfung ß", "label": "Ölstand Prüfung ß"},
@@ -33,8 +33,17 @@
     {"why": "private use character stays", "name": "AB", "label": "AB"}
   ],
   "notices": [
-    {"why": "system disk is never formatted", "name": "abcdefghijklmnopqrstuvwxyz0123456", "position": 1, "kind": "none", "label": null},
-    {"why": "empty system disk", "name": "", "position": 1, "kind": "none", "label": null},
+    {"why": "empty system disk keeps the task sequence label, silently", "name": "", "position": 1, "kind": "none", "label": null},
+    {"why": "spaces only on the system disk", "name": "   ", "position": 1, "kind": "none", "label": null},
+    {"why": "legacy default on the system disk counts as empty", "name": "System", "position": 1, "kind": "none", "label": null},
+    {"why": "auto name moved up to the system disk counts as empty", "name": "Disk 2", "position": 1, "kind": "none", "label": null},
+    {"why": "own system disk name fits", "name": "Ölstand Prüfung", "position": 1, "kind": "none", "label": "Ölstand Prüfung"},
+    {"why": "lower-case system is a name of its own", "name": "system", "position": 1, "kind": "none", "label": "system"},
+    {"why": "own system disk name is cut", "name": "abcdefghijklmnopqrstuvwxyz0123456", "position": 1, "kind": "label", "label": "abcdefghijklmnopqrstuvwxyz012345"},
+    {"why": "own system disk name has a character replaced", "name": "Logs: C", "position": 1, "kind": "label", "label": "Logs C"},
+    {"why": "nothing usable on the system disk", "name": "???", "position": 1, "kind": "system_fallback", "label": null},
+    {"why": "no-break space on the system disk is saved, nothing usable", "name": " ", "position": 1, "kind": "system_fallback", "label": null},
+    {"why": "data disk keeps the legacy default as a name", "name": "System", "position": 2, "kind": "none", "label": "System"},
     {"why": "label equals name", "name": "Daten", "position": 2, "kind": "none", "label": "Daten"},
     {"why": "outer spaces are trimmed on save", "name": "  Daten  ", "position": 2, "kind": "none", "label": "Daten"},
     {"why": "empty field saves the default name", "name": "", "position": 2, "kind": "default", "label": "Disk 2"},
@@ -44,5 +53,25 @@
     {"why": "cut to the limit", "name": "abcdefghijklmnopqrstuvwxyz0123456", "position": 2, "kind": "label", "label": "abcdefghijklmnopqrstuvwxyz012345"},
     {"why": "replaced character", "name": "Logs: C", "position": 4, "kind": "label", "label": "Logs C"},
     {"why": "emoji at the limit", "name": "abcdefghijklmnopqrstuvwxyz01234😀", "position": 2, "kind": "label", "label": "abcdefghijklmnopqrstuvwxyz01234"}
+  ],
+  "defaults_by_position": [
+    {"why": "empty system disk", "name": "", "position": 1, "is_default": true},
+    {"why": "spaces only", "name": "  ", "position": 1, "is_default": true},
+    {"why": "legacy default", "name": "System", "position": 1, "is_default": true},
+    {"why": "legacy default with outer spaces", "name": " System ", "position": 1, "is_default": true},
+    {"why": "legacy default is case-sensitive", "name": "system", "position": 1, "is_default": false},
+    {"why": "longer name with the legacy word", "name": "Systemplatte", "position": 1, "is_default": false},
+    {"why": "auto name of another position", "name": "Disk 2", "position": 1, "is_default": true},
+    {"why": "auto name with two digits", "name": "Disk 17", "position": 1, "is_default": true},
+    {"why": "prefix alone", "name": "Disk", "position": 1, "is_default": false},
+    {"why": "auto name with a suffix", "name": "Disk 2a", "position": 1, "is_default": false},
+    {"why": "auto name with two spaces", "name": "Disk  2", "position": 1, "is_default": false},
+    {"why": "auto name with a trailing line feed is trimmed", "name": "Disk 2\n", "position": 1, "is_default": true},
+    {"why": "no-break space is not trimmed", "name": " ", "position": 1, "is_default": false},
+    {"why": "own name", "name": "Daten", "position": 1, "is_default": false},
+    {"why": "data disk with its own default", "name": "Disk 2", "position": 2, "is_default": true},
+    {"why": "data disk with the default of another position", "name": "Disk 3", "position": 2, "is_default": false},
+    {"why": "data disk with the legacy default", "name": "System", "position": 2, "is_default": false},
+    {"why": "empty data disk", "name": "", "position": 3, "is_default": true}
   ]
 }

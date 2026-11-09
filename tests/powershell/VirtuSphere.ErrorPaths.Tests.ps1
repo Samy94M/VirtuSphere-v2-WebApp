@@ -1412,7 +1412,8 @@ Describe 'Client-Skripte melden keinen Erfolg fuer nicht geleistete Arbeit' {
         # nennt ("... nach Set-Disk weiterhin offline"), ist kein Aufruf, und ein
         # Test, der darauf anspringt, prueft seinen eigenen Suchausdruck.
         $text = (Get-ClientText -Name 'client_VMDisksOnline.ps1') -replace '"[^"\r\n]*"', '""' -replace "'[^'\r\n]*'", "''"
-        foreach ($cmdlet in @('Get-Disk', 'Set-Disk', 'Initialize-Disk', 'New-Partition', 'Format-Volume', 'Get-Volume')) {
+        # DN2: Set-Volume (Bezeichnung des Windows-Laufwerks) und Get-Partition gehoeren dazu.
+        foreach ($cmdlet in @('Get-Disk', 'Set-Disk', 'Initialize-Disk', 'New-Partition', 'Format-Volume', 'Get-Volume', 'Set-Volume', 'Get-Partition')) {
             # (?![\w-]) sonst matcht "Set-Disk" die skripteigene Hilfsfunktion
             # Set-DiskStatus, und der Test prueft seinen eigenen Suchfehler.
             $calls = [regex]::Matches($text, [regex]::Escape($cmdlet) + '(?![\w-])[^\r\n|]*')

@@ -26,7 +26,10 @@ require_once __DIR__ . '/../vm_timeline.php';
             <p><?php echo h(__t('help_missions.vm_steps_3', ['max' => (int) VIRTUSPHERE_VM_LIMITS['vm_name_max_length']])); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_4')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_5')); ?></p>
-            <p><?php echo h(__t('help_missions.vm_steps_6')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_6', [
+                'legacy' => VIRTUSPHERE_VM_DEFAULTS['disk_name_legacy_default'],
+                'example' => vm_disk_default_name(2),
+            ])); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_7')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_8')); ?></p>
             <p class="muted"><?php echo h(__t('help_missions.vm_steps_note')); ?></p>

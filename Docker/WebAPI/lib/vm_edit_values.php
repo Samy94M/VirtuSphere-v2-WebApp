@@ -23,7 +23,7 @@ function vm_default_interfaces(array $mission): array
 function vm_default_disks(): array
 {
     return [[
-        'disk_name' => VIRTUSPHERE_VM_DEFAULTS['disk_name'],
+        'disk_name' => vm_disk_default_name(1),
         'disk_size' => VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'],
         'disk_type' => VIRTUSPHERE_VM_DEFAULTS['disk_type'],
     ]];
@@ -90,13 +90,16 @@ function vm_parse_disks(array $rows): array
         $name = trim((string) ($row['disk_name'] ?? ''));
         $size = (int) ($row['disk_size'] ?? 0);
         $type = strtolower(trim((string) ($row['disk_type'] ?? VIRTUSPHERE_VM_DEFAULTS['disk_type'])));
-        if ($name === '' && $size <= 0) {
+        // An empty row is dropped, but never the first one: its name is empty
+        // by design since DN2, and dropping it would move a data disk (and its
+        // name) up to the system disk.
+        if ($name === '' && $size <= 0 && $disks !== []) {
             continue;
         }
         if (!in_array($type, $allowed, true)) {
             throw new RuntimeException(__t('vm_edit.err_invalid_disk_type'));
         }
-        $disks[] = ['disk_name' => $name !== '' ? $name : vm_disk_default_name(count($disks) + 1), 'disk_size' => max(1, $size), 'disk_type' => $type];
+        $disks[] = ['disk_name' => vm_disk_stored_name($name, count($disks) + 1), 'disk_size' => max(1, $size), 'disk_type' => $type];
     }
 
     return $disks !== [] ? $disks : vm_default_disks();

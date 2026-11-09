@@ -27,13 +27,21 @@ test('label rule matches the shared vectors', () => {
 });
 
 test('editor notice matches the shared vectors', () => {
-  const { first, prefix } = vectors.defaults;
+  const { first, prefix, legacy_first: legacy } = vectors.defaults;
   for (const vector of vectors.notices) {
     assert.deepEqual(
-      mirror.labelNotice(vector.name, vector.position, vectors.max, first, prefix),
+      mirror.labelNotice(vector.name, vector.position, vectors.max, first, prefix, legacy),
       { kind: vector.kind, label: vector.label },
       vector.why,
     );
+  }
+});
+
+test('default name rule matches the shared vectors (DN2)', () => {
+  const { first, prefix, legacy_first: legacy } = vectors.defaults;
+  assert.ok(vectors.defaults_by_position.length > 10);
+  for (const vector of vectors.defaults_by_position) {
+    assert.equal(mirror.isDefaultName(vector.name, vector.position, first, prefix, legacy), vector.is_default, vector.why);
   }
 });
 

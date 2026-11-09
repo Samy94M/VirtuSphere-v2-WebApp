@@ -8,6 +8,9 @@
 # Platte wird vor dem ersten Write mit stabiler Identitaet in einem dauerhaften
 # Registry-Journal registriert. Nach einem Abbruch wird ausschliesslich diese
 # Operation fortgesetzt; eine unbekannte online-RAW-Platte blockiert fail-closed.
+# Neue Datenplatten erhalten ihren Portalnamen als Bezeichnung (DN1). Traegt
+# die Systemplatte im Portal einen eigenen Namen, erhaelt das Windows-Laufwerk
+# ihn danach als Bezeichnung (DN2); sonst bleibt die der Task Sequence.
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
@@ -22,6 +25,9 @@ $basicDataGptType = '{EBD0A0A2-B9E5-4433-87C0-68B6B72699C7}'
 # Spiegel von VIRTUSPHERE_DISK_VOLUME_LABEL_MAX (Docker/WebAPI/lib/vm_disk_layout.php);
 # Pester liest beide Seiten. NTFS speichert hoechstens 32 UTF-16-Zeichen.
 $volumeLabelMax = 32
+# DN2: Rolloutrevision, fuer die das Windows-Laufwerk seine Portalbezeichnung
+# erhalten hat. Wert am Statusschluessel, nie ein Eintrag unter Operations.
+$systemLabelMarker = 'SystemVolumeLabelRevision'
 $reportMac = Get-VsReportMac
 $exitCode = 0
 $diskMutex = $null
@@ -202,7 +208,8 @@ function Confirm-OperationDisk {
 #   size_mismatch             Portalgroesse passt nicht zur Platte
 #   no_usable_name            vom Namen bleibt nach der Portalregel nichts uebrig
 #   label_invalid             Portal lieferte ein Label, das NTFS nicht nimmt
-# Bereits eingerichtete Platten werden nie umbenannt.
+# Bereits eingerichtete Datenplatten werden nie umbenannt; nur das Windows-
+# Laufwerk erhaelt im eigenen Block weiter unten eine Bezeichnung (DN2).
 
 function Get-DefaultDiskLabel {
     param([Parameter(Mandatory)][object]$Disk)
@@ -328,13 +335,20 @@ function Get-DiskLabelPlan {
     if (-not (Test-DiskScsiLayout -Disks $Disks -Addresses $addresses)) {
         return [pscustomobject]@{ Reason = 'scsi_layout_unknown'; Disks = @(); Addresses = $addresses }
     }
+    $portal = Get-PortalDiskLayoutSafe
+    # Portal reicht die Antwort an den Block der Systemplatte weiter (DN2), damit
+    # ein Lauf getDeviceInfos nur einmal fragt.
+    return [pscustomobject]@{ Reason = [string]$portal.Reason; Disks = @($portal.Disks); Addresses = $addresses; Portal = $portal }
+}
+
+function Get-PortalDiskLayoutSafe {
+    # Get-PortalDiskLayout, ein unerwarteter Fehler zaehlt als portal_unreachable.
     try {
-        $portal = Get-PortalDiskLayout
+        return Get-PortalDiskLayout
     } catch {
         Write-VsClientLog -Level WARN "Plattenliste des Portals nicht auswertbar: $($_.Exception.Message)"
-        $portal = [pscustomobject]@{ Disks = @(); Reason = 'portal_unreachable' }
+        return [pscustomobject]@{ Disks = @(); Reason = 'portal_unreachable' }
     }
-    return [pscustomobject]@{ Reason = [string]$portal.Reason; Disks = @($portal.Disks); Addresses = $addresses }
 }
 
 function Resolve-DiskVolumeLabel {
@@ -350,6 +364,161 @@ function Resolve-DiskVolumeLabel {
     $label = [string]$hits[0].volume_label
     if (-not (Test-DiskVolumeLabel -Label $label)) { return [pscustomobject]@{ Label = $fallback; Reason = 'label_invalid' } }
     return [pscustomobject]@{ Label = $label; Reason = '' }
+}
+
+# --- Bezeichnung des Windows-Laufwerks (DN2) ---------------------------------
+# Traegt die Systemplatte (Portalposition 0) im VM-Editor einen eigenen Namen,
+# erhaelt das Windows-Laufwerk ihn nach der Task Sequence als Bezeichnung. Ohne
+# eigenen Namen bleibt die Bezeichnung der Task Sequence. Der Block laeuft nach
+# den Datenplatten, auch ohne jede Zusatzplatte; er formatiert nie, legt keine
+# Partition an, schreibt kein Journal und nutzt Assert-DiskIsSafeTarget nicht.
+# Ziel ist nur das Volume auf $env:SystemDrive, dessen Partition IsBoot meldet
+# und auf der einen Bootplatte liegt; EFI, System Reserved und Recovery haben
+# diesen Buchstaben nie. Die Bezeichnung wird vorher gelesen, nur bei
+# Abweichung gesetzt und danach nachgelesen. Das Ergebnis steht als Token
+# system=renamed|kept|skip:<Grund> im Detail; die Phase bleibt erfolgreich.
+#   kept                        kein eigener Name (label_custom false), die
+#                               Bezeichnung stimmt schon, oder sie wurde fuer
+#                               diese Rolloutrevision schon gesetzt (Marker
+#                               SystemVolumeLabelRevision); eine danach von Hand
+#                               geaenderte Bezeichnung bleibt
+#   portal_without_system_label Portal ohne label_custom (Stand vor DN2): nie
+#                               umbenennen, auch wenn volume_label gesetzt ist
+#   no_portal_disk              keine Portalplatte auf scsi_unit 0
+#   scsi_layout_unknown         Bootplatte nicht auf SCSI-Target 0 oder Adressen
+#                               nicht lesbar
+#   system_volume_unknown       Windows-Laufwerk nicht sicher bestimmbar
+#   system_label_failed         Setzen gescheitert oder Nachlesen weicht ab (WARN)
+# Dazu die Gruende der Portalabfrage (rollout_mismatch, portal_unreachable,
+# portal_without_disk_names, disk_list_invalid) und der Labelpruefung
+# (no_usable_name, label_invalid) wie oben. Eine abweichende Portalgroesse ist
+# nur eine Warnung im Log: die Groesse im Portal wirkt nur beim Erstellen.
+
+function Get-SystemLabelMarker {
+    $value = Get-ItemProperty -Path $registryPath -Name $systemLabelMarker -ErrorAction SilentlyContinue
+    if ($null -eq $value) { return '' }
+    return [string]$value.$systemLabelMarker
+}
+
+function Set-SystemLabelMarker {
+    param([Parameter(Mandatory)][string]$Revision)
+    Set-ItemProperty -Path $registryPath -Name $systemLabelMarker -Value $Revision -ErrorAction Stop
+}
+
+function Get-SystemVolumeTarget {
+    # Das Volume des laufenden Windows oder ein Grund. Wirft nie.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Disks)
+    $unknown = [pscustomobject]@{ Reason = 'system_volume_unknown'; Letter = $null; Disk = $null; Volume = $null }
+    $drive = [string]$env:SystemDrive
+    if ($drive -notmatch '^[A-Za-z]:$') { return $unknown }
+    $letter = [char]$drive.Substring(0, 1).ToUpperInvariant()
+    $bootDisks = @($Disks | Where-Object { [bool]$_.IsBoot })
+    if ($bootDisks.Count -ne 1) { return $unknown }
+    try {
+        $partitions = @(Get-Partition -DriveLetter $letter -ErrorAction Stop)
+        $volume = Get-Volume -DriveLetter $letter -ErrorAction Stop
+    } catch {
+        Write-VsClientLog -Level WARN "Windows-Laufwerk $drive nicht lesbar: $($_.Exception.Message)"
+        return $unknown
+    }
+    if ($partitions.Count -ne 1 -or -not [bool]$partitions[0].IsBoot -or
+        [int]$partitions[0].DiskNumber -ne [int]$bootDisks[0].Number -or
+        $null -eq $volume -or [string]$volume.FileSystem -ne 'NTFS') { return $unknown }
+    return [pscustomobject]@{ Reason = ''; Letter = $letter; Disk = $bootDisks[0]; Volume = $volume }
+}
+
+function Resolve-SystemVolumeLabel {
+    # Entscheidet aus Portalliste, Ziel und SCSI-Adressen. Ergebnis Action =
+    # set (mit Label), kept oder skip (mit Reason).
+    param([Parameter(Mandatory)][object]$Portal, [Parameter(Mandatory)][object]$Target, [AllowNull()][hashtable]$Addresses)
+    if ($Portal.Reason) { return [pscustomobject]@{ Action = 'skip'; Reason = [string]$Portal.Reason; Label = $null } }
+    $hits = @($Portal.Disks | Where-Object { $null -ne $_.scsi_unit -and [int]$_.scsi_unit -eq 0 })
+    if ($hits.Count -ne 1) { return [pscustomobject]@{ Action = 'skip'; Reason = 'no_portal_disk'; Label = $null } }
+    $entry = $hits[0]
+    if (-not $entry.PSObject.Properties['label_custom']) {
+        return [pscustomobject]@{ Action = 'skip'; Reason = 'portal_without_system_label'; Label = $null }
+    }
+    if ($entry.label_custom -isnot [bool]) { return [pscustomobject]@{ Action = 'skip'; Reason = 'disk_list_invalid'; Label = $null } }
+    if (-not $entry.label_custom) { return [pscustomobject]@{ Action = 'kept'; Reason = 'no_own_name'; Label = $null } }
+    if ($Target.Reason) { return [pscustomobject]@{ Action = 'skip'; Reason = [string]$Target.Reason; Label = $null } }
+    $address = $null
+    if ($Addresses) { $address = $Addresses[[int]$Target.Disk.Number] }
+    if (-not $address -or $null -eq $address.Target -or [int]$address.Target -ne 0) {
+        return [pscustomobject]@{ Action = 'skip'; Reason = 'scsi_layout_unknown'; Label = $null }
+    }
+    if (([long]$entry.size_gb * 1GB) -ne [long]$Target.Disk.Size) {
+        # F4: die Portalgroesse wirkt nur beim Erstellen und darf spaeter abweichen.
+        Write-VsClientLog -Level WARN ("Systemplatte: Portalgroesse {0} GB weicht von der Platte ab ({1} Bytes); Bezeichnung trotzdem." -f $entry.size_gb, [long]$Target.Disk.Size)
+    }
+    if ($null -eq $entry.volume_label) { return [pscustomobject]@{ Action = 'skip'; Reason = 'no_usable_name'; Label = $null } }
+    $label = [string]$entry.volume_label
+    if (-not (Test-DiskVolumeLabel -Label $label)) { return [pscustomobject]@{ Action = 'skip'; Reason = 'label_invalid'; Label = $null } }
+    return [pscustomobject]@{ Action = 'set'; Reason = ''; Label = $label }
+}
+
+function Set-SystemVolumeLabel {
+    # Die einzige Stelle, die eine bestehende Bezeichnung aendert: nur das
+    # Windows-Laufwerk, nur bei Abweichung, mit Nachlesen. Wirft bei Fehler.
+    param([Parameter(Mandatory)][char]$Letter, [Parameter(Mandatory)][string]$Label)
+    $before = Get-Volume -DriveLetter $Letter -ErrorAction Stop
+    if ([string]$before.FileSystemLabel -ceq $Label) { return $false }
+    Set-Volume -DriveLetter $Letter -NewFileSystemLabel $Label -ErrorAction Stop
+    $after = Get-Volume -DriveLetter $Letter -ErrorAction Stop
+    if ([string]$after.FileSystemLabel -cne $Label) {
+        throw "Bezeichnung von ${Letter}: lautet nach dem Setzen '$($after.FileSystemLabel)' statt '$Label'."
+    }
+    Write-VsClientLog "Windows-Laufwerk ${Letter}: heisst jetzt '$Label' (vorher '$($before.FileSystemLabel)')."
+    return $true
+}
+
+function Invoke-SystemVolumeLabel {
+    # DN2-Block nach der Datenplattenschleife. Wirft nie; liefert das Token.
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Disks, [AllowNull()][object]$Portal)
+    try {
+        $revision = [string](Get-VsSnapshotValue -Name 'rollout_revision')
+        $marker = Get-SystemLabelMarker
+        if ($revision -and $marker -ceq $revision) {
+            Write-VsClientLog "Windows-Laufwerk: Bezeichnung fuer Rollout $revision schon gesetzt, bleibt."
+            return [pscustomobject]@{ Token = 'kept'; Reason = 'already_applied' }
+        }
+        if ($null -eq $Portal) { $Portal = Get-PortalDiskLayoutSafe }
+        $target = Get-SystemVolumeTarget -Disks $Disks
+        $addresses = @{}
+        if (-not $target.Reason -and -not $Portal.Reason) {
+            try { $addresses = Get-DiskScsiAddressMap } catch {
+                Write-VsClientLog -Level WARN "SCSI-Adressen nicht lesbar: $($_.Exception.Message)"
+            }
+        }
+        $decision = Resolve-SystemVolumeLabel -Portal $Portal -Target $target -Addresses $addresses
+        if ($decision.Action -eq 'kept') {
+            Write-VsClientLog 'Systemplatte ohne eigenen Namen: Windows-Laufwerk behaelt die Bezeichnung der Task Sequence.'
+            return [pscustomobject]@{ Token = 'kept'; Reason = [string]$decision.Reason }
+        }
+        if ($decision.Action -ne 'set') {
+            Write-VsClientLog -Level WARN "Windows-Laufwerk behaelt seine Bezeichnung ($($decision.Reason))."
+            return [pscustomobject]@{ Token = 'skip:' + [string]$decision.Reason; Reason = [string]$decision.Reason }
+        }
+    } catch {
+        Write-VsClientLog -Level WARN "Bezeichnung des Windows-Laufwerks nicht bestimmbar: $($_.Exception.Message)"
+        return [pscustomobject]@{ Token = 'skip:system_volume_unknown'; Reason = 'system_volume_unknown' }
+    }
+
+    try {
+        $changed = Set-SystemVolumeLabel -Letter $target.Letter -Label ([string]$decision.Label)
+    } catch {
+        Write-VsClientLog -Level WARN "Bezeichnung des Windows-Laufwerks nicht gesetzt: $($_.Exception.Message)"
+        return [pscustomobject]@{ Token = 'skip:system_label_failed'; Reason = 'system_label_failed' }
+    }
+    if ($revision) {
+        try { Set-SystemLabelMarker -Revision $revision } catch {
+            Write-VsClientLog -Level WARN "Marker der Systembezeichnung nicht gespeichert: $($_.Exception.Message)"
+        }
+    }
+    if (-not $changed) {
+        Write-VsClientLog "Windows-Laufwerk traegt die Portalbezeichnung '$($decision.Label)' bereits."
+        return [pscustomobject]@{ Token = 'kept'; Reason = 'already_equal' }
+    }
+    return [pscustomobject]@{ Token = 'renamed'; Reason = '' }
 }
 
 function Invoke-OwnedRawDiskOperation {
@@ -534,15 +703,25 @@ try {
         }
     }
 
-    $detail = "resumed={0} new={1} existing={2}" -f $resumed, $created, $existing
+    # DN2: Bezeichnung des Windows-Laufwerks, nach den Datenplatten und auch
+    # ohne Zusatzplatte. Wirft nie; ein Fehlschlag ist WARN und ein Grund.
+    $portalLayout = $null
+    if ($null -ne $labelPlan -and $labelPlan.PSObject.Properties['Portal']) { $portalLayout = $labelPlan.Portal }
+    $systemResult = Invoke-SystemVolumeLabel -Disks $disks -Portal $portalLayout
+    $systemToken = 'system={0}' -f $systemResult.Token
+    $systemRenamed = [int]([string]$systemResult.Token -eq 'renamed')
+
+    # Das Systemtoken steht vor den DN1-Gruenden, damit die Kuerzung des
+    # Details auf 255 Zeichen im Portal nie es trifft.
+    $detail = "resumed={0} new={1} existing={2} {3}" -f $resumed, $created, $existing, $systemToken
     if ($created -gt 0) {
         # DN1: wie viele neue Platten ihren Portalnamen bekamen, und warum die
         # uebrigen beim Vorgabelabel blieben.
         $detail += " named={0}" -f $named
         if ($labelReasons.Count -gt 0) { $detail += " default={0} ({1})" -f $labelReasons.Count, ((@($labelReasons) | Select-Object -Unique) -join ',') }
     }
-    if (($resumed + $created + $existing) -eq 0) { $detail = 'optional: no disk work required' }
-    Set-DiskStatus -Status 'Success' -Extra @{ ProcessedDisks = [string]($resumed + $created + $existing); LastResult = $detail }
+    if (($resumed + $created + $existing + $systemRenamed) -eq 0) { $detail = "optional: no disk work required $systemToken" }
+    Set-DiskStatus -Status 'Success' -Extra @{ ProcessedDisks = [string]($resumed + $created + $existing + $systemRenamed); LastResult = $detail }
     if ($reportMac) { Send-VsPhase -Mac $reportMac -Phase 'disks' -PhaseEvent 'finished' -Detail $detail }
 } catch {
     Write-VsClientLog -Level ERROR "Disk-Phase fehlgeschlagen: $($_.Exception.Message)"

@@ -119,7 +119,8 @@ function repo_replace_disks(mysqli $db, int $vmId, mixed $disks): void
 
     $disks = repo_validate_disks($disks);
     foreach ($disks as $disk) {
-        $name = (string) repo_object_get($disk, 'disk_name', VIRTUSPHERE_VM_DEFAULTS['disk_name']);
+        // repo_validate_disks() already applied vm_disk_stored_name().
+        $name = (string) repo_object_get($disk, 'disk_name', '');
         $size = (int) repo_object_get($disk, 'disk_size', VIRTUSPHERE_VM_DEFAULTS['disk_size_gb']);
         $type = strtolower((string) repo_object_get($disk, 'disk_type', VIRTUSPHERE_VM_DEFAULTS['disk_type']));
         repo_execute($db, 'INSERT INTO deploy_disks (vm_id, disk_name, disk_size, disk_type) VALUES (?, ?, ?, ?)', 'isis', [$vmId, $name, $size, $type]);

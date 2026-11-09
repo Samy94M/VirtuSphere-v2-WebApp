@@ -39,13 +39,43 @@ final class VmDiskLabelHintRenderTest extends TestCase
         self::assertSame(VIRTUSPHERE_DISK_VOLUME_LABEL_MAX, mb_strlen($label));
     }
 
-    public function testFittingNameAndSystemDiskStayQuiet(): void
+    public function testFittingNameAndEmptySystemDiskStayQuiet(): void
     {
-        foreach ([['Daten', 1], [str_repeat('x', 40), 0]] as [$name, $index]) {
+        foreach ([['Daten', 1], ['', 0], ['System', 0], ['Disk 2', 0], ['Systemplatte', 0]] as [$name, $index]) {
             $html = $this->row($name, $index);
             self::assertStringNotContainsString('aria-describedby', $html, $name);
             self::assertMatchesRegularExpression('/<small class="hint" id="[^"]+" data-disk-label-hint[^>]* hidden><\/small>/', $html, $name);
         }
+    }
+
+    public function testSystemDiskShowsThePlaceholderAndNeverSavesIt(): void
+    {
+        // DN2: a stored legacy default renders as the empty field it is saved
+        // as; the task sequence label is only the placeholder.
+        foreach (['', 'System', 'Disk 2'] as $name) {
+            $html = $this->row($name, 0);
+            self::assertStringContainsString('value="" placeholder="' . VIRTUSPHERE_SYSTEM_DISK_LABEL_PLACEHOLDER . '"', $html, $name);
+        }
+        self::assertStringContainsString('value="Systemplatte" placeholder=', $this->row('Systemplatte', 0));
+        self::assertStringContainsString('data-autoname-legacy="' . VIRTUSPHERE_VM_DEFAULTS['disk_name_legacy_default'] . '"', $this->row('', 0));
+        // Data disks and the template have no placeholder; the mirror moves it.
+        self::assertStringNotContainsString('placeholder=', $this->row('', 1));
+        self::assertStringContainsString('value="System"', $this->row('System', 1));
+        self::assertStringNotContainsString('placeholder=', $this->row('', '__INDEX__', true));
+    }
+
+    public function testSystemDiskNoticeOnlyWhenCutReplacedOrNothingUsable(): void
+    {
+        // F7: the system disk speaks only for cut, replaced or nothing usable.
+        $long = str_repeat('x', 40);
+        self::assertStringContainsString(
+            htmlspecialchars(__t('vm_edit.disk_label_windows', ['label' => (string) vm_disk_volume_label($long)]), ENT_QUOTES, 'UTF-8'),
+            $this->row($long, 0)
+        );
+        $html = $this->row('???', 0);
+        self::assertStringContainsString(htmlspecialchars(__t('vm_edit.disk_label_system_fallback'), ENT_QUOTES, 'UTF-8'), $html);
+        self::assertStringNotContainsString(htmlspecialchars(__t('vm_edit.disk_label_fallback'), ENT_QUOTES, 'UTF-8'), $html);
+        self::assertStringContainsString('aria-describedby="' . form_hint_id('vm_edit', 'disk_label', 0) . '"', $html);
     }
 
     public function testTemplateRowLeavesThePositionToTheMirror(): void
@@ -73,6 +103,8 @@ final class VmDiskLabelHintRenderTest extends TestCase
             self::assertStringContainsString(':label', (string) $island[$kind], $kind);
         }
         self::assertSame(__t('vm_edit.disk_label_fallback'), $island['fallback']);
+        self::assertSame(__t('vm_edit.disk_label_system_fallback'), $island['system_fallback']);
+        self::assertSame(VIRTUSPHERE_SYSTEM_DISK_LABEL_PLACEHOLDER, $island['placeholder']);
     }
 
     public function testEveryNoticeKindHasASentenceInBothLocales(): void
@@ -83,6 +115,7 @@ final class VmDiskLabelHintRenderTest extends TestCase
                 self::assertStringContainsString(':label', (string) ($catalog[$key] ?? ''), $locale . ' ' . $key);
             }
             self::assertNotSame('', trim((string) ($catalog['disk_label_fallback'] ?? '')), $locale);
+            self::assertNotSame('', trim((string) ($catalog['disk_label_system_fallback'] ?? '')), $locale);
         }
     }
 }

@@ -227,6 +227,8 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 
 ## R50 Inherited VM values live at the field, without a guessed fallback
 
+- The system disk name (first disk row, DN2) stays empty when the Windows drive keeps the task sequence label; `VIRTUSPHERE_SYSTEM_DISK_LABEL_PLACEHOLDER` ("Windows", `lib/vm_disk_layout.php`) is only its placeholder and is never saved. A stored legacy `System` or an auto name `Disk <n>` renders as that empty field (`vm_disk_stored_name()`). `portal/assets/vm-disk-label.js` moves the placeholder to whichever row is first and clears an auto name that moved up when the first row was removed; a name of the operator's own stays. The field is silent while empty; a sentence appears only for a cut or replaced label or `system_fallback` (nothing usable). Rule and mirror share `tests/fixtures/disk-label-vectors.json`.
+
 - Datastore and Datacenter stay empty for inheritance; the mission value rides in the empty select option (or, without an inventory list, in the text field's placeholder) and is never prefilled, because a prefill would be saved back as an override. With no mission datacenter and the control shown (`$hideVmDatacenter` false), `vm_edit.location_datacenter_host_hint` says deployment takes the selected ESXi credential's single datacenter; the editor never invents `ha-datacenter`. A datastore has no such fallback.
 - A blank/`-1` VM delay shows the normalized mission delay as placeholder; numeric zero is an explicit VM override and must not collapse into blank. With mission autostart off the VM controls are locked and the stored VM preference posts unchanged. No page module re-derives these values; there is no separate effective-value box (removed in VE1).
 

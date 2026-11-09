@@ -4,7 +4,10 @@
 // the operator types. Both run tests/fixtures/disk-label-vectors.json, so a
 // change on one side without the other fails. Texts and the limit come from the
 // JSON island render_disk_label_island() writes, the default names from the
-// field's data-autoname-* attributes; the file holds none of its own.
+// field's data-autoname-* attributes; the file holds none of its own. DN2: the
+// system disk (first row) shows the task sequence placeholder from the island,
+// and a default name there (empty, the legacy default, '<prefix> <n>') is no
+// name of its own (isDefaultName mirrors vm_disk_name_is_default()).
 (function (root) {
     'use strict';
 
@@ -39,23 +42,40 @@
         return position <= 1 ? first : prefix + ' ' + position;
     }
 
-    function labelNotice(name, position, max, first, prefix) {
-        if (position <= 1) {
+    function escapeRegExp(value) {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    // Mirror of vm_disk_name_is_default() (DN2): on the system disk empty, the
+    // legacy default and the auto pattern '<prefix> <n>' are no name of its own.
+    function isDefaultName(name, position, first, prefix, legacy) {
+        var saved = asciiTrim(wellFormed(name));
+        if (saved === '') {
+            return true;
+        }
+        if (position > 1) {
+            return saved === defaultName(position, first, prefix);
+        }
+        return saved === legacy || new RegExp('^' + escapeRegExp(prefix) + ' [0-9]+$').test(saved);
+    }
+
+    function labelNotice(name, position, max, first, prefix, legacy) {
+        var saved = asciiTrim(wellFormed(name));
+        if (position <= 1 && isDefaultName(saved, 1, first, prefix, legacy)) {
             return {kind: 'none', label: null};
         }
-        var saved = asciiTrim(wellFormed(name));
         if (saved === '') {
             return {kind: 'default', label: volumeLabel(defaultName(position, first, prefix), max)};
         }
         var label = volumeLabel(saved, max);
         if (label === null) {
-            return {kind: 'fallback', label: null};
+            return {kind: position <= 1 ? 'system_fallback' : 'fallback', label: null};
         }
         return {kind: label === saved ? 'none' : 'label', label: label};
     }
 
     if (typeof module === 'object' && module && module.exports) {
-        module.exports = {volumeLabel: volumeLabel, labelNotice: labelNotice};
+        module.exports = {volumeLabel: volumeLabel, labelNotice: labelNotice, isDefaultName: isDefaultName};
     }
 
     var doc = root && root.document;
@@ -88,6 +108,35 @@
         }
     }
 
+    function names(input) {
+        return {
+            first: input.getAttribute('data-autoname-first') || '',
+            prefix: input.getAttribute('data-autoname-prefix') || '',
+            legacy: input.getAttribute('data-autoname-legacy') || ''
+        };
+    }
+
+    // DN2: when the first row was removed, the row that moved up is the system
+    // disk now. Its proposed 'Disk 2' would become the label of the Windows
+    // drive, so it is cleared the way the server saves it; a name of the
+    // operator's own stays. Only on a change of the first row, never while typing.
+    var firstRow = target.querySelector('[data-repeat-row]');
+    function normaliseMovedFirstRow() {
+        var current = target.querySelector('[data-repeat-row]');
+        if (current === firstRow) {
+            return;
+        }
+        firstRow = current;
+        var input = current ? current.querySelector('[data-disk-label-input]') : null;
+        if (!input || input.value === '') {
+            return;
+        }
+        var n = names(input);
+        if (isDefaultName(input.value, 1, n.first, n.prefix, n.legacy)) {
+            input.value = '';
+        }
+    }
+
     function refresh() {
         var rows = target.querySelectorAll('[data-repeat-row]');
         Array.prototype.forEach.call(rows, function (row, index) {
@@ -96,13 +145,14 @@
             if (!input || !hint) {
                 return;
             }
-            var notice = labelNotice(
-                input.value,
-                index + 1,
-                max,
-                input.getAttribute('data-autoname-first') || '',
-                input.getAttribute('data-autoname-prefix') || ''
-            );
+            // The placeholder belongs to the system disk only and is never a value.
+            if (index === 0 && texts.placeholder) {
+                input.setAttribute('placeholder', String(texts.placeholder));
+            } else {
+                input.removeAttribute('placeholder');
+            }
+            var n = names(input);
+            var notice = labelNotice(input.value, index + 1, max, n.first, n.prefix, n.legacy);
             var text = notice.kind === 'none' ? '' : String(texts[notice.kind] || '');
             text = text.replace(':label', function () { return notice.label || ''; });
             if (hint.textContent !== text) {
@@ -115,6 +165,9 @@
 
     target.addEventListener('input', refresh);
     target.addEventListener('change', refresh);
-    new MutationObserver(refresh).observe(target, {childList: true});
+    new MutationObserver(function () {
+        normaliseMovedFirstRow();
+        refresh();
+    }).observe(target, {childList: true});
     refresh();
 }(typeof window !== 'undefined' ? window : null));
