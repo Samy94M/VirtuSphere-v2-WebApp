@@ -153,8 +153,15 @@ Package N1a extends the decision without changing its boundaries:
   circuit breaker; its stored reason now says whether the password expired,
   the account is disabled or expired, or locked.
 - **Timeouts.** `LDAP_OPT_TIMEOUT` clamps every synchronous answer wait to the
-  remaining request deadline, so a controller that completes TLS and then
-  stays silent costs at most the answer budget. PHP-FPM
+  remaining request deadline, so a controller that completes a TLS 1.2
+  handshake and then stays silent costs at most the answer budget and the
+  sign-in fails over. After a TLS 1.3 handshake this does not hold: the
+  server's session tickets wake libldap's `select`, and its blocking read
+  then waits without a limit (measured against the fixture on 2026-11-09;
+  PHP 8.4 calls `ldap_sasl_bind_s` and `ldap_search_ext_s`). TLS 1.3 stays
+  allowed, because capping the client at TLS 1.2 would weaken transport for
+  a rare fault. For that residual the FPM wall clock below is the bound, and
+  that request does not fail over. PHP-FPM
   `request_terminate_timeout` equals nginx `fastcgi_read_timeout` (300 s) as a
   hard wall clock for any request; `request_slowlog_timeout` (30 s) logs the
   script name to the container error stream. The FPM master runs without

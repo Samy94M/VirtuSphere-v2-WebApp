@@ -92,12 +92,18 @@ DC-Zertifikat erscheint dadurch spätestens am Folgetag mit dem neuen Ablauf.
 Liegt der gespeicherte Ablauf in der Vergangenheit, gab es danach aber einen
 erfolgreichen Kontakt, hat der DC offensichtlich ein neues Zertifikat: Der
 Controller steht dann auf „veraltet“ statt „gestört“, bis der nächste Test
-oder Lesevorgang den neuen Wert liefert.
+oder Lesevorgang den neuen Wert liefert. Ein Ablauf nach dem 19.01.2038
+wird als dieses Datum gespeichert und angezeigt (Grenze der Datenbankspalte);
+die Ablaufwarnung kommt dadurch höchstens zu früh.
 
 Eine technische Störung (Verbindung, TLS, Timeout) darf auf den nächsten
 priorisierten Controller ausweichen. Jede Antwortwartezeit ist durch die
-verbleibende Frist der Anfrage begrenzt; ein DC, der nach dem TLS-Handshake
-schweigt, kostet höchstens diese Frist und gilt dann als `timeout`. Eine
+verbleibende Frist der Anfrage begrenzt; ein DC, der nach einem
+TLS-1.2-Handshake schweigt, kostet höchstens diese Frist und gilt dann als
+`timeout`. Nach einem TLS-1.3-Handshake greift diese Frist in libldap nicht:
+Ein solcher DC hält die Anfrage bis zur FPM-Grenze (unten), ohne Wechsel zum
+nächsten Controller. Das ist ein seltener Fehlerfall (DC-Dienst hängt bei
+offener Verbindung); TLS 1.3 bleibt deshalb erlaubt. Eine
 abgewiesene Benutzeranmeldung wird nicht gegen weitere Controller wiederholt.
 Wird stattdessen das Suchkonto abgewiesen, öffnet sich der revisionsweite
 Circuit Breaker, damit das Konto nicht durch automatische Wiederholungen

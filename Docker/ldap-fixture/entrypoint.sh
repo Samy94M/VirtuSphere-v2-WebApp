@@ -12,9 +12,14 @@
 #                most TLS 1.1 (N1a A5): the client must refuse the handshake.
 #                @SECLEVEL=0 lets this OpenSSL offer TLS 1.0/1.1 at all, so a
 #                refusal is the client's floor, not a stub that cannot talk.
-#   tls-silent - completes the TLS handshake with a valid, trusted cert and
+#   tls-silent - completes a TLS 1.2 handshake with a valid, trusted cert and
 #                then never answers an LDAP request (N1a A2): the bind must
-#                end at LDAP_OPT_TIMEOUT, not when TCP gives up.
+#                end at LDAP_OPT_TIMEOUT, not when TCP gives up. TLS 1.2 on
+#                purpose: after a TLS 1.3 handshake the session tickets wake
+#                libldap's select and its blocking read then ignores the
+#                timeout (measured 09.11.2026); that residual is bounded only
+#                by the FPM wall clock (ADR-0039 amendment 2026-11-09). The
+#                short sleep ends a regression's hang after two minutes.
 #   blackhole  - a socat TCP listener that accepts and then never answers,
 #                proving the deadline/timeout path actually fires.
 set -eu
@@ -64,8 +69,8 @@ tls-silent)
     CERT_NAME="${CERT_NAME:?CERT_NAME is required for FIXTURE_ROLE=tls-silent}"
     PORT="${FIXTURE_PORT:-636}"
     exec socat -d \
-        "OPENSSL-LISTEN:${PORT},reuseaddr,fork,cert=${FIXTURES_DIR}/${CERT_NAME}.crt.txt,key=${FIXTURES_DIR}/${CERT_NAME}.key.txt,verify=0" \
-        SYSTEM:"sleep 3600"
+        "OPENSSL-LISTEN:${PORT},reuseaddr,fork,cert=${FIXTURES_DIR}/${CERT_NAME}.crt.txt,key=${FIXTURES_DIR}/${CERT_NAME}.key.txt,verify=0,openssl-max-proto-version=TLS1.2" \
+        SYSTEM:"sleep 120"
     ;;
 blackhole)
     PORT="${FIXTURE_PORT:-636}"

@@ -595,9 +595,10 @@ Was dieser Block belegt:
     (Probe und libldap lehnen ab);
   - nur TLS 1.1: `DirectoryLdapFixtureTest`, tls11 (libldap lehnt ab, die
     Positivkontrolle zeigt, dass der Dienst TLS 1.1 wirklich spricht);
-  - DC antwortet nach TLS nicht: `DirectoryLdapFixtureTest` und
+  - DC antwortet nach TLS 1.2 nicht: `DirectoryLdapFixtureTest` und
     `DirectoryLdapFixtureFailoverTest`, silent (Ende nach der Antwortfrist,
-    Wechsel zu dc2 im Budget);
+    Wechsel zu dc2 im Budget); nach TLS 1.3 begrenzt nur die FPM-Grenze
+    von 300 s (ADR-0039, Nachtrag 2026-11-09);
   - andere Domäne: Code `domain_mismatch`.
 - **Bei Abweichung:** —
 - [ ] Ergebnis:
