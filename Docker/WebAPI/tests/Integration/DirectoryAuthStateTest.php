@@ -8,6 +8,7 @@ require_once dirname(__DIR__, 2) . '/lib/auth.php';
 require_once dirname(__DIR__, 2) . '/lib/auth_rate_limit.php';
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/directory_restore_converge.php';
+require_once dirname(__DIR__, 2) . '/lib/directory_status.php';
 
 final class DirectoryAuthStateTest extends TestCase
 {
@@ -107,6 +108,29 @@ final class DirectoryAuthStateTest extends TestCase
             $this->db->query('DELETE FROM deploy_logs WHERE user_id = ' . $userId);
             $this->db->query('DELETE FROM deploy_users WHERE id = ' . $userId);
         }
+    }
+
+    /**
+     * N1a A7: the breaker stores the typed search-account reason so the System
+     * status can name it; anything outside the closed list is stored as the
+     * generic rejection, never as free text.
+     */
+    public function testTheBreakerStoresTheTypedSearchAccountReasonAndRefusesFreeText(): void
+    {
+        if (repo_directory_config($this->db) !== null) {
+            self::markTestSkipped('Disposable integration database already has directory configuration.');
+        }
+        $this->db->query("INSERT INTO deploy_ad_config (id, enabled, revision, bind_upn, bind_secret_ciphertext, ca_certificate_pem) VALUES (1, 1, 4, 'search@example.test', 'ciphertext', 'certificate')");
+        $this->ownsConfig = true;
+
+        repo_directory_pause_controllers_for_bind_rejection($this->db, 4, VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_LOCKED);
+        $config = repo_directory_config($this->db);
+        self::assertSame(4, (int) $config['automatic_bind_blocked_revision']);
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_LOCKED, (string) $config['automatic_bind_blocked_reason']);
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_LOCKED, directory_bind_block_outcome($config));
+
+        repo_directory_pause_controllers_for_bind_rejection($this->db, 4, 'AcceptSecurityContext error');
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED, (string) repo_directory_config($this->db)['automatic_bind_blocked_reason']);
     }
 
     public function testRestoreDisablesDirectoryAndInvalidatesControllerRevision(): void
