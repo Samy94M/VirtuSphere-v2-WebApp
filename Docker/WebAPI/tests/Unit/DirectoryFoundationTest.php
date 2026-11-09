@@ -410,6 +410,9 @@ final class DirectoryFoundationTest extends TestCase
             self::assertTrue(directory_certificate_refresh_claim_slot($dir, 7, 4, $now), 'a new revision reads again');
             self::assertTrue(directory_certificate_refresh_claim_slot($dir, 7, 3, $now + VIRTUSPHERE_DIRECTORY_CERTIFICATE_REFRESH_SECONDS), 'next day');
             self::assertFalse(directory_certificate_refresh_claim_slot($dir, 0, 3, $now), 'no controller id, no slot');
+            // Stale stamps go by their slot, not by file time.
+            self::assertTrue(directory_certificate_refresh_claim_slot($dir, 9, 3, $now + 3 * VIRTUSPHERE_DIRECTORY_CERTIFICATE_REFRESH_SECONDS));
+            self::assertCount(1, glob($dir . '/*.stamp') ?: [], 'only the current slot survives three days later');
         } finally {
             array_map('unlink', glob($dir . '/*') ?: []);
             rmdir($dir);

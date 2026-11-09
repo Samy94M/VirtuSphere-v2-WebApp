@@ -346,9 +346,14 @@ final class DirectoryLdapFixtureTest extends TestCase
         self::assertGreaterThanOrEqual(80400, PHP_VERSION_ID);
         self::assertFalse(defined('LDAP_OPT_X_TLS_NEWCTX'));
         self::assertTrue(defined('LDAP_OPT_X_TLS_PROTOCOL_MIN') && defined('LDAP_OPT_X_TLS_PROTOCOL_TLS1_2'));
-        self::assertTrue(defined('LDAP_OPT_X_TLS_PACKAGE'), 'ext-ldap cannot name its TLS library');
+        // The name goes through a variable: the stubs declare the constant,
+        // the runtime image is what has to prove it.
+        $packageOption = 'LDAP_OPT_X_TLS_PACKAGE';
+        self::assertTrue(defined($packageOption), 'ext-ldap cannot name its TLS library');
+        $connection = ldap_connect('ldaps://' . DirectoryLdapFixture::HOST_DC1 . ':' . DirectoryLdapFixture::PORT);
+        self::assertInstanceOf(LDAP\Connection::class, $connection);
         $package = null;
-        self::assertTrue(ldap_get_option(null, (int) constant('LDAP_OPT_X_TLS_PACKAGE'), $package));
+        self::assertTrue(ldap_get_option($connection, (int) constant($packageOption), $package));
         self::assertSame('OpenSSL', $package);
     }
 

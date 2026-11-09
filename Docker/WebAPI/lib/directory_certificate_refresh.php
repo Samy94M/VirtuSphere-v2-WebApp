@@ -58,8 +58,10 @@ function directory_certificate_refresh_claim_slot(string $directory, int $contro
     }
     fclose($handle);
     @chmod($prefix . $slot . '.stamp', 0600);
+    // Stale stamps go by the slot in their name, the same clock the claim
+    // used, never by file time: a stamp of the current slot must survive.
     foreach (glob($directory . DIRECTORY_SEPARATOR . 'certificate-read-*.stamp') ?: [] as $stamp) {
-        if ((@filemtime($stamp) ?: $now) < $now - 2 * VIRTUSPHERE_DIRECTORY_CERTIFICATE_REFRESH_SECONDS) {
+        if (preg_match('/-([0-9]+)\.stamp$/', $stamp, $match) === 1 && (int) $match[1] < $slot - 1) {
             @unlink($stamp);
         }
     }
