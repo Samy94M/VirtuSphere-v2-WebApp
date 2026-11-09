@@ -469,7 +469,12 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   der Vorlage. Ausgenommen sind die im Manifesthelper ausdrücklich
   ausgefilterten temporären Dateien. Auch geänderte Nutzlast unter derselben
   Version löst deshalb einen Abgleich aus; reguläre Paketänderungen sollen
-  weiterhin eine neue `version` erhalten.
+  weiterhin eine neue `version` erhalten. Seit AL1 (09.11.2026) merkt sich
+  der Autoimporter die Hashes im laufenden Prozess je Datei (voller Pfad,
+  Größe, Änderungszeit und NTFS-ChangeTime) und liest nur neue oder geänderte
+  Dateien. Die ChangeTime verrät auch eine Datei, deren Änderungszeit ein
+  Kopierwerkzeug zurückgesetzt hat. Nach einem Neustart der Aufgabe hasht der
+  erste Lauf einmal alles; jeder Eintrag verfällt nach 12 bis 24 Stunden.
 - **DP-Verteilung ist Sache von MECM (AV2, ADR-0034 Amendment 7):** Je neuem
   Dateimanifest fordert der Autoimporter höchstens einen Auftrag an: die
   Erstverteilung an die DP-Gruppe, solange MECM für die Application noch kein
