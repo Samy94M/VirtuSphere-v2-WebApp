@@ -57,7 +57,7 @@ function system_status_render_directory(mysqli $db, array $user, ?array $data = 
             <?php echo directory_state_badge($snapshot['overall']); ?>
         </div>
         <div class="table-wrap"><table><tbody>
-            <tr><th><?php echo h(__t('system_status.directory_state')); ?></th><td><?php echo h($state); ?></td></tr>
+            <tr><th><?php echo h(__t('system_status.directory_state')); ?></th><td><?php echo h($state); ?><?php if ((int) $config['enabled'] === 1 && (int) ($config['automatic_bind_blocked_revision'] ?? 0) === $revision) { ?><p class="hint"><?php echo h(directory_outcome_message(directory_bind_block_outcome($config))); ?></p><?php } ?></td></tr>
             <tr><th><?php echo h(__t('system_status.directory_revision')); ?></th><td><?php echo h((string) $revision); ?></td></tr>
             <tr><th><?php echo h(__t('system_status.directory_controllers')); ?></th><td><?php echo h(__t('system_status.directory_controller_evidence_count', ['admitted' => $counts['admitted'], 'current' => $counts['current_ok'], 'disturbed' => $counts['disturbed'], 'stale' => $counts['stale'], 'total' => count($controllers)])); ?></td></tr>
             <tr><th><?php echo h(__t('system_status.directory_last_success')); ?></th><td><?php echo $snapshot['last_admitted_success_at'] === null ? '&mdash;' : h(portal_format_timestamp($snapshot['last_admitted_success_at'])); ?></td></tr>

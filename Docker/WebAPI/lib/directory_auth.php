@@ -15,7 +15,9 @@ require_once __DIR__ . '/repo/directory.php';
  */
 function directory_authenticate_user(mysqli $db, string $upn, string $password): array
 {
-    if ($password === '' || !directory_upn_is_valid($upn)) {
+    // login() refuses these before any reservation (N1a A1/A8/F4); this is the
+    // second line for any other caller.
+    if (!directory_password_is_acceptable($password) || !directory_upn_is_valid($upn)) {
         throw new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_NOT_AUTHORIZED);
     }
 
@@ -61,8 +63,20 @@ function directory_authenticate_user(mysqli $db, string $upn, string $password):
     return $result;
 }
 
-/** @return array{ok:bool,temporary:bool,reason:string} */
-function directory_revalidate_user(mysqli $db, array $user): array
+/**
+ * Periodic check of a running AD session with the search account. Ends the
+ * session for a disabled, expired, locked (N1a F1) or deleted account and for
+ * a password set after the sign-in (F1: pwdLastSet newer than the value the
+ * session remembered). An only expired password keeps the session; the next
+ * sign-in fails at the controller anyway.
+ *
+ * $sessionPasswordLastSet is the pwdLastSet the session remembered at sign-in,
+ * or null for a session from before F1; 'pwd_last_set' in an ok answer is the
+ * value to remember from now on.
+ *
+ * @return array{ok:bool,temporary:bool,reason:string,pwd_last_set?:string}
+ */
+function directory_revalidate_user(mysqli $db, array $user, ?string $sessionPasswordLastSet = null): array
 {
     $guid = (string) ($user['ad_object_guid'] ?? '');
     if (strlen($guid) !== 16 || !directory_is_enabled($db)) {
@@ -70,23 +84,24 @@ function directory_revalidate_user(mysqli $db, array $user): array
     }
     try {
         $entry = directory_find_user_by_guid($db, $guid);
-        if (empty($entry['enabled'])) {
-            return ['ok' => false, 'temporary' => false, 'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_ACCOUNT_DISABLED];
-        }
+        // N1a A9: the cache follows every answer, so the user list shows a
+        // disabled account as disabled once its session has ended.
         repo_directory_update_user_cache($db, (int) $user['id'], $entry);
+        $reason = match (true) {
+            empty($entry['enabled']) => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_ACCOUNT_DISABLED,
+            !empty($entry['locked']) => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_ACCOUNT_LOCKED,
+            $sessionPasswordLastSet !== null
+                && directory_password_changed_since($sessionPasswordLastSet, (string) $entry['pwd_last_set'])
+                => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_PASSWORD_CHANGED,
+            default => '',
+        };
+        if ($reason !== '') {
+            return ['ok' => false, 'temporary' => false, 'reason' => $reason];
+        }
 
-        return ['ok' => true, 'temporary' => false, 'reason' => 'ok'];
+        return ['ok' => true, 'temporary' => false, 'reason' => 'ok', 'pwd_last_set' => (string) $entry['pwd_last_set']];
     } catch (DirectoryLdapException $exception) {
-        if ($exception->transportFailure || in_array($exception->outcome, [
-            VIRTUSPHERE_DIRECTORY_OUTCOME_EXTENSION_MISSING,
-            VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED,
-            VIRTUSPHERE_DIRECTORY_OUTCOME_SECRET_UNREADABLE,
-            VIRTUSPHERE_DIRECTORY_OUTCOME_SEARCH_FAILED,
-            VIRTUSPHERE_DIRECTORY_OUTCOME_INVALID_RESPONSE,
-            VIRTUSPHERE_DIRECTORY_OUTCOME_AMBIGUOUS,
-            VIRTUSPHERE_DIRECTORY_OUTCOME_DOMAIN_MISMATCH,
-            VIRTUSPHERE_DIRECTORY_OUTCOME_RODC_UNSUPPORTED,
-        ], true)) {
+        if ($exception->transportFailure || in_array($exception->outcome, VIRTUSPHERE_DIRECTORY_INFRASTRUCTURE_OUTCOMES, true)) {
             return ['ok' => false, 'temporary' => true, 'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_UNAVAILABLE];
         }
 

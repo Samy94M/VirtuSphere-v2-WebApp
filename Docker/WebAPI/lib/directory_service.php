@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/audit_events.php';
+require_once __DIR__ . '/directory_certificate_refresh.php';
 require_once __DIR__ . '/directory_config.php';
 require_once __DIR__ . '/directory_ldap.php';
+require_once __DIR__ . '/directory_status.php';
 require_once __DIR__ . '/permissions.php';
 require_once __DIR__ . '/repo/directory.php';
 
@@ -31,6 +33,9 @@ function directory_outcome_message(string $outcome): string
         VIRTUSPHERE_DIRECTORY_OUTCOME_UNAVAILABLE => 'outcome_unavailable',
         VIRTUSPHERE_DIRECTORY_OUTCOME_TIMEOUT => 'outcome_timeout',
         VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED => 'outcome_bind_rejected',
+        VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_PASSWORD_EXPIRED => 'outcome_service_password_expired',
+        VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_DISABLED => 'outcome_service_account_disabled',
+        VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_LOCKED => 'outcome_service_account_locked',
         VIRTUSPHERE_DIRECTORY_OUTCOME_USER_BIND_REJECTED => 'outcome_not_authorized',
         VIRTUSPHERE_DIRECTORY_OUTCOME_SECRET_UNREADABLE => 'outcome_secret_unreadable',
         VIRTUSPHERE_DIRECTORY_OUTCOME_SEARCH_FAILED => 'outcome_search_failed',
@@ -101,8 +106,10 @@ function directory_open_service_connection(mysqli $db, array $storedConfig, arra
         return $connection;
     } catch (DirectoryLdapException $exception) {
         directory_observe_controller($db, $controller, $revision, $exception);
-        if ($exception->outcome === VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED) {
-            repo_directory_pause_controllers_for_bind_rejection($db, $revision);
+        if (in_array($exception->outcome, VIRTUSPHERE_DIRECTORY_SERVICE_REJECTION_OUTCOMES, true)) {
+            // Every typed rejection (N1a A7) trips the same breaker: trying the
+            // same secret on the next DC multiplies an AD lockout.
+            repo_directory_pause_controllers_for_bind_rejection($db, $revision, $exception->outcome);
             audit_event($db, VIRTUSPHERE_AUDIT_EVENT_DIRECTORY_BIND_REJECTED, 'directory_config', 'active', VIRTUSPHERE_AUDIT_RESULT_WARNING, [
                 'action' => 'automatic_attempts_paused',
             ]);
@@ -126,7 +133,7 @@ function directory_read_with_failover(mysqli $db, callable $operation, bool $fai
         throw new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_UNAVAILABLE, true);
     }
     if ((int) ($stored['automatic_bind_blocked_revision'] ?? 0) === (int) $stored['revision']) {
-        throw new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED);
+        throw new DirectoryLdapException(directory_bind_block_outcome($stored));
     }
     try {
         $runtime = directory_runtime_config($stored);
@@ -149,7 +156,15 @@ function directory_read_with_failover(mysqli $db, callable $operation, bool $fai
             $connection = directory_open_service_connection($db, $stored, $runtime, $controller, $deadline);
             $serviceBound = true;
             $value = $operation($connection, $runtime, $controller, $deadline);
-            directory_observe_controller($db, $controller, (int) $stored['revision'], VIRTUSPHERE_DIRECTORY_OUTCOME_OK);
+            // N1a F7: at most once a day per controller, read its certificate
+            // again so a renewed one does not age into a false alarm.
+            $certificate = directory_certificate_refresh_if_due(
+                $controller,
+                (int) $stored['revision'],
+                (string) $runtime['ca_certificate_pem'],
+                $deadline
+            );
+            directory_observe_controller($db, $controller, (int) $stored['revision'], VIRTUSPHERE_DIRECTORY_OUTCOME_OK, $certificate);
 
             return $value;
         } catch (DirectoryLdapException $exception) {

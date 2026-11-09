@@ -16,6 +16,7 @@ return [
     'auth_source' => 'Anmeldeart',
     'source_directory' => 'Active Directory',
     'source_local' => 'Lokales Konto',
+    'directory_username_hint' => 'Active Directory: Anmeldung mit name@domäne',
     'directory_requires_https' => 'Die Active-Directory-Anmeldung steht nur über die sichere HTTPS-Adresse zur Verfügung.',
     'submit' => 'Anmelden',
     'tagline' => 'Bereitstellung & Verwaltung',

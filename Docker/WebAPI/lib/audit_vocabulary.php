@@ -29,6 +29,11 @@ const VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_INTEGRATION_DISABLED = 'directo
 const VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_DISABLED = 'directory_disabled';
 const VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_ACCOUNT_DISABLED = 'directory_account_disabled';
 const VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_UNAVAILABLE = 'directory_unavailable';
+// N1a F1: the AD recheck found a lockout or a password set after the sign-in.
+const VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_ACCOUNT_LOCKED = 'directory_account_locked';
+const VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_PASSWORD_CHANGED = 'directory_password_changed';
+// N1a A10: an administrator deactivated the portal account (both sources).
+const VIRTUSPHERE_AUDIT_SESSION_REASON_ACCOUNT_DEACTIVATED = 'account_deactivated';
 
 // Why a person's own password change was refused.
 const VIRTUSPHERE_AUDIT_PASSWORD_REASON_CURRENT_WRONG = 'current password is wrong';

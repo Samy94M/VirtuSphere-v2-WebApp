@@ -33,9 +33,106 @@ sAMAccountType: 805306368
 objectCategory: person
 userAccountControl: 512
 accountExpires: 0
+pwdLastSet: 134000000000000000
+msDS-User-Account-Control-Computed: 0
 mail: alice@vs-ldap.test
 userPassword: fixture-alice-Pass123!
 objectGUID:: AAECAwQFBgcICQoLDA0ODw==
+
+# N1a fixtures (A3, A11, F1). Every account below is synthetic; the GUIDs are
+# fixed so DirectoryLdapFixture can import and clean them up by value.
+# bob: disabled in AD (userAccountControl 514 = NORMAL_ACCOUNT + ACCOUNTDISABLE).
+dn: cn=bob,ou=people,dc=vs-ldap,dc=test
+objectClass: user
+cn: bob
+sn: Example
+displayName: Bob Example
+userPrincipalName: bob@vs-ldap.test
+sAMAccountName: bob
+sAMAccountType: 805306368
+objectCategory: person
+userAccountControl: 514
+accountExpires: 0
+pwdLastSet: 134000000000000000
+msDS-User-Account-Control-Computed: 2
+userPassword: fixture-bob-Pass123!
+objectGUID:: EBESExQVFhcYGRobHB0eHw==
+
+# carol: enabled, but locked out (computed UF_LOCKOUT 0x10).
+dn: cn=carol,ou=people,dc=vs-ldap,dc=test
+objectClass: user
+cn: carol
+sn: Example
+displayName: Carol Example
+userPrincipalName: carol@vs-ldap.test
+sAMAccountName: carol
+sAMAccountType: 805306368
+objectCategory: person
+userAccountControl: 512
+accountExpires: 0
+pwdLastSet: 134000000000000000
+msDS-User-Account-Control-Computed: 16
+userPassword: fixture-carol-Pass123!
+objectGUID:: ICEiIyQlJicoKSorLC0uLw==
+
+# nouac: the search account cannot see userAccountControl (A3: fail closed).
+dn: cn=nouac,ou=people,dc=vs-ldap,dc=test
+objectClass: user
+cn: nouac
+sn: Example
+userPrincipalName: nouac@vs-ldap.test
+sAMAccountName: nouac
+sAMAccountType: 805306368
+objectCategory: person
+accountExpires: 0
+pwdLastSet: 134000000000000000
+userPassword: fixture-nouac-Pass123!
+objectGUID:: MDEyMzQ1Njc4OTo7PD0+Pw==
+
+# twin1/twin2: two objects claim the same UPN (ambiguous at sign-in).
+dn: cn=twin1,ou=people,dc=vs-ldap,dc=test
+objectClass: user
+cn: twin1
+sn: Example
+userPrincipalName: twin@vs-ldap.test
+sAMAccountName: twin1
+sAMAccountType: 805306368
+objectCategory: person
+userAccountControl: 512
+accountExpires: 0
+pwdLastSet: 134000000000000000
+userPassword: fixture-twin-Pass123!
+objectGUID:: QEFCQ0RFRkdISUpLTE1OTw==
+
+dn: cn=twin2,ou=people,dc=vs-ldap,dc=test
+objectClass: user
+cn: twin2
+sn: Example
+userPrincipalName: twin@vs-ldap.test
+sAMAccountName: twin2
+sAMAccountType: 805306368
+objectCategory: person
+userAccountControl: 512
+accountExpires: 0
+pwdLastSet: 134000000000000000
+userPassword: fixture-twin-Pass123!
+objectGUID:: UFFSU1RVVldYWVpbXF1eXw==
+
+# joerg: a non-ASCII UPN (base64 in LDIF), found only by its exact value.
+dn: cn=joerg,ou=people,dc=vs-ldap,dc=test
+objectClass: user
+cn: joerg
+sn: Example
+displayName:: SsO2cmcgRXhhbXBsZQ==
+userPrincipalName:: asO2cmdAdnMtbGRhcC50ZXN0
+sAMAccountName: joerg
+sAMAccountType: 805306368
+objectCategory: person
+userAccountControl: 512
+accountExpires: 0
+pwdLastSet: 134000000000000000
+userPassword: fixture-joerg-Pass123!
+objectGUID:: YGFiY2RlZmdoaWprbG1ubw==
 
 # Subordinate referral inside the search subtree: proves LDAP_OPT_REFERRALS=0
 # stops the client from chasing an out-of-band host (referral-target.invalid

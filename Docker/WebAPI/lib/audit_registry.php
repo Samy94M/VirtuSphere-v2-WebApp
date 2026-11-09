@@ -49,6 +49,8 @@ function audit_context_field_registry(): array
         'username' => ['type' => 'string', 'max' => 191], 'username_length' => $int,
         'name' => ['type' => 'string', 'max' => 191],
         'role' => $id, 'previous_role' => $id, 'outcome' => $id, 'component' => $id, 'direction' => $id,
+        // N1a F5: a word of VIRTUSPHERE_DIRECTORY_BIND_REASONS, never controller text.
+        'directory_reason' => $id,
         'trust_mode' => $id, 'progress_kind' => $id, 'mode' => $id,
         'status' => $id, 'old_state' => $id, 'new_state' => $id,
         'report_type' => $id, 'error_class' => ['type' => 'string', 'max' => 191],

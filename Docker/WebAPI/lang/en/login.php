@@ -15,6 +15,7 @@ return [
     'password' => 'Password',
     'auth_source' => 'Sign-in method',
     'source_directory' => 'Active Directory',
+    'directory_username_hint' => 'Active Directory: sign in with name@domain',
     'source_local' => 'Local account',
     'directory_requires_https' => 'Active Directory sign-in is available only through the secure HTTPS address.',
     'submit' => 'Log in',

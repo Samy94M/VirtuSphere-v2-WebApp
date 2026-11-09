@@ -20,11 +20,13 @@ require_once __DIR__ . '/directory_constants.php';
  * re-test does, via repo_directory_clear_controller_validation()); real
  * traffic can keep failing against it while it still counts as usable.
  * 'warning': admitted, last observation was ok, but its certificate (known
- * only from its last manual test) expires within
- * VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS.
+ * from its last manual test or the daily certificate read, N1a F7) expires
+ * within VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS.
  * 'stale': admitted, last observation was ok and the certificate is not
  * soon-expiring, but that success is older than
- * VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS. Only a passing result
+ * VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS; or the stored
+ * certificate has expired while a later success proves the controller already
+ * presents a renewed one (N1a A4). Only a passing result
  * ages this way (matches ansible_preflight_ampel()'s rule): greying out a
  * known failure would hide it, so 'danger' never turns 'stale'.
  * 'ok': admitted, last observation ok, certificate not soon-expiring, and
@@ -44,17 +46,23 @@ function directory_controller_ampel(array $controller, int $currentRevision, ?in
 
     $now ??= time();
     $notAfter = trim((string) ($controller['certificate_not_after'] ?? ''));
+    $lastSuccess = trim((string) ($controller['last_success_at'] ?? ''));
+    $lastSuccessEpoch = $lastSuccess !== '' ? strtotime($lastSuccess . ' UTC') : false;
     if ($notAfter !== '') {
         $notAfterEpoch = strtotime($notAfter . ' UTC');
         if ($notAfterEpoch !== false && $notAfterEpoch < $now) {
-            return 'danger';
+            // N1a A4: a success after the stored expiry cannot have used that
+            // certificate, so the controller has a renewed one the stored
+            // values do not know yet (autoenrollment, no restart). That is
+            // missing evidence, not a fault: 'stale' until a test or the
+            // daily certificate read (F7) stores the new date.
+            return $lastSuccessEpoch !== false && $lastSuccessEpoch > $notAfterEpoch ? 'stale' : 'danger';
         }
         if ($notAfterEpoch !== false && $notAfterEpoch < $now + VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS * 86400) {
             return 'warning';
         }
     }
 
-    $lastSuccess = trim((string) ($controller['last_success_at'] ?? ''));
     if ($lastSuccess === '') {
         // Admitted with an 'ok' last_outcome but no last_success_at is not
         // reachable through repo_directory_record_controller_outcome() (it
@@ -62,12 +70,27 @@ function directory_controller_ampel(array $controller, int $currentRevision, ?in
         // ever happens, treat the missing timestamp itself as unproven.
         return 'stale';
     }
-    $lastSuccessEpoch = strtotime($lastSuccess . ' UTC');
     if ($lastSuccessEpoch !== false && ($now - $lastSuccessEpoch) > VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS * 86400) {
         return 'stale';
     }
 
     return 'ok';
+}
+
+/**
+ * The typed search-account rejection behind an active circuit breaker (N1a A7):
+ * the stored reason when it is one of the closed words, otherwise the generic
+ * one. Rows paused before N1a carry the generic word already.
+ *
+ * @param array<string,mixed> $config
+ */
+function directory_bind_block_outcome(array $config): string
+{
+    $reason = (string) ($config['automatic_bind_blocked_reason'] ?? '');
+
+    return in_array($reason, VIRTUSPHERE_DIRECTORY_SERVICE_REJECTION_OUTCOMES, true)
+        ? $reason
+        : VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED;
 }
 
 /**

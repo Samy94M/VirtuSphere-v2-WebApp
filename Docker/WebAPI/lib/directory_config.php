@@ -36,6 +36,9 @@ function directory_config_candidate(array $input, ?array $existing): array
                 $errors['bind_password'] = __t('directory.err_bind_secret_unreadable');
             }
         }
+    } elseif (!directory_password_is_acceptable($password)) {
+        // N1a A1/A8: a NUL byte or an overlong secret never reaches a bind.
+        $errors['bind_password'] = __t('directory.err_bind_password_invalid', ['max' => VIRTUSPHERE_DIRECTORY_PASSWORD_MAX_BYTES]);
     } else {
         $ciphertext = crypto_encrypt_secret($password);
     }

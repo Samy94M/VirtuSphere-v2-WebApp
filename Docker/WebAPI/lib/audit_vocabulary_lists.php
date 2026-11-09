@@ -31,6 +31,7 @@ function audit_code_vocabularies(): array
         'session_reason' => audit_constants_with_prefix('VIRTUSPHERE_AUDIT_SESSION_REASON_'),
         'password_reason' => [VIRTUSPHERE_AUDIT_PASSWORD_REASON_CURRENT_WRONG],
         'directory_outcome' => VIRTUSPHERE_DIRECTORY_OUTCOMES,
+        'directory_bind_reason' => VIRTUSPHERE_DIRECTORY_BIND_REASONS,
         'credential_test_outcome' => [
             ...audit_constants_with_prefix('VIRTUSPHERE_CREDENTIAL_TEST_'),
             ...VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES,

@@ -114,6 +114,61 @@ final class DirectoryModuleContractTest extends TestCase
         self::assertStringContainsString('$operation($connection, $runtime, $controller, $deadline)', $service);
     }
 
+    public function testTheDeadlineClampsTheSynchronousAnswerWaitOfEveryHandle(): void
+    {
+        // N1a A2: NETWORK_TIMEOUT ends at the TLS handshake; only TIMEOUT
+        // bounds the wait for a bind/search answer from a silent controller.
+        $adapter = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/directory_ldap.php');
+        self::assertSame(1, preg_match('/function directory_ldap_apply_deadline\(.*?\n\}/s', $adapter, $body));
+        self::assertStringContainsString('LDAP_OPT_TIMEOUT,', $body[0]);
+        self::assertStringContainsString('LDAP_OPT_NETWORK_TIMEOUT,', $body[0]);
+        self::assertStringContainsString('directory_deadline_remaining_seconds($deadline', $body[0]);
+        // A6: PHP 8.4 has no LDAP_OPT_X_TLS_NEWCTX; the dead branch stays gone.
+        self::assertStringNotContainsString('LDAP_OPT_X_TLS_NEWCTX', $adapter);
+        // A5: no fail-open defined() bracket around the TLS floor.
+        self::assertStringNotContainsString("if (defined('LDAP_OPT_X_TLS_PROTOCOL_MIN')", $adapter);
+        self::assertStringContainsString('directory_ldap_tls_minimum();', $adapter);
+    }
+
+    /**
+     * N1a A7/F5: the controller's diagnostic text is read in exactly one place
+     * and only its "data <hex>" value leaves that function. ldap_error() and
+     * the error string option, which carry the same text, are used nowhere.
+     */
+    public function testRawLdapDiagnosticsNeverLeaveTheSubCodeReader(): void
+    {
+        $root = dirname(__DIR__, 2);
+        $readers = [];
+        $files = array_merge(
+            glob($root . '/lib/*.php') ?: [],
+            glob($root . '/lib/*/*.php') ?: [],
+            glob($root . '/portal/*.php') ?: [],
+            glob($root . '/*.php') ?: []
+        );
+        self::assertGreaterThan(50, count($files), 'zero-match guard: the scan found no PHP sources');
+        foreach ($files as $file) {
+            $source = (string) file_get_contents($file);
+            $relative = substr(str_replace('\\', '/', $file), strlen(str_replace('\\', '/', $root)) + 1);
+            self::assertDoesNotMatchRegularExpression('/\bldap_error\s*\(/', $source, $relative . ' reads the raw LDAP error text');
+            self::assertStringNotContainsString('LDAP_OPT_ERROR_STRING', $source, $relative);
+            if (str_contains($source, 'LDAP_OPT_DIAGNOSTIC_MESSAGE')) {
+                $readers[] = $relative;
+            }
+        }
+        self::assertSame(['lib/directory_ldap.php'], $readers);
+
+        $adapter = (string) file_get_contents($root . '/lib/directory_ldap.php');
+        self::assertSame(1, substr_count($adapter, 'LDAP_OPT_DIAGNOSTIC_MESSAGE'));
+        self::assertSame(1, preg_match('/function directory_ldap_bind_code\(.*?\n\}/s', $adapter, $body));
+        self::assertStringContainsString('LDAP_OPT_DIAGNOSTIC_MESSAGE', $body[0], 'the diagnostic is read only inside the sub-code reader');
+        self::assertMatchesRegularExpression(
+            '/return directory_bind_code_from_diagnostic\(is_string\(\$diagnostic\) \? \$diagnostic : \'\'\);/',
+            $body[0],
+            'the only use of the text is the fixed "data <hex>" pattern'
+        );
+        self::assertSame(4, preg_match_all('/\$diagnostic(?!\w)/', $body[0]), 'the text variable is declared, filled, checked and handed to the pattern, nothing else');
+    }
+
     public function testQaPinsTheDirectoryCaCacheToTheFpmUser(): void
     {
         $repoRoot = dirname(__DIR__, 4);

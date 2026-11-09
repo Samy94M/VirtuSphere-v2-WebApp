@@ -49,7 +49,9 @@ final class AuditTransactionOwnershipContractTest extends TestCase
         'lib/auth_directory_login.php::auth_login_directory::VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN' => ['count' => 2, 'kind' => 'pure', 'reason' => 'R19: a login attempt is a security event; the success row already shares the attempt transaction'],
         'lib/auth_rate_limit.php::auth_record_failed_login::VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED' => ['count' => 1, 'kind' => 'pure', 'reason' => 'the limit onset is derived from counted attempts, nothing is written for it'],
         'lib/auth_rate_limit.php::auth_finish_failed_login::VIRTUSPHERE_AUDIT_EVENT_AUTH_IP_RATE_LIMITED' => ['count' => 1, 'kind' => 'pure', 'reason' => 'the limit onset is derived from counted attempts, nothing is written for it'],
-        'lib/auth.php::current_user::VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED' => ['count' => 3, 'kind' => 'pure', 'reason' => 'the ended session is PHP session state, not a database row'],
+        'lib/auth.php::current_user::VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED' => ['count' => 1, 'kind' => 'pure', 'reason' => 'the ended session is PHP session state, not a database row'],
+        // N1a A10/F1: the deactivated-account and AD session ends share one writer.
+        'lib/auth.php::auth_end_session::VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED' => ['count' => 1, 'kind' => 'pure', 'reason' => 'the ended session is PHP session state, not a database row'],
         'portal/logout.php::{main}::VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGOUT' => ['count' => 1, 'kind' => 'pure', 'reason' => 'the ended session is PHP session state, not a database row'],
         'portal/account.php::{main}::VIRTUSPHERE_AUDIT_EVENT_AUTH_PASSWORD_CHANGE_ATTEMPT' => ['count' => 1, 'kind' => 'pure', 'reason' => 'the denied attempt (wrong current password) writes nothing; the success row is required'],
         'lib/errors.php::virtusphere_audit_uncaught_error::VIRTUSPHERE_AUDIT_EVENT_SYSTEM_ERROR' => ['count' => 1, 'kind' => 'pure', 'reason' => 'an error reference, written fail-soft from the error handler'],

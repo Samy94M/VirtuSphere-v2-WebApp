@@ -42,7 +42,8 @@ return [
     'password_change_rejected' => 'Passwortänderung :scope abgewiesen:reason_part',
     'login_succeeded' => 'Anmeldung erfolgreich (:source:controller_part)',
     'login_controller' => ', Controller :controller',
-    'login_rejected' => 'Anmeldung abgewiesen:user_part: :reason',
+    'login_rejected' => 'Anmeldung abgewiesen:user_part: :reason:directory_part',
+    'login_directory_reason' => ' (Active Directory meldet: :reason)',
     'login_user_name' => ' für Benutzer „:username“',
     'login_user_unknown' => ' für eine Eingabe ohne passendes Konto (:length Zeichen)',
     'login_user_id' => ' für Benutzer-ID :id',
@@ -214,6 +215,17 @@ return [
     'code_session_reason_directory_disabled' => 'Anmeldung über Active Directory ist ausgeschaltet',
     'code_session_reason_directory_account_disabled' => 'Konto im Active Directory deaktiviert',
     'code_session_reason_directory_unavailable' => 'Active Directory nicht erreichbar',
+    'code_session_reason_directory_account_locked' => 'Konto im Active Directory gesperrt',
+    'code_session_reason_directory_password_changed' => 'Passwort im Active Directory nach der Anmeldung geändert',
+    'code_session_reason_account_deactivated' => 'Portalkonto deaktiviert',
+
+    'code_directory_bind_reason_invalid' => 'Anmeldedaten ungültig',
+    'code_directory_bind_reason_password_expired' => 'Passwort abgelaufen',
+    'code_directory_bind_reason_must_change' => 'Passwort muss geändert werden',
+    'code_directory_bind_reason_locked' => 'Konto gesperrt',
+    'code_directory_bind_reason_disabled' => 'Konto deaktiviert',
+    'code_directory_bind_reason_expired' => 'Konto abgelaufen',
+    'code_directory_bind_reason_logon_hours' => 'außerhalb der erlaubten Anmeldezeiten',
 
     'code_password_reason_current_password_is_wrong' => 'aktuelles Passwort falsch',
 
@@ -232,6 +244,9 @@ return [
     'code_directory_outcome_domain_mismatch' => 'Controller gehört nicht zur AD-Domäne',
     'code_directory_outcome_read_only_controller_unsupported' => 'schreibgeschützter Domänencontroller (RODC) nicht unterstützt',
     'code_directory_outcome_invalid_response' => 'Antwort nicht vollständig prüfbar',
+    'code_directory_outcome_service_password_expired' => 'Passwort des Suchkontos abgelaufen',
+    'code_directory_outcome_service_account_disabled' => 'Suchkonto deaktiviert oder abgelaufen',
+    'code_directory_outcome_service_account_locked' => 'Suchkonto gesperrt',
 
     'code_credential_test_outcome_ok' => 'in Ordnung',
     'code_credential_test_outcome_preflight' => 'Vorprüfung der Toolchain fehlgeschlagen',

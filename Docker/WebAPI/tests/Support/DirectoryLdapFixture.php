@@ -19,6 +19,10 @@ final class DirectoryLdapFixture
     public const HOST_EXPIRED = 'expired.vs-ldap.test';
     public const HOST_WRONGNAME = 'dc-wrongname.vs-ldap.test';
     public const HOST_BLACKHOLE = 'dc-blackhole.vs-ldap.test';
+    // N1a: no serverAuth EKU, at most TLS 1.1, TLS done and then silence.
+    public const HOST_NO_EKU = 'dc-noeku.vs-ldap.test';
+    public const HOST_TLS11 = 'dc-tls11.vs-ldap.test';
+    public const HOST_SILENT = 'dc-silent.vs-ldap.test';
     public const PORT = 636;
 
     public const SERVICE_BIND_DN = 'cn=svc-bind,dc=vs-ldap,dc=test';
@@ -30,6 +34,22 @@ final class DirectoryLdapFixture
     public const ALICE_PASSWORD = 'fixture-alice-Pass123!';
     // Matches seed/base.ldif's objectGUID:: AAECAwQFBgcICQoLDA0ODw==
     public const ALICE_GUID_HEX = '000102030405060708090a0b0c0d0e0f';
+    // seed/base.ldif: alice's pwdLastSet (N1a F1 baseline).
+    public const ALICE_PWD_LAST_SET = '134000000000000000';
+
+    // N1a seed accounts (base.ldif). Synthetic names, fixed GUIDs.
+    public const BOB_UPN = 'bob@vs-ldap.test';            // disabled (UAC 514)
+    public const BOB_GUID_HEX = '101112131415161718191a1b1c1d1e1f';
+    public const CAROL_UPN = 'carol@vs-ldap.test';        // locked (computed 0x10)
+    public const CAROL_GUID_HEX = '202122232425262728292a2b2c2d2e2f';
+    public const NOUAC_UPN = 'nouac@vs-ldap.test';        // no userAccountControl
+    public const TWIN_UPN = 'twin@vs-ldap.test';          // two objects, one UPN
+    public const JOERG_UPN = "j\u{00f6}rg@vs-ldap.test";  // non-ASCII UPN
+    public const JOERG_GUID_HEX = '606162636465666768696a6b6c6d6e6f';
+    /** Every GUID an N1a test may import; cleanup() removes them all. */
+    public const IMPORTABLE_GUID_HEXES = [
+        self::ALICE_GUID_HEX, self::BOB_GUID_HEX, self::CAROL_GUID_HEX, self::JOERG_GUID_HEX,
+    ];
 
     public static function available(): bool
     {
@@ -122,15 +142,35 @@ final class DirectoryLdapFixture
         return $result['user_id'];
     }
 
+    /** Imports one seed account as an AD portal user (N1a), by GUID and UPN. */
+    public static function importUser(mysqli $db, string $guidHex, string $upn, string $role = VIRTUSPHERE_ROLE_USER): int
+    {
+        $guid = hex2bin($guidHex);
+        assert(is_string($guid));
+        $result = repo_directory_import_user($db, [
+            'guid_bytes' => $guid,
+            'upn' => $upn,
+            'sam' => strstr($upn, '@', true) ?: $upn,
+            'display_name' => '',
+            'email' => '',
+            'enabled' => true,
+        ], $role);
+        assert($result['created'] === true);
+
+        return $result['user_id'];
+    }
+
     /** Removes every row this fixture may have written, config-cascade first. */
     public static function cleanup(mysqli $db): void
     {
         $db->query('DELETE FROM deploy_ad_config WHERE id = 1');
-        $guid = self::aliceGuidBytes();
         $stmt = $db->prepare('DELETE FROM deploy_users WHERE auth_source = ? AND ad_object_guid = ?');
         $source = VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY;
-        $stmt->bind_param('ss', $source, $guid);
-        $stmt->execute();
+        foreach (self::IMPORTABLE_GUID_HEXES as $hex) {
+            $guid = (string) hex2bin($hex);
+            $stmt->bind_param('ss', $source, $guid);
+            $stmt->execute();
+        }
     }
 
     /**

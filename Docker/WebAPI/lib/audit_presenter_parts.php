@@ -108,7 +108,12 @@ function audit_login_description(string $id, string $result, array $context, str
         default => '',
     };
 
-    return audit_t($locale, 'login_rejected', ['user_part' => $user, 'reason' => $reason]);
+    // N1a F5: what the controller said about a rejected AD password, typed.
+    $directory = isset($context['directory_reason'])
+        ? audit_t($locale, 'login_directory_reason', ['reason' => audit_code_label($locale, 'directory_bind_reason', (string) $context['directory_reason'])])
+        : '';
+
+    return audit_t($locale, 'login_rejected', ['user_part' => $user, 'reason' => $reason, 'directory_part' => $directory]);
 }
 
 /** @param array<string,mixed> $context */
