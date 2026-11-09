@@ -113,7 +113,7 @@ flowchart TD
 
 ## Package Import (Autoimporter)
 
-Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type, mit `generateOwnDeviceColletion` auch Collection und Deployments. Die Verteilung an die DPs übernimmt MECM: Der Autoimporter fordert sie je neuem Dateimanifest höchstens einmal an und zeigt den Stand nur an (AV2). Gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben oder der letzte Lauf offene Punkte hatte.
+Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type, mit `generateOwnDeviceColletion` auch Collection und Deployments. Die Verteilung an die DPs übernimmt MECM: Der Autoimporter fordert sie je neuem Dateimanifest höchstens einmal an und zeigt den Stand nur an (AV2). Gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben oder der letzte Lauf offene Punkte hatte. Die Prüfsumme liest nur neue oder geänderte Dateien (AL1): Der laufende Prozess merkt sich den Hash je Datei unter Pfad, Größe, Änderungszeit und NTFS-ChangeTime, die auch eine zurückgesetzte Änderungszeit verrät. Dateien, die in den letzten zwei Minuten geschrieben wurden, werden nie gemerkt, jeder Eintrag verfällt nach 12 bis 24 Stunden, und der erste Lauf nach einem Neustart der Aufgabe hasht alles. Die Paketprüfsummen des Scans nutzen denselben Speicher.
 
 ```mermaid
 flowchart TD
@@ -122,7 +122,7 @@ flowchart TD
   SH -->|nein| SH1["Warten, Registry jede Minute neu lesen"] --> SH
   SH -->|ja| S["Neuer Lauf, „started“ melden"]
   S --> M["Mit MECM verbinden (einmal), Ordner VirtuSphere_Applications anlegen, falls sie fehlen"]
-  M --> H["Prüfsumme über files und Package_Vorlage bilden"]
+  M --> H["Prüfsumme über files und Package_Vorlage bilden: nur neue oder geänderte Dateien hashen (Pfad, Größe, Änderungszeit, ChangeTime), sonst gemerkten Hash nehmen; jünger als 2 Minuten nie merken, Einträge verfallen nach 12 bis 24 h, erster Lauf nach Neustart hasht alles"]
   H -.->|Datei ändert sich währenddessen| HX["Lauf „warning“ (source_changing), Dateistand verwerfen, MECM-Verbindung bleibt, nächster Lauf prüft erneut"]
   H --> C{"Dateien geändert oder offene Punkte im letzten Lauf?"}
   C -->|nein| C1["Ergebnis „ok“ ohne Scan (unverändert); Verteilhinweise des letzten Scans weiter melden, ihren Stand höchstens alle 30 Minuten lesend auffrischen"] --> R
