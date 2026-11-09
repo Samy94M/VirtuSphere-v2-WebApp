@@ -1266,6 +1266,389 @@ Describe 'Get-VsFilesManifestStamp (Inhalt statt mtime)' {
     }
 }
 
+Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
+    # Der Autoimporter bildet den Stamp jede Minute. Ohne Cache las er dafuer
+    # jedesmal jeden Installer ganz (am Standort 20 Minuten je Lauf). Der Cache
+    # darf nur Lesearbeit sparen: gleicher Inhalt gibt denselben Stamp wie ohne
+    # Cache, und jede Aenderung an Laenge, Zeitstempel oder Dateiliste wird
+    # weiter erkannt. Alle Aufrufe eines Falls laufen in EINEM Ladevorgang von
+    # Common, weil der Cache wie im Autoimporter im Prozess lebt.
+    BeforeAll {
+        # Fuehrt $Body nach dem Laden von Common aus. $calls sammelt die relativen
+        # Pfade, die wirklich gehasht wurden (Cache-Fehlgriffe). Ein Test kann
+        # die ChangeTime einer Datei nicht in die Vergangenheit legen (jedes
+        # Setzen der mtime schreibt sie fort); deshalb laufen die Faelle mit
+        # Ruhezeit 0, und nur die Ruhezeit-Faelle nennen den Standardwert.
+        function script:Invoke-StampCacheCase {
+            param([scriptblock]$Body, [object[]]$Arguments = @(), [object]$SettleSeconds = 0)
+            Invoke-InFileScope -Path $script:MecmCommon -Arguments (@($Body, $SettleSeconds) + $Arguments) -Body {
+                param($caseBody, $settle)
+                $caseArgs = @($args)
+                if ($null -ne $settle) { $script:VsStampHashCacheSettleSeconds = [int]$settle }
+                $originalHash = ${function:Get-VsStampFileHash}
+                $calls = New-Object System.Collections.Generic.List[string]
+                function Get-VsStampFileHash {
+                    param($Path, $Relative)
+                    $calls.Add([string]$Relative)
+                    & $originalHash -Path $Path -Relative $Relative
+                }
+                . $caseBody @caseArgs
+            }
+        }
+
+        function script:Set-OldTime {
+            param([string]$Path, [int]$Days = 2, [int]$Minutes = 0)
+            (Get-Item -LiteralPath $Path -Force).LastWriteTimeUtc = [DateTime]::UtcNow.Date.AddDays(-$Days).AddMinutes($Minutes)
+        }
+
+        # Referenz ohne Cache und ohne Common: genau das Stampformat vor AL1.
+        function script:Get-ReferenceStamp {
+            param([string]$Root)
+            $rootFull = (Get-Item -LiteralPath $Root).FullName.TrimEnd('\', '/')
+            $parts = @(Get-ChildItem -LiteralPath $rootFull -Recurse -File -Force | Sort-Object FullName | ForEach-Object {
+                    '{0}|{1}|{2}' -f $_.FullName.Substring($rootFull.Length).TrimStart('\', '/').Replace('\', '/'), $_.Length,
+                        (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                })
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($parts -join "`n"))).Replace('-', '')) } finally { $sha.Dispose() }
+        }
+    }
+
+    BeforeEach {
+        $script:CacheRoot = Join-Path $TestDrive ('files-' + [guid]::NewGuid().ToString('N'))
+        $script:PkgA = Join-Path $script:CacheRoot 'PkgA'
+        $script:PkgB = Join-Path $script:CacheRoot 'PkgB'
+        New-Item -ItemType Directory -Force -Path (Join-Path $script:PkgA 'powershell'), $script:PkgB | Out-Null
+        $script:Big = Join-Path (Join-Path $script:PkgA 'powershell') 'setup.bin'
+        $script:Small = Join-Path $script:PkgB 'config.json'
+        [IO.File]::WriteAllText($script:Big, 'AAAAAAAAAAAAAAAA')
+        [IO.File]::WriteAllText($script:Small, '{"name":"b"}')
+        Set-OldTime $script:Big
+        Set-OldTime $script:Small
+    }
+
+    It 'hasht im Folgelauf keine unveraenderte Datei und liefert denselben Stamp wie ohne Cache' {
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot) -Body {
+            param($root)
+            $cold = Get-VsFilesManifestStamp -Path $root
+            $coldCalls = $calls.Count
+            $calls.Clear()
+            $warm = Get-VsFilesManifestStamp -Path $root
+            [pscustomobject]@{ Cold = $cold; Warm = $warm; ColdCalls = $coldCalls; WarmCalls = $calls.Count }
+        }
+        $result.ColdCalls | Should -Be 2
+        $result.WarmCalls | Should -Be 0
+        $result.Warm | Should -Be $result.Cold
+        $result.Cold | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
+    }
+
+    It 'nutzt die Eintraege des Gesamtstamps auch fuer die Paketstamps des Aenderungsscans' {
+        # Der Scan bildet nach dem Gesamtstamp je Paket einen eigenen Stamp
+        # (Content-Manifest); bisher las das jede Datei ein zweites Mal.
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:PkgA) -Body {
+            param($root, $pkg)
+            [void](Get-VsFilesManifestStamp -Path $root)
+            $calls.Clear()
+            $packageStamp = Get-VsFilesManifestStamp -Path $pkg
+            [pscustomobject]@{ Stamp = $packageStamp; Calls = $calls.Count }
+        }
+        $result.Calls | Should -Be 0
+        $result.Stamp | Should -Be (Get-ReferenceStamp -Root $script:PkgA)
+    }
+
+    It 'erkennt neuen Inhalt bei gleicher Laenge und neuem Zeitstempel' {
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
+            param($root, $big)
+            $before = Get-VsFilesManifestStamp -Path $root
+            [IO.File]::WriteAllText($big, 'BBBBBBBBBBBBBBBB')
+            Set-OldTime $big -Minutes 5
+            $calls.Clear()
+            $after = Get-VsFilesManifestStamp -Path $root
+            [pscustomobject]@{ Before = $before; After = $after; Calls = @($calls) }
+        }
+        $result.After | Should -Not -Be $result.Before
+        $result.Calls | Should -Be @('PkgA/powershell/setup.bin')
+        $result.After | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
+    }
+
+    It 'erkennt neuen Inhalt mit anderer Laenge bei wiederhergestelltem Zeitstempel' {
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
+            param($root, $big)
+            $before = Get-VsFilesManifestStamp -Path $root
+            $time = (Get-Item -LiteralPath $big).LastWriteTimeUtc
+            [IO.File]::WriteAllText($big, 'CCCCCCCCCCCCCCCCCCCC')
+            (Get-Item -LiteralPath $big).LastWriteTimeUtc = $time
+            [pscustomobject]@{ Before = $before; After = (Get-VsFilesManifestStamp -Path $root) }
+        }
+        $result.After | Should -Not -Be $result.Before
+        $result.After | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
+    }
+
+    It 'erkennt neue und entfernte Dateien und vergisst den Eintrag einer entfernten Datei' {
+        $extra = Join-Path $script:PkgB 'neu.txt'
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $extra, $script:Small) -Body {
+            param($root, $extra, $small)
+            $first = Get-VsFilesManifestStamp -Path $root
+            [IO.File]::WriteAllText($extra, 'neu')
+            Set-OldTime $extra
+            $withNew = Get-VsFilesManifestStamp -Path $root
+            $smallItem = Get-Item -LiteralPath $small
+            $smallChange = Get-VsFileChangeTicks -Path $small
+            $smallCachedBefore = [bool](Get-VsStampHashCacheEntry -FullName $smallItem.FullName -Length $smallItem.Length -Ticks $smallItem.LastWriteTimeUtc.Ticks -ChangeTicks $smallChange)
+            Remove-Item -LiteralPath $small -Force
+            $withoutSmall = Get-VsFilesManifestStamp -Path $root
+            [pscustomobject]@{
+                First = $first; WithNew = $withNew; WithoutSmall = $withoutSmall
+                SmallCachedBefore = $smallCachedBefore
+                SmallCachedAfter = [bool](Get-VsStampHashCacheEntry -FullName $smallItem.FullName -Length $smallItem.Length -Ticks $smallItem.LastWriteTimeUtc.Ticks -ChangeTicks $smallChange)
+            }
+        }
+        $result.WithNew | Should -Not -Be $result.First
+        $result.WithoutSmall | Should -Not -Be $result.WithNew
+        $result.WithoutSmall | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
+        $result.SmallCachedBefore | Should -BeTrue
+        $result.SmallCachedAfter | Should -BeFalse
+    }
+
+    It 'merkt eine Datei mit juengerer LastWriteTime nicht, sondern hasht sie jeden Lauf neu' {
+        # Eine gerade geschriebene Datei darf nicht mit einem Zwischenstand im
+        # Cache landen ("racy" wie bei git). Die ChangeTime ist hier alt
+        # vorgegeben, damit nur die LastWriteTime den Ausschlag gibt.
+        $result = Invoke-StampCacheCase -SettleSeconds $null -Arguments @($script:CacheRoot, $script:Big) -Body {
+            param($root, $big)
+            function Get-VsFileChangeTicks { param($Path) [DateTime]::UtcNow.AddDays(-5).Date.Ticks }
+            (Get-Item -LiteralPath $big).LastWriteTimeUtc = [DateTime]::UtcNow
+            [void](Get-VsFilesManifestStamp -Path $root)
+            $calls.Clear()
+            [void](Get-VsFilesManifestStamp -Path $root)
+            [pscustomobject]@{ Calls = @($calls); Settle = $script:VsStampHashCacheSettleSeconds }
+        }
+        $result.Settle | Should -BeGreaterThan 0
+        $result.Calls | Should -Be @('PkgA/powershell/setup.bin')
+    }
+
+    It 'merkt eine Datei mit juengerer ChangeTime nicht, auch wenn ihre LastWriteTime alt ist' {
+        # Kopierwerkzeuge setzen die alte LastWriteTime; die ChangeTime zeigt,
+        # dass die Datei gerade erst geschrieben wurde. Set-OldTime im BeforeEach
+        # hat sie eben fortgeschrieben.
+        $result = Invoke-StampCacheCase -SettleSeconds $null -Arguments @($script:CacheRoot) -Body {
+            param($root)
+            [void](Get-VsFilesManifestStamp -Path $root)
+            $calls.Clear()
+            [void](Get-VsFilesManifestStamp -Path $root)
+            @($calls | Sort-Object)
+        }
+        $result | Should -Be @('PkgA/powershell/setup.bin', 'PkgB/config.json')
+    }
+
+    It 'belegt die ChangeTime auf NTFS: Inhalt und SetFileTime schreiben sie fort, Lesen und Sperren nicht' {
+        # Grundlage des Schluessels, gemessen statt angenommen.
+        $file = Join-Path $script:PkgB 'ctime.bin'
+        [IO.File]::WriteAllText($file, 'AAAA')
+        Set-OldTime $file
+        $result = Invoke-StampCacheCase -Arguments @($file) -Body {
+            param($file)
+            $old = (Get-Item -LiteralPath $file).LastWriteTimeUtc
+            $c0 = Get-VsFileChangeTicks -Path $file
+            Start-Sleep -Milliseconds 30
+            [IO.File]::WriteAllText($file, 'BBBB')
+            (Get-Item -LiteralPath $file).LastWriteTimeUtc = $old
+            $c1 = Get-VsFileChangeTicks -Path $file
+            Start-Sleep -Milliseconds 30
+            (Get-Item -LiteralPath $file).LastWriteTimeUtc = $old.AddMinutes(1)
+            $c2 = Get-VsFileChangeTicks -Path $file
+            [void](Get-FileHash -LiteralPath $file -Algorithm SHA256)
+            $c3 = Get-VsFileChangeTicks -Path $file
+            $stream = [IO.File]::Open($file, 'Open', 'ReadWrite', 'None')
+            try { $c4 = Get-VsFileChangeTicks -Path $file } finally { $stream.Dispose() }
+            [pscustomobject]@{ C0 = $c0; C1 = $c1; C2 = $c2; C3 = $c3; C4 = $c4 }
+        }
+        $result.C0 | Should -BeGreaterThan 0
+        $result.C1 | Should -BeGreaterThan $result.C0
+        $result.C2 | Should -BeGreaterThan $result.C1
+        $result.C3 | Should -Be $result.C2
+        $result.C4 | Should -Be $result.C2
+    }
+
+    It 'erkennt neuen Inhalt gleicher Laenge mit zurueckgesetzter LastWriteTime auch im warmen Cache' {
+        # Derselbe Fall wie "erkennt Payloadinhalt auch bei wiederhergestellter
+        # mtime", aber mit gemerktem Eintrag: nur die ChangeTime verraet ihn.
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
+            param($root, $big)
+            $before = Get-VsFilesManifestStamp -Path $root
+            $time = (Get-Item -LiteralPath $big).LastWriteTimeUtc
+            [IO.File]::WriteAllText($big, 'DDDDDDDDDDDDDDDD')
+            (Get-Item -LiteralPath $big).LastWriteTimeUtc = $time
+            $calls.Clear()
+            $after = Get-VsFilesManifestStamp -Path $root
+            [pscustomobject]@{ Before = $before; After = $after; Calls = @($calls) }
+        }
+        $result.Calls | Should -Be @('PkgA/powershell/setup.bin')
+        $result.After | Should -Not -Be $result.Before
+        $result.After | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
+    }
+
+    It 'erkennt eine neue LastWriteTime auch, wenn die ChangeTime stehen bliebe' {
+        # Die LastWriteTime bleibt Teil des Schluessels, falls ein Dateisystem
+        # oder eine Freigabe die ChangeTime nicht fortschreibt.
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
+            param($root, $big)
+            function Get-VsFileChangeTicks { param($Path) [DateTime]::UtcNow.AddDays(-5).Date.Ticks }
+            $before = Get-VsFilesManifestStamp -Path $root
+            [IO.File]::WriteAllText($big, 'EEEEEEEEEEEEEEEE')
+            Set-OldTime $big -Minutes 9
+            [pscustomobject]@{ Before = $before; After = (Get-VsFilesManifestStamp -Path $root) }
+        }
+        $result.After | Should -Not -Be $result.Before
+        $result.After | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
+    }
+
+    It 'merkt nichts, wenn die ChangeTime nicht lesbar ist, und hasht dann wie vor AL1 jeden Lauf' {
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot) -Body {
+            param($root)
+            function Get-VsFileChangeTicks { param($Path) 0L }
+            $first = Get-VsFilesManifestStamp -Path $root
+            $calls.Clear()
+            $second = Get-VsFilesManifestStamp -Path $root
+            [pscustomobject]@{ First = $first; Second = $second; Calls = $calls.Count; Entries = $script:VsStampHashCache.Count }
+        }
+        $result.Calls | Should -Be 2
+        $result.Entries | Should -Be 0
+        $result.Second | Should -Be $result.First
+    }
+
+    It 'meldet eine waehrend des Hashens geaenderte Datei weiter als source_changing und findet danach den neuen Stand' {
+        # Kopierwerkzeuge setzen den alten Zeitstempel zurueck; die Laenge verraet
+        # die Aenderung trotzdem, und der Lauf danach hasht den neuen Inhalt.
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
+            param($root, $big)
+            $originalInner = ${function:Get-VsStampFileHash}
+            $grown = New-Object System.Collections.Generic.List[string]
+            function Get-VsStampFileHash {
+                param($Path, $Relative)
+                $hash = & $originalInner -Path $Path -Relative $Relative
+                if ($Relative -eq 'PkgA/powershell/setup.bin' -and $grown.Count -eq 0) {
+                    $time = (Get-Item -LiteralPath $Path).LastWriteTimeUtc
+                    [IO.File]::AppendAllText($Path, 'X')
+                    (Get-Item -LiteralPath $Path).LastWriteTimeUtc = $time
+                    $grown.Add($Relative)
+                }
+                $hash
+            }
+            $thrown = $null
+            try { [void](Get-VsFilesManifestStamp -Path $root) } catch { $thrown = $_ }
+            $calls.Clear()
+            $next = Get-VsFilesManifestStamp -Path $root
+            [pscustomobject]@{
+                Category = if ($thrown) { Get-VsExceptionRunCategory -ErrorRecord $thrown } else { '' }
+                Next = $next
+                NextCalls = @($calls)
+            }
+        }
+        $result.Category | Should -Be 'source_changing'
+        $result.NextCalls | Should -Contain 'PkgA/powershell/setup.bin'
+        $result.Next | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
+    }
+
+    It 'meldet eine neue Datei waehrend des Scans auch bei warmem Cache als source_changing' {
+        $late = Join-Path $script:PkgB 'spaet.txt'
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $late) -Body {
+            param($root, $late)
+            [void](Get-VsFilesManifestStamp -Path $root)
+            $originalGet = ${function:Get-VsStampHashCacheEntry}
+            function Get-VsStampHashCacheEntry {
+                param($FullName, $Length, $Ticks, $ChangeTicks)
+                if (-not (Test-Path -LiteralPath $late)) { [IO.File]::WriteAllText($late, 'spaet') }
+                & $originalGet -FullName $FullName -Length $Length -Ticks $Ticks -ChangeTicks $ChangeTicks
+            }
+            $thrown = $null
+            try { [void](Get-VsFilesManifestStamp -Path $root) } catch { $thrown = $_ }
+            if ($thrown) { Get-VsExceptionRunCategory -ErrorRecord $thrown } else { '' }
+        }
+        $result | Should -Be 'source_changing'
+    }
+
+    It 'hasht einen Eintrag nach Ablauf der Hoechstdauer voll neu' {
+        # Letzte Grenze gegen einen Inhaltswechsel, den weder Laenge noch beide
+        # Zeitstempel zeigen (ChangeTime gezielt gesetzt): spaetestens nach
+        # Ablauf wird die Datei wieder gelesen.
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
+            param($root, $big)
+            [void](Get-VsFilesManifestStamp -Path $root)
+            $item = Get-Item -LiteralPath $big
+            $entry = $script:VsStampHashCache[$item.FullName]
+            $lifetimeSeconds = ($entry.ExpiresTicks - [DateTime]::UtcNow.Ticks) / [TimeSpan]::TicksPerSecond
+            $calls.Clear()
+            [void](Get-VsFilesManifestStamp -Path $root)
+            $warmCalls = $calls.Count
+            $entry.ExpiresTicks = [DateTime]::UtcNow.AddSeconds(-1).Ticks
+            $calls.Clear()
+            [void](Get-VsFilesManifestStamp -Path $root)
+            [pscustomobject]@{
+                WarmCalls = $warmCalls; ExpiredCalls = @($calls)
+                MaxAge = $script:VsStampHashCacheMaxAgeSeconds; Lifetime = $lifetimeSeconds
+            }
+        }
+        $result.WarmCalls | Should -Be 0
+        $result.ExpiredCalls | Should -Be @('PkgA/powershell/setup.bin')
+        $result.MaxAge | Should -BeGreaterThan 0
+        # Verteilter Ablauf: zwischen der Haelfte und dem Ganzen der Hoechstdauer.
+        $result.Lifetime | Should -BeGreaterThan ($result.MaxAge / 2 - 60)
+        $result.Lifetime | Should -BeLessOrEqual $result.MaxAge
+    }
+
+    It 'verteilt den Ablauf der Eintraege, damit kein einzelner Lauf alles neu hasht' {
+        # Verfielen alle Eintraege gleichzeitig, dauerte dieser eine Lauf so lange
+        # wie frueher jeder und laege hinter der Meldefrist des Portals, die sich
+        # nach dem kurzen letzten Lauf richtet. Bei gleichverteiltem Ablauf in
+        # [0,5; 1] liegt mit 20 Dateien praktisch sicher einer unter 0,9.
+        $many = Join-Path $script:CacheRoot 'PkgC'
+        New-Item -ItemType Directory -Force -Path $many | Out-Null
+        foreach ($k in 1..20) {
+            $path = Join-Path $many ('f{0:D2}.txt' -f $k)
+            [IO.File]::WriteAllText($path, ('x' * $k))
+            Set-OldTime $path
+        }
+        $result = Invoke-StampCacheCase -Arguments @($many) -Body {
+            param($root)
+            [void](Get-VsFilesManifestStamp -Path $root)
+            $now = [DateTime]::UtcNow.Ticks
+            [pscustomobject]@{
+                MaxAge = $script:VsStampHashCacheMaxAgeSeconds
+                Lifetimes = @($script:VsStampHashCache.Values | ForEach-Object { ($_.ExpiresTicks - $now) / [TimeSpan]::TicksPerSecond })
+            }
+        }
+        $result.Lifetimes.Count | Should -Be 20
+        ($result.Lifetimes | Measure-Object -Minimum).Minimum | Should -BeLessThan ($result.MaxAge * 0.9)
+        ($result.Lifetimes | Measure-Object -Maximum).Maximum | Should -BeLessOrEqual $result.MaxAge
+    }
+
+    It 'nutzt den Cache auch fuer den Vorlagenbaum und erkennt dort Aenderungen' {
+        $template = Join-Path $TestDrive ('tpl-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $template 'reporting') | Out-Null
+        $wrapper = Join-Path $template 'install.ps1'
+        [IO.File]::WriteAllText($wrapper, 'exit 0')
+        Set-OldTime $wrapper
+        $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $template, $wrapper) -Body {
+            param($root, $template, $wrapper)
+            $cold = Get-VsFilesManifestStamp -Path $root -TemplatePath $template
+            $calls.Clear()
+            $warm = Get-VsFilesManifestStamp -Path $root -TemplatePath $template
+            $warmCalls = $calls.Count
+            [IO.File]::WriteAllText($wrapper, 'exit 2')
+            Set-OldTime $wrapper -Minutes 7
+            $changed = Get-VsFilesManifestStamp -Path $root -TemplatePath $template
+            Clear-VsStampHashCache
+            $recold = Get-VsFilesManifestStamp -Path $root -TemplatePath $template
+            [pscustomobject]@{ Cold = $cold; Warm = $warm; WarmCalls = $warmCalls; Changed = $changed; Recold = $recold }
+        }
+        $result.WarmCalls | Should -Be 0
+        $result.Warm | Should -Be $result.Cold
+        $result.Changed | Should -Not -Be $result.Cold
+        $result.Recold | Should -Be $result.Changed
+    }
+}
+
 Describe 'Installer: die vier Aufgaben ueberleben ihren eigenen Neustartzaehler' {
     BeforeAll {
         $script:InstallerText = Get-Content -Path $script:Installer -Raw

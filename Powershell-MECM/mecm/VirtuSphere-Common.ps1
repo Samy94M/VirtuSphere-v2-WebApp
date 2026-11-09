@@ -1101,6 +1101,172 @@ function Get-VsStampFileHash {
     }
 }
 
+# Hash-Cache des Datei-Stamps (AV-F13, AL1 09.11.2026). Der Autoimporter bildet
+# den Stamp jede Minute ueber den ganzen files-Baum; ohne Cache las er dafuer
+# jedesmal jeden Installer vollstaendig. Ein Eintrag gilt nur, solange voller
+# Pfad (ordinal), Laenge, LastWriteTimeUtc und die NTFS-Aenderungszeit
+# (ChangeTime) gleich sind. ChangeTime schreibt das Dateisystem bei jeder
+# Inhalts- oder Metadatenaenderung fort, auch wenn ein Werkzeug die
+# LastWriteTime danach zuruecksetzt (robocopy /COPY:T, SetFileTime); sie ist
+# ueber die normalen Datei-APIs nicht setzbar. Der Cache lebt im Prozess: nach
+# einem Neustart wird einmal alles gehasht. Der Stamp selbst bleibt unveraendert
+# (gleicher Inhalt, gleicher Stamp, keine Neuverteilung).
+#
+# Grenzen gegen falsches Gruen:
+# - Ohne lesbare ChangeTime (Add-Type gesperrt, Dateisystem ohne ChangeTime)
+#   wird die Datei nie gemerkt, sondern wie vor AL1 jeden Lauf gehasht.
+# - Eine Datei, deren LastWriteTime oder ChangeTime juenger als SettleSeconds
+#   ist (oder in der Zukunft liegt), wird nie gemerkt, sondern jeden Lauf neu
+#   gehasht ("racy" Eintraege wie bei git). Eine gerade kopierte oder
+#   geschriebene Datei landet so nicht mit einem Zwischenstand im Cache.
+# - Ein Eintrag verfaellt zufaellig zwischen der Haelfte und dem Ganzen von
+#   MaxAgeSeconds; dann wird die Datei wieder voll gehasht. Zufaellig, damit
+#   nicht alle Eintraege im selben Lauf verfallen: ein voller Hash in einem Lauf
+#   dauert so lange wie frueher jeder Lauf und ueberschritte die Meldefrist des
+#   Portals, die sich nach der Dauer des letzten Laufs richtet. 0 schaltet den
+#   Ablauf ab.
+$script:VsStampHashCache = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+$script:VsStampHashCacheSettleSeconds = 120
+$script:VsStampHashCacheMaxAgeSeconds = 86400
+$script:VsStampHashCacheRandom = New-Object System.Random
+$script:VsFileChangeTimeReady = $null
+
+function Clear-VsStampHashCache {
+    $script:VsStampHashCache.Clear()
+}
+
+# NTFS-ChangeTime einer Datei als .NET-Ticks (UTC) ueber FILE_BASIC_INFO. Oeffnet
+# nur mit FILE_READ_ATTRIBUTES, also auch bei einer exklusiv gesperrten Datei.
+# 0 heisst "nicht lesbar"; dann merkt der Cache die Datei nicht.
+function Get-VsFileChangeTicks {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($null -eq $script:VsFileChangeTimeReady) {
+        try {
+            if (-not ('VirtuSphere.FileChangeTime' -as [type])) {
+                Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace VirtuSphere {
+    public static class FileChangeTime {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FILE_BASIC_INFO {
+            public long CreationTime, LastAccessTime, LastWriteTime, ChangeTime;
+            public uint FileAttributes;
+        }
+        [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+        private static extern SafeFileHandle CreateFileW(string name, uint access, uint share,
+            IntPtr securityAttributes, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle, int infoClass,
+            out FILE_BASIC_INFO info, uint size);
+
+        // FILE_READ_ATTRIBUTES, FILE_SHARE_READ|WRITE|DELETE, OPEN_EXISTING,
+        // FILE_FLAG_BACKUP_SEMANTICS; FileBasicInfo = 0.
+        public static long GetUtcTicks(string path) {
+            using (SafeFileHandle handle = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+                if (handle.IsInvalid) { return 0; }
+                FILE_BASIC_INFO info;
+                if (!GetFileInformationByHandleEx(handle, 0, out info, (uint)Marshal.SizeOf(typeof(FILE_BASIC_INFO)))) { return 0; }
+                if (info.ChangeTime <= 0) { return 0; }
+                return DateTime.FromFileTimeUtc(info.ChangeTime).Ticks;
+            }
+        }
+    }
+}
+'@
+            }
+            $script:VsFileChangeTimeReady = $true
+        } catch {
+            $script:VsFileChangeTimeReady = $false
+            Write-VsLog -Level WARN -Message ('Aenderungszeit der Paketdateien nicht lesbar, Hash-Cache des Datei-Stamps bleibt aus: {0}' -f $_.Exception.Message)
+        }
+    }
+    if (-not $script:VsFileChangeTimeReady) { return 0L }
+    return [VirtuSphere.FileChangeTime]::GetUtcTicks($Path)
+}
+
+function Get-VsStampHashCacheEntry {
+    param(
+        [Parameter(Mandatory)][string]$FullName,
+        [Parameter(Mandatory)][long]$Length,
+        [Parameter(Mandatory)][long]$Ticks,
+        [Parameter(Mandatory)][long]$ChangeTicks
+    )
+    if ($ChangeTicks -le 0) { return $null }
+    $entry = $null
+    if (-not $script:VsStampHashCache.TryGetValue($FullName, [ref]$entry)) { return $null }
+    if ($entry.Length -ne $Length -or $entry.Ticks -ne $Ticks -or $entry.ChangeTicks -ne $ChangeTicks) { return $null }
+    if ($entry.ExpiresTicks -gt 0 -and [DateTime]::UtcNow.Ticks -ge $entry.ExpiresTicks) { return $null }
+    return $entry.Hash
+}
+
+# Merkt einen frisch gelesenen Hash unter den Werten VOR dem Hashen. Der Aufrufer
+# ruft das erst nach seiner Laengen-/Zeitpruefung. Hat sich die ChangeTime
+# waehrend des Hashens bewegt, trifft der Eintrag nie wieder: der naechste Lauf
+# liest die neue ChangeTime und hasht neu.
+function Set-VsStampHashCacheEntry {
+    param(
+        [Parameter(Mandatory)][string]$FullName,
+        [Parameter(Mandatory)][long]$Length,
+        [Parameter(Mandatory)][long]$Ticks,
+        [Parameter(Mandatory)][long]$ChangeTicks,
+        [Parameter(Mandatory)][string]$Hash
+    )
+    [void]$script:VsStampHashCache.Remove($FullName)
+    if ($ChangeTicks -le 0) { return }
+    $now = [DateTime]::UtcNow.Ticks
+    $settleTicks = [long]$script:VsStampHashCacheSettleSeconds * [TimeSpan]::TicksPerSecond
+    if (($now - $Ticks) -lt $settleTicks -or ($now - $ChangeTicks) -lt $settleTicks) { return }
+    $expires = 0L
+    if ($script:VsStampHashCacheMaxAgeSeconds -gt 0) {
+        $lifetime = [double]$script:VsStampHashCacheMaxAgeSeconds * (0.5 + 0.5 * $script:VsStampHashCacheRandom.NextDouble())
+        $expires = $now + [long]($lifetime * [TimeSpan]::TicksPerSecond)
+    }
+    $script:VsStampHashCache[$FullName] = [pscustomobject]@{
+        Length = $Length; Ticks = $Ticks; ChangeTicks = $ChangeTicks; Hash = $Hash; ExpiresTicks = $expires
+    }
+}
+
+# Entfernte Dateien fallen aus dem Cache: alle Eintraege unter Root, die der
+# vollstaendige Scan nicht mehr gesehen hat.
+function Remove-VsStampHashCacheOrphans {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [AllowEmptyCollection()][string[]]$Seen = @()
+    )
+    $prefix = $Root.TrimEnd('\', '/') + '\'
+    $keep = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($name in $Seen) { [void]$keep.Add($name) }
+    foreach ($key in @($script:VsStampHashCache.Keys)) {
+        if ($key.StartsWith($prefix, [StringComparison]::Ordinal) -and -not $keep.Contains($key)) {
+            [void]$script:VsStampHashCache.Remove($key)
+        }
+    }
+}
+
+# Hash einer Stamp-Datei aus dem Cache oder frisch gelesen. Die Pruefung auf
+# Aenderung waehrend des Scans bleibt beim Aufrufer: er merkt den Hash erst,
+# wenn Laenge und Zeitstempel danach noch dieselben sind. $ChangeTicks traegt
+# die ChangeTime von vor dem Hashen zum Aufrufer.
+function Get-VsCachedStampFileHash {
+    param(
+        [Parameter(Mandatory)][System.IO.FileInfo]$File,
+        [Parameter(Mandatory)][string]$Relative,
+        [Parameter(Mandatory)][ref]$Fresh,
+        [Parameter(Mandatory)][ref]$ChangeTicks
+    )
+    $ChangeTicks.Value = Get-VsFileChangeTicks -Path $File.FullName
+    $cached = Get-VsStampHashCacheEntry -FullName $File.FullName -Length $File.Length -Ticks $File.LastWriteTimeUtc.Ticks -ChangeTicks $ChangeTicks.Value
+    if ($cached) {
+        $Fresh.Value = $false
+        return $cached
+    }
+    $Fresh.Value = $true
+    return (Get-VsStampFileHash -Path $File.FullName -Relative $Relative)
+}
+
 function Get-VsFilesManifestStamp {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -1123,18 +1289,24 @@ function Get-VsFilesManifestStamp {
     $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop |
         Where-Object { & $isStampFile $_ } |
         Sort-Object FullName)
-    if ($files.Count -eq 0) { return 'empty' }
+    if ($files.Count -eq 0) {
+        Remove-VsStampHashCacheOrphans -Root $root
+        return 'empty'
+    }
 
     $parts = New-Object System.Collections.Generic.List[string]
     foreach ($file in $files) {
         $relative = $file.FullName.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
         $beforeLength = $file.Length
         $beforeTicks = $file.LastWriteTimeUtc.Ticks
-        $hash = Get-VsStampFileHash -Path $file.FullName -Relative $relative
+        $fresh = $false
+        $changeTicks = 0L
+        $hash = Get-VsCachedStampFileHash -File $file -Relative $relative -Fresh ([ref]$fresh) -ChangeTicks ([ref]$changeTicks)
         $after = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
         if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
             throw (New-VsRunCategoryError -Message ("Paketdatei hat sich waehrend des Scans geaendert: {0}" -f $relative) -Category 'source_changing')
         }
+        if ($fresh) { Set-VsStampHashCacheEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash }
         $parts.Add(('{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
     }
     $afterNames = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop |
@@ -1143,6 +1315,7 @@ function Get-VsFilesManifestStamp {
     if ((@($files.FullName) -join "`n") -cne ($afterNames -join "`n")) {
         throw (New-VsRunCategoryError -Message 'Paketdateiliste hat sich waehrend des Scans geaendert.' -Category 'source_changing')
     }
+    Remove-VsStampHashCacheOrphans -Root $root -Seen @($files.FullName)
 
     if ($TemplateScript) {
         if (Test-Path -LiteralPath $TemplateScript) {
@@ -1159,11 +1332,14 @@ function Get-VsFilesManifestStamp {
                 $relative = $file.FullName.Substring($templateRoot.Length).TrimStart('\', '/').Replace('\', '/')
                 $beforeLength = $file.Length
                 $beforeTicks = $file.LastWriteTimeUtc.Ticks
-                $hash = Get-VsStampFileHash -Path $file.FullName -Relative ('template/' + $relative)
+                $fresh = $false
+                $changeTicks = 0L
+                $hash = Get-VsCachedStampFileHash -File $file -Relative ('template/' + $relative) -Fresh ([ref]$fresh) -ChangeTicks ([ref]$changeTicks)
                 $after = Get-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
                 if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
                     throw (New-VsRunCategoryError -Message ("Paketvorlagendatei hat sich waehrend des Scans geaendert: {0}" -f $relative) -Category 'source_changing')
                 }
+                if ($fresh) { Set-VsStampHashCacheEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash }
                 $parts.Add(('template/{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
             }
             $afterTemplateNames = @(Get-ChildItem -LiteralPath $templateRoot -Recurse -File -Force -ErrorAction Stop |
@@ -1171,6 +1347,7 @@ function Get-VsFilesManifestStamp {
             if ((@($templateFiles.FullName) -join "`n") -cne ($afterTemplateNames -join "`n")) {
                 throw (New-VsRunCategoryError -Message 'Paketvorlagendateiliste hat sich waehrend des Scans geaendert.' -Category 'source_changing')
             }
+            Remove-VsStampHashCacheOrphans -Root $templateRoot -Seen @($templateFiles.FullName)
         } else { $parts.Add('template-tree|absent') }
     }
     $payload = $parts -join "`n"

@@ -1420,7 +1420,11 @@ Fehlerdetails gehören währenddessen zum letzten abgeschlossenen Lauf.
 Ein offener Lauf darf die feste Frist und, wenn das länger ist, bis zum Doppelten der Dauer brauchen, die sein letzter
 Abschluss gemeldet hat; ein normal langer SHA-256-Dateiscan bleibt deshalb in der
 Farbe des vorigen Ergebnisses. Erst ein Scan, der deutlich länger dauert als der
-letzte, überschreitet die Meldefrist.
+letzte, überschreitet die Meldefrist. Seit AL1 sind ruhige Läufe kurz, weil nur
+neue oder geänderte Dateien gehasht werden. Der erste Lauf nach einem Neustart
+der Aufgabe hasht dagegen einmal den ganzen Baum; bei vielen großen Installern
+kann er die feste Frist überschreiten, und die Karte meldet ihn bis zu seinem
+Abschluss als verspätet.
 „Synchronisationslauf fehlgeschlagen“ kann auch einen abgebrochenen
 Dateiscan bezeichnen; der historische Wire-Code `mecm_unavailable` bleibt
 kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die bestehenden
@@ -1472,7 +1476,7 @@ nicht.
 | `config.json` fehlt im Ordner | Ordner ignoriert | still |
 | `config.json` ungültig / ohne ProjectName+version / ohne gültiges ErrorAction (`Stop` oder `Continue`) | übersprungen, **offener Punkt** (`package_config_invalid`). Ohne gültiges `ErrorAction` wird das Paket nicht importiert, weil der Paketwrapper sonst auf jedem Client mit Exit-Code 1 abbricht | WARN |
 | `PackagesShare` fehlt in Registry | wartet in 60-s-Schleife auf den Installer | ERROR einmalig |
-| files-Baum unverändert (SHA-256-Manifest) | kein Scan | still |
+| files-Baum unverändert (SHA-256-Manifest) | kein Scan. Gehasht werden nur neue Dateien und solche mit geänderter Größe, Änderungszeit oder NTFS-ChangeTime (auch bei zurückgesetzter Änderungszeit); die übrigen Hashes merkt sich der laufende Prozess je Datei, höchstens 12 bis 24 Stunden lang (AL1). Der erste Lauf nach einem Neustart der Aufgabe hasht einmal alles | still |
 | files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
 | Alt-Version erkannt und `removeOldVersion=true` | automatische Entfernung von altem Deployment, Application und Collection nach Eigentums-, vollständigem Referenz- und Ersatznachweis. Ein von MECM angenommener Ersatzauftrag, eine sichtbar begonnene Verteilung und das neue Deployment genügen; der DP-Stand spielt keine Rolle. Eine gesperrte oder fehlgeschlagene Einheit meldet `package_cleanup_failed` | INFO je entfernter Einheit, WARN bei Sperre/Fehler |
 | Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
