@@ -65,7 +65,7 @@ function directory_ldap_connect(string $host, int $port, string $caFile, ?float 
     // libldap's TLS context itself after a global TLS option was set (php-src
     // PR 17940), so a long-lived FPM worker picks up a rotated CA bundle
     // without a restart; DirectoryLdapFixtureTest proves the rotation in the
-    // shipped image. PHP 8.4 has no LDAP_OPT_X_TLS_NEWCTX constant, so the
+    // shipped image. PHP 8.4 exposes no new-context TLS option, so the
     // former explicit renewal never ran and is gone (N1a A6).
     directory_ldap_require_option(null, LDAP_OPT_X_TLS_CACERTFILE, $caFile);
     directory_ldap_require_option(null, LDAP_OPT_X_TLS_REQUIRE_CERT, LDAP_OPT_X_TLS_DEMAND);

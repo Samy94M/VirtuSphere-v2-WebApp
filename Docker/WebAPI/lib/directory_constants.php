@@ -58,6 +58,9 @@ const VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS = 30;
 // portal reads the controller certificate again with one extra TLS handshake,
 // at most once per this many seconds per controller.
 const VIRTUSPHERE_DIRECTORY_CERTIFICATE_REFRESH_SECONDS = 86400;
+// Last value of the TIMESTAMP column deploy_ad_controller_state.certificate_not_after
+// (2038-01-19 03:14:07 UTC); see directory_certificate_not_after_column().
+const VIRTUSPHERE_DIRECTORY_CERTIFICATE_NOT_AFTER_MAX = 2147483647;
 
 // Per-controller and overall Ampel state sets (lib/directory_status.php),
 // shape-matched to the existing ESXi/Ansible ones so the shared legend

@@ -102,7 +102,8 @@ final class DirectoryLdapFixtureFailoverTest extends TestCase
         directory_authenticate_user($this->db, DirectoryLdapFixture::ALICE_UPN, DirectoryLdapFixture::ALICE_PASSWORD);
         $parsed = openssl_x509_parse(DirectoryLdapFixture::trustedBundle());
         self::assertIsArray($parsed);
-        $expected = gmdate('Y-m-d H:i:s', (int) $parsed['validTo_time_t']);
+        // The fixture certificate runs past the TIMESTAMP range (2046).
+        $expected = directory_certificate_not_after_column((int) $parsed['validTo_time_t']);
         self::assertSame($expected, $this->certificateNotAfter($controllerId));
 
         // A second contact the same day does not read again: a value written

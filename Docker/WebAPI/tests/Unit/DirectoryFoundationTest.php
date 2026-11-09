@@ -416,6 +416,15 @@ final class DirectoryFoundationTest extends TestCase
         }
     }
 
+    public function testACertificateExpiryAfterTheTimestampRangeIsStoredAsItsLastValue(): void
+    {
+        // The column is TIMESTAMP; a 2046 expiry made every state write, and
+        // with F7 every sign-in, fail (found by the e2e lane on 09.11.2026).
+        self::assertSame('2030-01-01 00:00:00', directory_certificate_not_after_column(1893456000));
+        self::assertSame('2038-01-19 03:14:07', directory_certificate_not_after_column(2417817600));
+        self::assertSame('2038-01-19 03:14:07', directory_certificate_not_after_column(VIRTUSPHERE_DIRECTORY_CERTIFICATE_NOT_AFTER_MAX));
+    }
+
     /** @return array<string,mixed> one ext-ldap shaped AD user entry */
     private static function ldapEntry(): array
     {
