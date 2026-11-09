@@ -21,6 +21,13 @@
 #      mit einem Drill-Admin, Machine-API-Ablehnung eines ungueltigen Tokens
 #   9. Vollstaendiges Cleanup (Container samt anonymem MySQL-Volume, Netz,
 #      Tempdateien) per Trap
+#  10. Nur wenn alles davor bestand: eine Zeile in
+#      <Backupverzeichnis>/status/restore-drill.jsonl (Nachweis fuer das Portal)
+#
+# Das Wegwerf-Netz bekommt ein festes Subnetz (VIRTUSPHERE_RESTORE_SUBNET,
+# Vorgabe unten). Vor dem Anlegen prueft der Drill auf einem Linux-Host, dass
+# es keine Route und keine bestehende TCP-Verbindung des Hosts ueberdeckt; sonst
+# koennte die neue Bridge eine SSH-Sitzung abschneiden.
 #
 # Code, Schema und Migrationen kommen aus dem Pruefroot (VIRTUSPHERE_CHECK_ROOT,
 # Standard: das Repository dieses Skripts), das Backup-Tripel aus
@@ -28,16 +35,22 @@
 # einem neuen Klon als Pruefroot ist der Lauf ein Migrations-Probelauf des neuen
 # Stands auf dem vorhandenen Backup (docs/operations/backup.md).
 #
-# Der laufende Stack wird nicht beruehrt; das Backupverzeichnis wird nur gelesen. Kanonischer Backup-Weg ist
+# Der laufende Stack wird nicht beruehrt. Im Backupverzeichnis schreibt der Drill
+# nur die Nachweiszeile unter status/; Dump, Konfigurationsarchiv und Manifest
+# liest er nur, und nichts davon wird gemountet. Kanonischer Backup-Weg ist
 # scripts/backup.sh; die frueheren Docker/scripts/{backup,restore}.sh sind
 # stillgelegt (E5). Empfohlene Kadenz: Release-Lane (scripts/check.ps1) und
 # mindestens monatlich (docs/operations/backup.md).
 #
-# Exitcodes: 0 Drill bestanden; 1 Befund; 2 Umgebung unvollstaendig.
+# Exitcodes: 0 Drill bestanden und Nachweis geschrieben; 1 Befund; 2 Umgebung
+# unvollstaendig, auch wenn der Drill bestand, der Nachweis aber nicht
+# geschrieben werden konnte (das Portal bleibt dann bei "unbekannt"). Ein Befund
+# oder eine fehlende Voraussetzung schreibt keinen Nachweis: Rot im
+# Migrations-Probelauf ist ein Befund am neuen Stand, kein gescheiterter Restore.
 set -eu
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
-PROGRESS_TOTAL=10
+PROGRESS_TOTAL=11
 progress_position=0
 progress_unit=""
 progress_run() {
@@ -95,6 +108,66 @@ else
   [ -d "$BACKUP_DIR" ] \
     || envfail "[restore.root-incomplete] Backupverzeichnis fehlt im beauftragten Restore-Pruefroot: $BACKUP_DIR"
 fi
+# Der einzige Schreibort des Drills im Backupverzeichnis: die Nachweiszeile fuer
+# das Portal (ADR-0021, Nachtrag 2). Der Dateiname ist derselbe, den
+# Docker/WebAPI/lib/backup_evidence.php liest.
+DRILL_STATUS_DIR="$BACKUP_DIR/status"
+DRILL_STATUS_FILE="$DRILL_STATUS_DIR/restore-drill.jsonl"
+DRILL_STATUS_KEEP_LINES=90
+
+# N1b: Ohne --subnet waehlt Docker fuer das Wegwerf-Netz ein Subnetz aus seinem
+# Standardbereich (172.17.0.0/16 bis 172.31.0.0/16, 192.168.0.0/16). Liegt die
+# SSH-Adresse des Betreibers darin, gehen die Antworten an die neue Bridge und
+# die Sitzung bricht ab (dieselbe Falle wie bei den Stack-Netzen, Go-Live 1a.2).
+# Die Vorgabe liegt ausserhalb dieser Bereiche. Ein Host, in dessen Netz sie
+# vorkommt, setzt VIRTUSPHERE_RESTORE_SUBNET auf ein freies Subnetz
+# (docs/operations/backup.md, "Subnetz des Drills"). Gleiche Strenge wie beim
+# Pruefroot: gesetzt, aber leer bricht ab, nie Rueckfall auf die Vorgabe.
+RESTORE_SUBNET_DEFAULT=10.250.0.0/24
+if [ "${VIRTUSPHERE_RESTORE_SUBNET+x}" = x ]; then
+  [ -n "$VIRTUSPHERE_RESTORE_SUBNET" ] \
+    || envfail "[restore.subnet-empty] VIRTUSPHERE_RESTORE_SUBNET ist gesetzt, aber leer; kein Rueckfall auf die Vorgabe $RESTORE_SUBNET_DEFAULT."
+  RESTORE_SUBNET=$VIRTUSPHERE_RESTORE_SUBNET
+  restore_subnet_source=VIRTUSPHERE_RESTORE_SUBNET
+else
+  RESTORE_SUBNET=$RESTORE_SUBNET_DEFAULT
+  restore_subnet_source=Vorgabe
+fi
+# Eine IPv4-Netzadresse mit Praefix 8 bis 29 (/29 laesst Platz fuer Gateway,
+# MySQL, Smoke-Server und einen PHP-Lauf), ohne gesetzte Hostbits.
+subnet_valid() {
+  printf '%s\n' "$1" | awk -F'[./]' '
+    NF != 5 { exit 1 }
+    {
+      for (i = 1; i <= 5; i++) if ($i !~ /^[0-9]+$/) exit 1
+      for (i = 1; i <= 4; i++) if ($i + 0 > 255) exit 1
+      prefix = $5 + 0
+      if (prefix < 8 || prefix > 29) exit 1
+      if (($1 * 16777216 + $2 * 65536 + $3 * 256 + $4) % (2 ^ (32 - prefix)) != 0) exit 1
+    }'
+}
+subnet_valid "$RESTORE_SUBNET" \
+  || envfail "[restore.subnet-invalid] Restore-Subnetz $RESTORE_SUBNET (aus $restore_subnet_source) ist keine IPv4-Netzadresse mit Praefix /8 bis /29, zum Beispiel <freies-/24>."
+# subnet_overlaps <cidr>: liest Zeilen "[<routentyp>] <adresse>[/<praefix>] <rest>"
+# und gibt die erste aus, deren Netz sich mit <cidr> ueberschneidet. Zwei Netze
+# ueberschneiden sich, wenn sie im kuerzeren der beiden Praefixe
+# uebereinstimmen. Ein Routentyp vor dem Ziel (blackhole, unreachable, local ...)
+# wird uebersprungen; "default" ist kein Ziel.
+subnet_overlaps() {
+  awk -v want="$1" '
+    function ipnum(a,   o) { split(a, o, "."); return o[1] * 16777216 + o[2] * 65536 + o[3] * 256 + o[4] }
+    BEGIN { split(want, w, "/"); want_num = ipnum(w[1]); want_prefix = w[2] + 0 }
+    {
+      target = $1
+      if (target !~ /^[0-9]/ && target != "default") target = $2
+      split(target, c, "/")
+      if (c[1] !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) next
+      prefix = (c[2] == "") ? 32 : c[2] + 0
+      if (want_prefix < prefix) prefix = want_prefix
+      size = 2 ^ (32 - prefix)
+      if (int(want_num / size) == int(ipnum(c[1]) / size)) { print; exit }
+    }'
+}
 [ -f "$SCHEMA_SQL" ] \
   || envfail "[restore.root-incomplete] struktur.sql fehlt im beauftragten Restore-Pruefroot: $SCHEMA_SQL"
 for required in \
@@ -202,7 +275,39 @@ cleanup() {
     progress_result fail
     [ "$original_ec" -ne 0 ] || original_ec=1
   fi
+  # Erst nach bestandenem Drill und sauberem Cleanup: der Nachweis fuer das
+  # Portal. Ein Befund, eine fehlende Voraussetzung oder ein Abbruch schreibt
+  # nichts.
+  if [ "$original_ec" -eq 0 ]; then
+    drill_record || original_ec=2
+  fi
   exit "$original_ec"
+}
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\t\n\r' '   '
+}
+# Haengt eine Zeile an restore-drill.jsonl an (gekappt auf
+# DRILL_STATUS_KEEP_LINES), atomar ueber eine Tempdatei im selben Verzeichnis.
+drill_record() {
+  progress_run 11 drill-record
+  record_tmp=""
+  if mkdir -p "$DRILL_STATUS_DIR" \
+    && record_tmp=$(mktemp "$DRILL_STATUS_DIR/.restore-drill.XXXXXX") \
+    && {
+      if [ -f "$DRILL_STATUS_FILE" ]; then tail -n $((DRILL_STATUS_KEEP_LINES - 1)) "$DRILL_STATUS_FILE"; fi \
+        && printf '{"ts":%s,"status":"ok","backup_ts":"%s","root_commit":"%s"}\n' \
+          "$(date +%s)" "$(json_escape "$ts")" "$(json_escape "$root_commit")"
+    } > "$record_tmp" \
+    && chmod 0644 "$record_tmp" \
+    && mv -f "$record_tmp" "$DRILL_STATUS_FILE"; then
+    echo "Restore-Drill Nachweis: $DRILL_STATUS_FILE (Backup-Stand $ts)"
+    progress_result pass
+    return 0
+  fi
+  [ -z "$record_tmp" ] || rm -f "$record_tmp"
+  echo "FEHLER (Umgebung): [restore.record-not-written] Der Drill hat bestanden, der Nachweis fuer das Portal wurde aber nicht geschrieben: $DRILL_STATUS_FILE" >&2
+  progress_result infrastructure_error
+  return 1
 }
 trap 'cleanup $?' EXIT
 trap 'exit 130' INT TERM
@@ -248,6 +353,47 @@ MYSQL_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$MYSQL_IMAGE" 2>/dev/n
 # die Namen noch auf die laufenden, danach auf die neuen; nur die ID sagt, was
 # geprueft wurde.
 echo "Restore-Drill Images: PHP=$PHP_IMAGE ($PHP_IMAGE_ID); MySQL=$MYSQL_IMAGE ($MYSQL_IMAGE_ID)"
+
+# N1b: Vor dem Anlegen des Netzes. Eine Route des Hosts im Restore-Subnetz
+# (eigenes LAN, Docker-Netz, Rest eines abgebrochenen Drills) oder eine
+# bestehende TCP-Verbindung mit einer Adresse darin (die SSH-Sitzung des
+# Betreibers, auch wenn sie ueber das Default-Gateway kommt) ist ein Abbruch vor
+# jeder Aenderung. Beides liefert iproute2 (ip, ss). Auf Docker Desktop liegt das
+# Netz in der Docker-VM, dort entfaellt die Pruefung; auf einem Linux-Host ist
+# ein fehlendes Werkzeug eine fehlende Voraussetzung, kein stilles Gruen.
+host_net_tool() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  [ "$(uname -s)" != Linux ] \
+    || envfail "[restore.subnet-probe] $1 fehlt (iproute2); ohne es prueft der Drill nicht, ob das Restore-Subnetz $RESTORE_SUBNET eine Route oder SSH-Sitzung des Hosts abschneidet."
+  return 1
+}
+subnet_checks=""
+if host_net_tool ip; then
+  host_routes=$(ip -4 route show) \
+    || envfail "[restore.subnet-probe] Routen des Hosts nicht lesbar (ip -4 route show)."
+  route_conflict=$(printf '%s\n' "$host_routes" | subnet_overlaps "$RESTORE_SUBNET")
+  [ -z "$route_conflict" ] \
+    || envfail "[restore.subnet-conflict] Restore-Subnetz $RESTORE_SUBNET (aus $restore_subnet_source) ueberschneidet die Host-Route \"$route_conflict\". Ein freies Subnetz mit VIRTUSPHERE_RESTORE_SUBNET setzen (docs/operations/backup.md, \"Subnetz des Drills\"); Reste eines abgebrochenen Drills zeigt docker network ls --filter label=virtusphere.qa.probe."
+  subnet_checks="Routen"
+fi
+if host_net_tool ss; then
+  host_connections=$(ss -tn state established) \
+    || envfail "[restore.subnet-probe] TCP-Verbindungen des Hosts nicht lesbar (ss -tn state established)."
+  # Jede Adresse "a.b.c.d:port" oder "[::ffff:a.b.c.d]:port" einer bestehenden
+  # Verbindung, lokal wie Gegenstelle; die Spaltenfolge von ss spielt keine Rolle.
+  connection_conflict=$(printf '%s\n' "$host_connections" | awk '{
+      for (i = 1; i <= NF; i++) {
+        field = $i
+        sub(/^\[::ffff:/, "", field)
+        sub(/\]?:[0-9]+$/, "", field)
+        if (field ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && field != $i) print field, "(bestehende TCP-Verbindung)"
+      }
+    }' | subnet_overlaps "$RESTORE_SUBNET")
+  [ -z "$connection_conflict" ] \
+    || envfail "[restore.subnet-conflict] Restore-Subnetz $RESTORE_SUBNET (aus $restore_subnet_source) enthaelt die Adresse $connection_conflict; die neue Bridge wuerde diese Verbindung, etwa eine SSH-Sitzung, abschneiden. Ein freies Subnetz mit VIRTUSPHERE_RESTORE_SUBNET setzen (docs/operations/backup.md, \"Subnetz des Drills\")."
+  subnet_checks="${subnet_checks:+$subnet_checks und }Verbindungen"
+fi
+echo "Restore-Drill Netz: Subnetz=$RESTORE_SUBNET (aus $restore_subnet_source); geprueft: ${subnet_checks:-nichts (kein Linux-Host, Docker-Netz in der Docker-VM)}"
 progress_result pass
 
 # --- 1. Manifest ---------------------------------------------------------------
@@ -357,10 +503,10 @@ progress_run 5 database-restore
 if docker network inspect "$NET" >/dev/null 2>&1; then
   fail "[restore.resource-collision] Restore-Netz $NET existiert bereits."
 fi
-NET_ID=$(docker network create \
+NET_ID=$(docker network create --subnet "$RESTORE_SUBNET" \
   --label com.docker.compose.project=virtusphere-qa \
   --label "virtusphere.qa.probe=$RUN_LABEL" "$NET") \
-  || envfail "Restore-Netz konnte nicht erzeugt werden."
+  || envfail "[restore.network-create] Restore-Netz mit Subnetz $RESTORE_SUBNET konnte nicht erzeugt werden. Belegt ein anderes Docker-Netz das Subnetz (docker network ls --filter label=virtusphere.qa.probe zeigt Reste abgebrochener Drills), ein freies mit VIRTUSPHERE_RESTORE_SUBNET setzen."
 verify_network || envfail "Erzeugtes Restore-Netz besteht die ID-/Label-Pruefung nicht."
 if docker container inspect "$MYSQL_NAME" >/dev/null 2>&1; then
   fail "[restore.resource-collision] MySQL-Name $MYSQL_NAME existiert bereits."

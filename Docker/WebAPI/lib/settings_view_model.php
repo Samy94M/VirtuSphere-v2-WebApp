@@ -8,6 +8,7 @@ require_once __DIR__ . '/repo/api_access.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/backup_encryption.php';
+require_once __DIR__ . '/settings_backup_drill.php';
 require_once __DIR__ . '/version_overview.php';
 
 /** @return array<string,mixed> */
@@ -61,6 +62,9 @@ function settings_build_view_model(mysqli $connection): array
     $backupIsOverdue = $backupOverdueAt !== null && $serverEpoch > $backupOverdueAt;
     $backupCertificate = backup_encryption_certificate($connection);
     $backupEncryptionFinding = backup_encryption_finding($backupCertificate, $backup);
+    // The last passed restore drill (restore_test.sh records it on the host), on
+    // the same clock as the backup rows.
+    $backupDrill = backup_drill_status_read(null, $serverEpoch);
 
     $currentTimezone = portal_timezone();
     $timezoneGroups = portal_timezone_choices($currentTimezone);
@@ -128,6 +132,7 @@ function settings_build_view_model(mysqli $connection): array
         'backupIsOverdue',
         'backupCertificate',
         'backupEncryptionFinding',
+        'backupDrill',
         'currentTimezone',
         'timezoneGroups',
         'esxiIntervalHours',

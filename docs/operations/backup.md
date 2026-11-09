@@ -83,11 +83,11 @@ Jeder Lauf hängt eine JSON-Zeile an `Docker/backups/status/backup-status.jsonl`
 
 Nur dieses Unterverzeichnis wird read-only in den PHP-Container gemountet (`./Docker/backups/status:/var/backups/virtusphere-status:ro`), nie die Dumps oder das Config-Tar (das die `.env` mit dem DB-Root-Passwort enthält). Ein Dump-Download über das Portal gibt es bewusst nicht. Der Missions-Export (JSON) ist ein Transportweg zwischen Umgebungen, der Listen-Export (CSV) nur ein Tabellen-Export für Berichte; beides ist kein Backup und kein Restore-Pfad.
 
-Neben der Statuszeile der Backupläufe liegen im selben Verzeichnis zwei Nachweise, die nie in `backup-status.jsonl` landen (eine Drill-Zeile dort läse das Portal als Backuplauf): `restore-drill.jsonl` (je bestandenem Drill eine Zeile `ts`, `status` = `ok`, `backup_ts`, `root_commit`; auf 90 Zeilen gekappt) schreibt `scripts/restore-drill-record.sh`, siehe „Nachweis im Portal“; `backup-scrub.json` (ein Objekt `ts`, `status`, `sets_checked`, `sets_failed`, `failed_sets`, `duration_s`, atomar ersetzt) schreibt `scripts/backup-scrub.sh`, siehe „Prüfsummen-Scrub“.
+Neben der Statuszeile der Backupläufe liegen im selben Verzeichnis zwei Nachweise, die nie in `backup-status.jsonl` landen (eine Drill-Zeile dort läse das Portal als Backuplauf): `restore-drill.jsonl` (je bestandenem Drill eine Zeile `ts`, `status` = `ok`, `backup_ts`, `root_commit`; auf 90 Zeilen gekappt) schreibt der Drill `scripts/restore_test.sh` selbst als letzten Schritt, siehe „Nachweis im Portal“; `backup-scrub.json` (ein Objekt `ts`, `status`, `sets_checked`, `sets_failed`, `failed_sets`, `duration_s`, atomar ersetzt) schreibt `scripts/backup-scrub.sh`, siehe „Prüfsummen-Scrub“.
 
 Das Portal liest die Backupläufe an genau einer Stelle (`lib/backup_status.php`), die beiden Nachweise in `lib/backup_evidence.php`, und zeigt:
 
-- **Backup-Karte** auf der Einstellungen-Seite (`settings.php`, Gate `system.config`): Zustand, Zeitplan samt Fundort, letzter Lauf, Alter, nächster Lauf, Überfälligkeitsgrenze, Größen, freier Speicher, Aufbewahrung. Darunter stehen nur der Einrichtungs-Befehl für den Cron-Zeitplan und ein Link in die Hilfe (Tab "Architektur"), die Ablauf, Ablageort und Restore-Weg erklärt; der frühere aufklappbare Erklärtext war ein Duplikat dieser Hilfe-Abschnitte.
+- **Backup-Karte** auf der Einstellungen-Seite (`settings.php`, Gate `system.config`): Zustand, Zeitplan samt Fundort, letzter Lauf, Alter, nächster Lauf, Überfälligkeitsgrenze, letzter Restore-Test (Zeitpunkt und Alter aus `restore-drill.jsonl`, Plakette „Fällig“ ab `VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS` Tagen; ohne Nachweis „Nicht nachgewiesen“; in beiden Fällen mit dem Drill-Befehl), Größen, freier Speicher, Aufbewahrung. Darunter stehen nur der Einrichtungs-Befehl für den Cron-Zeitplan und ein Link in die Hilfe (Tab "Architektur"), die Ablauf, Ablageort und Restore-Weg erklärt; der frühere aufklappbare Erklärtext war ein Duplikat dieser Hilfe-Abschnitte.
 - **Dashboard-Banner** für Admins, sobald der Zustand nicht `ok` ist (fail-soft; ein defekter Reader legt keine Seite lahm).
 - **Systemstatus**, Abschnitt „Interne Dienste“, Block „Hostzustand“: je eine Zeile für Backup (Zustand, letzter Lauf), Restore-Test (letzter nachgewiesener Erfolg „vor N Tagen“, geprüfter Stand; Hinweis „Fällig“ ab `VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS` Tagen), Prüfsummen (letzte Prüfung, Ergebnis) und, nur solange nginx HTTPS ausliefert, das HTTPS-Zertifikat (Ablaufdatum, Hinweis ab `VIRTUSPHERE_HTTPS_CERT_EXPIRY_WARN_DAYS` Tagen). Fehlt ein Nachweis, steht „Unbekannt“, nie „OK“. Die Zeilen ändern die Ampel der Kachel „Interne Dienste“ nicht.
 - **health.php** meldet den Backupzustand nicht; es liefert nur `status`, `db` und `php`. Backupzustand und -alter stehen ausschließlich im Portal.
@@ -126,17 +126,21 @@ Dafür gilt dieselbe Strenge: explizit leer gesetzt endet der Drill mit
 `[restore.backup-dir-empty]`, ein fehlendes Verzeichnis mit
 `[restore.backup-dir-missing]`, ein Verzeichnis ohne Tripel mit
 `[restore.backup-missing]`, jeweils Exitcode 2 und ohne Rückfall auf das
-Verzeichnis im Prüfroot. Ein relativer Pfad gilt ab dem Aufrufverzeichnis. Das
-Verzeichnis wird nur gelesen. Wofür die Trennung da ist, steht unter
+Verzeichnis im Prüfroot. Ein relativer Pfad gilt ab dem Aufrufverzeichnis. Dump,
+Konfigurationsarchiv und Manifest dort werden nur gelesen; geschrieben wird nur
+nach bestandenem Drill die Nachweiszeile unter `status/` („Nachweis im
+Portal“). Wofür die Trennung da ist, steht unter
 „Migrations-Probelauf mit dem neuen Stand“.
 
 Vor dem Import nennt der Drill seine Quellen in drei Zeilen, damit ein Nachweis
-eindeutig einem Stand zugeordnet bleibt:
+eindeutig einem Stand zugeordnet bleibt, und in einer vierten das Subnetz seines
+Wegwerf-Netzes („Subnetz des Drills“):
 
 ```text
 Restore-Drill Auswahl: Pruefroot=<Pfad>; Backup-Stand=<ts>
 Restore-Drill Quelle: Pruefroot-Commit=<Commit>; Backupverzeichnis=<Pfad> (aus Pruefroot|VIRTUSPHERE_RESTORE_BACKUP_DIR)
 Restore-Drill Images: PHP=<Name> (sha256:…); MySQL=<Name> (sha256:…)
+Restore-Drill Netz: Subnetz=<Subnetz> (aus Vorgabe|VIRTUSPHERE_RESTORE_SUBNET); geprueft: Routen und Verbindungen
 ```
 
 Der Commit ist der des Prüfroots selbst; `(Arbeitsbaum geaendert)` dahinter
@@ -145,7 +149,7 @@ der Prüfroot kein eigener Git-Checkout ist oder `git` fehlt oder den Zugriff
 verweigert. Die Schlusszeile `Restore-Drill OK` wiederholt Backupstand und
 Commit.
 
-Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, Wegwerf-MySQL mit dem lokal getaggten Stack-Image `mysql:8.4-virtusphere`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
+Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz mit festem Subnetz, Wegwerf-MySQL mit dem lokal getaggten Stack-Image `mysql:8.4-virtusphere`, Projekt-PHP-Image) und prüft die ganze Kette. Der Wegwerf-Server entsteht dabei wie der Produktionsstack, mit dem App-User aus der archivierten `.env` (`MYSQL_USER`/`MYSQL_PASSWORD`), und **alles ab den Migrationen verbindet als dieser App-User, nie als root**: genau so verbindet die App, und genau diese Fähigkeit hatte der Drill früher nie bewiesen.
 
 1. Manifest (`manifest-<ts>.sha256`, schreibt `scripts/backup.sh` bei jedem Lauf): Es muss genau die gewählten Archive listen, also Dump und Konfigurationsarchiv desselben Zeitstempels (bei verschlüsseltem Tripel deren `.cms`-Namen), und deren SHA-256-Hashes müssen stimmen. Sonst endet der Drill mit `[restore.manifest-mismatch]` (Exitcode 1), bevor etwas entschlüsselt oder ein Container angelegt wird.
 1b. Ist das jüngste Tripel verschlüsselt (`*.cms`), entschlüsselt der Drill beide Archive mit dem privaten Schlüssel aus `VIRTUSPHERE_BACKUP_PRIVATE_KEY` ins Wegwerf-Arbeitsverzeichnis. Fehlt die Variable oder ist die Datei nicht lesbar, endet der Drill als fehlende Voraussetzung (`[restore.key-missing]`, Exitcode 2), nie als bestanden. Den Drill dafür auf einem Rechner mit dem Schlüssel ausführen, nicht auf dem App-Host.
@@ -156,20 +160,59 @@ Der Drill arbeitet vollständig in einer Wegwerf-Umgebung (eigenes Docker-Netz, 
 6. Credential-Entschlüsselung mit dem `APP_KEY` aus dem gesicherten `.env`, und erwartetes Scheitern mit einem falschen Schlüssel
 7. App-Smoke gegen die wiederhergestellten Daten: `health.php`, Portal-Login mit einem Drill-Admin, Machine-API-Ablehnung einer nicht freigegebenen IP (eingefrorene 403-Antwort von `mecm-api.php`)
 8. Vollständiges Cleanup per Trap: Container, das anonyme Datenvolume des Wegwerf-MySQL (sonst bliebe nach jedem Lauf eine Kopie der Datenbank im Docker-Datenbereich liegen), Netz und Arbeitsverzeichnis; der laufende Stack wird nie berührt
+9. Nur nach bestandenem Drill und sauberem Cleanup: die Nachweiszeile für das Portal (Schritt `[11/11] drill-record`, „Nachweis im Portal“)
 
 Kadenz: Release-Lane des kanonischen Runners (`scripts/check.ps1 -Lane Release`, Gate `restore-drill`), nach jedem Schema-Meilenstein, mindestens monatlich und als Migrations-Probelauf vor jedem Update mit neuen Migrationen.
 
-### Nachweis im Portal
+### Subnetz des Drills
 
-Der Drill selbst schreibt keinen Nachweis. Damit der Systemstatus den letzten Restore-Test zeigt, den Drill über den Nachweis-Aufruf starten:
+Ohne Vorgabe legt Docker ein neues Netz in seinem Standardbereich an (`172.17.0.0/16` bis `172.31.0.0/16`, `192.168.0.0/16`). Liegt die Adresse, über die der Betreiber per SSH kommt, in diesem Bereich, gehen die Antworten des Hosts an die neue Bridge, und die Sitzung bricht ab, mitten im Drill. Dieselbe Falle beschreibt [Go-Live](go-live.md), Schritt 1a.2, für die Netze des Stacks. Der Drill legt sein Wegwerf-Netz deshalb immer mit festem Subnetz an:
 
-```sh
-sudo sh scripts/restore-drill-record.sh
+- Vorgabe ist `10.250.0.0/24`, ein privates Subnetz außerhalb der Docker-Standardbereiche.
+- Ein Host, in dessen Netz die Vorgabe vorkommt, setzt `VIRTUSPHERE_RESTORE_SUBNET` auf ein eigenes freies Subnetz. Es darf sich mit keinem Netz überschneiden, das der Host erreicht, und mit keinem Subnetz-Pin der Override. Erlaubt ist eine IPv4-Netzadresse mit Präfix `/8` bis `/29` ohne gesetzte Hostbits. `sudo` gibt die Variable nur als Argument weiter, als der Betriebsnutzer mit vollem Pfad:
+
+  ```sh
+  cd /opt/VirtuSphere-v2-WebApp
+  sudo VIRTUSPHERE_RESTORE_SUBNET=<freies-/24> sh scripts/restore_test.sh
+  ```
+
+  Gesetzt, aber leer endet der Drill mit `[restore.subnet-empty]`, ein ungültiger Wert mit `[restore.subnet-invalid]`, jeweils Exitcode 2 und ohne Rückfall auf die Vorgabe. Das tatsächliche Subnetz eines Standorts gehört in seine Betriebsnotizen, nicht ins Repository.
+
+Bevor das Netz entsteht, prüft der Drill auf einem Linux-Host mit `ip -4 route show` und `ss -tn state established` (beides aus iproute2), dass das Subnetz keine Route des Hosts überdeckt (eigenes LAN, ein Docker-Netz, der Rest eines abgebrochenen Drills) und keine Adresse einer bestehenden TCP-Verbindung enthält. Die zweite Prüfung findet auch eine SSH-Sitzung, die über das Default-Gateway kommt und deshalb in keiner Route steht. Ein Treffer endet vor jeder Änderung mit `[restore.subnet-conflict]` und Exitcode 2; die Meldung nennt die Route oder die Adresse. Fehlt `ip` oder `ss` auf einem Linux-Host, endet der Drill mit `[restore.subnet-probe]`, nie mit einem stillen Grün. Auf Docker Desktop liegt das Netz in der Docker-VM; dort entfällt die Prüfung, und die Zeile `Restore-Drill Netz` sagt das. Eine Sitzung, die erst nach der Prüfung aus dem Subnetz heraus aufgebaut wird, sieht der Drill nicht.
+
+Belegt ein anderes Docker-Netz das Subnetz schon, lehnt Docker das Anlegen ab, und der Drill endet mit `[restore.network-create]` (Exitcode 2). Reste eines abgebrochenen Drills zeigt `docker network ls --filter label=virtusphere.qa.probe`; sie lassen sich mit `docker network rm <ID>` entfernen, nachdem kein Drill mehr läuft. Zwei Drills gleichzeitig auf demselben Host gehen deshalb nicht; die Release-Lane läuft ohnehin nacheinander.
+
+```mermaid
+flowchart TD
+  A{"VIRTUSPHERE_RESTORE_SUBNET gesetzt?"} -->|nein| V["Vorgabe 10.250.0.0/24"]
+  A -->|ja, leer| E1["Exit 2: restore.subnet-empty"]
+  A -->|ja, Wert| F{"IPv4-Netzadresse /8 bis /29?"}
+  V --> F
+  F -->|nein| E2["Exit 2: restore.subnet-invalid"]
+  F -->|ja| L{"ip und ss vorhanden?"}
+  L -->|nein, Linux-Host| E3["Exit 2: restore.subnet-probe"]
+  L -->|nein, Docker Desktop| N["Netz mit --subnet anlegen"]
+  L -->|ja| R{"Route oder bestehende Verbindung im Subnetz?"}
+  R -->|ja| E4["Exit 2: restore.subnet-conflict, nichts angelegt"]
+  R -->|nein| N
+  N --> D{"Drill bestanden und Cleanup sauber?"}
+  D -->|nein| X["Exit 1, 2 oder 130, kein Nachweis"]
+  D -->|ja| W{"Nachweiszeile geschrieben?"}
+  W -->|ja| OK["Exit 0, Portal zeigt den Restore-Test"]
+  W -->|nein| E5["Exit 2: restore.record-not-written"]
 ```
 
-Er startet `scripts/restore_test.sh` unverändert, mit denselben Argumenten und Umgebungsvariablen (also auch `VIRTUSPHERE_RESTORE_BACKUP_DIR`), und gibt dessen Ausgabe und Exitcode weiter. Eigene Restore-Logik hat er nicht. Nur bei Exitcode 0 hängt er eine Zeile an `status/restore-drill.jsonl` in dem Backupverzeichnis an, das der Drill in seiner Zeile `Restore-Drill Quelle` nennt. Ein Befund (1) oder eine fehlende Voraussetzung (2) schreibt nichts. Bestand der Drill, ließ sich der Nachweis aber nicht schreiben, endet der Aufruf mit 2 und `[drill-record.not-written]`; das Portal bleibt dann bei „Unbekannt“.
+### Nachweis im Portal
 
-Läuft der Drill auf einem anderen Rechner (etwa weil dort der private Schlüssel für verschlüsselte Backups liegt), entsteht der Nachweis dort und nicht auf dem App-Host. Der Systemstatus zeigt dann ehrlich „Unbekannt“.
+Der Drill schreibt seinen Nachweis selbst. Als letzten Schritt (`[11/11] drill-record`), nur wenn alle Prüfungen bestanden und das Cleanup sauber war, hängt er eine Zeile an `status/restore-drill.jsonl` in dem Backupverzeichnis an, aus dem er gelesen hat (die Zeile `Restore-Drill Quelle` nennt es), atomar über eine Tempdatei im selben Verzeichnis und gekappt auf 90 Zeilen. Danach meldet er:
+
+```text
+Restore-Drill Nachweis: <Backupverzeichnis>/status/restore-drill.jsonl (Backup-Stand <ts>)
+```
+
+Ein Befund (1), eine fehlende Voraussetzung (2), ein abgebrochener Lauf oder ein gescheitertes Cleanup schreibt nichts. Bestand der Drill, ließ sich der Nachweis aber nicht schreiben, endet er mit 2 und `[restore.record-not-written]`; das Portal bleibt dann bei „Unbekannt“. Ein eigener Aufruf dafür ist nicht nötig; das frühere `scripts/restore-drill-record.sh` ist entfallen.
+
+Den Nachweis zeigen der Systemstatus (Block „Hostzustand“) und die Backup-Karte in den Einstellungen. Läuft der Drill auf einem anderen Rechner (etwa weil dort der private Schlüssel für verschlüsselte Backups liegt), entsteht der Nachweis dort und nicht auf dem App-Host. Beide Anzeigen bleiben dann ehrlich bei „Unbekannt“ beziehungsweise „Nicht nachgewiesen“. Auch der Migrations-Probelauf und das Gate `restore-drill` der Release-Lane schreiben bei Erfolg eine Zeile in das Backupverzeichnis, aus dem sie gelesen haben: Sie haben genau dieses Backup erfolgreich wiederhergestellt.
 
 ### Migrations-Probelauf mit dem neuen Stand
 
@@ -185,7 +228,7 @@ Der Drill vor einem Update ([Update-Runbook](update.md), Schritt 3.2) beweist, d
    sudo VIRTUSPHERE_RESTORE_BACKUP_DIR=/opt/VirtuSphere-v2-WebApp/Docker/backups sh scripts/restore_test.sh
    ```
 
-   Quelle ist das jüngste Tripel dort, in der Regel das nächtliche aus dem Zeitplan. Der Drill mountet das Verzeichnis in keinen Container und schreibt, verschiebt oder löscht dort nichts. Nur wer ihn über `scripts/restore-drill-record.sh` startet, bekommt nach bestandenem Drill eine Zeile in `status/restore-drill.jsonl` dieses Verzeichnisses („Nachweis im Portal“). Entschlüsselte Archive und die archivierte `.env` liegen nur im Wegwerf-Arbeitsverzeichnis, das der Cleanup entfernt. Platzbedarf während des Laufs: die entpackte Datenbank im Docker-Datenbereich und bei verschlüsseltem Backup die entschlüsselten Archive im Temp-Verzeichnis; beides ist nach dem Lauf wieder frei.
+   Quelle ist das jüngste Tripel dort, in der Regel das nächtliche aus dem Zeitplan. Der Drill mountet das Verzeichnis in keinen Container und verschiebt oder löscht dort nichts; nach bestandenem Drill schreibt er nur eine Zeile in `status/restore-drill.jsonl` dieses Verzeichnisses („Nachweis im Portal“). Auf einem Host, in dessen Netz das Vorgabe-Subnetz vorkommt, kommt `VIRTUSPHERE_RESTORE_SUBNET` als weiteres Argument dazu („Subnetz des Drills“). Entschlüsselte Archive und die archivierte `.env` liegen nur im Wegwerf-Arbeitsverzeichnis, das der Cleanup entfernt. Platzbedarf während des Laufs: die entpackte Datenbank im Docker-Datenbereich und bei verschlüsseltem Backup die entschlüsselten Archive im Temp-Verzeichnis; beides ist nach dem Lauf wieder frei.
 3. Die Zeile `Restore-Drill Quelle` prüfen: `Pruefroot-Commit` muss der Commit des neuen Stands sein, ohne `(Arbeitsbaum geaendert)`. Steht dort `unbekannt`, den Commit mit `git -C <neuer-Klon> rev-parse HEAD` von Hand zum Ergebnis notieren.
 
 Vorab findet der Drill die Images über ihre Namen, also in der Regel die laufenden; die Zeile `Restore-Drill Images` nennt ihre IDs. Ein Wechsel des PHP- oder MySQL-Images ist damit erst im zweiten Lauf im Fenster geprüft.

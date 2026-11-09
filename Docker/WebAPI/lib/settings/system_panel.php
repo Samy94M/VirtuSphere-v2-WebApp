@@ -19,6 +19,7 @@ declare(strict_types=1);
 /** @var int|null $backupNextHours */
 /** @var int|null $backupOverdueAt */
 /** @var bool $backupIsOverdue */
+/** @var array{state:string,ts:int|null,age_days:int|null,backup_ts:string} $backupDrill */
 
 ?>
     <div class="stack" id="panel-system" role="tabpanel" aria-labelledby="tab-system" tabindex="0" data-tab-panel hidden>
@@ -161,6 +162,10 @@ declare(strict_types=1);
                         <td><?php echo h(portal_format_epoch($backupOverdueAt)); ?></td>
                     </tr>
                     <?php } ?>
+                    <tr data-backup-drill="<?php echo h($backupDrill['state']); ?>">
+                        <th><?php echo h(__t('settings.backup_drill')); ?></th>
+                        <td><?php echo settings_backup_drill_cell($backupDrill); ?></td>
+                    </tr>
                     <?php if (($backupLast['db_bytes'] ?? null) !== null) { ?>
                     <tr>
                         <th><?php echo h(__t('settings.backup_db_size')); ?></th>

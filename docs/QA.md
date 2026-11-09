@@ -183,6 +183,23 @@ triplet under `Docker/backups/` of its check root. That directory is ignored, so
 a fresh worktree has none and ends with `[restore.backup-missing]` (exit 2); a
 copied triplet lets the drill run with the worktree's code.
 
+The N1b cases (ADR-0017 amendment 8, ADR-0021 amendment 2) run on the same
+safety harness. Every run there gets neutral fake `ip` and `ss` (one default
+route, no connection), so a Linux runner with its own iproute2 sees the same
+host as Git Bash; a case passes its own fakes to place a route or a connection
+inside the subnet. They pin the throwaway network to `--subnet` with the
+default or `VIRTUSPHERE_RESTORE_SUBNET`, reject an empty or malformed value
+before any Docker call, end with `[restore.subnet-conflict]` on an overlapping
+route or connection address (plain, v4-mapped, with or without the `ss` state
+column) before the network exists, and treat a Linux host without iproute2 as a
+missing prerequisite. That last case needs a shell without `ip` and is
+inconclusive on a Linux runner; the Windows lanes run it. The record cases check
+that only a passed drill with a clean cleanup appends one line as
+`[11/11] drill-record`, capped at 90 lines with no temp file left, that a
+missing prerequisite, a failed cleanup or an interrupt records nothing, and that
+an unwritable status directory ends with exit 2. A passed `restore-drill` gate
+therefore also appends its record to `Docker/backups/status/` of its check root.
+
 ### Container hardening and supply chain (AP8)
 
 PHP-FPM requires exactly `KILL`, `SETGID` and `SETUID`: the master runs as
