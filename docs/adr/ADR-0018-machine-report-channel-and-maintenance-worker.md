@@ -340,8 +340,9 @@ for status 1), and said nothing about *what* MECM rated critical. On the target
 site the whole MECM area was red while distribution points, the distribution
 manager and AD system discovery were critical and cloud/service connection parts
 had warnings. The user ruled out a list of known systems: the answer has to work
-on any site without configuration. The user rates the distribution manager as a
-core part (without it no content reaches a DP), so that site stays red, now
+on any site without configuration. The user rates the distribution manager and the
+package transfer manager as core parts (without them no content reaches a DP),
+so that site stays red, now
 with its cause named on the card; the way back to green is repairing or
 removing the DPs, and MECM resets its component counts at midnight.
 

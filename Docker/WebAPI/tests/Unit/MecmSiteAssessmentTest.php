@@ -212,8 +212,9 @@ final class MecmSiteAssessmentTest extends TestCase
         foreach (['SMS Site Server', 'SMS SQL Server', 'SMS Provider', 'SMS Management Point'] as $role) {
             self::assertSame(VIRTUSPHERE_MECM_SITE_PART_CORE, mecm_site_part_class(VIRTUSPHERE_SITE_PART_KIND_ROLES, $role), $role);
         }
-        // SMS_DISTRIBUTION_MANAGER: user decision 09.11. (no content reaches any DP without it).
-        foreach (['SMS_EXECUTIVE', 'SMS_SITE_COMPONENT_MANAGER', 'SMS_DISTRIBUTION_MANAGER'] as $component) {
+        // Distribution and package transfer manager: user decisions 09.11.
+        // (no content reaches any DP without them).
+        foreach (['SMS_EXECUTIVE', 'SMS_SITE_COMPONENT_MANAGER', 'SMS_DISTRIBUTION_MANAGER', 'SMS_PACKAGE_TRANSFER_MANAGER'] as $component) {
             self::assertSame(VIRTUSPHERE_MECM_SITE_PART_CORE, mecm_site_part_class(VIRTUSPHERE_SITE_PART_KIND_COMPONENTS, $component), $component);
         }
         foreach (['SMS Distribution Point', 'SMS Software Update Point', 'SMS Dmp Connector', 'SMS Cloud Proxy Connector'] as $role) {
@@ -221,7 +222,7 @@ final class MecmSiteAssessmentTest extends TestCase
         }
         // Service connection point and cloud services stay supporting also in an
         // air gap: shown as degraded, never hidden (coordinator decision 09.11.).
-        foreach (['SMS_PACKAGE_TRANSFER_MANAGER', 'SMS_AD_SYSTEM_DISCOVERY_AGENT', 'SMS_SERVICE_CONNECTOR', 'SMS_CLOUDCONNECTION', 'SMS_CLOUD_PROXYCONNECTOR', 'SMS_WSUS_SYNC_MANAGER'] as $component) {
+        foreach (['SMS_AD_SYSTEM_DISCOVERY_AGENT', 'SMS_SERVICE_CONNECTOR', 'SMS_CLOUDCONNECTION', 'SMS_CLOUD_PROXYCONNECTOR', 'SMS_WSUS_SYNC_MANAGER'] as $component) {
             self::assertSame(VIRTUSPHERE_MECM_SITE_PART_SUPPORTING, mecm_site_part_class(VIRTUSPHERE_SITE_PART_KIND_COMPONENTS, $component), $component);
         }
         // Not proven by a source: stays unclassified, so MECM's verdict applies.
