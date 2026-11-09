@@ -8,49 +8,32 @@ declare(strict_types=1);
             <h2><?php echo h(__t('help_stack.stack_heading')); ?></h2>
             <p><?php echo h(__t('help_stack.stack_p1')); ?></p>
             <?php
-            // Struktur je Frage: 'pre' Absaetze, optionale Liste ('ul'|'ol' + Anzahl),
-            // 'post' Absaetze (p-Nummerierung laeuft nach der Liste weiter).
-            $stackFaq = [
-                1 => ['pre' => 1, 'list' => ['ul', 7], 'post' => 1],
-                2 => ['pre' => 1, 'list' => ['ul', 5], 'post' => 1],
-                3 => ['pre' => 4],
-                4 => ['pre' => 1, 'list' => ['ol', 5], 'post' => 1],
-                5 => ['pre' => 3],
-                6 => ['pre' => 4],
-                7 => ['pre' => 3],
-                8 => ['pre' => 3],
-                9 => ['pre' => 1, 'list' => ['ul', 7], 'post' => 1],
-                10 => ['pre' => 3],
-                11 => ['pre' => 1, 'list' => ['ul', 6], 'post' => 1],
-                12 => ['pre' => 2],
-                13 => ['pre' => 2],
-                14 => ['pre' => 2],
-            ];
+            // The FAQ is read from the catalog (help_stack_faq() in lib/help_page.php),
+            // never from a written table of counts: a new key renders without an edit here.
+            $stackFaq = help_stack_faq(static fn (string $prefix): int => Lang::countNumbered($prefix));
             ?>
-            <?php foreach ($stackFaq as $faqIndex => $faqShape): $faqParagraph = 0; ?>
+            <?php foreach ($stackFaq as $faqEntry): ?>
                 <details>
-                    <summary><?php echo h(__t('help_stack.stack_q' . $faqIndex)); ?></summary>
-                    <?php for ($i = 0; $i < $faqShape['pre']; $i++): $faqParagraph++; ?>
-                        <p><?php echo h(__t('help_stack.stack_a' . $faqIndex . '_p' . $faqParagraph)); ?></p>
-                    <?php endfor; ?>
-                    <?php if (isset($faqShape['list'])): ?>
-                        <?php if ($faqShape['list'][0] === 'ol'): ?>
-                            <ol>
-                                <?php for ($i = 1; $i <= $faqShape['list'][1]; $i++): ?>
-                                    <li><?php echo h(__t('help_stack.stack_a' . $faqIndex . '_li' . $i)); ?></li>
-                                <?php endfor; ?>
-                            </ol>
-                        <?php else: ?>
-                            <ul>
-                                <?php for ($i = 1; $i <= $faqShape['list'][1]; $i++): ?>
-                                    <li><?php echo h(__t('help_stack.stack_a' . $faqIndex . '_li' . $i)); ?></li>
-                                <?php endfor; ?>
-                            </ul>
-                        <?php endif; ?>
+                    <summary><?php echo h(__t($faqEntry['question'])); ?></summary>
+                    <?php foreach ($faqEntry['before'] as $faqKey): ?>
+                        <p><?php echo h(__t($faqKey)); ?></p>
+                    <?php endforeach; ?>
+                    <?php if ($faqEntry['list_tag'] === 'ol'): ?>
+                        <ol>
+                            <?php foreach ($faqEntry['items'] as $faqKey): ?>
+                                <li><?php echo h(__t($faqKey)); ?></li>
+                            <?php endforeach; ?>
+                        </ol>
+                    <?php elseif ($faqEntry['list_tag'] === 'ul'): ?>
+                        <ul>
+                            <?php foreach ($faqEntry['items'] as $faqKey): ?>
+                                <li><?php echo h(__t($faqKey)); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
                     <?php endif; ?>
-                    <?php for ($i = 0; $i < ($faqShape['post'] ?? 0); $i++): $faqParagraph++; ?>
-                        <p><?php echo h(__t('help_stack.stack_a' . $faqIndex . '_p' . $faqParagraph)); ?></p>
-                    <?php endfor; ?>
+                    <?php foreach ($faqEntry['after'] as $faqKey): ?>
+                        <p><?php echo h(__t($faqKey)); ?></p>
+                    <?php endforeach; ?>
                 </details>
             <?php endforeach; ?>
         </section>

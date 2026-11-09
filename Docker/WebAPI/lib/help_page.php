@@ -102,3 +102,56 @@ function help_url(string $panel, ?string $section = null): string
 
     return 'help.php#' . $section;
 }
+
+/**
+ * Stack FAQ questions whose answer list is a numbered sequence (<ol>). The kind
+ * of list is the one thing the catalog keys cannot say; everything else comes
+ * from the catalog through help_stack_faq().
+ */
+const VIRTUSPHERE_HELP_STACK_FAQ_ORDERED_LISTS = [4];
+
+/**
+ * The stack FAQ as catalog keys, read from the catalog instead of a written
+ * table of counts (W3D, N1D): a written count leaves a new key unrendered and
+ * nothing notices. Question n exists while help_stack.stack_q<n> does. Its answer
+ * is every paragraph stack_a<n>_p1..m and, when stack_a<n>_li1 exists, one list
+ * stack_a<n>_li1..k after the first paragraph; the paragraph numbers run on
+ * after the list. HelpStackFaqTest proves that this shape renders every
+ * stack_q/stack_a key of both catalogs and nothing else.
+ *
+ * @param callable(string): int $countNumbered Lang::countNumbered() for one locale
+ * @return list<array{question: string, before: list<string>, list_tag: 'ol'|'ul'|null, items: list<string>, after: list<string>}>
+ */
+function help_stack_faq(callable $countNumbered): array
+{
+    $numbered = static function (string $prefix) use ($countNumbered): array {
+        $keys = [];
+        $count = $countNumbered($prefix);
+        for ($i = 1; $i <= $count; $i++) {
+            $keys[] = $prefix . $i;
+        }
+
+        return $keys;
+    };
+
+    $faq = [];
+    foreach ($numbered('help_stack.stack_q') as $index => $question) {
+        $answer = 'help_stack.stack_a' . ($index + 1);
+        $paragraphs = $numbered($answer . '_p');
+        $items = $numbered($answer . '_li');
+        $split = $items === [] ? count($paragraphs) : min(1, count($paragraphs));
+        $listTag = null;
+        if ($items !== []) {
+            $listTag = in_array($index + 1, VIRTUSPHERE_HELP_STACK_FAQ_ORDERED_LISTS, true) ? 'ol' : 'ul';
+        }
+        $faq[] = [
+            'question' => $question,
+            'before' => array_slice($paragraphs, 0, $split),
+            'list_tag' => $listTag,
+            'items' => $items,
+            'after' => array_slice($paragraphs, $split),
+        ];
+    }
+
+    return $faq;
+}
