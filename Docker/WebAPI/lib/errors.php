@@ -331,6 +331,15 @@ function virtusphere_cli_error_text(Throwable $exception, string $refId): string
     ));
 }
 
+/**
+ * The stable mark of the page below. Browser specs find this page by the
+ * attribute, never by its title text, which may be reworded or translated
+ * (tests/e2e/lib/error-page.js; tests/e2e/tests/error-page-mirror.test.js holds
+ * both sides together). It sits on <main>, so it survives the case in which the
+ * page is appended below an already sent portal page.
+ */
+const VIRTUSPHERE_ERROR_PAGE_ATTRIBUTE = 'data-virtusphere-error-page';
+
 function virtusphere_render_error_page(Throwable $exception, string $refId): void
 {
     $nonce = virtusphere_error_nonce();
@@ -362,7 +371,7 @@ function virtusphere_render_error_page(Throwable $exception, string $refId): voi
     echo 'dl{display:grid;grid-template-columns:minmax(140px,220px) 1fr;gap:8px 16px;margin:24px 0;}';
     echo 'dt{color:#cbd5e1;font-weight:700;}dd{margin:0;overflow-wrap:anywhere;}';
     echo 'pre{white-space:pre-wrap;overflow:auto;background:#111827;border:1px solid #475569;padding:16px;}';
-    echo '</style></head><body><main>';
+    echo '</style></head><body><main ' . VIRTUSPHERE_ERROR_PAGE_ATTRIBUTE . '="1">';
     echo '<h1>VirtuSphere Fehler</h1>';
     echo '<p>Ein unerwarteter Fehler ist aufgetreten. Details wurden intern protokolliert.</p><dl>';
     foreach ($details as $name => $value) {

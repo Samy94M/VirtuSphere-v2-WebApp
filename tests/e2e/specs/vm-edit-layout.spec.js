@@ -6,6 +6,7 @@
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
 const { runPhp, phpJson } = require('../lib/php');
+const { ERROR_PAGE_SELECTOR } = require('../lib/error-page');
 
 test.use({ storageState: ROLES.admin.storageState });
 
@@ -87,7 +88,7 @@ test('adding a VM renders to the end of the page, as wide as editing one', async
   // Before VE1 the timeline's chronicle link threw for an unsaved VM: the page
   // ended in the error renderer, whose inline style also narrowed <main>.
   await page.goto(`vm_edit.php?mission_id=${ids.mission}`);
-  await expect(page.getByText('VirtuSphere Fehler')).toHaveCount(0);
+  await expect(page.locator(ERROR_PAGE_SELECTOR)).toHaveCount(0);
   await expect(page.locator('dialog.modal-confirm')).toHaveCount(1);
   await expect(page.locator('#vm-timeline-heading')).toHaveCount(0);
   // The confirm dialog (layout_modals.php) closes every page with its own
@@ -107,7 +108,7 @@ test('without JavaScript, adding a VM renders completely with the server-side fi
   try {
     const noJsPage = await noJs.newPage();
     await noJsPage.goto(`vm_edit.php?mission_id=${ids.mission}`);
-    await expect(noJsPage.getByText('VirtuSphere Fehler')).toHaveCount(0);
+    await expect(noJsPage.locator(ERROR_PAGE_SELECTOR)).toHaveCount(0);
     await expect(noJsPage.locator('dialog.modal-confirm')).toHaveCount(1);
     const shown = await noJsPage.locator('[name="vm_datacenter"]:not([type="hidden"])').count();
     await expect(noJsPage.getByText(HOST_HINT)).toHaveCount(shown > 0 ? 1 : 0);
@@ -128,7 +129,7 @@ foreach (['deploy_interfaces', 'deploy_disks'] as $table) {
 `);
   await page.goto(`vm_edit.php?mission_id=${ids.mission}&vm_id=${ids.vm}`);
 
-  await expect(page.getByText('VirtuSphere Fehler')).toHaveCount(0);
+  await expect(page.locator(ERROR_PAGE_SELECTOR)).toHaveCount(0);
   await expect(page.locator('dialog.modal-confirm')).toHaveCount(1);
   await expect(page.locator('#vm-timeline-heading')).toHaveCount(1);
 });

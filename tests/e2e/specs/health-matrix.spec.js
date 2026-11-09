@@ -10,6 +10,7 @@ const { test, expect } = require('../lib/test');
 const { PORTAL_PAGES, pageUrl, pageLabel } = require('../lib/pages');
 const { ROLES } = require('../lib/auth');
 const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
+const { ERROR_PAGE_SELECTOR } = require('../lib/error-page');
 
 const THEMES = ['light', 'dark'];
 const MARK = 'e2ehealth';
@@ -25,11 +26,11 @@ const PHP_ERROR_MARKERS = [
   'Stack trace',
   'mysqli',
   '/var/www/html',
-  // The portal's own error renderer (lib/errors.php) hides every PHP marker
-  // above. After a partial render it is appended below the page, which still
-  // answers 200 (VE1: "VM hinzufügen" ended like that), so its title counts too.
-  'VirtuSphere Fehler',
 ];
+// The portal's own error renderer (lib/errors.php) hides every PHP marker
+// above. After a partial render it is appended below the page, which still
+// answers 200 (VE1: "VM hinzufügen" ended like that). It is found by its
+// attribute (lib/error-page.js), not by its title text (C5).
 
 // A missing translation renders the bare key as an element's ENTIRE text (a
 // label, heading or button that is exactly `help.foo`). Matching a substring
@@ -125,6 +126,10 @@ for (const [roleName, role] of Object.entries(ROLES)) {
 
           // The air-gap holds on every page, denied or not.
           expect(offHostRequests, `off-host requests from ${pageLabel(pageDef)}`).toEqual([]);
+
+          // No page ends in the portal error renderer, denied or not: a denied
+          // page that crashes answers 500, which the status check below accepts.
+          await expect(page.locator(ERROR_PAGE_SELECTOR), `portal error page on ${pageLabel(pageDef)}`).toHaveCount(0);
 
           if (denied) {
             // A denied page must not render its content: the portal answers 403
