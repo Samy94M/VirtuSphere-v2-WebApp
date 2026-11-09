@@ -6,6 +6,16 @@ require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/log_rotation.php';
 require_once __DIR__ . '/error_debug.php';
 
+/**
+ * The stable mark of the portal error page (virtusphere_render_error_page()).
+ * Browser specs find the page by this attribute, never by its title text, which
+ * may be reworded or translated (tests/e2e/lib/error-page.js;
+ * tests/e2e/tests/error-page-mirror.test.js holds both sides together). It sits
+ * on <main>, so it survives the case in which the page is appended below an
+ * already sent portal page.
+ */
+const VIRTUSPHERE_ERROR_PAGE_ATTRIBUTE = 'data-virtusphere-error-page';
+
 function virtusphere_install_error_handlers(): void
 {
     static $installed = false;
@@ -330,15 +340,6 @@ function virtusphere_cli_error_text(Throwable $exception, string $refId): string
         $exception->getTraceAsString()
     ));
 }
-
-/**
- * The stable mark of the page below. Browser specs find this page by the
- * attribute, never by its title text, which may be reworded or translated
- * (tests/e2e/lib/error-page.js; tests/e2e/tests/error-page-mirror.test.js holds
- * both sides together). It sits on <main>, so it survives the case in which the
- * page is appended below an already sent portal page.
- */
-const VIRTUSPHERE_ERROR_PAGE_ATTRIBUTE = 'data-virtusphere-error-page';
 
 function virtusphere_render_error_page(Throwable $exception, string $refId): void
 {
