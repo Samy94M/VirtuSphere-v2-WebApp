@@ -121,7 +121,7 @@ final class RunReportSitePartsTest extends TestCase
     {
         $r = run_report_validate($this->site(['site_parts' => $parts]));
         self::assertSame('Invalid site_parts', $r['error'] ?? null);
-        self::assertSame(400, $r['status'] ?? null);
+        self::assertSame(400, $r['status']);
     }
 
     public function testExactlyTheEntryCapIsAccepted(): void

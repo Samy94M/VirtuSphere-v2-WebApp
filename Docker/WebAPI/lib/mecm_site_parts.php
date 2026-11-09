@@ -99,6 +99,5 @@ function mecm_site_parts_shape(array $parts): ?array
     }
     $clean[VIRTUSPHERE_SITE_PARTS_OMITTED] = $omitted;
 
-    /** @var array{roles: list<array{name: string, status: int, count: int}>, components: list<array{name: string, status: int, count: int}>, omitted: int} $clean */
     return $clean;
 }
