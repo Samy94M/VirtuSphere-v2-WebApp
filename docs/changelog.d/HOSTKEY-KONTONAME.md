@@ -1,0 +1,1 @@
+- **Host-Schlüssel: Bestätigung nennt den Kontonamen (HOSTKEY-KONTONAME, 09.11.2026).** Zugangsdaten und Systemstatus zeigen bei einem bestätigten Ansible-Host-Schlüssel „Bestätigt am … durch <Konto>“ statt der Kontonummer. Nur ein gelöschtes Konto erscheint als „Benutzer #n (gelöscht)“, eine Bestätigung ohne Konto als „durch einen unbekannten Benutzer“. Keine Schemaänderung.

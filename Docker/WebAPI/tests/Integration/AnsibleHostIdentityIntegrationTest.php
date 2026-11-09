@@ -82,6 +82,32 @@ final class AnsibleHostIdentityIntegrationTest extends TestCase
         self::assertSame(2, (int) $logs['c'], 'Initial pin and explicit confirmation must each be audited once.');
     }
 
+    /**
+     * Both readers that feed the host-identity line (Credentials list, System
+     * status) carry the confirming account's name; an account that no longer
+     * exists leaves the name NULL so the display falls back to "#n (deleted)".
+     */
+    public function testTheListReadersCarryTheConfirmingAccountName(): void
+    {
+        $identity = $this->identity('a');
+        repo_confirm_ansible_host_identity($this->db, $this->id, 1, '', $identity['fingerprint'], $identity['type'], $this->userId);
+        $userName = (string) repo_fetch_one($this->db, 'SELECT name FROM deploy_users WHERE id = ?', 'i', [$this->userId])['name'];
+        self::assertNotSame('', $userName);
+        self::assertSame($userName, $this->listed(repo_credentials($this->db))['ansible_host_confirmed_by_name']);
+        self::assertSame($userName, $this->listed(repo_credentials_by_type($this->db, 'ansible'))['ansible_host_confirmed_by_name']);
+
+        $missing = (int) repo_fetch_one($this->db, 'SELECT COALESCE(MAX(id), 0) + 1000 AS id FROM deploy_users', '', [])['id'];
+        $stmt = $this->db->prepare('UPDATE deploy_credentials SET ansible_host_confirmed_by = ? WHERE id = ?');
+        $stmt->bind_param('ii', $missing, $this->id);
+        $stmt->execute();
+        foreach ([repo_credentials($this->db), repo_credentials_by_type($this->db, 'ansible')] as $rows) {
+            $row = $this->listed($rows);
+            self::assertNull($row['ansible_host_confirmed_by_name']);
+            self::assertSame($missing, (int) $row['ansible_host_confirmed_by']);
+            self::assertStringContainsString('#' . $missing, credential_host_identity_confirmation($row));
+        }
+    }
+
     public function testRotationReadsTheCurrentPinForAnOldWorkerAndFencesAnOldForm(): void
     {
         $old = $this->identity('a');
@@ -300,6 +326,17 @@ final class AnsibleHostIdentityIntegrationTest extends TestCase
         self::assertTrue(repo_confirm_ansible_host_identity($this->db, $this->id, (int) $snapshot['config_revision'], $old['fingerprint'], $line, '', $this->userId, true));
         self::assertSame($new['fingerprint'], $this->row()['ansible_host_fingerprint']);
         self::assertSame('ssh-ed25519', $this->row()['ansible_host_key_type']);
+    }
+
+    /** @param list<array<string, mixed>> $rows @return array<string, mixed> */
+    private function listed(array $rows): array
+    {
+        foreach ($rows as $row) {
+            if ((int) $row['id'] === $this->id) {
+                return $row;
+            }
+        }
+        throw new RuntimeException('Fixture missing from the list reader.');
     }
 
     private function row(): array

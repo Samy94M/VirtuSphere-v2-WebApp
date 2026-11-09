@@ -48,6 +48,27 @@ function credential_host_identity_contact(array $credential): ?array
     return ['matching' => $matching, 'when' => $matching ? $observedAt : ''];
 }
 
+/**
+ * When and by whom the key was confirmed, naming the account. The same
+ * deleted-account fallback as the terminal presenter (deploy.cancel_actor_*):
+ * an account that is gone must not erase the fact that somebody confirmed this
+ * key. Without any account the sentence names nobody instead of "#0".
+ */
+function credential_host_identity_confirmation(array $credential): string
+{
+    $when = portal_format_timestamp($credential['ansible_host_confirmed_at'] ?? '');
+    $name = trim((string) ($credential['ansible_host_confirmed_by_name'] ?? ''));
+    $id = (int) ($credential['ansible_host_confirmed_by'] ?? 0);
+    if ($name === '' && $id <= 0) {
+        return __t('credentials.host_identity_confirmation_unknown', ['when' => $when]);
+    }
+
+    return __t('credentials.host_identity_confirmation', [
+        'when' => $when,
+        'user' => $name !== '' ? $name : __t('credentials.host_identity_confirmer_deleted', ['id' => $id]),
+    ]);
+}
+
 function credential_render_host_identity(array $credential, bool $canManage = false): void
 {
     $state = credential_host_identity_state($credential);
@@ -62,7 +83,7 @@ function credential_render_host_identity(array $credential, bool $canManage = fa
             $observed = (string) ($credential['ansible_host_observed_fingerprint'] ?? '');
             if ($observed !== '') { ?><small><?php echo h(__t('credentials.host_identity_observed', ['identity' => (string) $credential['ansible_host_observed_type'] . ' ' . $observed, 'when' => portal_format_timestamp($credential['ansible_host_observed_at'] ?? '')])); ?></small><?php }
         } ?>
-        <?php if (!empty($credential['ansible_host_confirmed_at'])) { ?><small><?php echo h(__t('credentials.host_identity_confirmation', ['when' => portal_format_timestamp($credential['ansible_host_confirmed_at']), 'user' => (int) ($credential['ansible_host_confirmed_by'] ?? 0)])); ?></small><?php } ?>
+        <?php if (!empty($credential['ansible_host_confirmed_at'])) { ?><small><?php echo h(credential_host_identity_confirmation($credential)); ?></small><?php } ?>
         <?php if ($contact !== null) { ?><small data-host-identity-contact="<?php echo $contact['matching'] ? 'matching' : 'idle'; ?>"><?php echo h($contact['matching'] ? __t('credentials.host_identity_last_matching', ['when' => portal_format_timestamp($contact['when'])]) : __t('credentials.host_identity_idle')); ?></small><?php } ?>
         <?php if ($canManage) { ?><small><a href="<?php echo h(credential_host_identity_url((int) $credential['id'])); ?>"><?php echo h(__t('credentials.host_identity_manage')); ?></a></small><?php } ?>
     </div>

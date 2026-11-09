@@ -172,7 +172,7 @@ function credential_validate_payload(mysqli $db, array $data, ?string $secret, b
 
 function repo_credentials(mysqli $db): array
 {
-    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.config_revision, c.ansible_test_generation, c.ansible_host_fingerprint, c.ansible_host_key_type, c.ansible_host_first_seen_at, c.ansible_host_confirmed_at, c.ansible_host_confirmed_by, c.ansible_host_accept_new, c.ansible_host_observed_fingerprint, c.ansible_host_observed_type, c.ansible_host_observed_at, c.created_by, u.name AS created_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by ORDER BY c.type, c.name');
+    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.config_revision, c.ansible_test_generation, c.ansible_host_fingerprint, c.ansible_host_key_type, c.ansible_host_first_seen_at, c.ansible_host_confirmed_at, c.ansible_host_confirmed_by, c.ansible_host_accept_new, c.ansible_host_observed_fingerprint, c.ansible_host_observed_type, c.ansible_host_observed_at, c.created_by, u.name AS created_by_name, cu.name AS ansible_host_confirmed_by_name, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users u ON u.id = c.created_by LEFT JOIN deploy_users cu ON cu.id = c.ansible_host_confirmed_by ORDER BY c.type, c.name');
     $stmt->execute();
 
     return repo_fetch_all($stmt->get_result());
@@ -181,7 +181,9 @@ function repo_credentials(mysqli $db): array
 function repo_credentials_by_type(mysqli $db, string $type): array
 {
     $type = credential_normalize_type($type);
-    $stmt = $db->prepare('SELECT id, type, name, host, port, username, esxi_trust_mode, esxi_cert_kind, esxi_certificate_pem, esxi_strict_tested_at, config_revision, ansible_test_generation, ansible_host_fingerprint, ansible_host_key_type, ansible_host_first_seen_at, ansible_host_confirmed_at, ansible_host_confirmed_by, ansible_host_accept_new, ansible_host_observed_fingerprint, ansible_host_observed_type, ansible_host_observed_at, created_at, updated_at FROM deploy_credentials WHERE type = ? ORDER BY name');
+    // The confirming account's name rides along for the host-identity line on
+    // the System status page; a deleted account leaves it NULL.
+    $stmt = $db->prepare('SELECT c.id, c.type, c.name, c.host, c.port, c.username, c.esxi_trust_mode, c.esxi_cert_kind, c.esxi_certificate_pem, c.esxi_strict_tested_at, c.config_revision, c.ansible_test_generation, c.ansible_host_fingerprint, c.ansible_host_key_type, c.ansible_host_first_seen_at, c.ansible_host_confirmed_at, c.ansible_host_confirmed_by, cu.name AS ansible_host_confirmed_by_name, c.ansible_host_accept_new, c.ansible_host_observed_fingerprint, c.ansible_host_observed_type, c.ansible_host_observed_at, c.created_at, c.updated_at FROM deploy_credentials c LEFT JOIN deploy_users cu ON cu.id = c.ansible_host_confirmed_by WHERE c.type = ? ORDER BY c.name');
     $stmt->bind_param('s', $type);
     $stmt->execute();
 
