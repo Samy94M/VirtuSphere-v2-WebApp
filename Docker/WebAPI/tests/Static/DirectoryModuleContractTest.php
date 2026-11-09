@@ -169,6 +169,38 @@ final class DirectoryModuleContractTest extends TestCase
         self::assertSame(4, preg_match_all('/\$diagnostic(?!\w)/', $body[0]), 'the text variable is declared, filled, checked and handed to the pattern, nothing else');
     }
 
+    /**
+     * N1a A2 residual (user decision 2026-11-09, variant A): LDAP_OPT_TIMEOUT
+     * ends a wait on a silent controller only after a TLS 1.2 handshake
+     * (measured 3.0 s); after TLS 1.3 libldap hangs. This pins the boundary
+     * so nobody mistakes the gap for closed: the fixture proof stays on TLS
+     * 1.2 (a TLS 1.3 silent fixture would hang phpunit-full), the client sets
+     * no TLS maximum (TLS 1.3 stays allowed), the FPM wall clock that bounds
+     * the residual exists, and ADR and runbook name the gap.
+     */
+    public function testTheSilentControllerTimeoutIsProvenOnlyForTls12AndTheTls13GapIsBoundByFpm(): void
+    {
+        $repoRoot = dirname(__DIR__, 4);
+        $entrypoint = $repoRoot . '/Docker/ldap-fixture/entrypoint.sh';
+        if (!is_file($entrypoint)) {
+            self::markTestSkipped('LDAP fixture is outside this partial WebAPI mount.');
+        }
+        $fixture = (string) file_get_contents($entrypoint);
+        self::assertSame(1, preg_match('/^tls-silent\)\n(.*?)\n    ;;/ms', $fixture, $silent), 'tls-silent role not found');
+        self::assertStringContainsString('openssl-max-proto-version=TLS1.2', $silent[1], 'the silent proof must stay on TLS 1.2');
+
+        $adapter = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/directory_ldap.php');
+        self::assertStringNotContainsString('LDAP_OPT_X_TLS_PROTOCOL_MAX', $adapter, 'variant A: no TLS maximum on the client');
+
+        $fpm = (string) file_get_contents($repoRoot . '/Docker/php/fpm.d/zz-virtusphere.conf');
+        self::assertMatchesRegularExpression('/^request_terminate_timeout = 300s$/m', $fpm, 'the wall clock bounds the TLS 1.3 residual');
+
+        $adr = (string) file_get_contents($repoRoot . '/docs/adr/ADR-0039-active-directory-authentication-over-ldaps.md');
+        self::assertStringContainsString('After a TLS 1.3 handshake this does not hold', $adr);
+        $runbook = (string) file_get_contents($repoRoot . '/docs/operations/active-directory.md');
+        self::assertStringContainsString('Nach einem TLS-1.3-Handshake greift diese Frist in libldap nicht', $runbook);
+    }
+
     public function testQaPinsTheDirectoryCaCacheToTheFpmUser(): void
     {
         $repoRoot = dirname(__DIR__, 4);

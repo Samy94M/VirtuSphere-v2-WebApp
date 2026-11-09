@@ -101,9 +101,15 @@ priorisierten Controller ausweichen. Jede Antwortwartezeit ist durch die
 verbleibende Frist der Anfrage begrenzt; ein DC, der nach einem
 TLS-1.2-Handshake schweigt, kostet höchstens diese Frist und gilt dann als
 `timeout`. Nach einem TLS-1.3-Handshake greift diese Frist in libldap nicht:
-Ein solcher DC hält die Anfrage bis zur FPM-Grenze (unten), ohne Wechsel zum
-nächsten Controller. Das ist ein seltener Fehlerfall (DC-Dienst hängt bei
-offener Verbindung); TLS 1.3 bleibt deshalb erlaubt. Eine
+Ein solcher DC hält die Anfrage bis zur FPM-Grenze von 300 s (unten, kommt
+mit dem `php`-Image des nächsten Release), ohne Wechsel zum nächsten
+Controller. Gemessen im QA-Netz: mit TLS 1.2 Ende nach 3,0 s bei 3 s Frist,
+mit TLS 1.3 kein Ende. Ursache: Nach dem TLS-1.3-Handshake wecken die
+Session-Tickets des Servers das Warten in libldap, danach liest libldap
+blockierend (OpenLDAP 2.6 `libraries/libldap/result.c`; PHP 8.4 ruft Bind und
+Suche ohne eigene Frist auf, php-src `ext/ldap/ldap.c`). Das ist ein seltener
+Fehlerfall (DC-Dienst hängt bei offener Verbindung); TLS 1.3 bleibt nach
+Nutzerentscheid vom 09.11.2026 erlaubt. Eine
 abgewiesene Benutzeranmeldung wird nicht gegen weitere Controller wiederholt.
 Wird stattdessen das Suchkonto abgewiesen, öffnet sich der revisionsweite
 Circuit Breaker, damit das Konto nicht durch automatische Wiederholungen

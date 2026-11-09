@@ -160,8 +160,16 @@ Package N1a extends the decision without changing its boundaries:
   then waits without a limit (measured against the fixture on 2026-11-09;
   PHP 8.4 calls `ldap_sasl_bind_s` and `ldap_search_ext_s`). TLS 1.3 stays
   allowed, because capping the client at TLS 1.2 would weaken transport for
-  a rare fault. For that residual the FPM wall clock below is the bound, and
-  that request does not fail over. PHP-FPM
+  a rare fault (user decision 2026-11-09). For that residual the FPM wall
+  clock below (300 s, shipped with the php image of the next release) is the
+  only bound, and that request does not fail over. Measured in the QA
+  network: 3.0 s and errno -5 after TLS 1.2 with a 3 s timeout, no end after
+  TLS 1.3. Sources: OpenLDAP 2.6 `libraries/libldap/result.c` (`wait4msg`
+  applies `LDAP_OPT_TIMEOUT` only to the readiness wait), php-src PHP-8.4
+  `ext/ldap/ldap.c` (`ldap_bind` uses `ldap_sasl_bind_s`, `ldap_search` uses
+  `ldap_search_ext_s`, both without a timeout argument). The fixture proof
+  stays on TLS 1.2, and `DirectoryModuleContractTest` pins this boundary.
+  PHP-FPM
   `request_terminate_timeout` equals nginx `fastcgi_read_timeout` (300 s) as a
   hard wall clock for any request; `request_slowlog_timeout` (30 s) logs the
   script name to the container error stream. The FPM master runs without
