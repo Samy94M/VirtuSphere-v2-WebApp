@@ -34,11 +34,6 @@ allow:172\.17\.0\.[01](/16)?
 allow:172\.31\.0\.0(/16)?
 allow:192\.168\.0\.0(/16|/20)?
 allow:10\.250\.0\.0(/24)?
-# Ein alter synthetischer Testwert in einem privaten Bereich. Der Baum nutzt ihn
-# nicht mehr (N1D-Nachtrag), aber noch ungepushte Commits aus MSB und N1D
-# enthalten ihn, und die Bereichspruefung liest jeden Commit einzeln. Nach dem
-# Push entfaellt die Zeile.
-allow:10\.0\.0\.5
 # Einzelne Testwerte ausserhalb privater Bereiche: Platzhalter-Adresse und
 # invertierte Netzmaske.
 allow:1\.2\.3\.4
