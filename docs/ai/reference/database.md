@@ -45,6 +45,13 @@ prerequisite without importing, and the production runbook starts MySQL with
 `docker compose up -d --wait mysql`, whose healthcheck pings `127.0.0.1`
 (`docs/operations/backup.md` step 3, ADR-0017 amendment 7).
 
+The drill's throwaway network always has a fixed subnet (default in
+`RESTORE_SUBNET_DEFAULT`, override `VIRTUSPHERE_RESTORE_SUBNET`) and is created
+only after the host routes and established connections show no overlap
+(ADR-0017 amendment 8). In the backup directory the drill writes nothing but its
+own record, `status/restore-drill.jsonl`, after a passed run with a clean
+cleanup; `lib/backup_evidence.php` is its only reader (ADR-0021 amendment 2).
+
 ## R6 Audit category pagination uses the composite category/id index.
 
 `deploy_logs_category_lookup` is exactly `(category, id)`. Migration 0054

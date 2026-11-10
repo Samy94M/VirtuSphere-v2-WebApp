@@ -182,3 +182,11 @@ are in the task register, section "Welle R1".
 - `VirtuSphere.RestoreRoot.Tests.ps1` pins both: the fake-Docker drill imports
   only after the TCP probe answered, and the runbook waits with `--wait` before
   the import while the healthcheck stays on TCP.
+
+## Amendment 8 (2026-11-09, N1b): a fixed subnet for the drill network
+
+The drill created its throwaway network without `--subnet`, so Docker took one from its default pools (`172.17.0.0/16` to `172.31.0.0/16`, `192.168.0.0/16`). On a host whose operator reaches it over SSH from an address in that range, the new bridge takes the return route and the session drops mid-drill; the production rollout of 2026-11-09 had to run the drill detached for this reason. It is the trap that the subnet pins of the stack networks avoid (C-07, go-live step 1a.2).
+
+- The network is created with `--subnet`. The default is `10.250.0.0/24`, a private range outside the Docker default pools; `VIRTUSPHERE_RESTORE_SUBNET` overrides it. Set but empty, or not an IPv4 network address with prefix /8 to /29, ends as a missing prerequisite before any resource exists, never as a fallback to the default. A site's real subnet stays in its own operating notes, not in the repository.
+- Before creating the network the drill reads the host routes (`ip -4 route show`) and the established TCP connections (`ss -tn state established`). A route or a connection address inside the subnet ends with `[restore.subnet-conflict]` (exit 2). The connection check also covers an SSH session that arrives through the default gateway and therefore matches no route. On a Linux host without iproute2 the probe is a missing prerequisite (`[restore.subnet-probe]`), not a skip; on Docker Desktop the network lives in the Docker VM and the probe does not apply, which the `Restore-Drill Netz` line states.
+- Two drills on one host now collide on the subnet; Docker refuses the second network (`[restore.network-create]`). The Release lane runs heavy gates one at a time, and the runbook names the command that lists leftovers of an aborted drill.

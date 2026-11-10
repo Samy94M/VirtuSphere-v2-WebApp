@@ -9,8 +9,8 @@ declare(strict_types=1);
  * mount, and never into that file: a drill line there would read as a backup
  * run to backup_status_read().
  *
- * - `scripts/restore-drill-record.sh` runs `restore_test.sh` unchanged and, only
- *   on exit 0, appends one line to restore-drill.jsonl.
+ * - `scripts/restore_test.sh` appends one line to restore-drill.jsonl as its last
+ *   step, only after the drill passed and cleaned up (amendment 2, N1b).
  * - `scripts/backup-scrub.sh` re-hashes every retained set against the manifest
  *   backup.sh wrote and replaces backup-scrub.json atomically.
  *
@@ -30,8 +30,9 @@ const VIRTUSPHERE_BACKUP_SCRUB_STATUS_FILE = 'backup-scrub.json';
 // from this age on the System status shows a hint, not an error.
 const VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS = 35;
 
-// The two commands the hints name. They write the evidence this module reads.
-const VIRTUSPHERE_RESTORE_DRILL_RECORD_COMMAND = 'sudo sh scripts/restore-drill-record.sh';
+// The two commands the hints name. They write the evidence this module reads;
+// the drill records itself, so its command is the drill.
+const VIRTUSPHERE_RESTORE_DRILL_RECORD_COMMAND = 'sudo sh scripts/restore_test.sh';
 const VIRTUSPHERE_BACKUP_SCRUB_COMMAND = 'sudo sh scripts/backup-scrub.sh';
 
 // A scrub result is one small JSON object; anything larger is not ours.
@@ -80,7 +81,7 @@ function backup_evidence_set_stamp(mixed $value): string
  * The newest successful restore drill.
  *
  * `due` from VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS whole days on; `unknown` when no
- * valid success line exists. The recorder writes successes only, so a line with
+ * valid success line exists. The drill writes successes only, so a line with
  * another status is ignored rather than trusted.
  *
  * @param string|null $path Override for tests; defaults to the container mount.

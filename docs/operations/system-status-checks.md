@@ -211,7 +211,7 @@ flowchart TD
   C -->|frisch| GR["OK (grün)"]
 ```
 
-Unter den Dienstzeilen steht der Block **Hostzustand** (`lib/system_status_backup_panels.php`). Seine Zeilen haben je eine eigene Plakette und ändern die Ampel der Kachel nicht: Es sind Hinweise des Docker-Hosts, kein Dienstzustand. Quelle ist der Backup-Statuskanal (`docs/operations/backup.md`): Backup aus `backup_status_read()` mit den Zuständen der Backup-Karte, Restore-Test aus `backup_drill_status_read()` (schreibt `scripts/restore-drill-record.sh`), Prüfsummen aus `backup_scrub_status_read()` (schreibt `scripts/backup-scrub.sh`). Die Zertifikatszeile erscheint nur, solange `https_listener_live()` gilt. Ein fehlender, unlesbarer oder in der Zukunft datierter Nachweis heißt „Unbekannt“, nie „OK“.
+Unter den Dienstzeilen steht der Block **Hostzustand** (`lib/system_status_backup_panels.php`). Seine Zeilen haben je eine eigene Plakette und ändern die Ampel der Kachel nicht: Es sind Hinweise des Docker-Hosts, kein Dienstzustand. Quelle ist der Backup-Statuskanal (`docs/operations/backup.md`): Backup aus `backup_status_read()` mit den Zuständen der Backup-Karte, Restore-Test aus `backup_drill_status_read()` (schreibt der Drill `scripts/restore_test.sh` selbst), Prüfsummen aus `backup_scrub_status_read()` (schreibt `scripts/backup-scrub.sh`). Die Zertifikatszeile erscheint nur, solange `https_listener_live()` gilt. Ein fehlender, unlesbarer oder in der Zukunft datierter Nachweis heißt „Unbekannt“, nie „OK“.
 
 ```mermaid
 flowchart TD

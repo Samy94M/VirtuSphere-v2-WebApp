@@ -35,3 +35,12 @@ Two needs, one package:
 - `scripts/restore-drill-record.sh` is not a second restore path (ADR-0017 Amendment 1): it runs `scripts/restore_test.sh` unchanged with the caller's arguments and environment, passes its output and exit code through, and records a line only on exit 0, in the backup directory the drill names in its `Restore-Drill Quelle` line. A finding (1) or a missing prerequisite (2) records nothing, because a red migration rehearsal is a finding against the new code, not a failed restore.
 - `scripts/backup-scrub.sh` only reads the archives and compares them with the manifests `backup.sh` wrote. It does not take the backup lock, because `backup.sh` aborts on a held lock and a scrub must never prevent a backup.
 - `lib/backup_evidence.php` reads both files with the same fail-soft rule as `lib/backup_status.php`: missing, broken or future-dated evidence is `unknown`, never `ok`. The System status shows it under "Internal services" as host-state rows with their own badges; it does not feed the heartbeat state, the dashboard banner or `health.php`.
+
+## Amendment 2 (2026-11-09, N1b): the drill writes its own record
+
+Amendment 1 kept `scripts/restore_test.sh` unchanged and put the record in a wrapper, because the drill's subnet follow-up was not yet commissioned. With that follow-up (ADR-0017 Amendment 8) the wrapper is gone.
+
+- `scripts/restore_test.sh` appends the line to `restore-drill.jsonl` itself, as its last progress unit (`[11/11] drill-record`), only after every check passed and the cleanup removed its own resources. The format, the 90-line cap, the atomic replace through a temp file in the status directory and the target (the backup directory the drill read from, named in its `Restore-Drill Quelle` line) are those of Amendment 1. A finding, a missing prerequisite, an interrupt or a failed cleanup records nothing; a passed drill whose record cannot be written ends with exit 2 (`[restore.record-not-written]`).
+- `scripts/restore-drill-record.sh` is removed with its callers and tests. `VIRTUSPHERE_RESTORE_DRILL_RECORD_COMMAND`, the command the portal hints name, is now the drill itself (`sudo sh scripts/restore_test.sh`).
+- Writing into the backup directory is limited to `status/restore-drill.jsonl`. Dumps, config archives and manifests stay read-only for the drill and are never mounted; `VirtuSphere.RestoreRoot.Tests.ps1` pins both.
+- The record also shows on the Backup card of the settings page (time, age, "due" from `VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS`), read through the same `backup_drill_status_read()`.

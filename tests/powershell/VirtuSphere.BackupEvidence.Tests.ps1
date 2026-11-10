@@ -1,13 +1,12 @@
-# Backup evidence for the System status page: scripts/backup-scrub.sh and
-# scripts/restore-drill-record.sh. Both run against a synthetic checkout in
-# TestDrive. The drill itself is a stand-in that prints the same source lines
-# restore_test.sh prints; the real drill is covered by RestoreRoot and the
-# restore-drill gate, not here.
+# Backup evidence for the System status page: scripts/backup-scrub.sh runs
+# against a synthetic checkout in TestDrive. The drill record that
+# scripts/restore_test.sh writes itself (N1b) is covered by RestoreRoot and the
+# restore-drill gate; here only its file name is pinned to the portal reader.
 
 BeforeAll {
     $script:RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $script:ScrubScript = Join-Path (Join-Path $script:RepoRoot 'scripts') 'backup-scrub.sh'
-    $script:RecordScript = Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore-drill-record.sh'
+    $script:DrillScript = Join-Path (Join-Path $script:RepoRoot 'scripts') 'restore_test.sh'
     $script:EvidenceReader = Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'lib') 'backup_evidence.php'
     $script:CheckRuntime = Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') 'runtime.ps1'
     . $script:CheckRuntime
@@ -31,7 +30,7 @@ BeforeAll {
         $scripts = Join-Path $root 'scripts'
         $backups = Join-Path (Join-Path $root 'Docker') 'backups'
         New-Item -ItemType Directory -Path $scripts, $backups -Force | Out-Null
-        Copy-Item -LiteralPath $script:ScrubScript, $script:RecordScript -Destination $scripts
+        Copy-Item -LiteralPath $script:ScrubScript -Destination $scripts
         foreach ($stamp in $Stamps) {
             $db = "db-$stamp.sql.gz"
             $config = "config-$stamp.tar.gz.cms"
@@ -142,69 +141,11 @@ Describe 'backup-scrub.sh' {
     }
 }
 
-Describe 'restore-drill-record.sh' {
-    BeforeAll {
-        if (-not $script:ShExe) { throw 'sh is required for the backup evidence tests' }
-
-        # Stand-in drill: the two source lines restore_test.sh prints, then the
-        # exit code the test asks for through the first argument.
-        function New-FakeDrill {
-            param([Parameter(Mandatory)][string]$Root, [switch]$WithoutSourceLines)
-            $lines = if ($WithoutSourceLines) { '' } else {
-                'echo "Restore-Drill Auswahl: Pruefroot=$ROOT; Backup-Stand=20261102-060000"' + "`n" +
-                'echo "Restore-Drill Quelle: Pruefroot-Commit=0123abc (Arbeitsbaum geaendert); Backupverzeichnis=$ROOT/Docker/backups (aus Pruefroot)"' + "`n"
-            }
-            $body = "#!/bin/sh`nset -eu`nROOT=`$(CDPATH='' cd -- `"`$(dirname `"`$0`")/..`" && pwd -P)`n" + $lines + "echo `"drill args: `$*`"`nexit `"`$1`"`n"
-            Write-LfFile -Path (Join-Path (Join-Path $Root 'scripts') 'restore_test.sh') -Content $body
-        }
-    }
-
-    It 'records a passed drill beside the backup status line and keeps exit code 0' {
-        $root = New-EvidenceRoot
-        New-FakeDrill -Root $root
-        $run = Invoke-Sh (Join-Path (Join-Path $root 'scripts') 'restore-drill-record.sh') @('0', 'extra')
-
-        $run.ExitCode | Should -Be 0
-        $run.Output | Should -Contain 'drill args: 0 extra'
-        $statusFile = Join-Path (Join-Path (Join-Path (Join-Path $root 'Docker') 'backups') 'status') (Get-PhpConstant 'VIRTUSPHERE_RESTORE_DRILL_STATUS_FILE')
-        $lines = @(Get-Content -LiteralPath $statusFile)
-        $lines.Count | Should -Be 1
-        $line = $lines[0] | ConvertFrom-Json
-        $line.status | Should -Be 'ok'
-        $line.backup_ts | Should -Be '20261102-060000'
-        $line.root_commit | Should -Be '0123abc (Arbeitsbaum geaendert)'
-        ($line.ts -gt 0) | Should -BeTrue
-
-        (Invoke-Sh (Join-Path (Join-Path $root 'scripts') 'restore-drill-record.sh') @('0')).ExitCode | Should -Be 0
-        @(Get-Content -LiteralPath $statusFile).Count | Should -Be 2
-    }
-
-    It 'passes a finding or a missing prerequisite through and records nothing' -TestCases @(
-        @{ Code = 1 }, @{ Code = 2 }
-    ) {
-        param($Code)
-        $root = New-EvidenceRoot
-        New-FakeDrill -Root $root
-        $run = Invoke-Sh (Join-Path (Join-Path $root 'scripts') 'restore-drill-record.sh') @([string]$Code)
-
-        $run.ExitCode | Should -Be $Code
-        Test-Path -LiteralPath (Join-Path $root 'Docker/backups/status/restore-drill.jsonl') | Should -BeFalse
-    }
-
-    It 'ends with 2 when a passed drill named no backup directory' {
-        $root = New-EvidenceRoot
-        New-FakeDrill -Root $root -WithoutSourceLines
-        $run = Invoke-Sh (Join-Path (Join-Path $root 'scripts') 'restore-drill-record.sh') @('0')
-
-        $run.ExitCode | Should -Be 2
-        ($run.Output -join "`n") | Should -Match '\[drill-record\.not-written\]'
-        Test-Path -LiteralPath (Join-Path $root 'Docker/backups/status/restore-drill.jsonl') | Should -BeFalse
-    }
-}
-
 Describe 'evidence names' {
     It 'the scripts write the files the portal reader reads' {
         (Get-Content -LiteralPath $script:ScrubScript -Raw) | Should -Match ([regex]::Escape('STATUS_FILE="$STATUS_DIR/' + (Get-PhpConstant 'VIRTUSPHERE_BACKUP_SCRUB_STATUS_FILE') + '"'))
-        (Get-Content -LiteralPath $script:RecordScript -Raw) | Should -Match ([regex]::Escape('STATUS_NAME="' + (Get-PhpConstant 'VIRTUSPHERE_RESTORE_DRILL_STATUS_FILE') + '"'))
+        (Get-Content -LiteralPath $script:DrillScript -Raw) | Should -Match ([regex]::Escape('DRILL_STATUS_FILE="$DRILL_STATUS_DIR/' + (Get-PhpConstant 'VIRTUSPHERE_RESTORE_DRILL_STATUS_FILE') + '"'))
+        (Get-PhpConstant 'VIRTUSPHERE_RESTORE_DRILL_RECORD_COMMAND') | Should -Be 'sudo sh scripts/restore_test.sh'
+        Test-Path -LiteralPath $script:DrillScript | Should -BeTrue -Because 'the portal hint names the drill that writes the record'
     }
 }

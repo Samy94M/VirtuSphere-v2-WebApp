@@ -378,14 +378,20 @@ Describe 'Restore drill check-root contract' {
         ($dirty.Output -join "`n") | Should -Match ('Pruefroot-Commit=' + $head + ' \(Arbeitsbaum geaendert\)')
     }
 
-    It 'MP1: never mounts or writes the backup directory' {
+    It 'MP1/N1b: never mounts the backup directory and writes there only the drill record under status/' {
         $restore = Get-Content -LiteralPath $script:RestoreScript -Raw
         $restore | Should -Match 'if \[ "\$\{VIRTUSPHERE_RESTORE_BACKUP_DIR\+x\}" = x \]'
-        $restore | Should -Not -Match '-v\s+"?\$BACKUP_DIR'
+        $restore | Should -Not -Match '-v\s+"?\$(BACKUP_DIR|DRILL_STATUS)'
         $restore | Should -Not -Match '>>?\s*"?\$BACKUP_DIR'
         $restore | Should -Not -Match '\b(rm|mv|cp|touch|mkdir|chmod|chown|tee|ln)\b[^\r\n]*\$BACKUP_DIR'
         $restore | Should -Not -Match '\b(rm|mv|touch|chmod|chown)\b[^\r\n]*"\$(dump|config|manifest)"'
         $restore | Should -Match 'docker rm -f -v "\$MYSQL_ID"'
+        # N1b: the one write target is derived from BACKUP_DIR exactly once.
+        ([regex]::Matches($restore, '(?m)^DRILL_STATUS_DIR=')).Count | Should -Be 1
+        $restore | Should -Match '(?m)^DRILL_STATUS_DIR="\$BACKUP_DIR/status"$'
+        $restore | Should -Match '(?m)^DRILL_STATUS_FILE="\$DRILL_STATUS_DIR/restore-drill\.jsonl"$'
+        ([regex]::Matches($restore, '\b(mv|cp|tee|ln)\b[^\r\n]*\$DRILL_STATUS')).Count | Should -Be 1 -Because 'the record is replaced by one atomic mv'
+        $restore | Should -Match 'mv -f "\$record_tmp" "\$DRILL_STATUS_FILE"'
     }
 }
 
@@ -428,12 +434,31 @@ Describe 'Restore and backup resource safety' {
                 [string]$BackupCert = '',
                 [string]$PrivateKey = '',
                 [string]$ProcessPin = '',
-                [string]$BackupDir = ''
+                [string]$BackupDir = '',
+                # N1b: a non-empty value is exported as VIRTUSPHERE_RESTORE_SUBNET.
+                [string]$Subnet = '',
+                # N1b: name -> shell body of extra fake tools (ip, ss, uname) put
+                # first on PATH, so the host network probe sees a defined host.
+                [hashtable]$FakeTools = $null
             )
             $fakeBin = Join-Path $TestDrive ('safety-bin-' + [guid]::NewGuid().ToString('N'))
             $fakeLog = Join-Path $TestDrive ('safety-' + [guid]::NewGuid().ToString('N') + '.log')
             $fakeState = Join-Path $TestDrive ('safety-state-' + [guid]::NewGuid().ToString('N'))
             New-FakeDockerPath -Root $fakeBin -DockerFixture 'fake-docker-safety.sh'
+            # Without an explicit set every run sees the same neutral host (one
+            # default route, no connection), on Windows as on a Linux runner with
+            # its own ip and ss.
+            if ($null -eq $FakeTools) {
+                $FakeTools = @{ ip = 'echo "default via 192.0.2.1 dev eth0 proto static"'; ss = 'exit 0' }
+            }
+            foreach ($tool in $FakeTools.Keys) {
+                $toolPath = Join-Path $fakeBin $tool
+                [IO.File]::WriteAllText($toolPath, "#!/bin/sh`n" + $FakeTools[$tool].Replace("`r`n", "`n") + "`n", [Text.UTF8Encoding]::new($false))
+                if ($env:OS -ne 'Windows_NT') {
+                    & chmod '+x' $toolPath
+                    if ($LASTEXITCODE -ne 0) { throw "fake $tool could not be made executable" }
+                }
+            }
             # Git Bash on Windows ships no flock. backup.sh takes its single-run
             # lock with it on the Linux hosts it runs on, so the fixture models
             # such a host; without it the orphan sweep would correctly stay off.
@@ -459,6 +484,7 @@ Describe 'Restore and backup resource safety' {
                 VIRTUSPHERE_BACKUP_PRIVATE_KEY = $env:VIRTUSPHERE_BACKUP_PRIVATE_KEY
                 VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 = $env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256
                 VIRTUSPHERE_RESTORE_BACKUP_DIR = $env:VIRTUSPHERE_RESTORE_BACKUP_DIR
+                VIRTUSPHERE_RESTORE_SUBNET = $env:VIRTUSPHERE_RESTORE_SUBNET
                 MSYS_NO_PATHCONV = $env:MSYS_NO_PATHCONV
                 TZ = $env:TZ
             }
@@ -487,6 +513,8 @@ Describe 'Restore and backup resource safety' {
                 else { Remove-Item Env:VIRTUSPHERE_BACKUP_RECIPIENT_SHA256 -ErrorAction SilentlyContinue }
                 if ($BackupDir -ne '') { $env:VIRTUSPHERE_RESTORE_BACKUP_DIR = $BackupDir.Replace('\', '/') }
                 else { Remove-Item Env:VIRTUSPHERE_RESTORE_BACKUP_DIR -ErrorAction SilentlyContinue }
+                if ($Subnet -ne '') { $env:VIRTUSPHERE_RESTORE_SUBNET = $Subnet }
+                else { Remove-Item Env:VIRTUSPHERE_RESTORE_SUBNET -ErrorAction SilentlyContinue }
 
                 $runnerShell = (Get-Command sh -ErrorAction SilentlyContinue).Source
                 if (-not $runnerShell -or $runnerShell -notmatch 'safety-bin-') {
@@ -528,14 +556,25 @@ Describe 'Restore and backup resource safety' {
         }
 
         function Invoke-RestoreSafety {
-            param([Parameter(Mandatory)][string]$Mode, [switch]$FullDump, [string]$Cert = '', [string]$PrivateKey = '', [string]$Stamp = '', [string[]]$ArchiveEnv = @())
+            param([Parameter(Mandatory)][string]$Mode, [switch]$FullDump, [string]$Cert = '', [string]$PrivateKey = '', [string]$Stamp = '', [string[]]$ArchiveEnv = @(), [string]$Subnet = '', [hashtable]$FakeTools = $null, [scriptblock]$Arrange = $null)
             $stamp = if ($Stamp -ne '') { $Stamp } else { $Mode }
             $root = Join-Path $TestDrive ('restore-' + $stamp)
             New-CanonicalSourceRoot -Root $root -Stamp $stamp -ExtraArchiveEnv $ArchiveEnv
             if ($FullDump) { Set-CompleteSyntheticDump -Root $root -Stamp $stamp }
             if ($Cert -ne '') { Protect-SyntheticBackup -Root $root -Stamp $stamp -Cert $Cert }
+            if ($null -ne $Arrange) { & $Arrange $root }
             $scriptPath = Join-Path (Join-Path $root 'scripts') 'restore_test.sh'
-            Invoke-WithSafetyDocker -ScriptPath $scriptPath -Mode $Mode -CheckRoot $root -PrivateKey $PrivateKey
+            $result = Invoke-WithSafetyDocker -ScriptPath $scriptPath -Mode $Mode -CheckRoot $root -PrivateKey $PrivateKey -Subnet $Subnet -FakeTools $FakeTools
+            $result | Add-Member -NotePropertyName Root -NotePropertyValue $root
+            $result
+        }
+
+        # N1b: the drill record restore_test.sh appends after a passed drill.
+        function Get-DrillRecordLines {
+            param([Parameter(Mandatory)][string]$BackupDir)
+            $file = Join-Path (Join-Path $BackupDir 'status') 'restore-drill.jsonl'
+            if (-not (Test-Path -LiteralPath $file)) { return @() }
+            return @(Get-Content -LiteralPath $file)
         }
 
         # -Name separates roots of runs that share a fake-docker mode; -EnvText
@@ -663,6 +702,8 @@ Describe 'Restore and backup resource safety' {
         $result = Invoke-WithSafetyDocker -ScriptPath (Join-Path $root 'scripts\restore_test.sh') -Mode early-failure -CheckRoot $root
         $result.ExitCode | Should -Be 1
         @($result.DockerCalls | Where-Object { $_ -match '^(rm|run|create|start)\s|^network\s+(create|rm)' }).Count | Should -Be 0
+        @(Get-DrillRecordLines -BackupDir (Join-Path $root 'Docker\backups')).Count | Should -Be 0 -Because 'a finding writes no drill record'
+        Test-Path -LiteralPath (Join-Path $root 'Docker\backups\status') | Should -BeFalse
     }
 
     It 'fails closed on a generated network-name collision without mutation' {
@@ -678,8 +719,159 @@ Describe 'Restore and backup resource safety' {
         $result.DockerCalls | Should -Contain ('rm -f ' + ('c' * 64))
         $result.DockerCalls | Should -Contain ('rm -f -v ' + ('b' * 64))
         $result.DockerCalls | Should -Contain ('network rm ' + ('a' * 64))
-        ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
+        ($result.Output -join "`n") | Should -Match '\[10/11\] pass cleanup'
         ($result.Output -join "`n") | Should -Match 'Restore-Drill Images: PHP=fixture-php-never-real \(sha256:d{64}\); MySQL=fixture-mysql-never-real \(sha256:d{64}\)'
+    }
+
+    It 'N1b: records a passed drill after the cleanup, once per run, capped at 90 lines' {
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'record-success' -Arrange {
+            param($root)
+            $status = Join-Path $root 'Docker\backups\status'
+            New-Item -ItemType Directory -Path $status -Force | Out-Null
+            $old = 1..95 | ForEach-Object { '{"ts":' + (1700000000 + $_) + ',"status":"ok","backup_ts":"20261001-060000","root_commit":"old"}' }
+            [IO.File]::WriteAllText((Join-Path $status 'restore-drill.jsonl'), ($old -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+        }
+        $text = $result.Output -join "`n"
+        $result.ExitCode | Should -Be 0
+        $text | Should -Match '\[11/11\] RUN drill-record'
+        $text | Should -Match '\[11/11\] pass drill-record'
+        $text.IndexOf('[10/11] pass cleanup') | Should -BeLessThan $text.IndexOf('[11/11] RUN drill-record') -Because 'the record follows a clean cleanup'
+        $text | Should -Match 'Restore-Drill Nachweis: .*status/restore-drill\.jsonl \(Backup-Stand record-success\)'
+        $backups = Join-Path $result.Root 'Docker\backups'
+        $lines = @(Get-DrillRecordLines -BackupDir $backups)
+        $lines.Count | Should -Be 90
+        $lines[0] | Should -Match '"ts":1700000007,' -Because 'the six oldest of 95 lines are dropped for 89 plus the new one'
+        $last = $lines[-1] | ConvertFrom-Json
+        $last.status | Should -Be 'ok'
+        $last.backup_ts | Should -Be 'record-success'
+        $last.root_commit | Should -Be 'unbekannt (kein Git-Checkout oder git verweigert den Pruefroot)'
+        ($last.ts -gt 1700000095) | Should -BeTrue
+        @(Get-ChildItem -LiteralPath (Join-Path $backups 'status') -Force | ForEach-Object { $_.Name }) | Should -Be @('restore-drill.jsonl') -Because 'no temp file stays behind'
+    }
+
+    It 'N1b: a missing prerequisite, a failed cleanup or an interrupted drill records nothing' -ForEach @(
+        @{ Mode = 'start-failure'; FullDump = $false; Exit = 2 },
+        @{ Mode = 'cleanup-rm-failure'; FullDump = $true; Exit = 1 },
+        @{ Mode = 'signal'; FullDump = $false; Exit = 130 }
+    ) {
+        $result = Invoke-RestoreSafety -Mode $Mode -FullDump:$FullDump -Stamp ('norecord-' + $Mode)
+        $result.ExitCode | Should -Be $Exit
+        ($result.Output -join "`n") | Should -Not -Match 'drill-record'
+        Test-Path -LiteralPath (Join-Path $result.Root 'Docker\backups\status') | Should -BeFalse
+    }
+
+    It 'N1b: a passed drill whose record cannot be written ends as a missing prerequisite' {
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'record-blocked' -Arrange {
+            param($root)
+            # A file where the status directory belongs: mkdir -p must fail.
+            [IO.File]::WriteAllText((Join-Path $root 'Docker\backups\status'), "not a directory`n", [Text.UTF8Encoding]::new($false))
+        }
+        $text = $result.Output -join "`n"
+        $result.ExitCode | Should -Be 2
+        $text | Should -Match '\[restore\.record-not-written\]'
+        $text | Should -Match '\[11/11\] infrastructure_error drill-record'
+        (Get-Item -LiteralPath (Join-Path $result.Root 'Docker\backups\status')).PSIsContainer | Should -BeFalse
+    }
+
+    It 'N1b: creates the throwaway network with the default subnet outside the Docker pools' {
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'subnet-default'
+        $result.ExitCode | Should -Be 0
+        $create = @($result.DockerCalls | Where-Object { $_ -match '^network create ' })
+        $create.Count | Should -Be 1
+        $create[0] | Should -Match '^network create --subnet 10\.250\.0\.0/24 '
+        ($result.Output -join "`n") | Should -Match 'Restore-Drill Netz: Subnetz=10\.250\.0\.0/24 \(aus Vorgabe\)'
+    }
+
+    It 'N1b: takes the subnet from VIRTUSPHERE_RESTORE_SUBNET' {
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'subnet-env' -Subnet '198.51.100.0/24'
+        $result.ExitCode | Should -Be 0
+        @($result.DockerCalls | Where-Object { $_ -match '^network create --subnet 198\.51\.100\.0/24 ' }).Count | Should -Be 1
+        ($result.Output -join "`n") | Should -Match 'Subnetz=198\.51\.100\.0/24 \(aus VIRTUSPHERE_RESTORE_SUBNET\)'
+    }
+
+    It 'N1b: refuses a malformed subnet <Value> before any resource exists' -ForEach @(
+        @{ Value = '198.51.100.0' }, @{ Value = '198.51.100.1/24' }, @{ Value = '198.51.100.0/30' },
+        @{ Value = '198.51.100.0/7' }, @{ Value = '198.51.300.0/24' }, @{ Value = 'fd00::/64' }, @{ Value = '198.51.100.0/24 x' }
+    ) {
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp ('subnet-bad-' + [guid]::NewGuid().ToString('N').Substring(0, 8)) -Subnet $Value
+        $result.ExitCode | Should -Be 2
+        ($result.Output -join "`n") | Should -Match '\[restore\.subnet-invalid\]'
+        @($result.DockerCalls | Where-Object { $_ -match '^(rm|run|create|start)\s|^network\s+(create|rm)|^image\s' }).Count | Should -Be 0
+    }
+
+    It 'N1b: refuses an explicitly empty subnet instead of using the default' {
+        $root = Join-Path $TestDrive 'subnet-empty'
+        New-CanonicalSourceRoot -Root $root -Stamp 'subnet-empty'
+        $scriptPath = (Join-Path (Join-Path $root 'scripts') 'restore_test.sh') -replace '\\', '/'
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = (Split-Path $script:ShExe -Parent) + [IO.Path]::PathSeparator + $oldPath
+            $output = @(& $script:ShExe -c 'VIRTUSPHERE_CHECK_ROOT="$2" VIRTUSPHERE_RESTORE_SUBNET= sh "$1" 2>&1' 'restore-empty-subnet' $scriptPath ($root -replace '\\', '/') |
+                ForEach-Object { "$_" })
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $env:PATH = $oldPath
+        }
+        $exitCode | Should -Be 2
+        ($output -join "`n") | Should -Match '\[restore\.subnet-empty\]'
+    }
+
+    It 'N1b: refuses a subnet that overlaps a host route and creates no network' {
+        $routes = @(
+            'echo "default via 192.0.2.1 dev eth0 proto static"',
+            'echo "192.0.2.0/24 dev eth0 proto kernel scope link src 192.0.2.10"',
+            'echo "198.51.100.0/24 dev br-0123 proto kernel scope link src 198.51.100.1 linkdown"'
+        ) -join "`n"
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'subnet-route' -Subnet '198.51.100.128/25' -FakeTools @{ ip = $routes; ss = 'exit 0' }
+        $text = $result.Output -join "`n"
+        $result.ExitCode | Should -Be 2
+        $text | Should -Match '\[restore\.subnet-conflict\].*Host-Route "198\.51\.100\.0/24 dev br-0123'
+        $text | Should -Match '\[1/11\] infrastructure_error restore-inputs'
+        @($result.DockerCalls | Where-Object { $_ -match '^(rm|run|create|start)\s|^network\s+(create|rm)' }).Count | Should -Be 0
+    }
+
+    It 'N1b: reads the target behind a route type such as blackhole' {
+        $routes = 'echo "default via 192.0.2.1 dev eth0 proto static"' + "`n" + 'echo "blackhole 198.51.100.0/24 proto static"'
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'subnet-route-type' -Subnet '198.51.100.0/26' -FakeTools @{ ip = $routes; ss = 'exit 0' }
+        $result.ExitCode | Should -Be 2
+        ($result.Output -join "`n") | Should -Match '\[restore\.subnet-conflict\].*Host-Route "blackhole 198\.51\.100\.0/24'
+        @($result.DockerCalls | Where-Object { $_ -match '^network\s+create' }).Count | Should -Be 0
+    }
+
+    It 'N1b: refuses a subnet that holds the address of an existing TCP connection (<Form>)' -ForEach @(
+        @{ Form = 'ipv4'; Line = 'echo "0 0 192.0.2.10:22 198.51.100.7:51234"' },
+        @{ Form = 'v4-mapped'; Line = 'echo "0 0 [::ffff:192.0.2.10]:22 [::ffff:198.51.100.7]:51234"' },
+        @{ Form = 'with state column'; Line = 'echo "ESTAB 0 0 192.0.2.10:2222 198.51.100.7:51234"' }
+    ) {
+        $tools = @{
+            ip = 'echo "default via 192.0.2.1 dev eth0 proto static"'
+            ss = ('echo "Recv-Q Send-Q Local Address:Port Peer Address:Port Process"' + "`n" + $Line)
+        }
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp ('subnet-peer-' + $Form.Replace(' ', '-')) -Subnet '198.51.100.0/24' -FakeTools $tools
+        $result.ExitCode | Should -Be 2
+        ($result.Output -join "`n") | Should -Match '\[restore\.subnet-conflict\].*198\.51\.100\.7 \(bestehende TCP-Verbindung\)'
+        @($result.DockerCalls | Where-Object { $_ -match '^network\s+create' }).Count | Should -Be 0
+    }
+
+    It 'N1b: passes when routes and connections lie outside the subnet and names both checks' {
+        $tools = @{
+            ip = ('echo "default via 192.0.2.1 dev eth0 proto static"' + "`n" + 'echo "192.0.2.0/24 dev eth0 proto kernel scope link src 192.0.2.10"' + "`n" + 'echo "local 192.0.2.10 dev eth0 table local"')
+            ss = 'echo "0 0 192.0.2.10:22 203.0.113.9:51234"'
+        }
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'subnet-free' -Subnet '198.51.100.0/24' -FakeTools $tools
+        $result.ExitCode | Should -Be 0
+        ($result.Output -join "`n") | Should -Match 'Restore-Drill Netz: Subnetz=198\.51\.100\.0/24 \(aus VIRTUSPHERE_RESTORE_SUBNET\); geprueft: Routen und Verbindungen'
+    }
+
+    It 'N1b: on a Linux host without iproute2 the probe is a missing prerequisite, not a skip' {
+        # A fake uname makes Git Bash look like Linux; ip and ss are absent there.
+        # A Linux runner has ip on the PATH the drill needs, so only a Windows
+        # host can show the absence; the Windows lanes run this case.
+        if ($env:OS -ne 'Windows_NT') { Set-ItResult -Inconclusive -Because 'needs a host shell without iproute2 (Git Bash)' }
+        $result = Invoke-RestoreSafety -Mode success -FullDump -Stamp 'subnet-no-iproute' -FakeTools @{ uname = 'echo Linux' }
+        $result.ExitCode | Should -Be 2
+        ($result.Output -join "`n") | Should -Match '\[restore\.subnet-probe\] ip fehlt'
+        @($result.DockerCalls | Where-Object { $_ -match '^network\s+create' }).Count | Should -Be 0
     }
 
     It 'MP1: a drill with a separate backup directory passes, names its sources and leaves the backups untouched' {
@@ -688,8 +880,11 @@ Describe 'Restore and backup resource safety' {
         Set-CompleteSyntheticDump -Root $root -Stamp 'mp1-nightly'
         $backupDir = Join-Path $TestDrive 'mp1-running-backups'
         Move-Item -LiteralPath (Join-Path $root 'Docker\backups') -Destination $backupDir
+        # N1b: everything except the status directory, where only the drill
+        # record may appear (checked below).
+        $statusDir = Join-Path $backupDir 'status'
         $snapshot = {
-            Get-ChildItem -LiteralPath $backupDir -Recurse -Force | Sort-Object FullName | ForEach-Object {
+            Get-ChildItem -LiteralPath $backupDir -Recurse -Force | Where-Object { $_.FullName -ne $statusDir -and -not $_.FullName.StartsWith($statusDir + [IO.Path]::DirectorySeparatorChar) } | Sort-Object FullName | ForEach-Object {
                 $hash = if ($_.PSIsContainer) { 'dir' } else { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
                 '{0}|{1}|{2}' -f $_.FullName.Substring($backupDir.Length), $_.LastWriteTimeUtc.Ticks, $hash
             }
@@ -703,11 +898,13 @@ Describe 'Restore and backup resource safety' {
         $text | Should -Match 'Backupverzeichnis=.*mp1-running-backups \(aus VIRTUSPHERE_RESTORE_BACKUP_DIR\)'
         $text | Should -Match 'Restore-Drill Images: PHP=fixture-php-never-real \(sha256:d{64}\)'
         $text | Should -Match 'Restore-Drill OK: .*Stand mp1-nightly, Pruefroot-Commit '
-        $text | Should -Match '\[10/10\] pass cleanup'
+        $text | Should -Match '\[10/11] pass cleanup'
         $result.DockerCalls | Should -Contain ('rm -f -v ' + ('b' * 64))
         @($result.DockerCalls | Where-Object { $_ -match 'mp1-running-backups' }).Count | Should -Be 0 -Because 'the backup directory is never mounted into a container'
         $before.Count | Should -BeGreaterThan 2
-        (@(& $snapshot) -join "`n") | Should -Be ($before -join "`n") -Because 'the drill only reads the backup directory'
+        (@(& $snapshot) -join "`n") | Should -Be ($before -join "`n") -Because 'the drill only reads the backup triplets'
+        @(Get-ChildItem -LiteralPath $statusDir -Force | ForEach-Object { $_.Name }) | Should -Be @('restore-drill.jsonl') -Because 'the record is the only write, next to the backups the drill read'
+        @(Get-DrillRecordLines -BackupDir $backupDir)[-1] | ConvertFrom-Json | Select-Object -ExpandProperty backup_ts | Should -Be 'mp1-nightly'
         Test-Path -LiteralPath (Join-Path $root 'Docker\backups') | Should -BeFalse -Because 'the drill creates no backup directory in the check root'
     }
 
@@ -759,7 +956,7 @@ Describe 'Restore and backup resource safety' {
     It 'turns an exact-ID docker rm failure into a failed drill' {
         $result = Invoke-RestoreSafety -Mode cleanup-rm-failure -FullDump
         $result.ExitCode | Should -Be 1
-        ($result.Output -join "`n") | Should -Match '\[10/10\] fail cleanup'
+        ($result.Output -join "`n") | Should -Match '\[10/11] fail cleanup'
     }
 
     It 'cleans recorded IDs when TERM arrives after create and before start completes' {
@@ -829,7 +1026,7 @@ Describe 'Restore and backup resource safety' {
         $result = Invoke-RestoreSafety -Mode success -FullDump -Cert $keys.Cert -PrivateKey $keys.Key -Stamp 'encrypted-success'
         $result.ExitCode | Should -Be 0
         ($result.Output -join "`n") | Should -Match 'verschluesseltes Backup encrypted-success entschluesselt'
-        ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
+        ($result.Output -join "`n") | Should -Match '\[10/11] pass cleanup'
     }
 
     It 'K19: an encrypted triplet without a private key is a missing prerequisite, not a pass' {
@@ -1062,7 +1259,7 @@ Describe 'Restore and backup resource safety' {
         $archivePin = "VIRTUSPHERE_BACKUP_RECIPIENT_SHA256=$($other.Fingerprint)"
         $result = Invoke-RestoreSafety -Mode success -FullDump -Cert $keys.Cert -PrivateKey $keys.Key -Stamp 'k19-a3-restore-pin' -ArchiveEnv @($archivePin)
         $result.ExitCode | Should -Be 0
-        ($result.Output -join "`n") | Should -Match '\[10/10\] pass cleanup'
+        ($result.Output -join "`n") | Should -Match '\[10/11] pass cleanup'
     }
 
     It 'K19-A3: a pin set only in the process environment has no effect' {

@@ -239,10 +239,20 @@ sudo sh scripts/backup.sh
 sudo sh scripts/restore_test.sh
 ```
 
-Erwartet: `backup.sh` endet mit `Backup OK`, der Drill zählt bis zum letzten
-Schritt hoch und meldet „Restore-Drill OK“ mit dem Zeitstempel des eben
-geschriebenen Backups. **Ohne grünen Drill kein Update.** Den Zeitstempel
-notieren; er ist der Rückweg.
+Erwartet: `backup.sh` endet mit `Backup OK`, der Drill zählt bis
+`[11/11] pass drill-record` hoch und meldet „Restore-Drill OK“ mit dem
+Zeitstempel des eben geschriebenen Backups. **Ohne grünen Drill kein Update.**
+Den Zeitstempel notieren; er ist der Rückweg. Die Zeile `Restore-Drill Nachweis`
+heißt, dass Systemstatus und Backup-Karte diesen Drill zeigen; einen eigenen
+Nachweis-Aufruf gibt es nicht mehr.
+
+Der Drill läuft im Vordergrund der SSH-Sitzung. Sein Wegwerf-Netz hat ein festes
+Subnetz, und vorher prüft er, dass es keine Route und keine bestehende
+Verbindung des Hosts überdeckt, also auch nicht die eigene SSH-Sitzung
+([Backup](backup.md), „Subnetz des Drills“). Endet er mit
+`[restore.subnet-conflict]`, ist nichts angelegt: ein freies Subnetz wählen und
+den Drill mit `sudo VIRTUSPHERE_RESTORE_SUBNET=<freies-/24> sh scripts/restore_test.sh`
+wiederholen. Dasselbe Argument gilt dann für den Probelauf in 2.3 und 3.6a.
 
 ### 3.3 Laufende Images sichern
 
@@ -432,8 +442,8 @@ cd /opt/VirtuSphere-v2-WebApp
 sudo sh scripts/restore_test.sh
 ```
 
-Erwartet: Der Drill zählt bis `[10/10] pass cleanup` und meldet „Restore-Drill
-OK“ mit dem Zeitstempel aus Schritt 3.2. Die Zeile `Restore-Drill Quelle` nennt
+Erwartet: Der Drill zählt bis `[11/11] pass drill-record` und meldet
+„Restore-Drill OK“ mit dem Zeitstempel aus Schritt 3.2. Die Zeile `Restore-Drill Quelle` nennt
 den Ziel-Commit aus Schritt 3.6, ohne `(Arbeitsbaum geaendert)`. Die Zeile
 `Restore-Drill Images` nennt die eben geladenen Image-IDs (beim Bundle gegen
 `images.txt`). Jede offene Migration erscheint als `applied`.
@@ -615,6 +625,8 @@ nach dem [Backup-Runbook](backup.md) **dieses alten Stands** ausführen (Abschni
 | SSH-Sitzung friert beim `up` ein | ein Netz ohne Pin bekam ein Subnetz aus `172.x`, in dem die SSH-Adresse liegt | neu verbinden, `docker compose --profile tools down`, Pin in der Override ergänzen, Prüfschritt aus 3.6, neu hoch |
 | `check-compose-network-pins.sh` meldet `gepinnt=nein` | Override pinnt nicht jedes Netz (nach C-07 fehlt oft `front`) | Pin ergänzen wie unter 3.5, „Netztrennung“; erst dann `up` |
 | Drill rot | Backup unvollständig oder Restore-Weg gestört | anhalten; ohne grünen Drill kein Update |
+| Drill endet mit `[restore.subnet-conflict]` oder `[restore.network-create]` | das Vorgabe-Subnetz des Drills liegt in einem Netz des Hosts, einer bestehenden Verbindung oder einem Docker-Netz | nichts angelegt; mit `sudo VIRTUSPHERE_RESTORE_SUBNET=<freies-/24> sh scripts/restore_test.sh` wiederholen ([Backup](backup.md), „Subnetz des Drills“) |
+| Drill endet mit `[restore.record-not-written]` | Drill bestanden, Nachweiszeile unter `Docker/backups/status` nicht schreibbar | Rechte des Statusverzeichnisses prüfen und den Drill wiederholen; bis dahin zeigt das Portal den Restore-Test als unbekannt |
 | Migrations-Probelauf (3.6a) rot | eine Migration scheitert an diesen Daten oder das Schema weicht ab | vor 3.7 abbrechen, Rückweg vor der Migration; Drill-Ausgabe an die Entwicklung |
 
 ## Nach dem Update festhalten

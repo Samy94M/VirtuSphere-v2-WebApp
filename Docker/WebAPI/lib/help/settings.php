@@ -6,6 +6,7 @@
 // it explains. Sections inside a group are h3, mirroring the card order.
 declare(strict_types=1);
 require_once __DIR__ . '/../ansible_test_config.php';
+require_once __DIR__ . '/../backup_evidence.php';
 ?>
     <div class="stack" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -104,6 +105,10 @@ require_once __DIR__ . '/../ansible_test_config.php';
                 'grace' => portal_format_duration(VIRTUSPHERE_BACKUP_GRACE_SECONDS),
             ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_backup_p4')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_backup_p5', [
+                'days' => VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS,
+                'command' => VIRTUSPHERE_RESTORE_DRILL_RECORD_COMMAND,
+            ])); ?></p>
         </section>
 
         <section class="panel">
