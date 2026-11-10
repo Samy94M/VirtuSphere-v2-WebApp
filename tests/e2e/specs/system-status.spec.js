@@ -54,7 +54,7 @@ function seedSite(outcome, category, summary = null) {
   runPhp(`
 $db = db();
 $db->query("DELETE FROM deploy_integration_heartbeats WHERE source = 'mecm-site-health'");
-$stmt = $db->prepare("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_result_at, last_failure_at, last_status, last_event, last_error_category, report_version, interval_seconds, last_ip, beat_count, last_summary) VALUES ('mecm-site-health', NOW(), NOW(), NOW(), NOW(), ?, 'completed', ?, 2, 300, '10.0.0.5', 1, ?)");
+$stmt = $db->prepare("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_result_at, last_failure_at, last_status, last_event, last_error_category, report_version, interval_seconds, last_ip, beat_count, last_summary) VALUES ('mecm-site-health', NOW(), NOW(), NOW(), NOW(), ?, 'completed', ?, 2, 300, '192.0.2.5', 1, ?)");
 $outcome = '${outcome}';
 $category = '${category}';
 $summary = '${encoded}' === '' ? null : base64_decode('${encoded}');

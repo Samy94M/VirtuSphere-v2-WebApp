@@ -34,11 +34,6 @@ allow:172\.17\.0\.[01](/16)?
 allow:172\.31\.0\.0(/16)?
 allow:192\.168\.0\.0(/16|/20)?
 allow:10\.250\.0\.0(/24)?
-# Ein synthetischer Testwert in einem privaten Bereich, nur noch in
-# tests/e2e/specs/system-status.spec.js (W3B und N1D haben Tests, Fixtures,
-# Platzhalter und die uebrigen e2e-Specs auf RFC 5737 umgestellt; diese Spec
-# folgt nach dem Merge von mecm-site-bewertung, dann entfaellt die Zeile).
-allow:10\.0\.0\.5
 # Einzelne Testwerte ausserhalb privater Bereiche: Platzhalter-Adresse und
 # invertierte Netzmaske.
 allow:1\.2\.3\.4
