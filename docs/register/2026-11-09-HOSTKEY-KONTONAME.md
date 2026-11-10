@@ -1,0 +1,13 @@
+# HOSTKEY-KONTONAME (09.11.2026): Host-Schlüssel-Bestätigung nennt den Kontonamen
+
+- **Auftrag:** Nutzerwort 09.11. („ja korrigiere das in einer subsession“), aufgefallen beim Prod-Rollout 2026.11.5. Zugangsdaten > Ansible-Host zeigte „Bestätigt am … durch Benutzer #2“ statt des Kontonamens. Vorgezogen vor die nächste Arbeitsrunde, kommt mit dem nächsten Release. Session Opus 5.5, Effort high, Worktree `angry-roentgen-22c2de`, Branch `claude/hostkey-kontoname-74094f` auf `061953c8`.
+- **Ursache:** `credential_render_host_identity()` (`lib/credentials_host_identity.php`) gab `(int) ansible_host_confirmed_by` direkt in `credentials.host_identity_confirmation`; die beiden Leser, die die Zeile speisen, holten den Namen nicht: `repo_credentials()` (Seite Zugangsdaten, nur `created_by_name`) und `repo_credentials_by_type()` (Systemstatus über `integration_health.php`).
+- **Umsetzung:**
+  - `repo_credentials()` und `repo_credentials_by_type()` lesen `ansible_host_confirmed_by_name` per `LEFT JOIN deploy_users` mit. `repo_credential()` bleibt unverändert, weil kein Aufrufer die Zeile damit rendert. Keine Schemaänderung (Spalte ohne Fremdschlüssel, ein gelöschtes Konto ergibt `NULL`).
+  - Neuer Helfer `credential_host_identity_confirmation()`: Name, sonst bei Nummer > 0 „Benutzer #n (gelöscht)“ / „User #n (deleted)“ wie `deploy.cancel_actor_deleted`, sonst ein eigener ganzer Satz „Bestätigt am … durch einen unbekannten Benutzer“ (statt „durch Unbekannter Benutzer“, das im Deutschen falsch dekliniert wäre).
+  - Texte `credentials.host_identity_confirmation` („durch :user“), neu `host_identity_confirmer_deleted` und `host_identity_confirmation_unknown`, DE/EN gleich.
+- **Geschwister geprüft:** `rg` über `lang/` und `lib/` nach `Benutzer #`, `#:user`, `_by']` und `confirmed_by`: kein weiterer Fall, der eine Kontonummer statt eines Namens anzeigt. Abbruch im Auftragsprotokoll (`deploy_terminal_presenter.php`) und Annahmestopp im Systemstatus (`system_status_service_panel.php`) haben den Namen schon.
+- **Tests:** `CredentialHostIdentityRenderTest` (Name, gelöschtes Konto in DE/EN, fehlender Wert und Leername in DE/EN ohne `#0`), `AnsibleHostIdentityIntegrationTest::testTheListReadersCarryTheConfirmingAccountName` (beide Leser liefern den Namen, ein nicht vorhandenes Konto ergibt `NULL` und die Nummer im Satz).
+- **Sollbilder:** keines betroffen; kein Seed der Visual-Suite setzt `ansible_host_confirmed_at`.
+- **Gates und Mutationsbeleg:** siehe `qa-artifacts/hostkey-kontoname.done` im Worktree.
+- **Dateibesitz:** `Docker/WebAPI/lib/credentials_host_identity.php`, `Docker/WebAPI/lib/repo/credentials.php` (zwei Leser), `Docker/WebAPI/lang/{de,en}/credentials.php`, die zwei Tests, diese Fragmente.

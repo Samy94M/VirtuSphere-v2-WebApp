@@ -31,6 +31,7 @@ final class CredentialHostIdentityRenderTest extends TestCase
             'ansible_host_observed_at' => '2026-10-02 10:00:00',
             'ansible_host_confirmed_at' => '2026-10-01 09:00:00',
             'ansible_host_confirmed_by' => 1,
+            'ansible_host_confirmed_by_name' => 'fixture-admin',
             'ansible_host_first_seen_at' => '2026-09-30 08:00:00',
             'ansible_host_accept_new' => 0,
         ], $overrides);
@@ -76,6 +77,54 @@ final class CredentialHostIdentityRenderTest extends TestCase
         $provisional = self::credential(['ansible_host_confirmed_at' => null]);
         self::assertNull(credential_host_identity_contact($provisional));
         self::assertStringNotContainsString('data-host-identity-contact', $this->render($provisional));
+    }
+
+    /**
+     * The confirmation line names the account, not its number. Only a deleted
+     * account falls back to its number, and a missing value to a neutral word.
+     */
+    public function testTheConfirmationNamesTheConfirmingAccount(): void
+    {
+        Lang::load('de');
+        try {
+            $html = $this->render(self::credential(['ansible_host_confirmed_by' => 4, 'ansible_host_confirmed_by_name' => 'fixture-admin']));
+            self::assertStringContainsString('durch fixture-admin</small>', $html);
+            self::assertStringNotContainsString('#4', $html);
+            self::assertStringNotContainsString('Benutzer #', $html);
+        } finally {
+            Lang::load(Lang::DEFAULT_LOCALE);
+        }
+    }
+
+    public function testADeletedConfirmingAccountKeepsItsNumberMarkedAsDeleted(): void
+    {
+        $credential = self::credential(['ansible_host_confirmed_by' => 4, 'ansible_host_confirmed_by_name' => null]);
+        $expected = ['de' => 'durch Benutzer #4 (gelöscht)</small>', 'en' => 'by User #4 (deleted)</small>'];
+        try {
+            foreach ($expected as $locale => $text) {
+                Lang::load($locale);
+                self::assertStringContainsString($text, $this->render($credential), $locale);
+            }
+        } finally {
+            Lang::load(Lang::DEFAULT_LOCALE);
+        }
+    }
+
+    public function testAConfirmationWithoutAnAccountNamesNoNumber(): void
+    {
+        $expected = ['de' => 'durch einen unbekannten Benutzer</small>', 'en' => 'by an unknown user</small>'];
+        try {
+            foreach ([['ansible_host_confirmed_by' => null, 'ansible_host_confirmed_by_name' => null], ['ansible_host_confirmed_by' => 0, 'ansible_host_confirmed_by_name' => '  ']] as $overrides) {
+                foreach ($expected as $locale => $text) {
+                    Lang::load($locale);
+                    $html = $this->render(self::credential($overrides));
+                    self::assertStringContainsString($text, $html, $locale);
+                    self::assertStringNotContainsString('#0', $html, $locale);
+                }
+            }
+        } finally {
+            Lang::load(Lang::DEFAULT_LOCALE);
+        }
     }
 
     public function testTheStatesThatNeedAnActionOpenTheRowByThemselves(): void
