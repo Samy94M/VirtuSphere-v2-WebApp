@@ -1070,15 +1070,72 @@ Describe 'Ursachenvokabular der Warnlaeufe' {
         ([regex]::Matches($detail, '(?:^|;\s*)package_content_failed\s+target=')).Count | Should -Be 0
     }
 
-    It 'deckelt die Liste und sagt, wie viele fehlen' {
+    It 'nennt alle Ursachen, solange sie in die Grenze passen (AR1, keine feste Anzahl)' {
+        # Bis AR1 standen fest 10 Ursachen da und "(+5 weitere)", obwohl alle in
+        # die Grenze passten.
         $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
             $causes = New-VsRunCauseList
             1..15 | ForEach-Object { Add-VsRunCause -Causes $causes -Cause 'mac_missing' -Target ('VM{0:D2}' -f $_) }
             Format-VsRunDetail -Causes $causes
         }
 
-        ([regex]::Matches($detail, 'mac_missing')).Count | Should -Be 10
-        $detail | Should -Match '\(\+5 weitere\)'
+        ([regex]::Matches($detail, 'mac_missing')).Count | Should -Be 15
+        $detail | Should -Not -Match 'weitere'
+    }
+
+    It 'fuellt 22 Paketursachen bis zur Grenze, schneidet keine Ursache an und nennt den Rest' {
+        # Das Feldbild vom 09.11.: 22 Pakete mit DeployTo-Befund. Die Grenze ist
+        # die Zeichenkappung des Servers (1024) und die Bytegrenze (2048).
+        $r = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $causes = New-VsRunCauseList
+            1..22 | ForEach-Object {
+                Add-VsRunCause -Causes $causes -Cause 'package_deployto_missing' -Target ('Produkt-{0:D2}-1.0.{0}' -f $_) -Collection ('Zielgruppe Abteilung {0:D2}' -f $_)
+            }
+            [pscustomobject]@{
+                Detail = Format-VsRunDetail -Causes $causes; All = @($causes)
+                MaxChars = $script:VsReportDetailMaxChars; MaxBytes = $script:VsReportDetailMaxBytes
+            }
+        }
+        $r.Detail.Length | Should -BeLessOrEqual $r.MaxChars
+        [System.Text.Encoding]::UTF8.GetByteCount($r.Detail) | Should -BeLessOrEqual $r.MaxBytes
+        $parts = @($r.Detail -split '; ')
+        $shown = @($parts | Where-Object { $_ -notmatch '^\(\+\d+ weitere\)$' })
+        $shown.Count | Should -BeGreaterThan 10 -Because 'die alte feste Grenze von 10 ist weg'
+        $shown.Count | Should -BeLessThan 22 -Because 'dieser Fall passt nicht ganz in 1024 Zeichen'
+        foreach ($cause in $shown) { $r.All | Should -Contain $cause -Because 'eine Ursache steht ganz da oder gar nicht' }
+        $parts[-1] | Should -Be ('(+{0} weitere)' -f (22 - $shown.Count))
+        # Gierig: die naechste Ursache haette samt Rest-Angabe nicht mehr gepasst.
+        $next = ($shown -join '; ') + '; ' + $r.All[$shown.Count]
+        $nextRest = 22 - $shown.Count - 1
+        if ($nextRest -gt 0) { $next += ('; (+{0} weitere)' -f $nextRest) }
+        ($next.Length -gt $r.MaxChars -or [System.Text.Encoding]::UTF8.GetByteCount($next) -gt $r.MaxBytes) | Should -BeTrue
+    }
+
+    It 'haelt die Bytegrenze auch bei Mehrbyte-Namen ein, bevor die Zeichengrenze greift' {
+        $r = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $causes = New-VsRunCauseList
+            1..40 | ForEach-Object { Add-VsRunCause -Causes $causes -Cause 'package_deploy_failed' -Target ('Prüfwerkzeug-{0}' -f $_) -Collection ('Größenprüfung €{0}' -f $_) }
+            [pscustomobject]@{ Detail = Format-VsRunDetail -Causes $causes -MaxBytes 600 -MaxChars 1024 }
+        }
+        [System.Text.Encoding]::UTF8.GetByteCount($r.Detail) | Should -BeLessOrEqual 600
+        $r.Detail | Should -Match '; \(\+\d+ weitere\)$'
+    }
+
+    It 'nennt nur den Rest, wenn schon die erste Ursache nicht passt' {
+        $detail = Invoke-InFileScope -Path $script:MecmCommon -Body {
+            $causes = New-VsRunCauseList
+            Add-VsRunCause -Causes $causes -Cause 'package_config_invalid' -Target ('x' * 300)
+            Add-VsRunCause -Causes $causes -Cause 'package_config_invalid' -Target 'kurz'
+            Format-VsRunDetail -Causes $causes -MaxChars 100
+        }
+        $detail | Should -Be '(+2 weitere)'
+    }
+
+    It 'die Zeichengrenze in Common spiegelt VIRTUSPHERE_CLIENT_EVENT_DETAIL_MAX_CHARS aus lib/constants.php' {
+        $constants = Get-Content -Raw -Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'Docker') 'WebAPI') 'lib/constants.php')
+        $php = [int]([regex]::Match($constants, 'VIRTUSPHERE_CLIENT_EVENT_DETAIL_MAX_CHARS\s*=\s*(\d+)').Groups[1].Value)
+        $php | Should -BeGreaterThan 0
+        Invoke-InFileScope -Path $script:MecmCommon -Body { $script:VsReportDetailMaxChars } | Should -Be $php
     }
 
     It 'liefert $null fuer einen Lauf ohne Ursachen' {

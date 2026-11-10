@@ -318,8 +318,11 @@ BeforeAll {
         $providerMachine = $null
         $lastFilesStamp = ''
         $loop = 0
-        # Prozessweiter Zustand wie im Skriptkopf (PS-09): der Block liest ihn nur.
+        # Prozessweiter Zustand wie im Skriptkopf (PS-09, AV2, AR1).
         $pendingAppFolderMoves = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        $rememberedDistributionHints = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+        $lastHintRefresh = Get-Date
+        $openPackages = New-VsImporterOpenPackageSet
 
         & $script:AutoimporterCycleBlock
         return [pscustomobject]@{
@@ -362,8 +365,8 @@ Describe 'M03-F02: optionale Altobjektinventare isolieren ihren Lesefehler' {
 }
 
 Describe 'Autoimporter AV2: Generation und Vertrag' {
-    It 'meldet die Generation, in der DP-Zustaende nichts mehr sperren' {
-        (Get-Content -LiteralPath $script:Importer -Raw) | Should -Match "\`$SCRIPT_VERSION\s*=\s*'autoimporter/2\.3'"
+    It 'meldet die Generation mit Wiederholliste und DeployTo-Pruefung (AR1, nach AV2)' {
+        (Get-Content -LiteralPath $script:Importer -Raw) | Should -Match "\`$SCRIPT_VERSION\s*=\s*'autoimporter/2\.4'"
     }
 
     It 'verlangt denselben MECM-Serververtrag wie Common und der Installer prueft Staging und Livebestand' {
@@ -371,8 +374,10 @@ Describe 'Autoimporter AV2: Generation und Vertrag' {
         $commonText = Get-Content -LiteralPath $script:MecmCommon -Raw
         $installerText = Get-Content -LiteralPath $script:Installer -Raw
 
-        $commonText | Should -Match '\$script:VsMecmServerContractVersion\s*=\s*3'
-        $importerText | Should -Match '\$script:VsRequiredMecmServerContractVersion\s*=\s*3'
+        # 4 seit AR1: der Autoimporter braucht Wiederholliste, DeployTo-Pruefung
+        # und Verbindungsprobe aus Common.
+        $commonText | Should -Match '\$script:VsMecmServerContractVersion\s*=\s*4'
+        $importerText | Should -Match '\$script:VsRequiredMecmServerContractVersion\s*=\s*4'
         $importerText | Should -Match 'Get-Variable -Name VsMecmServerContractVersion -Scope Script'
         $importerText | Should -Match 'MECM-Serverpaket inkompatibel'
         $importerText | Should -Match 'install-VirtuSphere-MECM\.ps1 -Upgrade'
@@ -688,6 +693,7 @@ Describe 'Autoimporter AV2: Verteilhinweise im Lauf' {
             $pendingAppFolderMoves = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
             $rememberedDistributionHints = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
             $lastHintRefresh = Get-Date
+            $openPackages = New-VsImporterOpenPackageSet
 
             for ($i = 0; $i -lt $Iterations; $i++) {
                 if ($i -gt 0) {
@@ -725,19 +731,22 @@ Describe 'Autoimporter AV2: Verteilhinweise im Lauf' {
         $box.Reads | Should -Be 2
     }
 }
-Describe 'Autoimporter: ein Lauf mit offenen Punkten merkt den Stamp nicht' {
-    It 'die Stamp-Zuweisung liegt im else-Zweig von $scanWarnings -gt 0' {
-        # Der Stamp ist die Change-Detection: wird er nach einem Lauf mit offenen
-        # Punkten gemerkt, ist der naechste Lauf "unveraendert" und meldet ok.
-        # Ein Paket, das nie entstanden ist, war damit ab dem zweiten Durchlauf
-        # unsichtbar. Nur ein Lauf ohne offene Punkte darf ihn merken.
-        $if = Get-IfByCondition -Path $script:Importer -ConditionText '$scanWarnings -gt 0'
-        $if | Should -Not -BeNullOrEmpty
-
-        $then = $if.Clauses[0].Item2.Extent.Text
-        $then | Should -Not -Match 'lastFilesStamp\s*='
-        $if.ElseClause | Should -Not -BeNullOrEmpty
-        $if.ElseClause.Extent.Text | Should -Match '\$lastFilesStamp\s*=\s*\$stamp'
+Describe 'Autoimporter: offene Punkte bleiben sichtbar, auch wenn der Stamp gemerkt wird (AR1, F-1)' {
+    It 'der Stamp wird nach dem Paketdurchlauf gemerkt, und jeder vollstaendige Lauf meldet die Wiederholliste' {
+        # Bis AR1 hielt jeder offene Punkt den Stamp zurueck, damit ein nie
+        # entstandenes Paket nicht ab dem zweiten Lauf als "unveraendert ok"
+        # verschwand. Der Preis: elf dauerhaft fehlende DeployTo-Collections
+        # erzwangen jede Minute einen Vollscan. Seit AR1 traegt die Wiederholliste
+        # diese Pflicht: der Stamp wird gemerkt, und das Ergebnis jedes Laufs
+        # (auch des ruhigen) liest die offenen Punkte aus ihr. Verhalten:
+        # VirtuSphere.AutoimporterRobustness.Tests.ps1.
+        $text = Get-Content -LiteralPath $script:Importer -Raw
+        $text | Should -Match '(?s)Set-VsImporterOpenPackage -OpenPackages \$openPackages.*?\$lastFilesStamp = \$stamp'
+        $report = Get-IfByCondition -Path $script:Importer -ConditionText '$reportOpenPoints'
+        $report | Should -Not -BeNullOrEmpty
+        $report.Clauses[0].Item2.Extent.Text | Should -Match 'Get-VsImporterOpenCauses -OpenPackages \$openPackages'
+        $report.Clauses[0].Item2.Extent.Text | Should -Match "\`$outcome = 'warning'"
+        $text | Should -Match 'open_points = \$openPointCount'
     }
 
     It 'merkt den Stamp genau an einer Stelle im Erfolgsfall' {

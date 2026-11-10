@@ -24,7 +24,7 @@ Set-StrictMode -Version 1.0
 # Common-Funktionen benoetigen, pruefen diesen Wert direkt nach dem Dot-Sourcing.
 # Der Installer vergleicht die Literale zusaetzlich im Staging und nach der
 # Aktivierung, damit ein gemischter Satz gar nicht erst gestartet wird.
-$script:VsMecmServerContractVersion = 3
+$script:VsMecmServerContractVersion = 4
 
 $script:VsRegistryPath = 'HKLM:\SOFTWARE\VirtuSphere\MECM'
 
@@ -492,6 +492,10 @@ $script:VsRunScriptVersionMaxChars = 32   # VIRTUSPHERE_RUN_SCRIPT_VERSION_MAX_C
 # kappt zusaetzlich bei 1024 Zeichen.
 $script:VsReportDetailMaxBytes = 2048
 $script:VsClientEventBodyMaxBytes = 8192  # VIRTUSPHERE_CLIENT_EVENT_MAX_BODY_BYTES
+# Der Server speichert hoechstens so viele Zeichen (mb_substr). Format-VsRunDetail
+# fuellt die Ursachenliste nur bis hierhin, damit der Server nie mitten in einer
+# Ursache abschneidet und die Angabe "(+n weitere)" verliert (AR1).
+$script:VsReportDetailMaxChars = 1024     # VIRTUSPHERE_CLIENT_EVENT_DETAIL_MAX_CHARS
 
 # ---------------------------------------------------------------------------
 # Build-Kennung und Installationsmanifest
@@ -793,6 +797,10 @@ $script:VsRunCauseVocabulary = @(
     'package_definition_drift',  # Application/Deployment-Type nicht eindeutig oder vertragswidrig
     'package_source_missing',    # files-Pfad des Paketordners fehlt
     'package_deploy_failed',     # New-CMApplicationDeployment fehlgeschlagen
+    'package_deployto_missing',  # DeployTo-Collection existiert in MECM nicht (AR1, F-3); dauerhaft bis Konfig- oder MECM-Aenderung
+    'package_deployto_ambiguous', # mehrere Collections tragen den DeployTo-Namen (AR1, F-3)
+    'package_deployto_invalid',  # DeployTo nennt die eigene Collection des Pakets (AR1, F-16)
+    'package_scan_failed',       # Paket brach mit einem MECM-Fehler ab, MECM antwortet; die uebrigen Pakete liefen weiter (AR1, F-4)
     'package_cleanup_failed',    # Alt-Version nicht vollstaendig entfernt
     'package_folder_failed',     # Application nicht in den Ordner VirtuSphere_Applications verschoben (PS-09, AV-F28)
     'package_template_failed'    # Vorlagen-install.ps1 nicht ueberschrieben
@@ -1143,9 +1151,39 @@ $script:VsStampHashCacheSettleSeconds = 120
 $script:VsStampHashCacheMaxAgeSeconds = 86400
 $script:VsStampHashCacheRandom = New-Object System.Random
 $script:VsFileChangeTimeReady = $null
+# Laufspeicher (AR1, F-1): ein Hash je Datei je Lauf. Der Autoimporter bildet in
+# einem Scan erst den Gesamtstamp und dann je Paket den Paketstamp ueber dieselben
+# Dateien. Der Hash-Cache oben merkt eine gerade geschriebene Datei bewusst nicht
+# (racy), also wurde genau die Datei, die den Scan ausgeloest hat (etwa ein
+# frisch kopierter Installer), zweimal voll gelesen. Der Laufspeicher gilt nur
+# zwischen zwei Aufrufen von Start-VsStampHashRun (Beginn jedes Laufs; ohne
+# diesen Aufruf ist er aus) und nur bei unveraenderter Laenge, LastWriteTime und
+# ChangeTime; ohne lesbare ChangeTime merkt er nichts, wie der Cache.
+$script:VsStampRunHashes = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+$script:VsStampRunActive = $false
 
 function Clear-VsStampHashCache {
     $script:VsStampHashCache.Clear()
+    $script:VsStampRunHashes.Clear()
+}
+
+# Grenze eines Laufs: verwirft den Laufspeicher des vorigen Laufs und schaltet ihn
+# fuer diesen Lauf ein.
+function Start-VsStampHashRun {
+    $script:VsStampRunHashes.Clear()
+    $script:VsStampRunActive = $true
+}
+
+function Set-VsStampRunHashEntry {
+    param(
+        [Parameter(Mandatory)][string]$FullName,
+        [Parameter(Mandatory)][long]$Length,
+        [Parameter(Mandatory)][long]$Ticks,
+        [Parameter(Mandatory)][long]$ChangeTicks,
+        [Parameter(Mandatory)][string]$Hash
+    )
+    if (-not $script:VsStampRunActive -or $ChangeTicks -le 0) { return }
+    $script:VsStampRunHashes[$FullName] = [pscustomobject]@{ Length = $Length; Ticks = $Ticks; ChangeTicks = $ChangeTicks; Hash = $Hash }
 }
 
 # NTFS-ChangeTime einer Datei als .NET-Ticks (UTC) ueber FILE_BASIC_INFO. Oeffnet
@@ -1271,6 +1309,12 @@ function Get-VsCachedStampFileHash {
         [Parameter(Mandatory)][ref]$ChangeTicks
     )
     $ChangeTicks.Value = Get-VsFileChangeTicks -Path $File.FullName
+    $runEntry = $null
+    if ($script:VsStampRunActive -and $ChangeTicks.Value -gt 0 -and $script:VsStampRunHashes.TryGetValue($File.FullName, [ref]$runEntry) -and
+        $runEntry.Length -eq $File.Length -and $runEntry.Ticks -eq $File.LastWriteTimeUtc.Ticks -and $runEntry.ChangeTicks -eq $ChangeTicks.Value) {
+        $Fresh.Value = $false
+        return $runEntry.Hash
+    }
     $cached = Get-VsStampHashCacheEntry -FullName $File.FullName -Length $File.Length -Ticks $File.LastWriteTimeUtc.Ticks -ChangeTicks $ChangeTicks.Value
     if ($cached) {
         $Fresh.Value = $false
@@ -1319,7 +1363,10 @@ function Get-VsFilesManifestStamp {
         if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
             throw (New-VsRunCategoryError -Message ("Paketdatei hat sich waehrend des Scans geaendert: {0}" -f $relative) -Category 'source_changing')
         }
-        if ($fresh) { Set-VsStampHashCacheEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash }
+        if ($fresh) {
+            Set-VsStampHashCacheEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash
+            Set-VsStampRunHashEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash
+        }
         $parts.Add(('{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
     }
     $afterNames = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop |
@@ -1352,7 +1399,10 @@ function Get-VsFilesManifestStamp {
                 if ($after.Length -ne $beforeLength -or $after.LastWriteTimeUtc.Ticks -ne $beforeTicks) {
                     throw (New-VsRunCategoryError -Message ("Paketvorlagendatei hat sich waehrend des Scans geaendert: {0}" -f $relative) -Category 'source_changing')
                 }
-                if ($fresh) { Set-VsStampHashCacheEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash }
+                if ($fresh) {
+                    Set-VsStampHashCacheEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash
+                    Set-VsStampRunHashEntry -FullName $file.FullName -Length $beforeLength -Ticks $beforeTicks -ChangeTicks $changeTicks -Hash $hash
+                }
                 $parts.Add(('template/{0}|{1}|{2}' -f $relative, $beforeLength, $hash))
             }
             $afterTemplateNames = @(Get-ChildItem -LiteralPath $templateRoot -Recurse -File -Force -ErrorAction Stop |
@@ -1868,6 +1918,164 @@ function Get-VsDistributionHintCause {
 }
 
 # ---------------------------------------------------------------------------
+# Autoimporter-Robustheit (AR1, 10.11.2026): DeployTo, Paketfehler, Wiederholliste
+# ---------------------------------------------------------------------------
+#
+# Zustand des DeployTo-Ziels eines Pakets (F-3, F-16): none | self | missing |
+# ambiguous | ready. Die Syntax hat Read-VsPackageConfig schon geprueft (keine
+# Wildcards, kein Randleerraum), also ist die Abfrage exakt. DeployTo darf eine
+# Device- oder eine User-Collection sein; der Aufrufer liest deshalb mit
+# Get-CMCollection, nicht mit Get-CMDeviceCollection. Ein Providerfehler der
+# Abfrage wird nicht verschluckt: $Lookup wirft, und der Paket-Catch des
+# Autoimporters entscheidet, ob MECM weg ist oder nur dieses Paket scheiterte.
+# MECM vergleicht Collection-Namen ohne Gross-/Kleinschreibung, deshalb -eq.
+function Get-VsDeployToState {
+    param(
+        [AllowEmptyString()][string]$DeployTo,
+        [Parameter(Mandatory)][string]$FullName,
+        [bool]$OwnCollection = $false,
+        [Parameter(Mandatory)][scriptblock]$Lookup
+    )
+    if ([string]::IsNullOrEmpty($DeployTo)) { return 'none' }
+    # Die eigene Collection traegt schon das Required-Deployment; das
+    # Available-Deployment wurde dort frueher still uebersprungen (F-16).
+    if ($OwnCollection -and $DeployTo -eq $FullName) { return 'self' }
+    $found = @(& $Lookup $DeployTo | Where-Object { $null -ne $_ -and [string]$_.Name -eq $DeployTo })
+    if ($found.Count -eq 0) { return 'missing' }
+    if ($found.Count -gt 1) { return 'ambiguous' }
+    return 'ready'
+}
+
+# Antwortet der SMS-Provider ueber das Site-Drive? Der Paket-Catch (F-4) fragt
+# das, statt den Fehlertext zu deuten (der wechselt mit MECM-Version und
+# Sprache): Antwortet MECM, scheiterte nur dieses Paket, und die folgenden laufen
+# weiter. Antwortet MECM nicht, ist es ein Verbindungsfehler, und erst dann setzt
+# der aeussere Catch die Verbindung zurueck und meldet mecm_unavailable.
+function Test-VsCmProviderConnection {
+    param([string]$SiteCode)
+    if ([string]::IsNullOrWhiteSpace($SiteCode)) { return $false }
+    try {
+        $site = Get-CMSite -SiteCode $SiteCode -ErrorAction Stop
+        return ($null -ne $site)
+    } catch {
+        Write-Debug $_
+        return $false
+    }
+}
+
+# Die Ursachen, die seit Position $Start in die Liste kamen: die eines Pakets.
+function Get-VsRunCausesSince {
+    param([Parameter(Mandatory)][AllowEmptyCollection()]$Causes, [int]$Start = 0)
+    $slice = New-Object System.Collections.Generic.List[string]
+    for ($i = [Math]::Max(0, $Start); $i -lt @($Causes).Count; $i++) { $slice.Add([string]$Causes[$i]) }
+    # Flach in die Pipeline: Aufrufer sammeln mit @().
+    return $slice.ToArray()
+}
+
+# --- Wiederholliste offener Punkte (F-1) ------------------------------------
+#
+# Frueher hielt jeder offene Punkt den Dateistand zurueck: elf dauerhaft fehlende
+# DeployTo-Collections zwangen jede Minute einen Vollscan mit doppeltem Hashen und
+# allen MECM-Abfragen je Paket. Jetzt merkt der Scan den Dateistand immer, und
+# jedes Paket mit offenen Punkten steht mit seinen Ursachen in der Wiederholliste
+# (Schluessel: Paketordner, ordinal). Ruhige Laeufe melden die Ursachen weiter
+# (warning, partial_failure, offene Punkte), ein faelliger Eintrag wird allein
+# erneut bearbeitet. Behoben ist ein Punkt erst, wenn dieses Paket ohne Ursache
+# durchlaeuft. Prozessintern: nach einem Neustart scannt der erste Lauf voll.
+#
+# Abstand: vorruebergehende Ursachen ab dem Takt verdoppelt bis
+# $script:VsImporterRetryMaxSeconds. Ursachen, die nur eine Aenderung in MECM
+# behebt (fehlende oder mehrdeutige DeployTo-Collection, Definitionsdrift), gleich
+# mit dem Hoechstabstand, damit sie nicht jede Minute eine WARN-Zeile schreiben.
+# Ursachen, die nur eine Dateiaenderung behebt (ungueltige config.json, DeployTo
+# auf die eigene Collection), werden nie wiederholt: Die Dateiaenderung loest
+# ohnehin einen Vollscan aus.
+$script:VsImporterRetryMaxSeconds = 3600
+$script:VsImporterMecmFixCauses = @('package_deployto_missing', 'package_deployto_ambiguous', 'package_definition_drift')
+$script:VsImporterFileFixCauses = @('package_config_invalid', 'package_deployto_invalid')
+
+function New-VsImporterOpenPackageSet {
+    return , (New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal))
+}
+
+function Get-VsRunCauseCode {
+    param([AllowEmptyString()][string]$Cause)
+    return ([string]$Cause -split ' ', 2)[0]
+}
+
+function Get-VsImporterRetryDelaySeconds {
+    param([Parameter(Mandatory)][int]$Attempt, [Parameter(Mandatory)][int]$IntervalSeconds, [bool]$MecmFix = $false)
+    $max = [int]$script:VsImporterRetryMaxSeconds
+    if ($MecmFix) { return $max }
+    [double]$delay = [Math]::Max(1, $IntervalSeconds)
+    for ($i = 1; $i -lt $Attempt -and $delay -lt $max; $i++) { $delay = $delay * 2 }
+    return [int][Math]::Min($delay, $max)
+}
+
+# Traegt das Ergebnis eines bearbeiteten Pakets ein. Ohne Ursachen faellt der
+# Eintrag weg ('healed', wenn es einen gab, sonst 'clean'); mit Ursachen zaehlt
+# der Versuch hoch und der naechste Termin wird gesetzt ('open').
+function Set-VsImporterOpenPackage {
+    param(
+        [Parameter(Mandatory)]$OpenPackages,
+        [Parameter(Mandatory)][string]$Folder,
+        [AllowEmptyCollection()][string[]]$Causes = @(),
+        [Parameter(Mandatory)][int]$IntervalSeconds,
+        [Nullable[datetime]]$Now = $null
+    )
+    $at = if ($null -ne $Now) { [datetime]$Now } else { Get-Date }
+    $previous = $null
+    $had = $OpenPackages.TryGetValue($Folder, [ref]$previous)
+    $list = @($Causes | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($list.Count -eq 0) {
+        if ($had) { [void]$OpenPackages.Remove($Folder); return 'healed' }
+        return 'clean'
+    }
+    $codes = @($list | ForEach-Object { Get-VsRunCauseCode -Cause $_ })
+    $fileFixOnly = @($codes | Where-Object { $script:VsImporterFileFixCauses -notcontains $_ }).Count -eq 0
+    $mecmFixOnly = @($codes | Where-Object { $script:VsImporterFileFixCauses -notcontains $_ -and $script:VsImporterMecmFixCauses -notcontains $_ }).Count -eq 0
+    $attempt = if ($had) { [int]$previous.Attempts + 1 } else { 1 }
+    $delay = Get-VsImporterRetryDelaySeconds -Attempt $attempt -IntervalSeconds $IntervalSeconds -MecmFix $mecmFixOnly
+    $due = if ($fileFixOnly) { [datetime]::MaxValue } else { $at.AddSeconds($delay) }
+    $OpenPackages[$Folder] = [pscustomobject]@{
+        Causes = [string[]]$list; Attempts = $attempt; DueAt = $due; DelaySeconds = $(if ($fileFixOnly) { 0 } else { $delay })
+    }
+    return 'open'
+}
+
+# Paketordner, deren Wiederholung faellig ist (ordinal sortiert).
+function Get-VsImporterDueFolders {
+    param([Parameter(Mandatory)]$OpenPackages, [Nullable[datetime]]$Now = $null)
+    $at = if ($null -ne $Now) { [datetime]$Now } else { Get-Date }
+    $due = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($key in @($OpenPackages.Keys)) {
+        if ($OpenPackages[$key].DueAt -le $at) { [void]$due.Add([string]$key) }
+    }
+    return , $due
+}
+
+# Alle offenen Ursachen in fester Reihenfolge (Ordner ordinal), fuer Detail und
+# Zaehler jedes Laufs.
+function Get-VsImporterOpenCauses {
+    param([Parameter(Mandatory)]$OpenPackages)
+    [string[]]$keys = @($OpenPackages.Keys)
+    [Array]::Sort($keys, [StringComparer]::Ordinal)
+    $all = New-Object System.Collections.Generic.List[string]
+    foreach ($key in $keys) { foreach ($cause in @($OpenPackages[$key].Causes)) { $all.Add([string]$cause) } }
+    # Flach in die Pipeline: Aufrufer sammeln mit @().
+    return $all.ToArray()
+}
+
+# Nach einem Vollscan: Eintraege von Ordnern, die der Scan nicht mehr gesehen hat
+# (geloescht oder umbenannt), fallen weg.
+function Limit-VsImporterOpenPackages {
+    param([Parameter(Mandatory)]$OpenPackages, [Parameter(Mandatory)][AllowEmptyCollection()]$Seen)
+    foreach ($key in @($OpenPackages.Keys)) {
+        if (-not $Seen.Contains([string]$key)) { [void]$OpenPackages.Remove($key) }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # MECM-Mitgliedschafts-Reconciliation (ADR-0034)
 # ---------------------------------------------------------------------------
 # Pure Planfunktion: desired (Portalwunsch, {name,type}), owned (Provenienz,
@@ -2165,7 +2373,8 @@ function Add-VsRunCause {
             'resource_id_pending', 'resource_update_failed',
             'package_config_invalid', 'package_content_failed', 'package_content_in_progress',
             'package_content_unknown', 'package_content_request_failed', 'package_content_group_empty', 'package_definition_drift', 'package_source_missing',
-            'package_deploy_failed', 'package_cleanup_failed', 'package_folder_failed', 'package_template_failed')]
+            'package_deploy_failed', 'package_deployto_missing', 'package_deployto_ambiguous', 'package_deployto_invalid',
+            'package_scan_failed', 'package_cleanup_failed', 'package_folder_failed', 'package_template_failed')]
         [string]$Cause,
         [string]$Target = '',
         [string]$Collection = ''
@@ -2190,15 +2399,35 @@ function Add-VsRunCause {
 # ohnehin abschneidet: dann besser ehrlich sagen, wie viele nicht dastehen.
 # Liefert $null bei leerer Liste, damit ein sauberer Lauf kein leeres Detail
 # sendet.
+#
+# Gefuellt wird bis zur Grenze, nicht bis zu einer festen Anzahl (AR1): frueher
+# standen fest 10 Ursachen da und "(+12 weitere)", obwohl alle 22 gepasst
+# haetten. Eine Ursache steht ganz da oder gar nicht; die Grenze gilt fuer die
+# Zeile samt Rest-Angabe, in UTF-8-Bytes (VsReportDetailMaxBytes) UND in
+# Zeichen (VsReportDetailMaxChars, die Kappung des Servers). Die Reihenfolge
+# bleibt: was der Aufrufer zuerst nennt (offene Punkte vor Hinweisen), steht da.
 function Format-VsRunDetail {
-    param($Causes, [int]$MaxCauses = 10)
+    param(
+        $Causes,
+        [int]$MaxBytes = $script:VsReportDetailMaxBytes,
+        [int]$MaxChars = $script:VsReportDetailMaxChars
+    )
     if ($null -eq $Causes -or @($Causes).Count -eq 0) { return $null }
 
     $all = @($Causes)
-    $shown = @($all | Select-Object -First $MaxCauses)
-    $line = $shown -join '; '
-    if ($all.Count -gt $shown.Count) {
-        $line += ('; (+{0} weitere)' -f ($all.Count - $shown.Count))
+    $line = ''
+    $shown = 0
+    for ($i = 0; $i -lt $all.Count; $i++) {
+        $candidate = if ($shown -eq 0) { [string]$all[$i] } else { $line + '; ' + [string]$all[$i] }
+        $rest = $all.Count - $i - 1
+        $probe = if ($rest -gt 0) { $candidate + ('; (+{0} weitere)' -f $rest) } else { $candidate }
+        if ($probe.Length -gt $MaxChars -or [System.Text.Encoding]::UTF8.GetByteCount($probe) -gt $MaxBytes) { break }
+        $line = $candidate
+        $shown++
+    }
+    if ($shown -lt $all.Count) {
+        $more = '(+{0} weitere)' -f ($all.Count - $shown)
+        $line = if ($shown -eq 0) { $more } else { $line + '; ' + $more }
     }
     return $line
 }
@@ -3005,6 +3234,22 @@ function Read-VsPackageConfig {
         $cfg.ProjectName -match '[\r\n*?\[\]]' -or $cfg.version -match '[\s*?\[\]]') {
         Write-VsLog -Level WARN -Context $context -Message 'ProjectName/version enthalten Rand-Leerraum, Steuerzeichen oder Wildcards; version darf keinen Leerraum enthalten. Werte werden nicht automatisch umbenannt.'
         return $null
+    }
+    # DeployTo nach derselben Regel wie ProjectName/version (AR1, F-3). Frueher
+    # wurde der Wert ungeprueft per [string] zum Collection-Namen: eine Liste wurde
+    # zu "a b", eine Zahl zu "5", ein Randleerzeichen oder ein Wildcard traf in
+    # MECM eine andere oder keine Collection. Fehlt das Feld, ist es null oder
+    # leer, gibt es kein Zusatz-Deployment. Ob die Collection existiert, prueft
+    # erst der Autoimporter gegen MECM.
+    if ($cfg.PSObject.Properties['DeployTo'] -and $null -ne $cfg.DeployTo) {
+        if ($cfg.DeployTo -isnot [string]) {
+            Write-VsLog -Level WARN -Context $context -Message 'DeployTo muss eine JSON-Zeichenkette mit genau einem Collection-Namen sein (leer = kein Zusatz-Deployment); keine Zahl, Liste oder Objekt. Paket uebersprungen.'
+            return $null
+        }
+        if ($cfg.DeployTo -ne '' -and ($cfg.DeployTo -cne $cfg.DeployTo.Trim() -or $cfg.DeployTo -match '[\x00-\x1F\x7F*?\[\]]')) {
+            Write-VsLog -Level WARN -Context $context -Message 'DeployTo enthaelt Rand-Leerraum, Steuerzeichen oder Wildcards (* ? [ ]); erwartet wird der exakte Name einer Collection. Wert wird nicht automatisch korrigiert. Paket uebersprungen.'
+            return $null
+        }
     }
     # Der Katalog trennt "Name-Version" am LETZTEN Bindestrich (lib/repo/catalog.php).
     # Eine version mit Bindestrich (z.B. "1.0-beta") wuerde die Basisnamen-Gruppierung

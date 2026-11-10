@@ -28,7 +28,7 @@ flowchart TD
   B --> S["Neuer Lauf: Lauf-ID, „started“ melden (Site Health meldet nur „completed“)"]
   S --> A["Eigentliche Arbeit (Abschnitte unten)"]
   A --> F{"Fehler im Lauf?"}
-  F -->|ja| E["Ergebnis „fail“; Devices und Packages Sync pausieren 30 s, ab dem dritten Fehler in Folge 60 s und bauen die MECM-Verbindung neu auf; der Autoimporter pausiert immer 60 s, baut neu auf und scannt beim nächsten Lauf voll; Site Health pausiert immer sein Intervall"]
+  F -->|ja| E["Ergebnis „fail“; Devices und Packages Sync pausieren 30 s, ab dem dritten Fehler in Folge 60 s und bauen die MECM-Verbindung neu auf; der Autoimporter pausiert 60 s, baut neu auf und scannt beim nächsten Lauf voll, aber nur, wenn MECM nicht mehr antwortet (ein Fehler in einem Paket bleibt ein offener Punkt dieses Pakets); Site Health pausiert immer sein Intervall"]
   F -->|nein| D
   E --> D["„completed“ melden: Ergebnis (ok, warning, fail, unknown), Dauer, Zähler, Ursachen; Timeout 5 s, ein Zustellfehler landet nur im Log"]
   D --> P["Pause bis zum nächsten Lauf"]
@@ -113,7 +113,7 @@ flowchart TD
 
 ## Package Import (Autoimporter)
 
-Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type, mit `generateOwnDeviceColletion` auch Collection und Deployments. Die Verteilung an die DPs übernimmt MECM: Der Autoimporter fordert sie je neuem Dateimanifest höchstens einmal an und zeigt den Stand nur an (AV2). Gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben oder der letzte Lauf offene Punkte hatte. Die Prüfsumme liest nur neue oder geänderte Dateien (AL1): Der laufende Prozess merkt sich den Hash je Datei unter Pfad, Größe, Änderungszeit und NTFS-ChangeTime, die auch eine zurückgesetzte Änderungszeit verrät. Dateien, die in den letzten zwei Minuten geschrieben wurden, werden nie gemerkt, jeder Eintrag verfällt nach 12 bis 24 Stunden, und der erste Lauf nach einem Neustart der Aufgabe hasht alles. Die Paketprüfsummen des Scans nutzen denselben Speicher.
+Macht aus den Paketordnern unter `files` mit ihrer `config.json` MECM-Applications samt Deployment Type, mit `generateOwnDeviceColletion` auch Collection und Deployments. Die Verteilung an die DPs übernimmt MECM: Der Autoimporter fordert sie je neuem Dateimanifest höchstens einmal an und zeigt den Stand nur an (AV2). Voll gescannt wird nur, wenn sich Dateien unter `files` oder `Package_Vorlage` geändert haben. Offene Punkte halten den Dateistand nicht mehr zurück (AR1): Jedes Paket mit offenen Punkten steht mit seinen Ursachen in einer Wiederholliste und wird allein erneut bearbeitet, wenn sein Termin fällig ist. Vorübergehende Ursachen wiederholt der Autoimporter nach dem Takt, danach mit doppeltem Abstand bis höchstens eine Stunde; was nur eine Änderung in MECM behebt (fehlende oder mehrdeutige `DeployTo`-Collection, Definitionsdrift), gleich nach einer Stunde; was nur eine Dateiänderung behebt (ungültige `config.json`, `DeployTo` auf die eigene Collection), gar nicht, denn die Dateiänderung löst ohnehin einen Vollscan aus. Jeder Lauf meldet alle offenen Punkte der Liste, auch ein ruhiger. Die Liste lebt im Prozess; nach einem Neustart scannt der erste Lauf voll. Die Prüfsumme liest nur neue oder geänderte Dateien (AL1): Der laufende Prozess merkt sich den Hash je Datei unter Pfad, Größe, Änderungszeit und NTFS-ChangeTime, die auch eine zurückgesetzte Änderungszeit verrät. Dateien, die in den letzten zwei Minuten geschrieben wurden, werden nie gemerkt, jeder Eintrag verfällt nach 12 bis 24 Stunden, und der erste Lauf nach einem Neustart der Aufgabe hasht alles. Die Paketprüfsummen des Scans nutzen denselben Speicher; eine gerade geschriebene Datei liest ein Lauf trotzdem nur einmal, weil er ihren Hash bis zum Laufende behält.
 
 ```mermaid
 flowchart TD
@@ -122,22 +122,22 @@ flowchart TD
   SH -->|nein| SH1["Warten, Registry jede Minute neu lesen"] --> SH
   SH -->|ja| S["Neuer Lauf, „started“ melden"]
   S --> M["Mit MECM verbinden (einmal), Ordner VirtuSphere_Applications anlegen, falls sie fehlen"]
-  M --> H["Prüfsumme über files und Package_Vorlage bilden: nur neue oder geänderte Dateien hashen (Pfad, Größe, Änderungszeit, ChangeTime), sonst gemerkten Hash nehmen; jünger als 2 Minuten nie merken, Einträge verfallen nach 12 bis 24 h, erster Lauf nach Neustart hasht alles"]
+  M --> H["Prüfsumme über files und Package_Vorlage bilden: nur neue oder geänderte Dateien hashen (Pfad, Größe, Änderungszeit, ChangeTime), sonst gemerkten Hash nehmen; jünger als 2 Minuten nie merken, aber bis Laufende behalten; Einträge verfallen nach 12 bis 24 h, erster Lauf nach Neustart hasht alles"]
   H -.->|Datei ändert sich währenddessen| HX["Lauf „warning“ (source_changing), Dateistand verwerfen, MECM-Verbindung bleibt, nächster Lauf prüft erneut"]
-  H --> C{"Dateien geändert oder offene Punkte im letzten Lauf?"}
-  C -->|nein| C1["Ergebnis „ok“ ohne Scan (unverändert); Verteilhinweise des letzten Scans weiter melden, ihren Stand höchstens alle 30 Minuten lesend auffrischen"] --> R
+  H --> C{"Dateien geändert oder ein Paket der Wiederholliste fällig?"}
+  C -->|nein| C1["Kein Scan (unverändert): offene Punkte der Wiederholliste und Verteilhinweise weiter melden, mit offenen Punkten „warning“; Verteilstand höchstens alle 30 Minuten lesend auffrischen"] --> R
   C -->|ja| B{"Ordner files vorhanden?"}
-  B -->|nein| B1["Warnung source_missing"] --> R
-  B -->|ja| RC["Alle config.json lesen (ungültige sind offene Punkte), je Produkt die höchste Version bestimmen"]
+  B -->|nein| B1["Warnung source_missing, Dateistand nicht merken"] --> R
+  B -->|ja| RC["Alle config.json lesen (ungültige sind offene Punkte bis zur nächsten Dateiänderung; DeployTo muss eine Zeichenkette ohne Randleerraum und Wildcards sein), je Produkt die höchste Version bestimmen. Bei geänderten Dateien jedes Paket bearbeiten, sonst nur die fälligen der Wiederholliste"]
   RC --> T
-  subgraph JP["Je Paketordner"]
+  subgraph JP["Je bearbeitetem Paketordner, mit eigenem Fehlerrahmen"]
     T["Vorlage (install.ps1, Reporter) ins Paket kopieren, wenn sie abweicht; eine Altvorlage ohne reporting-Ordner gleicht bis zum Cutover nur install.ps1 ab"]
     T -.->|nicht kopierbar| T1["Paket übersprungen, offener Punkt package_template_failed"]
     T --> AM{"Applicationname eindeutig?"}
     AM -->|nein, mehrere| AM1["Paket übersprungen, keine Definition und kein Content verändert, offener Punkt package_definition_drift"]
     AM -->|ja| A{"Application Name-Version vorhanden?"}
     A -->|nein| A1["Application (Marker) und Deployment Type anlegen: install.ps1, Erkennung per Registry-Schlüssel der Version"] --> DT
-    A1 -.->|Deployment Type scheitert| A2["Application wieder entfernen; der ganze Lauf endet mit „fail“"]
+    A1 -.->|Deployment Type scheitert| A2["Application wieder entfernen; das Paket endet mit package_scan_failed"]
     A -->|ja| DT{"Genau ein Deployment Type, Identität lesbar?"}
     DT -->|nein| DT1["Paket übersprungen, offener Punkt"]
     DT -->|ja| FA{"Gespeicherter Auftrag nennt eine andere Identität (Application neu angelegt), und sie hat weder VirtuSphere-Marker noch liegt sie in VirtuSphere_Applications?"}
@@ -145,14 +145,27 @@ flowchart TD
     FA -->|nein| CR{"Neues Dateimanifest, oder noch kein von MECM angenommener Auftrag?"}
     CR -->|ja| CR1["Höchstens ein Auftrag je Manifest: Erstverteilung an die DP-Gruppe oder neue Contentversion; nicht angenommen oder keine DP-Gruppe: offener Punkt package_content_request_failed"] --> TR
     CR -->|nein| TR["Verteilstand nur lesen: Fehler oder laufende Kopie auf DPs ist ein Hinweis, kein offener Punkt; DPs sperren nichts"]
-    TR --> CO["Nur mit generateOwnDeviceColletion: Collection Name-Version und Deployment „Erforderlich“ anlegen, bei DeployTo zusätzlich „Verfügbar“; Fehlendes nachziehen. Ohne das Feld entsteht keine Collection, und das Paket fehlt im Portalkatalog, weil der Packages Sync nur Collections liest"]
-    CO --> RO{"removeOldVersion und höchste Version?"}
+    TR --> CO["Nur mit generateOwnDeviceColletion: Collection Name-Version und Deployment „Erforderlich“ anlegen; Fehlendes nachziehen. Ohne das Feld entsteht keine Collection, und das Paket fehlt im Portalkatalog, weil der Packages Sync nur Collections liest"]
+    CO --> DD{"DeployTo gesetzt? Exakt in MECM prüfen (Device- oder User-Collection)"}
+    DD -->|eigene Collection| DD1["Kein Deployment „Verfügbar“, offener Punkt package_deployto_invalid, keine Wiederholung bis zur Dateiänderung"]
+    DD -->|fehlt| DD2["Kein Deployment, offener Punkt package_deployto_missing mit Collection-Name, Wiederholung nach einer Stunde"]
+    DD -->|mehrere gleichnamig| DD3["Kein Deployment, offener Punkt package_deployto_ambiguous"]
+    DD -->|vorhanden| DD4["Deployment „Verfügbar“ anlegen, wenn es fehlt; scheitert es: package_deploy_failed"]
+    DD -->|nein| RO
+    DD1 --> RO
+    DD2 --> RO
+    DD3 --> RO
+    DD4 --> RO{"removeOldVersion und höchste Version?"}
     RO -->|ja| RO1["Bereinigungsplan zweimal lesen; bereit (Ersatzauftrag angenommen, Verteilung begonnen, Deployment geprüft; DP-Stand egal): Deployments, Applications und Collections älterer Versionen löschen; gesperrt: offener Punkt"]
+    RO -->|nein| PE
+    RO1 --> PE["Ergebnis in die Wiederholliste: mit Ursachen offen samt nächstem Termin, ohne Ursachen behoben"]
   end
-  RO -->|nein| OP
-  RO1 --> OP{"Lauf ohne offene Punkte? Verteilhinweise zählen nicht"}
-  OP -->|ja| OP1["Dateistand merken: der nächste Lauf ohne Änderung bleibt ruhig"] --> R
-  OP -->|nein| R["„completed“ melden (Ordner, angelegt, entfernt, offene Punkte; mit offenen Punkten „warning“); Pause = Takt (Standard 60 s)"]
+  A2 --> PX
+  JP -.->|unerwarteter MECM-Fehler| PX{"Antwortet MECM noch (Get-CMSite)?"}
+  PX -->|ja| PX1["Nur dieses Paket: offener Punkt package_scan_failed, Wiederholung nach dem Takt, dann mit doppeltem Abstand; die folgenden Pakete laufen weiter"] --> PE
+  PX -->|nein| PX2["Lauf „fail“ (mecm_unavailable): Dateistand verwerfen, Verbindung neu aufbauen, 60 s Pause"] --> R
+  PE --> OP["Dateistand merken, auch mit offenen Punkten; ein Vollscan streicht Einträge verschwundener Ordner"]
+  OP --> R["„completed“ melden (Ordner, angelegt, entfernt, alle offenen Punkte der Wiederholliste; mit offenen Punkten „warning“; Ursachen bis zur Grenze von 1024 Zeichen, Rest als „(+n weitere)“); Pause = Takt (Standard 60 s)"]
   R -.->|nächster Lauf| S
 ```
 

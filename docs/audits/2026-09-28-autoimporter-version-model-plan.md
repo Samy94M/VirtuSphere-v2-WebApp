@@ -8,6 +8,8 @@ Arbeitsstand 20.10.2026 (Session s38, Worktree `vs-s38`, noch nicht committet): 
 
 Nachtrag 04.11.2026 (AV2, [Plan](2026-11-04-av2-dp-check-relaxation-plan.md), ADR-0034 Amendment 7): DP-Zustände sind keine offenen Punkte mehr. `package_content_failed` und `package_content_in_progress` sind Hinweise, der Lauf bleibt `ok` und merkt den Dateistand. Damit ist AV-F15 für DP-Zustände gelöst; ruhige Läufe melden die gemerkten Hinweise weiter und frischen sie höchstens alle 30 Minuten lesend auf (AV-R07 bleibt: kein Abgleich ohne Dateiänderung). AV-R01 und AV-R04 (AV-B) bleiben offen; sie würden Contentaufträge weiter einschränken und widersprechen AV2 nicht.
 
+Nachtrag 10.11.2026 (AR1, Audit-Fund F-2): AV-R01 und AV-E06 weichen vom ausgelieferten Code ab und werden nicht umgesetzt. Nutzerentscheid 09.11.2026: Eine Änderung nur an der `config.json` löst weiterhin eine neue Contentversion aus; die Warnung „Dateien geändert, Version nicht angehoben“ gibt es nicht. Maßgeblich ist [MECM-Integration](../operations/mecm-integration.md) (Dateimanifest einschließlich `config.json`).
+
 Einstieg und Reihenfolge stehen im [Register](2026-09-12-consolidated-session-backlog.md), Abschnitt „Entscheidungen 28.09.2026“. Dieser Plan ersetzt die dortige offene Frage M03-Q03 und besitzt Entscheidungen, Befunde, Randfälle und Arbeitspakete dieses Strangs.
 
 ## 1. Ziel
