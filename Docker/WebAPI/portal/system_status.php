@@ -9,6 +9,7 @@ require_once __DIR__ . '/../lib/system_status_page.php';
 require_once __DIR__ . '/../lib/system_status_service_panel.php';
 require_once __DIR__ . '/../lib/system_status_shared_panels.php';
 require_once __DIR__ . '/../lib/system_status_panels.php';
+require_once __DIR__ . '/../lib/system_status_backup_panels.php';
 require_once __DIR__ . '/../lib/system_status_esxi_panels.php';
 require_once __DIR__ . '/../lib/system_status_deviation_view.php';
 require_once __DIR__ . '/../lib/system_status_directory_panels.php';
@@ -39,6 +40,8 @@ if ($serviceSnapshot !== null) {
     $snapshot['esxi']['claim_state'] = $serviceSnapshot['claim_state'];
 }
 $directoryData = system_status_directory_panel_data($connection, $user);
+// Read once: the overview card and the section below must judge the same files.
+$hostData = system_status_backup_panel_data();
 
 // A detail query is accepted only for an ESXi credential already present in
 // the snapshot. Invalid, deleted and type-confused IDs collapse to no selection
@@ -138,7 +141,7 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
         </div>
     </section>
 
-    <?php system_status_render_overview($snapshot, $deviationCount, $anchorQuery, $serviceSnapshot, $directoryData); ?>
+    <?php system_status_render_overview($snapshot, $deviationCount, $anchorQuery, $serviceSnapshot, $directoryData, $hostData, $deviationReport); ?>
     <?php // Directly under the overview: this is the card an operator opens the
           // page for while a deploy is in flight, and it is the only one that
           // carries an action changing what the installation does next. ?>
@@ -148,6 +151,7 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
     <?php system_status_render_ansible($snapshot, $user); ?>
     <?php system_status_render_esxi($snapshot, $user, $selectedInventoryId, $selectedInventory); ?>
     <?php system_status_render_deviations($deviationView, $activeVlanNames, $user, $reassignFrom, $deviationCount, $deviationReport, $anchorQuery); ?>
+    <?php system_status_render_host_backup($hostData, $user); ?>
     <?php system_status_render_internal($snapshot, $user); ?>
 </div>
 <?php layout_footer(); ?>

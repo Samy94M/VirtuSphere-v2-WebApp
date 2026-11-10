@@ -482,6 +482,9 @@ const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS = 'deviations';
 // needs the same stable fragment the other sections have.
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE = 'deploy-service';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY = 'directory-status';
+// Backup, restore drill, checksums and certificate (SY1): an area with its own
+// overview card, so a failed backup can no longer hide behind a green strip.
+const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP = 'host-backup';
 const VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_REASSIGN = 'reassign';
 
 const VIRTUSPHERE_INTEGRATION_SOURCES = [

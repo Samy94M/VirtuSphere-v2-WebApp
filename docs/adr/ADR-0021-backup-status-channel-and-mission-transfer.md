@@ -44,3 +44,11 @@ Amendment 1 kept `scripts/restore_test.sh` unchanged and put the record in a wra
 - `scripts/restore-drill-record.sh` is removed with its callers and tests. `VIRTUSPHERE_RESTORE_DRILL_RECORD_COMMAND`, the command the portal hints name, is now the drill itself (`sudo sh scripts/restore_test.sh`).
 - Writing into the backup directory is limited to `status/restore-drill.jsonl`. Dumps, config archives and manifests stay read-only for the drill and are never mounted; `VirtuSphere.RestoreRoot.Tests.ps1` pins both.
 - The record also shows on the Backup card of the settings page (time, age, "due" from `VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS`), read through the same `backup_drill_status_read()`.
+
+## Amendment 3 (2026-11-10, SY1): host state is an area with its own overview card
+
+Amendment 1 put the host-state rows under "Internal services" without an overview card, so a failed backup, a checksum mismatch or an expired certificate left every overview card green. The rows did not change, their place did.
+
+- System status renders them as the section "Host und Backup" with the anchor `host-backup` (`VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP`) and its own overview card. The card shows the worst row in that row's own word and colour, ranked by `virtusphere_heartbeat_state_rank()`, so `unknown` outranks `ok` and a row without evidence keeps the card from reading green. Card and section read one list of row badges (`system_status_host_checks()`) from one read of the channel per request.
+- The certificate row counts for the card only while it is rendered, that is while `https_listener_live()` holds.
+- Unchanged: the evidence still does not feed the heartbeat state of "Internal services", the dashboard banner or `health.php`, and missing, broken or future-dated evidence is still `unknown`, never `ok`.

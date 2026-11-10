@@ -19,6 +19,7 @@ function system_status_url(string $anchor, array $query = []): string
         VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI,
         VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS,
         VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL,
+        VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP,
         VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_REASSIGN,
     ], true);
     $dynamicCredential = preg_match('/\Acredential-([1-9][0-9]*)\z/D', $anchor, $match) === 1

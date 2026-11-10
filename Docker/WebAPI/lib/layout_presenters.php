@@ -96,12 +96,16 @@ function esxi_state_badge(string $state): string
  * a colour or a wording the section below it contradicts. `null` is neutral and
  * says the scan did not run; it is deliberately not green, because "not
  * checked" and "nothing found" are different facts and only one of them is
- * reassuring.
+ * reassuring. A zero is green only on complete, current evidence (SY1): a zero
+ * over some kinds or over old names is no release, and the section says so.
  */
-function deviation_count_badge(?int $count): string
+function deviation_count_badge(?int $count, bool $evidenceCurrent): string
 {
     if ($count === null) {
         return portal_badge('neutral', __t('system_status.dev_count_unknown'));
+    }
+    if ($count === 0 && !$evidenceCurrent) {
+        return portal_badge('neutral', __t('system_status.dev_count_none_unconfirmed'));
     }
 
     return portal_badge($count > 0 ? 'warning' : 'success', match (true) {

@@ -18,6 +18,7 @@ require_once __DIR__ . '/system_status_shared_panels.php';
 require_once __DIR__ . '/system_status_mecm_panels.php';
 require_once __DIR__ . '/system_status_ansible_panels.php';
 require_once __DIR__ . '/system_status_internal_panels.php';
+require_once __DIR__ . '/system_status_backup_panels.php';
 require_once __DIR__ . '/system_status_service_panel.php';
 require_once __DIR__ . '/system_status_directory_panels.php';
 
@@ -31,6 +32,11 @@ require_once __DIR__ . '/system_status_directory_panels.php';
  * at a portgroup that no longer exists is not a green installation, and until
  * now that fact lived only at the bottom of the page.
  *
+ * The "Host and backup" card reads the same host data the section below it
+ * renders (system_status_host_checks()), so a failed backup or a checksum
+ * mismatch turns the strip red instead of hiding behind "Internal services"
+ * (SY1). Without data it reads unknown, never OK.
+ *
  * The hrefs go through system_status_url() with the query the page is currently
  * showing. That keeps them same-document (the browser compares everything left
  * of the fragment), so a card is still an in-page jump and a selected ESXi
@@ -38,8 +44,10 @@ require_once __DIR__ . '/system_status_directory_panels.php';
  *
  * @param array<string,mixed> $snapshot
  * @param array<string,int|string> $query the page's current selection
+ * @param array<string, array<string,mixed>|null>|null $hostData from system_status_backup_panel_data()
+ * @param array<string,mixed>|null $deviationReport the report the count came from
  */
-function system_status_render_overview(array $snapshot, ?int $deviationCount = null, array $query = [], ?array $serviceSnapshot = null, ?array $directoryData = null): void
+function system_status_render_overview(array $snapshot, ?int $deviationCount = null, array $query = [], ?array $serviceSnapshot = null, ?array $directoryData = null, ?array $hostData = null, ?array $deviationReport = null): void
 {
     $cards = [
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE, __t('system_status.overview_deploy_service'), $serviceSnapshot, 'deploy'],
@@ -47,6 +55,7 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE, __t('system_status.overview_ansible'), $snapshot['ansible']['state'] ?? 'unknown', 'ansible'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI, __t('system_status.overview_esxi'), $snapshot['esxi']['state'] ?? 'unknown', 'esxi'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS, __t('system_status.overview_deviations'), '', 'deviations'],
+        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP, __t('system_status.overview_host_backup'), '', 'host'],
         [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL, __t('system_status.overview_internal'), $snapshot['internal']['state'], 'heartbeat'],
     ];
     if ($directoryData !== null) {
@@ -56,7 +65,7 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
     // alone in the last row (seven: 3 + 3 + 1) switches to four columns (4 + 3)
     // instead. It is derived from the same list the strip renders, so the
     // optional directory card cannot put the grid out of step with its cards.
-    // The list always holds the six fixed cards, so no lower bound is needed.
+    // The list always holds the seven fixed cards, so no lower bound is needed.
     $overviewModifier = count($cards) % 3 === 1 ? ' status-overview-four' : '';
     ?>
     <nav class="status-overview<?php echo $overviewModifier; ?>" aria-label="<?php echo h(__t('system_status.overview_heading')); ?>">
@@ -67,12 +76,13 @@ function system_status_render_overview(array $snapshot, ?int $deviationCount = n
                 echo match ($kind) {
                     'esxi' => esxi_state_badge((string) $state),
                     'ansible' => ansible_state_badge((string) $state),
-                    'deviations' => deviation_count_badge($deviationCount),
+                    'deviations' => deviation_count_badge($deviationCount, system_status_deviation_evidence_current($deviationReport)),
                     'deploy' => $state === null
                         ? portal_badge('neutral', __t('system_status.service_unknown'))
                         : portal_badge((string) $state['badge'], deploy_service_summary_label($state)),
                     'directory' => directory_state_badge((string) $state),
                     'mecm' => system_status_mecm_overview_badge($snapshot),
+                    'host' => system_status_host_overview_badge($hostData ?? []),
                     default => heartbeat_badge((string) $state),
                 };
                 ?>

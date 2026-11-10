@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-// Host state in System status, Internal services section
+// Host and backup section of System status
 // (lib/system_status_backup_panels.php). Numbers arrive as placeholders from the
 // constants in lib/backup_evidence.php and lib/constants.php.
 return [
-    'heading' => 'Host state',
-    'hint' => 'The Docker host reports these values through the backup status channel. Without a report the value reads "Unknown".',
+    'heading' => 'Host and backup',
+    'hint' => 'The Docker host reports these values through the backup status channel. Without a report the value reads "Unknown". The overview card shows the worst row; "Unknown" never counts as OK there.',
     'row_backup' => 'Backup',
     'row_drill' => 'Restore test',
     'row_scrub' => 'Checksums',

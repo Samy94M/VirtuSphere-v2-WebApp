@@ -29,6 +29,7 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     'help-status-overview' => 'system-status',
     'help-status-deploy' => 'system-status',
     'help-status-directory' => 'system-status',
+    'help-status-host' => 'system-status',
     'help-status-mecm' => 'system-status',
     // The per-cause steps of the device sync. A punctual run with open points
     // links here from its card instead of repeating the cause list there.

@@ -38,6 +38,18 @@ const VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES = [
 const VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS = 1800;
 
 /**
+ * Whether the deviation scan compared every object kind against current names.
+ * Only then is a zero a release; both readers of the count pass this to
+ * deviation_count_badge(). A missing report is not current (fail closed).
+ *
+ * @param array<string,mixed>|null $report esxi_inventory_deviation_report()
+ */
+function system_status_deviation_evidence_current(?array $report): bool
+{
+    return !empty($report['fully_current']);
+}
+
+/**
  * How many mission/VM deviations the scan found, or null when it could not run.
  *
  * The three answers are genuinely different and the difference is the whole

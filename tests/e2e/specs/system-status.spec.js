@@ -94,10 +94,10 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
   await expect(page.locator('h1')).toHaveText(/Systemstatus|System status/);
   await expect(page.locator('nav a[href="system_status.php"]')).toHaveText(/Systemstatus|System status/);
   const directoryCards = await page.locator('.status-overview-card[href="system_status.php#directory-status"]').count();
-  await expect(page.locator('.status-overview-card')).toHaveCount(6 + directoryCards);
+  await expect(page.locator('.status-overview-card')).toHaveCount(7 + directoryCards);
   // The hrefs are built by system_status_url(), so they carry the page path;
   // with no query they still resolve to this same document and jump in place.
-  for (const anchor of ['deploy-service', 'mecm', 'ansible', 'esxi', 'deviations', 'internal-services']) {
+  for (const anchor of ['deploy-service', 'mecm', 'ansible', 'esxi', 'deviations', 'host-backup', 'internal-services']) {
     await expect(page.locator(`.status-overview-card[href="system_status.php#${anchor}"]`)).toHaveCount(1);
     await expect(page.locator(`#${anchor}`)).toHaveCount(1);
   }
@@ -390,19 +390,20 @@ test('unknown Systemstatus POST action is rejected with HTTP 400', async ({ brow
   }
 });
 
-// The overview has six fixed signals and one optional directory signal. Desktop
-// shows three cards per row; seven cards take four on the first row so that no
-// card sits alone on the last one (4 + 3, never 3 + 3 + 1). The renderer derives
-// that from the count, so this test measures the rows the browser actually
-// placed, grouped by card top, instead of asserting the modifier class.
+// The overview has seven fixed signals (SY1 added "Host and backup") and one
+// optional directory signal. Desktop shows three cards per row; seven cards take
+// four on the first row so that no card sits alone on the last one (4 + 3, never
+// 3 + 3 + 1), eight stay at three (3 + 3 + 2). The renderer derives that from
+// the count, so this test measures the rows the browser actually placed, grouped
+// by card top, instead of asserting the modifier class.
 test('Systemstatus overview: all visible cards share the responsive grid', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto('system_status.php');
 
   const cards = page.locator('.status-overview .status-overview-card');
   const count = await cards.count();
-  expect(count, 'the strip carries all six fixed health signals').toBeGreaterThanOrEqual(6);
-  expect(count, 'at most the directory signal is conditional').toBeLessThanOrEqual(7);
+  expect(count, 'the strip carries all seven fixed health signals').toBeGreaterThanOrEqual(7);
+  expect(count, 'at most the directory signal is conditional').toBeLessThanOrEqual(8);
 
   // Cards per row, in document order.
   const rowsAt = async () => page.locator('.status-overview').evaluate((strip) => {
@@ -414,7 +415,7 @@ test('Systemstatus overview: all visible cards share the responsive grid', async
     return [...rows.values()];
   });
 
-  const desktopRows = count === 7 ? [4, 3] : [3, 3];
+  const desktopRows = count === 7 ? [4, 3] : [3, 3, 2];
   expect(await rowsAt(), 'desktop shows three cards per row, four on the first row for seven cards').toEqual(desktopRows);
 
   // Still the desktop rule at a narrow laptop width, where the sidebar leaves
@@ -424,7 +425,7 @@ test('Systemstatus overview: all visible cards share the responsive grid', async
 
   // At 850px and below the strip takes two columns, so the last row may be short.
   await page.setViewportSize({ width: 800, height: 900 });
-  const tabletRows = count === 7 ? [2, 2, 2, 1] : [2, 2, 2];
+  const tabletRows = count === 7 ? [2, 2, 2, 1] : [2, 2, 2, 2];
   expect(await rowsAt(), 'at 850px and below the strip takes two columns').toEqual(tabletRows);
 
   await page.setViewportSize({ width: 500, height: 900 });
