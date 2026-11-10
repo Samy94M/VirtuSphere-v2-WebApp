@@ -26,7 +26,7 @@ $db = db();
 $id = repo_create_credential($db, [
     'type' => VIRTUSPHERE_CREDENTIAL_TYPE_ANSIBLE,
     'name' => '${name}',
-    'host' => '10.99.0.7',
+    'host' => '203.0.113.7',
     'port' => 22,
     'username' => 'e2e',
 ], 'e2e-secret-value', 1);
@@ -201,8 +201,8 @@ test('an action hint is a repair instruction: it appears on a broken row and not
 $db = db();
 $db->query("DELETE FROM deploy_integration_heartbeats WHERE source IN ('device-sync','packages-sync','autoimporter')");
 $db->query("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_result_at, last_success_at, last_status, last_event, report_version, last_ip, interval_seconds, beat_count)
-  VALUES ('device-sync', NOW(), NOW(), NOW(), NOW(), 'ok', 'completed', 2, '10.0.0.1', 30, 5),
-         ('packages-sync', NOW() - INTERVAL 2 DAY, NOW() - INTERVAL 2 DAY, NOW() - INTERVAL 2 DAY, NULL, 'ok', 'completed', 2, '10.0.0.1', 30, 5)");
+  VALUES ('device-sync', NOW(), NOW(), NOW(), NOW(), 'ok', 'completed', 2, '192.0.2.1', 30, 5),
+         ('packages-sync', NOW() - INTERVAL 2 DAY, NOW() - INTERVAL 2 DAY, NOW() - INTERVAL 2 DAY, NULL, 'ok', 'completed', 2, '192.0.2.1', 30, 5)");
 echo 'SEEDED';
 `);
 
@@ -295,7 +295,7 @@ audit_event(
     VIRTUSPHERE_AUDIT_RESULT_DENIED,
     ['action' => 'getDeviceList'],
     null,
-    '10.99.0.42'
+    '203.0.113.42'
 );
 echo 'SEEDED';
 `, ['lib/repo/log.php']);
@@ -314,7 +314,7 @@ echo 'SEEDED';
 
     // The refused IP is named, because that IP is exactly what goes on the
     // allowlist; a warning that withholds it is a warning the operator cannot act on.
-    await expect(page.locator('#mecm .alert-warning')).toContainText('10.99.0.42');
+    await expect(page.locator('#mecm .alert-warning')).toContainText('203.0.113.42');
   } finally {
     restoreHeartbeats(snapshot);
     restoreDenials(denials);
@@ -439,7 +439,7 @@ test('a legacy V1 heartbeat renders as yellow "Legacy" with an update hint', asy
 $db = db();
 $db->query("DELETE FROM deploy_integration_heartbeats WHERE source IN ('device-sync','packages-sync','autoimporter')");
 $db->query("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_status, last_event, last_ip, interval_seconds, beat_count)
-  VALUES ('device-sync', NOW(), NOW(), 'ok', 'heartbeat', '10.0.0.1', 30, 5)");
+  VALUES ('device-sync', NOW(), NOW(), 'ok', 'heartbeat', '192.0.2.1', 30, 5)");
 echo 'SEEDED';
 `);
     await page.goto('system_status.php#mecm');
@@ -458,7 +458,7 @@ test('a V2 completed ok run renders green under the integration subgroup', async
 $db = db();
 $db->query("DELETE FROM deploy_integration_heartbeats WHERE source IN ('device-sync','packages-sync','autoimporter')");
 $db->query("INSERT INTO deploy_integration_heartbeats (source, last_seen_at, last_checked_at, last_result_at, last_success_at, last_status, last_event, report_version, last_ip, interval_seconds, beat_count)
-  VALUES ('device-sync', NOW(), NOW(), NOW(), NOW(), 'ok', 'completed', 2, '10.0.0.1', 30, 5)");
+  VALUES ('device-sync', NOW(), NOW(), NOW(), NOW(), 'ok', 'completed', 2, '192.0.2.1', 30, 5)");
 echo 'SEEDED';
 `);
     await page.goto('system_status.php#mecm');

@@ -14,6 +14,7 @@ const { PORTAL_PAGES, pageUrl, pageLabel } = require('../lib/pages');
 const { ROLES } = require('../lib/auth');
 const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
 const { formReferenceProblems } = require('../lib/form-accessibility');
+const { ERROR_PAGE_SELECTOR } = require('../lib/error-page');
 
 const THEMES = ['light', 'dark'];
 const MARK = 'e2ea11y';
@@ -60,6 +61,14 @@ for (const pageDef of PORTAL_PAGES) {
       }, theme);
 
       await page.goto(pageUrl(pageDef, seeded), { waitUntil: 'domcontentloaded' });
+
+      // A page that ended in the portal error renderer would be scanned as the
+      // error page (or as half a page with it appended) and could pass: axe
+      // finds little to fault on a heading and a paragraph (C5).
+      await expect(
+        page.locator(ERROR_PAGE_SELECTOR),
+        `portal error page on ${pageLabel(pageDef)} (${theme})`
+      ).toHaveCount(0);
 
       // A closed <details> is not in the accessibility tree, so axe skips its
       // content entirely: legends, technical-detail blocks and repair forms were

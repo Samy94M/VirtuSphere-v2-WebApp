@@ -438,7 +438,7 @@ test('the status column says whether it refreshes itself, and an old Ansible res
   const esxiName = PREFIX + 'cadence-esxi';
   const ansibleName = PREFIX + 'cadence-ansible';
   const esxiId = seedCredential(esxiName);
-  const ansibleId = seedCredential(ansibleName, '10.99.0.7', 22, 'ansible');
+  const ansibleId = seedCredential(ansibleName, '203.0.113.7', 22, 'ansible');
   // Own the global selection instead of assuming a clean database: whether the
   // scheduler resolves a host is one of the branches under test, so it must be
   // set here rather than inherited from whatever ran before.
@@ -504,7 +504,7 @@ $db = db();
 $db->query("UPDATE deploy_esxi_inventory_state SET paused_until_credential_change = 0 WHERE credential_id = ${Number(esxiId)}");
 echo 'UNPAUSED';
 `);
-    const secondAnsible = seedCredential(PREFIX + 'cadence-ansible-2', '10.99.0.8', 22, 'ansible');
+    const secondAnsible = seedCredential(PREFIX + 'cadence-ansible-2', '203.0.113.8', 22, 'ansible');
     expect(secondAnsible, 'the second Ansible credential was created').toBeGreaterThan(0);
     inventoryAnsibleSetting(0);
     await page.reload();
