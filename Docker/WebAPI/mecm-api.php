@@ -63,6 +63,7 @@ function machine_client_interfaces(mysqli $db, int $vmId): array
  * as the serverlist (vm_disk_client_layout()). Read-only like the rest of
  * getDeviceInfos; the current portal names, not a rollout snapshot, because a
  * label is display data and the client confirms each match by SCSI target and size.
+ * DN2 adds `label_custom` per entry; the system disk is renamed only when it is true.
  */
 function machine_client_disks(mysqli $db, int $vmId): array
 {

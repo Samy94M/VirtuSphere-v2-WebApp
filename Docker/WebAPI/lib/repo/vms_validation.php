@@ -155,7 +155,9 @@ function repo_validate_disks(mixed $disks): array
 
         $validator = new Validator();
         $row = [
-            'disk_name' => $validator->optionalString('disks.' . $index . '.disk_name', repo_object_get($disk, 'disk_name', vm_disk_default_name($index + 1)), validator_label('disk_name', 'Disk name'), 255),
+            // DN2: vm_disk_stored_name() is the one rule for an empty or default
+            // name (system disk stays empty, a data disk gets 'Disk <n>').
+            'disk_name' => vm_disk_stored_name($validator->optionalString('disks.' . $index . '.disk_name', repo_object_get($disk, 'disk_name', ''), validator_label('disk_name', 'Disk name'), 255), $index + 1),
             'disk_size' => $validator->intRange(
                 'disks.' . $index . '.disk_size',
                 repo_object_get($disk, 'disk_size', VIRTUSPHERE_VM_DEFAULTS['disk_size_gb']),
@@ -166,9 +168,6 @@ function repo_validate_disks(mixed $disks): array
             ),
             'disk_type' => $validator->enum('disks.' . $index . '.disk_type', repo_object_get($disk, 'disk_type', VIRTUSPHERE_VM_DEFAULTS['disk_type']), validator_label('disk_type', 'Disk type'), VIRTUSPHERE_DISK_TYPES, VIRTUSPHERE_VM_DEFAULTS['disk_type']),
         ];
-        if ($row['disk_name'] === '') {
-            $row['disk_name'] = vm_disk_default_name($index + 1);
-        }
         $validator->throwIfInvalid();
         $validated[] = $row;
         $index++;

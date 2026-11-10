@@ -239,7 +239,8 @@
     // this file holds no copy of them and cannot drift from
     // vm_disk_default_name(). A name already taken (a middle row was removed,
     // then a new one added) is stepped over rather than duplicated: two disks
-    // with one name is the very thing this fixes.
+    // with one name is the very thing this fixes. Since DN2 the first row's
+    // proposal is empty (the Windows drive keeps the task sequence label).
     function applyRowAutoName(row, target) {
         var input = row.querySelector('[data-autoname-prefix]');
         if (!input) {

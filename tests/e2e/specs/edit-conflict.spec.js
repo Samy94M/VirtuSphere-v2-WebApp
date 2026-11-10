@@ -49,6 +49,7 @@ $vmId = (int) $db->insert_id;
 $stmt = $db->prepare("INSERT INTO deploy_interfaces (vm_id, ip, subnet, gateway, vlan, mac, mode) VALUES (?, '', '', '', ?, NULL, 'dhcp')");
 $stmt->bind_param('is', $vmId, $vlan);
 $stmt->execute();
+// DN2: the legacy default on purpose; the editor shows it as the empty field it saves.
 $diskName = 'System';
 $diskSize = 50;
 $diskType = 'thin';

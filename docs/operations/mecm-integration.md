@@ -35,7 +35,7 @@ verknüpfen                  Rolloutnamen, weist
                             Collections zu)               --->  mecm_updateid.php (ResourceID)
                                                                                         getInfos (Registry füllen)
                                                           <---  mecm-api.php?action=  hostname (umbenennen+Reboot)
-                                                                getDeviceInfos        VMDisksOnline (Platten online, Namen aus getDeviceInfos)
+                                                                getDeviceInfos        VMDisksOnline (Platten online, Namen und Systembezeichnung aus getDeviceInfos)
                                                                                         staticip (Netz konfigurieren)
                                                           <---  mecm_client_ack.php (Client bereit, 5/5)
                      Ergebnisberichte + Site-Health + Client-Phasen  --->  mecm_report.php
@@ -1182,7 +1182,18 @@ Kernpunkte:
   manuelle Blocker und werden nicht formatiert. Vorhandene GPT-/MBR-Datenplatten
   werden nur online geschaltet. `optional: no disk work required` bedeutet
   ausschließlich, dass keine Zusatzplatte und keine offene eigene Operation
-  vorhanden ist.
+  vorhanden ist und das Windows-Laufwerk nicht umbenannt wurde; dahinter steht
+  das Token `system=kept` oder `system=skip:<Grund>`.
+- **Bezeichnung des Windows-Laufwerks (DN2):** Nach den Datenplatten setzt die
+  Phase einen eigenen Namen der Systemplatte (`label_custom` in
+  `getDeviceInfos`) als Bezeichnung des Volumes auf `%SystemDrive%`, nur auf der
+  Boot-Partition der einen Bootplatte, nur bei Abweichung und mit Nachlesen. Sie
+  merkt sich die Rolloutrevision als Wert `SystemVolumeLabelRevision` am
+  Schlüssel `VMDiskManagement` (kein Journaleintrag unter `Operations`) und fasst
+  das Laufwerk in derselben Revision nicht wieder an. Fehlt `label_custom`
+  (älteres Portal), bleibt die Bezeichnung der Task Sequence. Ein Fehlschlag ist
+  `system=skip:system_label_failed` mit WARN, die Phase bleibt erfolgreich.
+  Ablauf und Gründe: `docs/operations/client-flows.md`.
 - Einheitliches Datei-Logging unter `C:\Program Files\VirtuSphere\Logs` (30
   Tage). Jede Application enthält Phase, `VirtuSphere-Client-Common.ps1`,
   `VirtuSphere-Client-Logging.ps1` und `bootstrap.json`; Packaging staged und hashprüft die Skriptdateien als

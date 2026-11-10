@@ -217,3 +217,38 @@ Consequences:
   `MachineApiWireTest` pins the key list and the layout.
 - `disk.EnableUUID` stays unset: switching it on would change the `UniqueId`
   of existing disks, which the disk journal uses as identity.
+
+## Amendment 7 (2026-11-09): `label_custom` per disk entry (DN2)
+
+A name of the operator's own on the system disk (position 0) becomes the label
+of the Windows drive after the task sequence; an empty name keeps the task
+sequence label. Before DN2 the portal stored `System` as the system disk
+default and sent it as `volume_label`, so a client could not tell a default
+from a chosen name: a new client against an older portal would have renamed
+every Windows drive to `System`. Each entry of `disks` therefore gains one
+additive boolean, `label_custom`, true when the row carries a name of its own
+(`vm_disk_name_is_default()` in `lib/defaults.php` is false). On the system
+disk the legacy `System`, an auto name `Disk <n>` and an empty name count as
+default; there the entry carries `volume_label: null` and `label_custom:
+false`. On data disks only the exact own default `Disk <n>` counts as default;
+their `volume_label` is unchanged from amendment 6.
+
+Consequences:
+
+- `volume_label` stays a key on every entry, `null` when nothing is to be set,
+  because the client refuses a list with an entry that lacks it.
+- New client, older portal: `label_custom` is missing, the client never renames
+  the Windows drive (`system=skip:portal_without_system_label`). Older client,
+  new portal: the extra key is ignored, the old client never touches position 0.
+- The client renames only on `label_custom: true` with a usable label, only
+  the volume on `$env:SystemDrive` whose partition is the boot partition of the
+  one boot disk on SCSI target 0, only when the current label differs, and
+  reads it back. It records the rollout revision under
+  `HKLM:\SOFTWARE\VirtuSphere\VMDiskManagement` (`SystemVolumeLabelRevision`)
+  and does not touch the label again for that revision. A failure is a warning;
+  the phase still succeeds. A size different from the portal value is only a
+  warning (the portal size applies at creation only).
+- No migration: stored `System` reads as no name of its own everywhere
+  (`vm_disk_stored_name()`), and an import of an older export does the same.
+- `MachineApiWireTest` pins the key set per entry and the values for the
+  legacy default, an auto name and an own name.

@@ -220,5 +220,14 @@ sowie einmal die Erholung. Daraus entstehen keine weiteren Portalaufrufe.
   ihren Namen aus dem VM-Editor als Laufwerksbezeichnung, wenn ihr SCSI-Target
   und ihre Größe eindeutig zu einer Portalplatte passen (Feld `disks` von
   `getDeviceInfos`); sonst bleibt `VM_Disk_<Nummer>` mit einem Grund im Detail
-  (DN1, `docs/operations/client-flows.md`). Bestehende Platten werden nie
-  umbenannt.
+  (DN1, `docs/operations/client-flows.md`). Bestehende Datenplatten werden nie
+  umbenannt. Trägt die Systemplatte im VM-Editor einen eigenen Namen
+  (`label_custom` in `getDeviceInfos`), erhält das Windows-Laufwerk auf
+  `%SystemDrive%` ihn danach als Bezeichnung (DN2): vorher lesen, nur bei
+  Abweichung setzen, nachlesen, Rolloutrevision als
+  `SystemVolumeLabelRevision` am Schlüssel `VMDiskManagement` merken. Ein leeres
+  Feld, die Altvorgabe „System“ und ein Portal ohne `label_custom` lassen die
+  Bezeichnung der Task Sequence stehen. Das Detail nennt
+  `system=renamed|kept|skip:<Grund>`; ein Fehlschlag ist eine Warnung, die Phase
+  bleibt erfolgreich. Ein geändertes Skript braucht ein neu gebautes und
+  verteiltes Paket `client_VMDisksOnline`.

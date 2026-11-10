@@ -6,7 +6,8 @@ require_once __DIR__ . '/defaults.php';
 
 /**
  * The disks of one VM as the create playbook builds them, and the Windows
- * volume label each new data disk receives (DN1). Three facts live here
+ * volume label each new data disk receives (DN1) and the Windows drive takes
+ * when the system disk carries a name of its own (DN2). Three facts live here
  * because they must agree with each other:
  *
  *  - the disk rows: deploy_disks in id order, one default disk for a VM without
@@ -20,6 +21,13 @@ require_once __DIR__ . '/defaults.php';
 
 /** NTFS keeps at most 32 characters (UTF-16 code units) as a volume label. */
 const VIRTUSPHERE_DISK_VOLUME_LABEL_MAX = 32;
+
+/**
+ * DN2: what the empty system disk name field shows as placeholder. It is the
+ * label the task sequence usually gives the Windows drive; the portal does not
+ * know the actual one, so the value is shown and never saved (decisions F6).
+ */
+const VIRTUSPHERE_SYSTEM_DISK_LABEL_PLACEHOLDER = 'Windows';
 
 /**
  * community.vmware 6.2.0 vmware_guest (configure_disks) puts every disk of the
@@ -39,9 +47,8 @@ function vm_disk_rows(array $vm): array
     foreach (array_values((array) ($vm['disks'] ?? [])) as $position => $disk) {
         $size = (int) trim((string) ($disk['disk_size'] ?? ''));
         $type = strtolower(trim((string) ($disk['disk_type'] ?? '')));
-        $name = trim((string) ($disk['disk_name'] ?? ''));
         $rows[] = [
-            'name' => $name !== '' ? $name : vm_disk_default_name($position + 1),
+            'name' => vm_disk_stored_name((string) ($disk['disk_name'] ?? ''), $position + 1),
             'size_gb' => $size > 0 ? $size : (int) VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'],
             'type' => $type !== '' ? $type : VIRTUSPHERE_VM_DEFAULTS['disk_type'],
         ];
@@ -49,7 +56,7 @@ function vm_disk_rows(array $vm): array
 
     if ($rows === []) {
         $rows[] = [
-            'name' => vm_disk_default_name(1),
+            'name' => vm_disk_stored_name('', 1),
             'size_gb' => (int) VIRTUSPHERE_VM_DEFAULTS['disk_size_gb'],
             'type' => VIRTUSPHERE_VM_DEFAULTS['disk_type'],
         ];
@@ -108,30 +115,34 @@ function vm_disk_volume_label(string $name): ?string
  * only where it differs from the name as saved. `$position` is 1-based in the
  * order of the editor rows, which is the order the validator saves them.
  *
- *  - none: the system disk (it is never formatted), or the label equals the name;
- *  - default: the field is empty, the validator saves vm_disk_default_name()
- *    and that name becomes the label;
+ *  - none: the label equals the name, or the system disk name is a default
+ *    (empty, 'System', 'Disk <n>'): the task sequence label stays and the
+ *    field says so with its placeholder (DN2, F7: the empty field is silent);
+ *  - default: a data disk field is empty, the validator saves
+ *    vm_disk_default_name() and that name becomes the label;
  *  - fallback: no usable character is left, the client keeps VM_Disk_<number>;
- *  - label: the label is cut or has characters replaced.
+ *  - system_fallback: the same on the system disk, where the Windows drive
+ *    keeps the task sequence label instead;
+ *  - label: the label is cut or has characters replaced (both disk kinds).
  *
  * portal/assets/vm-disk-label.js mirrors this and vm_disk_volume_label() for
  * live typing; both run the vectors in tests/fixtures/disk-label-vectors.json.
  *
- * @return array{kind: 'none'|'default'|'fallback'|'label', label: ?string}
+ * @return array{kind: 'none'|'default'|'fallback'|'system_fallback'|'label', label: ?string}
  */
 function vm_disk_label_notice(string $name, int $position): array
 {
-    if ($position <= 1) {
-        return ['kind' => 'none', 'label' => null];
-    }
     // The validator trims with trim() (ASCII white space), so does vm_disk_rows().
     $saved = trim($name);
+    if ($position <= 1 && vm_disk_name_is_default($saved, 1)) {
+        return ['kind' => 'none', 'label' => null];
+    }
     if ($saved === '') {
         return ['kind' => 'default', 'label' => vm_disk_volume_label(vm_disk_default_name($position))];
     }
     $label = vm_disk_volume_label($saved);
     if ($label === null) {
-        return ['kind' => 'fallback', 'label' => null];
+        return ['kind' => $position <= 1 ? 'system_fallback' : 'fallback', 'label' => null];
     }
 
     return ['kind' => $label === $saved ? 'none' : 'label', 'label' => $label];
@@ -142,7 +153,15 @@ function vm_disk_label_notice(string $name, int $position): array
  * position, SCSI unit, size and volume label, in the order the playbook
  * creates the disks.
  *
- * @return list<array{position: int, scsi_unit: ?int, size_gb: int, volume_label: ?string}>
+ * DN2 (ADR-0019 amendment 7, decision F1) adds `label_custom` per entry: true
+ * when the row carries a name of the operator's own (vm_disk_name_is_default()
+ * is false). The client renames the Windows drive only on position 0 with
+ * label_custom true; a portal without the key (older release) never causes a
+ * rename, even though it sends 'System' as volume_label there. volume_label
+ * stays a key on every entry, null when nothing is to be set: the client
+ * refuses a list with an entry that lacks it.
+ *
+ * @return list<array{position: int, scsi_unit: ?int, size_gb: int, volume_label: ?string, label_custom: bool}>
  */
 function vm_disk_client_layout(array $vm): array
 {
@@ -153,6 +172,7 @@ function vm_disk_client_layout(array $vm): array
             'scsi_unit' => vm_disk_scsi_unit($position),
             'size_gb' => $row['size_gb'],
             'volume_label' => vm_disk_volume_label($row['name']),
+            'label_custom' => !vm_disk_name_is_default($row['name'], $position + 1),
         ];
     }
 
