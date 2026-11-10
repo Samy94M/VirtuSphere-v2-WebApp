@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+require_once dirname(__DIR__, 2) . '/lib/auth.php';
 require_once dirname(__DIR__, 2) . '/lib/auth_rate_limit.php';
 require_once dirname(__DIR__, 2) . '/lib/db.php';
 require_once dirname(__DIR__, 2) . '/lib/directory_restore_converge.php';
+require_once dirname(__DIR__, 2) . '/lib/directory_status.php';
 
 final class DirectoryAuthStateTest extends TestCase
 {
@@ -69,6 +71,66 @@ final class DirectoryAuthStateTest extends TestCase
 
         self::assertFalse($blocked['ok']);
         self::assertSame('rate_limited', $blocked['reason']);
+    }
+
+    /**
+     * N1a A10 (plan section 12, "lokal deaktiviert: sofort beenden"): the
+     * session file of a deactivated account is destroyed with a typed audit
+     * row, so a reactivation within its lifetime does not revive it. The rule
+     * is source-independent; a local account proves it without a directory.
+     */
+    public function testALocallyDeactivatedAccountEndsItsSessionForGood(): void
+    {
+        $name = self::PREFIX . 'deactivated_' . bin2hex(random_bytes(3));
+        $hash = password_hash('correct-horse-battery-staple', PASSWORD_DEFAULT);
+        $role = VIRTUSPHERE_ROLE_USER;
+        $email = $name . '@example.test';
+        $stmt = $this->db->prepare('INSERT INTO deploy_users (name, email, password, role, is_active, must_change_password) VALUES (?, ?, ?, ?, 1, 0)');
+        $stmt->bind_param('ssss', $name, $email, $hash, $role);
+        $stmt->execute();
+        $userId = (int) $this->db->insert_id;
+        try {
+            session_start_secure();
+            $_SESSION = ['user_id' => $userId, 'session_expires_at' => time() + 600, 'auth_source' => VIRTUSPHERE_AUTH_SOURCE_LOCAL];
+            self::assertNotNull(current_user($this->db), 'precondition: an active account is signed in');
+
+            $this->db->query('UPDATE deploy_users SET is_active = 0 WHERE id = ' . $userId);
+            self::assertNull(current_user($this->db));
+            self::assertArrayNotHasKey('user_id', $_SESSION, 'the session must be destroyed, not just answered with null');
+            $row = $this->db->query("SELECT context_json FROM deploy_logs WHERE event_code = 'auth.session_ended' AND user_id = " . $userId . ' ORDER BY id DESC LIMIT 1')->fetch_assoc();
+            self::assertIsArray($row);
+            self::assertSame(VIRTUSPHERE_AUDIT_SESSION_REASON_ACCOUNT_DEACTIVATED, json_decode((string) $row['context_json'], true)['reason'] ?? null);
+
+            $this->db->query('UPDATE deploy_users SET is_active = 1 WHERE id = ' . $userId);
+            self::assertNull(current_user($this->db), 'reactivating the account does not revive the ended session');
+        } finally {
+            $_SESSION = [];
+            $this->db->query('DELETE FROM deploy_logs WHERE user_id = ' . $userId);
+            $this->db->query('DELETE FROM deploy_users WHERE id = ' . $userId);
+        }
+    }
+
+    /**
+     * N1a A7: the breaker stores the typed search-account reason so the System
+     * status can name it; anything outside the closed list is stored as the
+     * generic rejection, never as free text.
+     */
+    public function testTheBreakerStoresTheTypedSearchAccountReasonAndRefusesFreeText(): void
+    {
+        if (repo_directory_config($this->db) !== null) {
+            self::markTestSkipped('Disposable integration database already has directory configuration.');
+        }
+        $this->db->query("INSERT INTO deploy_ad_config (id, enabled, revision, bind_upn, bind_secret_ciphertext, ca_certificate_pem) VALUES (1, 1, 4, 'search@example.test', 'ciphertext', 'certificate')");
+        $this->ownsConfig = true;
+
+        repo_directory_pause_controllers_for_bind_rejection($this->db, 4, VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_LOCKED);
+        $config = repo_directory_config($this->db);
+        self::assertSame(4, (int) $config['automatic_bind_blocked_revision']);
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_LOCKED, (string) $config['automatic_bind_blocked_reason']);
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_ACCOUNT_LOCKED, directory_bind_block_outcome($config));
+
+        repo_directory_pause_controllers_for_bind_rejection($this->db, 4, 'AcceptSecurityContext error');
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED, (string) repo_directory_config($this->db)['automatic_bind_blocked_reason']);
     }
 
     public function testRestoreDisablesDirectoryAndInvalidatesControllerRevision(): void

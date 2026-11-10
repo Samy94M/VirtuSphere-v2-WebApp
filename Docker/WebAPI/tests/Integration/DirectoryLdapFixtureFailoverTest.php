@@ -66,6 +66,61 @@ final class DirectoryLdapFixtureFailoverTest extends TestCase
         self::assertSame($liveControllerId, $result['controller_id'], 'Must have authenticated against the second, reachable controller.');
     }
 
+    /**
+     * N1a A2: a priority-1 controller that completes TLS and then stays silent
+     * costs at most the answer timeout; the sign-in still reaches dc2 inside
+     * the request budget.
+     */
+    public function testASilentPrimaryAfterTlsFailsOverToTheSecondControllerInsideTheBudget(): void
+    {
+        DirectoryLdapFixture::importAlice($this->db);
+        $config = DirectoryLdapFixture::insertConfig($this->db, DirectoryLdapFixture::trustedBundle(), $this->actorId);
+        DirectoryLdapFixture::insertController($this->db, DirectoryLdapFixture::HOST_SILENT, $config['revision'], 1, $this->actorId);
+        $liveControllerId = DirectoryLdapFixture::insertController($this->db, DirectoryLdapFixture::HOST_DC2, $config['revision'], 2, $this->actorId);
+
+        $start = directory_deadline_now();
+        $result = directory_authenticate_user($this->db, DirectoryLdapFixture::ALICE_UPN, DirectoryLdapFixture::ALICE_PASSWORD);
+        $elapsed = directory_deadline_now() - $start;
+
+        self::assertSame($liveControllerId, $result['controller_id']);
+        self::assertLessThan(VIRTUSPHERE_DIRECTORY_TOTAL_TIMEOUT_SECONDS + 2, $elapsed, 'the silent controller may cost the answer timeout, never the TCP timeout');
+        $silent = array_values(array_filter(repo_directory_controllers($this->db), static fn (array $row): bool => $row['host'] === DirectoryLdapFixture::HOST_SILENT));
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_TIMEOUT, (string) $silent[0]['last_outcome'], 'the silent controller is recorded as a timeout');
+    }
+
+    /**
+     * N1a F7: a successful sign-in reads the controller certificate once and
+     * stores its expiry, so a renewed certificate replaces the date of the
+     * last manual test.
+     */
+    public function testASuccessfulSignInStoresTheControllerCertificateOncePerDay(): void
+    {
+        DirectoryLdapFixture::importAlice($this->db);
+        $config = DirectoryLdapFixture::insertConfig($this->db, DirectoryLdapFixture::trustedBundle(), $this->actorId);
+        $controllerId = DirectoryLdapFixture::insertController($this->db, DirectoryLdapFixture::HOST_DC1, $config['revision'], 1, $this->actorId);
+
+        directory_authenticate_user($this->db, DirectoryLdapFixture::ALICE_UPN, DirectoryLdapFixture::ALICE_PASSWORD);
+        $parsed = openssl_x509_parse(DirectoryLdapFixture::trustedBundle());
+        self::assertIsArray($parsed);
+        // The fixture certificate runs past the TIMESTAMP range (2046).
+        $expected = directory_certificate_not_after_column((int) $parsed['validTo_time_t']);
+        self::assertSame($expected, $this->certificateNotAfter($controllerId));
+
+        // A second contact the same day does not read again: a value written
+        // in between survives it.
+        $this->db->query("UPDATE deploy_ad_controller_state SET certificate_not_after = '2030-01-01 00:00:00' WHERE controller_id = " . $controllerId);
+        directory_authenticate_user($this->db, DirectoryLdapFixture::ALICE_UPN, DirectoryLdapFixture::ALICE_PASSWORD);
+        self::assertSame('2030-01-01 00:00:00', $this->certificateNotAfter($controllerId));
+    }
+
+    private function certificateNotAfter(int $controllerId): string
+    {
+        $row = $this->db->query('SELECT certificate_not_after FROM deploy_ad_controller_state WHERE controller_id = ' . $controllerId)->fetch_assoc();
+        self::assertIsArray($row);
+
+        return (string) $row['certificate_not_after'];
+    }
+
     public function testWrongPasswordIsAuthoritativeAndNeverFansOutToTheSecondController(): void
     {
         DirectoryLdapFixture::importAlice($this->db);

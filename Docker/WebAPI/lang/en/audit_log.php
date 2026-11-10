@@ -41,7 +41,8 @@ return [
     'password_change_rejected' => 'rejected :scope password change:reason_part',
     'login_succeeded' => 'login succeeded (:source:controller_part)',
     'login_controller' => ', controller :controller',
-    'login_rejected' => 'login rejected:user_part: :reason',
+    'login_rejected' => 'login rejected:user_part: :reason:directory_part',
+    'login_directory_reason' => ' (Active Directory reports: :reason)',
     'login_user_name' => ' for user ":username"',
     'login_user_unknown' => ' for input matching no account (:length characters)',
     'login_user_id' => ' for user id :id',
@@ -213,6 +214,17 @@ return [
     'code_session_reason_directory_disabled' => 'directory_disabled',
     'code_session_reason_directory_account_disabled' => 'directory_account_disabled',
     'code_session_reason_directory_unavailable' => 'directory_unavailable',
+    'code_session_reason_directory_account_locked' => 'directory_account_locked',
+    'code_session_reason_directory_password_changed' => 'directory_password_changed',
+    'code_session_reason_account_deactivated' => 'account_deactivated',
+
+    'code_directory_bind_reason_invalid' => 'invalid',
+    'code_directory_bind_reason_password_expired' => 'password_expired',
+    'code_directory_bind_reason_must_change' => 'must_change',
+    'code_directory_bind_reason_locked' => 'locked',
+    'code_directory_bind_reason_disabled' => 'disabled',
+    'code_directory_bind_reason_expired' => 'expired',
+    'code_directory_bind_reason_logon_hours' => 'logon_hours',
 
     'code_password_reason_current_password_is_wrong' => 'current password is wrong',
 
@@ -231,6 +243,9 @@ return [
     'code_directory_outcome_domain_mismatch' => 'domain_mismatch',
     'code_directory_outcome_read_only_controller_unsupported' => 'read_only_controller_unsupported',
     'code_directory_outcome_invalid_response' => 'invalid_response',
+    'code_directory_outcome_service_password_expired' => 'service_password_expired',
+    'code_directory_outcome_service_account_disabled' => 'service_account_disabled',
+    'code_directory_outcome_service_account_locked' => 'service_account_locked',
 
     'code_credential_test_outcome_ok' => 'ok',
     'code_credential_test_outcome_preflight' => 'preflight',

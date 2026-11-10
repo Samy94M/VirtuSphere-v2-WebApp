@@ -110,8 +110,9 @@ function login(string $username, string $password, ?mysqli $db = null, string $s
     session_start_secure();
     $db = $db ?? db();
     $username = trim($username);
-    if ($username === '' || $password === '' || !in_array($source, VIRTUSPHERE_AUTH_SOURCES, true)) {
-        // An empty/invalid form submit touches neither LDAP nor the counters.
+    if (!auth_login_input_is_admissible($username, $password, $source)) {
+        // An empty/invalid form submit touches neither LDAP nor the counters
+        // (N1a A1/A8/F4: also a NUL byte, an overlong AD password, a non-UPN).
         return ['ok' => false, 'reason' => 'invalid'];
     }
 
@@ -208,7 +209,7 @@ function auth_complete_login(array $user, string $source): array
         $_SESSION['directory_verified_at'] = time();
         unset($_SESSION['directory_retry_at']);
     } else {
-        unset($_SESSION['directory_verified_at'], $_SESSION['directory_retry_at']);
+        unset($_SESSION['directory_verified_at'], $_SESSION['directory_retry_at'], $_SESSION['directory_pwd_last_set']);
     }
     session_touch_expiry();
 
@@ -286,44 +287,32 @@ function current_user(?mysqli $db = null): ?array
         static fn (): ?array => repo_fetch_one($db, 'SELECT id, name, auth_source, email, role, is_active, must_change_password, last_seen_at, ad_object_guid, ad_upn, ad_sam_account_name, ad_display_name, ad_account_enabled, ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1', 'i', [$userId]),
         static fn (): ?array => repo_fetch_one($db, "SELECT id, name, 'local' AS auth_source, email, role, is_active, must_change_password, last_seen_at, NULL AS ad_object_guid, NULL AS ad_upn, NULL AS ad_sam_account_name, NULL AS ad_display_name, NULL AS ad_account_enabled, NULL AS ad_last_checked_at FROM deploy_users WHERE id = ? LIMIT 1", 'i', [$userId]),
     );
-    if ($user === null || (int) $user['is_active'] !== 1) {
+    if ($user === null) {
+        return null;
+    }
+    if ((int) $user['is_active'] !== 1) {
+        // N1a A10, plan section 12: a deactivated account ends its session now,
+        // for both sources. Returning null alone kept user_id in the session
+        // file, and a reactivation within its lifetime revived it.
+        auth_end_session($db, $userId, VIRTUSPHERE_AUDIT_SESSION_REASON_ACCOUNT_DEACTIVATED);
         return null;
     }
 
     if ((string) $user['auth_source'] === VIRTUSPHERE_AUTH_SOURCE_ACTIVE_DIRECTORY) {
-        $verifiedAt = (int) ($_SESSION['directory_verified_at'] ?? 0);
-        if (!directory_is_enabled($db)) {
-            audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
-                'reason' => VIRTUSPHERE_AUDIT_SESSION_REASON_DIRECTORY_INTEGRATION_DISABLED,
-            ], $userId);
-            logout();
-            return null;
-        }
-        if ($verifiedAt === 0 || time() - $verifiedAt >= VIRTUSPHERE_DIRECTORY_SESSION_RECHECK_SECONDS) {
-            $retryAt = (int) ($_SESSION['directory_retry_at'] ?? 0);
-            if ($retryAt > time()) {
-                return $user;
-            }
-            $check = directory_revalidate_user($db, $user);
-            if ($check['ok']) {
-                $_SESSION['directory_verified_at'] = time();
-                unset($_SESSION['directory_retry_at']);
-                $fresh = repo_directory_user_by_guid($db, (string) $user['ad_object_guid']);
-                if ($fresh !== null) {
-                    $user = $fresh;
-                }
-            } elseif ($check['temporary'] && $verifiedAt > 0 && time() - $verifiedAt < VIRTUSPHERE_DIRECTORY_SESSION_GRACE_SECONDS) {
-                $remainingGrace = VIRTUSPHERE_DIRECTORY_SESSION_GRACE_SECONDS - (time() - $verifiedAt);
-                $_SESSION['directory_retry_at'] = time() + min(60, max(1, $remainingGrace));
-            } else {
-                audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, ['reason' => audit_snippet($check['reason'], 256)], $userId);
-                logout();
-                return null;
-            }
-        }
+        return auth_directory_session_user($db, $user, $userId);
     }
 
     return $user;
+}
+
+/** Writes auth.session_ended with a typed reason, then destroys the session. */
+function auth_end_session(mysqli $db, int $userId, string $reason): void
+{
+    // Audit before logout(): it wipes the session this entry is attributed to.
+    audit_event($db, VIRTUSPHERE_AUDIT_EVENT_AUTH_SESSION_ENDED, 'user', $userId, VIRTUSPHERE_AUDIT_RESULT_DENIED, [
+        'reason' => audit_snippet($reason, 256),
+    ], $userId);
+    logout();
 }
 
 function require_login(?mysqli $db = null): array

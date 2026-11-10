@@ -180,6 +180,18 @@ function directory_tls_probe(string $host, int $port, string $caFile, ?float $de
 
     return [
         'fingerprint' => implode(':', str_split(strtoupper($fingerprint), 2)),
-        'not_after' => gmdate('Y-m-d H:i:s', $notAfter),
+        'not_after' => directory_certificate_not_after_column($notAfter),
     ];
+}
+
+/**
+ * certificate_not_after is a TIMESTAMP column, which ends in January 2038. A
+ * later expiry is stored as that last value: earlier than the truth, so the
+ * expiry warning can only come too early, never too late, and a long-lived
+ * certificate can no longer make the state write (and with N1a F7 every
+ * sign-in) fail.
+ */
+function directory_certificate_not_after_column(int $epoch): string
+{
+    return gmdate('Y-m-d H:i:s', min($epoch, VIRTUSPHERE_DIRECTORY_CERTIFICATE_NOT_AFTER_MAX));
 }

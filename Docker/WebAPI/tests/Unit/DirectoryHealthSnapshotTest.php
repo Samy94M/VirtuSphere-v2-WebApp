@@ -100,10 +100,57 @@ final class DirectoryHealthSnapshotTest extends TestCase
 
     public function testAnExpiredCertificateIsDanger(): void
     {
+        // N1a A4: danger needs a stored expiry with no success after it. The
+        // last success here is two days old, the certificate expired yesterday.
         self::assertSame(
             'danger',
-            directory_controller_ampel($this->controller(['certificate_not_after' => $this->daysAgo(1)]), 3, $this->now())
+            directory_controller_ampel($this->controller([
+                'certificate_not_after' => $this->daysAgo(1),
+                'last_success_at' => $this->daysAgo(2),
+            ]), 3, $this->now())
         );
+        self::assertSame(
+            'danger',
+            directory_controller_ampel($this->controller([
+                'certificate_not_after' => $this->daysAgo(1),
+                'last_success_at' => null,
+            ]), 3, $this->now()),
+            'no success at all after an expiry is a real expiry'
+        );
+    }
+
+    public function testASuccessAfterTheStoredExpiryMeansARenewedCertificateAndIsStale(): void
+    {
+        // N1a A4: a controller that answered after its stored notAfter cannot
+        // have used that certificate (autoenrollment renewed it in place), so
+        // the stored values are outdated evidence, not a fault.
+        self::assertSame(
+            'stale',
+            directory_controller_ampel($this->controller([
+                'certificate_not_after' => $this->daysAgo(3),
+                'last_success_at' => $this->daysAgo(1),
+            ]), 3, $this->now())
+        );
+        $snapshot = directory_health_snapshot($this->config(), [$this->controller([
+            'certificate_not_after' => $this->daysAgo(3),
+            'last_success_at' => $this->daysAgo(1),
+        ])], $this->now());
+        self::assertSame('warning', $snapshot['overall'], 'a renewed certificate degrades the pool, it is no outage');
+        self::assertSame(1, $snapshot['counts']['stale']);
+        self::assertSame(0, $snapshot['counts']['disturbed']);
+    }
+
+    public function testABindBlockNamesItsTypedReasonAndFallsBackForOldRows(): void
+    {
+        self::assertSame(
+            VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_PASSWORD_EXPIRED,
+            directory_bind_block_outcome($this->config(['automatic_bind_blocked_reason' => VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_PASSWORD_EXPIRED]))
+        );
+        self::assertSame(
+            VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED,
+            directory_bind_block_outcome($this->config(['automatic_bind_blocked_reason' => 'raw controller text']))
+        );
+        self::assertSame(VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED, directory_bind_block_outcome($this->config()));
     }
 
     public function testSnapshotSeparatesAdmissionFromOperatingEvidence(): void

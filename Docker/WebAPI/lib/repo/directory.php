@@ -94,9 +94,10 @@ function directory_select_login_controllers(array $controllers): array
     return $controllers === [] ? [] : [$controllers[0]];
 }
 
-function repo_directory_pause_controllers_for_bind_rejection(mysqli $db, int $revision): void
+function repo_directory_pause_controllers_for_bind_rejection(mysqli $db, int $revision, string $reason = VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED): void
 {
-    $reason = VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED;
+    // Typed search-account rejection only (N1a A7), never controller text.
+    $reason = in_array($reason, VIRTUSPHERE_DIRECTORY_SERVICE_REJECTION_OUTCOMES, true) ? $reason : VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED;
     $stmt = $db->prepare(
         'UPDATE deploy_ad_config
          SET automatic_bind_blocked_revision = ?, automatic_bind_blocked_at = NOW(),

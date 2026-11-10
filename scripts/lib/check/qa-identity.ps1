@@ -43,6 +43,7 @@ function Get-QaStackIdentity {
         # (ADR-0015-Ergaenzung: kein Skip in dieser Lane).
         Services       = @('webserver', 'php', 'mysql', 'deploy-worker', 'maintenance-worker',
             'ldap-dc1', 'ldap-dc2', 'ldap-badcert-unknown-ca', 'ldap-badcert-expired',
-            'ldap-badcert-wrongname', 'ldap-dc-rotated', 'ldap-blackhole')
+            'ldap-badcert-wrongname', 'ldap-dc-rotated', 'ldap-blackhole',
+            'ldap-badcert-noeku', 'ldap-tls-legacy', 'ldap-tls-silent')
     }
 }

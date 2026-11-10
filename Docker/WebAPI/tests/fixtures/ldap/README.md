@@ -17,12 +17,18 @@ Fehlerursachen gleichzeitig beweist:
 | `expired.*` | dc-expired | root-a | `expired.vs-ldap.test` | von root-a signiert, aber `notBefore`/`notAfter` fest auf 2020-01-01/2021-01-01 (unabhaengig vom Systemdatum abgelaufen) |
 | `wrongname.*` | dc-wrongname | root-a | `unexpected.vs-ldap.test` | von root-a signiert und gueltig, aber Servername (`dc-wrongname.vs-ldap.test`) weicht vom SAN ab |
 | `root-c.*` | dc-rotated | selbstsigniert | `dc-rotated.vs-ldap.test` | zweite, unabhaengige Root fuer den CA-Rotationstest (ueberlappendes Bundle root-a+root-c, dann Cutover) |
+| `noeku.*` | dc-noeku (N1a) | root-a | `dc-noeku.vs-ldap.test` | von root-a signiert, gueltig, korrekter Name, aber `extendedKeyUsage=clientAuth` ohne serverAuth |
+| `tls11.*` | dc-tls11 (N1a) | root-a | `dc-tls11.vs-ldap.test` | gueltig und vertraut; die Rolle `tls-legacy` spricht damit hoechstens TLS 1.1 |
+| `silent.*` | dc-silent (N1a) | root-a | `dc-silent.vs-ldap.test` | gueltig und vertraut; die Rolle `tls-silent` schliesst TLS ab und antwortet danach nie |
 
 Neu erzeugen (nur bei Bedarf, z.B. nach Ablauf der 20-Jahres-Gueltigkeit der
 langlebigen Zertifikate): `openssl req -x509 -newkey rsa:2048 -nodes -days
 7300 -subj "/CN=<name>" -addext "subjectAltName=DNS:<name>"` fuer die Roots,
 `openssl x509 -req -CA root-a.crt.txt -CAkey root-a.key.txt -CAcreateserial`
-fuer die von root-a signierten Blaetter. `expired.*` braucht `openssl ca` mit
+fuer die von root-a signierten Blaetter (`noeku`, `tls11`, `silent` am
+09.11.2026 so erzeugt, mit `-days 7300`, `subjectAltName=DNS:<name>`,
+`basicConstraints=CA:FALSE` und bei `noeku` zusaetzlich
+`extendedKeyUsage=clientAuth` in der `-extfile`). `expired.*` braucht `openssl ca` mit
 expliziten `-startdate`/`-enddate` (ASN1 GENERALIZEDTIME), da `openssl x509
 -req` keine Datumsflaggen kennt; die festen Vergangenheitswerte machen das
 Zertifikat unabhaengig vom Build-Zeitpunkt reproduzierbar abgelaufen.

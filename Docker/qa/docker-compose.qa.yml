@@ -303,6 +303,70 @@ services:
       start_period: 5s
     restart: "no"
 
+  # N1a: Zertifikat ohne Server-Authentication-EKU (nur clientAuth), sonst
+  # gueltig, vertraut und mit passendem Namen.
+  ldap-badcert-noeku:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-stub
+      CERT_NAME: noeku
+    volumes:
+      - *qa-ldap-fixtures
+    networks:
+      default:
+        aliases:
+          - dc-noeku.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  # N1a A5: gueltiges, vertrautes Zertifikat, aber hoechstens TLS 1.1.
+  ldap-tls-legacy:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-legacy
+      CERT_NAME: tls11
+    volumes:
+      - *qa-ldap-fixtures
+    networks:
+      default:
+        aliases:
+          - dc-tls11.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
+  # N1a A2: TLS wird angenommen, auf LDAP kommt nie eine Antwort.
+  ldap-tls-silent:
+    build:
+      context: ./Docker/ldap-fixture
+    environment:
+      FIXTURE_ROLE: tls-silent
+      CERT_NAME: silent
+    volumes:
+      - *qa-ldap-fixtures
+    networks:
+      default:
+        aliases:
+          - dc-silent.vs-ldap.test
+    healthcheck:
+      test: ["CMD", "pgrep", "-x", "socat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: "no"
+
   ldap-blackhole:
     build:
       context: ./Docker/ldap-fixture

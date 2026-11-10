@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/directory_bind_codes.php';
 require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/directory_identity.php';
 require_once __DIR__ . '/directory_result.php';
@@ -19,10 +20,38 @@ function directory_ldap_require_option(mixed $connection, int $option, mixed $va
     }
 }
 
+/**
+ * Clamps every client-side wait of this handle to what is left of the request
+ * deadline, before each blocking call (plan 11.3):
+ * - NETWORK_TIMEOUT bounds the TCP connect and the TLS handshake;
+ * - TIMEOUT bounds the wait for the answer of a synchronous operation
+ *   (bind, read, search). Without it a controller that completes TLS and then
+ *   stays silent held the FPM worker until the kernel gave up on TCP (N1a A2);
+ * - TIMELIMIT is only the search time limit the server is asked to enforce.
+ */
 function directory_ldap_apply_deadline(mixed $connection, ?float $deadline): void
 {
     directory_ldap_require_option($connection, LDAP_OPT_NETWORK_TIMEOUT, directory_deadline_remaining_seconds($deadline, VIRTUSPHERE_DIRECTORY_NETWORK_TIMEOUT_SECONDS));
+    directory_ldap_require_option($connection, LDAP_OPT_TIMEOUT, directory_deadline_remaining_seconds($deadline, VIRTUSPHERE_DIRECTORY_OPERATION_TIMEOUT_SECONDS));
     directory_ldap_require_option($connection, LDAP_OPT_TIMELIMIT, directory_deadline_remaining_seconds($deadline, VIRTUSPHERE_DIRECTORY_OPERATION_TIMEOUT_SECONDS));
+}
+
+/**
+ * The TLS 1.2 floor as [option, value]. A build without the constants cannot
+ * enforce it, so it is refused like a missing extension instead of connecting
+ * without a floor (N1a A5). $isDefined is the test seam for that build.
+ *
+ * @param (callable(string):bool)|null $isDefined
+ * @return array{int,int}
+ */
+function directory_ldap_tls_minimum(?callable $isDefined = null): array
+{
+    $isDefined ??= static fn (string $name): bool => defined($name);
+    if (!$isDefined('LDAP_OPT_X_TLS_PROTOCOL_MIN') || !$isDefined('LDAP_OPT_X_TLS_PROTOCOL_TLS1_2')) {
+        throw new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_EXTENSION_MISSING);
+    }
+
+    return [(int) constant('LDAP_OPT_X_TLS_PROTOCOL_MIN'), (int) constant('LDAP_OPT_X_TLS_PROTOCOL_TLS1_2')];
 }
 
 /** @return mixed LDAP\Connection when ext-ldap is available */
@@ -31,11 +60,16 @@ function directory_ldap_connect(string $host, int $port, string $caFile, ?float 
     if (!directory_ldap_available()) {
         throw new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_EXTENSION_MISSING);
     }
+    [$tlsMinimumOption, $tlsMinimum] = directory_ldap_tls_minimum();
+    // Global options before ldap_connect(). Since PHP 8.3 ext-ldap renews
+    // libldap's TLS context itself after a global TLS option was set (php-src
+    // PR 17940), so a long-lived FPM worker picks up a rotated CA bundle
+    // without a restart; DirectoryLdapFixtureTest proves the rotation in the
+    // shipped image. PHP 8.4 exposes no new-context TLS option, so the
+    // former explicit renewal never ran and is gone (N1a A6).
     directory_ldap_require_option(null, LDAP_OPT_X_TLS_CACERTFILE, $caFile);
     directory_ldap_require_option(null, LDAP_OPT_X_TLS_REQUIRE_CERT, LDAP_OPT_X_TLS_DEMAND);
-    if (defined('LDAP_OPT_X_TLS_PROTOCOL_MIN') && defined('LDAP_OPT_X_TLS_PROTOCOL_TLS1_2')) {
-        directory_ldap_require_option(null, LDAP_OPT_X_TLS_PROTOCOL_MIN, LDAP_OPT_X_TLS_PROTOCOL_TLS1_2);
-    }
+    directory_ldap_require_option(null, $tlsMinimumOption, $tlsMinimum);
 
     $connection = @ldap_connect('ldaps://' . $host . ':' . $port);
     if ($connection === false) {
@@ -45,11 +79,22 @@ function directory_ldap_connect(string $host, int $port, string $caFile, ?float 
     directory_ldap_require_option($connection, LDAP_OPT_REFERRALS, 0);
     directory_ldap_apply_deadline($connection, $deadline);
     directory_ldap_require_option($connection, LDAP_OPT_SIZELIMIT, VIRTUSPHERE_DIRECTORY_SEARCH_RESULT_LIMIT + 1);
-    if (defined('LDAP_OPT_X_TLS_NEWCTX')) {
-        directory_ldap_require_option($connection, LDAP_OPT_X_TLS_NEWCTX, 0);
-    }
 
     return $connection;
+}
+
+/**
+ * Reads the diagnostic of the failed bind and keeps only its sub-code
+ * (directory_bind_codes.php). The text itself leaves this function never.
+ */
+function directory_ldap_bind_code(mixed $connection): string
+{
+    $diagnostic = null;
+    if (!is_object($connection) || !@ldap_get_option($connection, LDAP_OPT_DIAGNOSTIC_MESSAGE, $diagnostic)) {
+        return '';
+    }
+
+    return directory_bind_code_from_diagnostic(is_string($diagnostic) ? $diagnostic : '');
 }
 
 function directory_ldap_failure(
@@ -59,7 +104,20 @@ function directory_ldap_failure(
 {
     $number = is_object($connection) ? ldap_errno($connection) : 0;
     if ($number === 49) {
+        $bindCode = directory_ldap_bind_code($connection);
+        if ($credentialRejection === VIRTUSPHERE_DIRECTORY_OUTCOME_USER_BIND_REJECTED) {
+            return new DirectoryLdapException($credentialRejection, false, directory_user_bind_reason($bindCode));
+        }
+        if ($credentialRejection === VIRTUSPHERE_DIRECTORY_OUTCOME_SERVICE_BIND_REJECTED) {
+            return new DirectoryLdapException(directory_service_rejection_outcome($bindCode));
+        }
+
         return new DirectoryLdapException($credentialRejection);
+    }
+    // -5 (LDAP_TIMEOUT) is what libldap reports when LDAP_OPT_TIMEOUT fires on
+    // a synchronous call (N1a A2, proven by the tls-silent fixture).
+    if ($number === -5) {
+        return new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_TIMEOUT, true);
     }
     // -1 (no libldap result code available) is what the linked OpenLDAP client
     // actually reports for every connect-level failure: refused/unroutable
@@ -83,7 +141,9 @@ function directory_ldap_failure(
 
 function directory_ldap_bind(mixed $connection, string $identity, string $password, string $credentialRejection, ?float $deadline = null): void
 {
-    if ($password === '') {
+    // Empty, NUL byte or over the byte bound: the same typed refusal, before any
+    // network contact (N1a A1/A8). ldap_bind() would throw a TypeError for NUL.
+    if (!directory_password_is_acceptable($password)) {
         throw new DirectoryLdapException($credentialRejection);
     }
     directory_ldap_apply_deadline($connection, $deadline);
@@ -215,16 +275,27 @@ function directory_ldap_test_controller(array $controller, array $config): array
     }
 }
 
-/** @return array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool} */
+/**
+ * userAccountControl and pwdLastSet belong to the same "Account Restrictions"
+ * property set; a missing or malformed value is an invalid response, never an
+ * enabled account (N1a A3) or an unchanged password (F1). The lockout bit comes
+ * from the constructed msDS-User-Account-Control-Computed; it is optional,
+ * because a constructed attribute may be withheld outside a base search (Gate
+ * 0B checks that the target AD returns it).
+ *
+ * @return array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool,locked:bool,pwd_last_set:string}
+ */
 function directory_ldap_normalize_user(array $entry): array
 {
     $guid = directory_ldap_first_binary($entry, 'objectGUID');
     $upn = directory_ldap_first_text($entry, 'userPrincipalName');
     $dn = trim((string) ($entry['dn'] ?? ''));
-    if (strlen($guid) !== 16 || !directory_upn_is_valid($upn) || $dn === '') {
+    $uac = directory_parse_account_control(directory_ldap_first_text($entry, 'userAccountControl'));
+    $pwdLastSet = directory_parse_password_last_set(directory_ldap_first_text($entry, 'pwdLastSet'));
+    if (strlen($guid) !== 16 || !directory_upn_is_valid($upn) || $dn === '' || $uac === null || $pwdLastSet === null) {
         throw new DirectoryLdapException(VIRTUSPHERE_DIRECTORY_OUTCOME_INVALID_RESPONSE);
     }
-    $uac = (int) directory_ldap_first_text($entry, 'userAccountControl');
+    $computed = directory_parse_account_control(directory_ldap_first_text($entry, 'msDS-User-Account-Control-Computed'));
 
     return [
         'guid_bytes' => $guid,
@@ -234,14 +305,19 @@ function directory_ldap_normalize_user(array $entry): array
         'email' => directory_ldap_first_text($entry, 'mail'),
         'dn' => $dn,
         'enabled' => directory_account_is_enabled($uac, directory_ldap_first_text($entry, 'accountExpires')),
+        'locked' => $computed !== null && ($computed & VIRTUSPHERE_DIRECTORY_UAC_LOCKOUT) !== 0,
+        'pwd_last_set' => $pwdLastSet,
     ];
 }
 
-/** @return array{rows:list<array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool}>,truncated:bool} */
+/** @return array{rows:list<array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool,locked:bool,pwd_last_set:string}>,truncated:bool} */
 function directory_ldap_search_users(mixed $connection, string $baseDn, string $filter, ?float $deadline = null): array
 {
     directory_ldap_apply_deadline($connection, $deadline);
-    $attributes = ['objectGUID', 'userPrincipalName', 'sAMAccountName', 'displayName', 'mail', 'userAccountControl', 'accountExpires'];
+    $attributes = [
+        'objectGUID', 'userPrincipalName', 'sAMAccountName', 'displayName', 'mail',
+        'userAccountControl', 'accountExpires', 'pwdLastSet', 'msDS-User-Account-Control-Computed',
+    ];
     $result = @ldap_search(
         $connection,
         $baseDn,
@@ -268,7 +344,7 @@ function directory_ldap_search_users(mixed $connection, string $baseDn, string $
     return ['rows' => $normalized, 'truncated' => $truncated];
 }
 
-/** @return array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool} */
+/** @return array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool,locked:bool,pwd_last_set:string} */
 function directory_ldap_find_user_by_upn(mixed $connection, string $baseDn, string $upn, ?float $deadline = null): array
 {
     $value = ldap_escape($upn, '', LDAP_ESCAPE_FILTER);
@@ -285,7 +361,7 @@ function directory_ldap_find_user_by_upn(mixed $connection, string $baseDn, stri
     return $rows[0];
 }
 
-/** @return array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool} */
+/** @return array{guid_bytes:string,upn:string,sam:string,display_name:string,email:string,dn:string,enabled:bool,locked:bool,pwd_last_set:string} */
 function directory_ldap_find_user_by_guid(mixed $connection, string $baseDn, string $guidBytes, ?float $deadline = null): array
 {
     $filter = '(&(objectCategory=person)(objectClass=user)(sAMAccountType=805306368)(objectGUID=' . directory_guid_filter_value($guidBytes) . '))';
