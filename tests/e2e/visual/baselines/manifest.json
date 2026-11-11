@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "updatedAt": "2026-11-10T14:18:21.120Z",
-  "reason": "SY1: Ueberblick bekommt die Karte Host und Backup (Fixtur rot Fehlgeschlagen)",
+  "updatedAt": "2026-11-11T15:25:04.131Z",
+  "reason": "SY2: Statusvokabular mit Symbolen, MECM-Kachel in zwei Zeilen",
   "runner": {
     "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
     "platform": "win32",
@@ -82,41 +82,57 @@
             {
               "href": "system_status.php#deploy-service",
               "className": "badge badge-danger",
+              "icon": "critical",
               "text": "Manuelle Klärung nötig"
             },
             {
               "href": "system_status.php#mecm",
+              "signal": 1,
               "className": "badge badge-success",
-              "text": "Aktiv"
+              "icon": "ok",
+              "text": "OK"
+            },
+            {
+              "href": "system_status.php#mecm",
+              "signal": 2,
+              "className": "badge badge-danger",
+              "icon": "critical",
+              "text": "Kritisch"
             },
             {
               "href": "system_status.php#ansible",
               "className": "badge badge-neutral",
-              "text": "Nicht geprüft"
+              "icon": "no-data",
+              "text": "Keine Daten"
             },
             {
               "href": "system_status.php#esxi",
               "className": "badge badge-warning",
-              "text": "Nicht geprüft"
+              "icon": "warning",
+              "text": "Warnung"
             },
             {
               "href": "system_status.php#deviations",
               "className": "badge badge-warning",
+              "icon": "warning",
               "text": "12 Abweichungen"
             },
             {
               "href": "system_status.php#host-backup",
               "className": "badge badge-danger",
-              "text": "Fehlgeschlagen"
+              "icon": "critical",
+              "text": "Kritisch"
             },
             {
               "href": "system_status.php#internal-services",
               "className": "badge badge-success",
-              "text": "Aktiv"
+              "icon": "current",
+              "text": "Aktuell"
             },
             {
               "href": "system_status.php#directory-status",
               "className": "badge badge-warning",
+              "icon": "limited",
               "text": "Eingeschränkt",
               "optional": true
             }
@@ -139,17 +155,17 @@
     "dark/missions-desktop.png": "f701b746f49f44eec1b9462e1fd8f1c5abdfb8932b5e9dad859b5e88b5f0db02",
     "dark/missions-mobile.png": "24ed4455c3cfdb419054fca3703ae8c56b8116bebcf3858cf3f81acf799b288c",
     "dark/missions-wrap.png": "b10e63f69f8e31348ccabbbac5f13ddede07e447d4c5cfdee3c1025d4dad0396",
-    "dark/system-status-desktop.png": "d1241e3a3d491e2701d0d45f5032b99548ca359abc5e5fdf2b16d597a053f633",
-    "dark/system-status-mobile.png": "193950412d8b87e68a2f4c7a2e09b93832e87ae0aa93643ee73e6aa83a69b6d8",
-    "dark/system-status-wrap.png": "fb6788614cd5bda808e8de3de7b30d9c367b4df3f3d8c060f51ef82b89ff1014",
+    "dark/system-status-desktop.png": "d034c431df841a7a0ff17878eb0693af1532af89b375548505b45227c2dc538c",
+    "dark/system-status-mobile.png": "434b3bcd80e7f5eaea2b53eec51018c2c03286cb90a7ecfeb48e10d488578b78",
+    "dark/system-status-wrap.png": "7d08315330e0702f2a0c1930ac1bd61cd028f5bc6ec5a516469f13e7026acbf5",
     "light/deploy-desktop.png": "f441c95e1194980e095d51912aa487631915c43bdb3a4a81cb7be85de242b0e8",
     "light/deploy-mobile.png": "96082ed88e5f276e7964471bbd5d5c53034e4ace7e1aacf92cae58a8627aa71a",
     "light/deploy-wrap.png": "50928b0135310af26657efbeb4b48a987a496d0dd51676611473cc8df50afe4c",
     "light/missions-desktop.png": "22c18e756e1f4d8ec6a1cf9530cfd8c246613796a079b847deeceeff518c6d14",
     "light/missions-mobile.png": "84c89ca07e241cd4552d70862ee480b1b3820d903724d8dd5d40b862ef2fb719",
     "light/missions-wrap.png": "6af5cc94d5ee17257da81c975d55d386504b26b3924d543cb5ad898716ee5a4d",
-    "light/system-status-desktop.png": "03d71580d18a9a338ca10fee31e046d863c3121e45829cfc876789444e9cf398",
-    "light/system-status-mobile.png": "3cdef8201fe9ca3af3081d957e0406763b22c3949663c2389d6c4ff4c9e626d4",
-    "light/system-status-wrap.png": "dcf4fae2d84ea28d63c8113f37333bb5dd00df3d1b25655e6cbc48f798a4c07e"
+    "light/system-status-desktop.png": "8d4c702ed9f3303ccc05460719cb7da89d06a02f4e55b612dea044ae00e1914a",
+    "light/system-status-mobile.png": "5f996b0013d70901a949bcac2ede48041cab20d0cdfeb2b110df262703aed623",
+    "light/system-status-wrap.png": "16206c9ff82224627c67caa558e926ffffc3270a777e1b05c84bbab88f73fb60"
   }
 }
