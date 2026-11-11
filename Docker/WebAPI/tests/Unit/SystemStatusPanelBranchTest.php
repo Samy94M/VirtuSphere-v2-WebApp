@@ -336,7 +336,7 @@ final class SystemStatusPanelBranchTest extends TestCase
         );
         $html = (string) ob_get_clean();
 
-        self::assertStringContainsString(__t('system_status.dev_count_none_unconfirmed'), $html);
+        self::assertStringContainsString(status_tone_badge('evidence_incomplete'), $html);
         self::assertStringContainsString(__t('system_status.dev_none_partial'), $html);
         self::assertStringNotContainsString('badge-success', $html);
     }
