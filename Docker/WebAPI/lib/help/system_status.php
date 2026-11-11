@@ -31,6 +31,9 @@ require_once __DIR__ . '/../system_status.php';
                 <li><?php echo h(__t('help_system_status.system_status_signal_heartbeat')); ?></li>
                 <li><?php echo h(__t('help_system_status.system_status_signal_combination')); ?></li>
             </ul>
+            <h3 id="help-status-vocabulary" tabindex="-1"><?php echo h(__t('status_vocabulary.legend_heading')); ?></h3>
+            <p><?php echo h(__t('status_vocabulary.legend_intro')); ?></p>
+            <?php system_status_vocabulary_legend(4); ?>
         </section>
         <section class="panel">
             <h2 id="help-status-deploy" tabindex="-1"><?php echo h(__t('help_system_status.service_card_heading')); ?></h2>

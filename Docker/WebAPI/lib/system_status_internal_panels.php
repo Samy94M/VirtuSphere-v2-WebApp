@@ -23,6 +23,7 @@ function system_status_render_internal(array $snapshot, array $user): void
     ?>
     <details class="panel status-legend"><summary><?php echo h(__t('system_status.legend_heading')); ?></summary>
         <p><?php echo h(__t('system_status.legend_intro')); ?></p>
+        <?php system_status_vocabulary_legend(); ?>
         <h3><?php echo h(__t('system_status.legend_group_heartbeat')); ?></h3>
         <?php system_status_legend_items('heartbeat'); ?>
         <h3><?php echo h(__t('system_status.esxi_legend_heading')); ?></h3>

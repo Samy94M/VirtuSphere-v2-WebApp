@@ -34,7 +34,7 @@ function system_status_ansible_job_badge(string $status): string
         ? deploy_job_status_badge_class($status)
         : 'neutral';
 
-    return portal_badge($variant, __t('system_status.' . $key));
+    return status_value_badge(status_tone_for_variant($variant), __t('system_status.' . $key));
 }
 
 /** @param array<string,mixed>|null $job */

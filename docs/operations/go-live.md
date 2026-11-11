@@ -523,7 +523,7 @@ funktionieren ohne MECM weiter.
      (Providerfehler), **nicht** „MECM kritisch".
    - Einen Sync-Task beenden: nur die Integration wird stale/rot, MECM-Site bleibt
      unberührt.
-   - Site-Health-Task beenden: nur MECM-Site wird gelb („Überfällig“) oder grau
+   - Site-Health-Task beenden: nur MECM-Site wird gelb („Warnung“) oder grau
      („Veraltet“), nie rot; die Integration bleibt grün.
 
    Das ist die erste echte Abnahme von Rückkanal, Wartungsdienst und MECM-Anbindung.

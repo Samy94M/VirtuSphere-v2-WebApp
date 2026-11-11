@@ -40,14 +40,15 @@
       "captureSelector": ".status-overview",
       "fixture": {
         "overviewBadges": [
-          { "href": "system_status.php#deploy-service", "className": "badge badge-danger", "text": "Manuelle Klärung nötig" },
-          { "href": "system_status.php#mecm", "className": "badge badge-success", "text": "Aktiv" },
-          { "href": "system_status.php#ansible", "className": "badge badge-neutral", "text": "Nicht geprüft" },
-          { "href": "system_status.php#esxi", "className": "badge badge-warning", "text": "Nicht geprüft" },
-          { "href": "system_status.php#deviations", "className": "badge badge-warning", "text": "12 Abweichungen" },
-          { "href": "system_status.php#host-backup", "className": "badge badge-danger", "text": "Fehlgeschlagen" },
-          { "href": "system_status.php#internal-services", "className": "badge badge-success", "text": "Aktiv" },
-          { "href": "system_status.php#directory-status", "className": "badge badge-warning", "text": "Eingeschränkt", "optional": true }
+          { "href": "system_status.php#deploy-service", "className": "badge badge-danger", "icon": "critical", "text": "Manuelle Klärung nötig" },
+          { "href": "system_status.php#mecm", "signal": 1, "className": "badge badge-success", "icon": "ok", "text": "OK" },
+          { "href": "system_status.php#mecm", "signal": 2, "className": "badge badge-danger", "icon": "critical", "text": "Kritisch" },
+          { "href": "system_status.php#ansible", "className": "badge badge-neutral", "icon": "no-data", "text": "Keine Daten" },
+          { "href": "system_status.php#esxi", "className": "badge badge-warning", "icon": "warning", "text": "Warnung" },
+          { "href": "system_status.php#deviations", "className": "badge badge-warning", "icon": "warning", "text": "12 Abweichungen" },
+          { "href": "system_status.php#host-backup", "className": "badge badge-danger", "icon": "critical", "text": "Kritisch" },
+          { "href": "system_status.php#internal-services", "className": "badge badge-success", "icon": "current", "text": "Aktuell" },
+          { "href": "system_status.php#directory-status", "className": "badge badge-warning", "icon": "limited", "text": "Eingeschränkt", "optional": true }
         ]
       }
     }

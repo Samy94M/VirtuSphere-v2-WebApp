@@ -18,6 +18,8 @@ require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/remote_execution_constants.php';
 require_once __DIR__ . '/integration_health.php';
 require_once __DIR__ . '/deploy_supervisor_constants.php';
+require_once __DIR__ . '/status.php';
+require_once __DIR__ . '/status_vocabulary.php';
 require_once __DIR__ . '/deploy_supervisor_policy.php';
 require_once __DIR__ . '/repo/deploy_job_service_state.php';
 require_once __DIR__ . '/repo/deploy_supervisor_state.php';
@@ -133,26 +135,48 @@ function deploy_service_recovery_attention(array $facts): string
  * nothing will start is the green an operator trusts and walks away from. It
  * reads like the card's own claim badge, which is yellow whenever the claim is
  * anything but accepting.
+ *
+ * The colour is the colour of deploy_service_badge_tone() (SY2), so the variant
+ * and the icon of the System status card come from one precedence.
  */
 function deploy_service_badge_variant(string $availability, string $attention, string $claimState): string
 {
-    if ($availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE
-        || $attention === VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW
-    ) {
-        return 'danger';
-    }
-    if ($availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED
-        || $availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN
-        || $attention === VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING
-        || $claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING
-    ) {
-        return 'warning';
-    }
-    if ($availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY) {
-        return 'info';
-    }
+    return status_tone_meta(deploy_service_badge_tone($availability, $attention, $claimState))['variant'];
+}
 
-    return 'success';
+/**
+ * Status-vocabulary tone of the compact badge (lib/status_vocabulary.php), in
+ * the precedence of deploy_service_summary_label(): offline, manual review,
+ * degraded or cooldown, recovering, a claim pause, then the availability.
+ */
+function deploy_service_badge_tone(string $availability, string $attention, string $claimState): string
+{
+    return match (true) {
+        $availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE => 'unreachable',
+        $attention === VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW => 'critical',
+        in_array($availability, [VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN], true) => deploy_service_availability_tone($availability),
+        $attention === VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING => 'warning',
+        $claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING => 'warning',
+        default => deploy_service_availability_tone($availability),
+    };
+}
+
+/**
+ * Tone of the availability axis alone. The axis keeps its own words ("Bereit",
+ * "Arbeitet", ...); the tone gives colour and icon, so a degraded service
+ * carries the "limited" icon and an offline one the "unreachable" icon of every
+ * other silent reporter.
+ */
+function deploy_service_availability_tone(string $state): string
+{
+    return match ($state) {
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_READY => 'ok',
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY => 'running',
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED => 'limited',
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN => 'warning',
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE => 'unreachable',
+        default => 'unknown',
+    };
 }
 
 /**

@@ -21,6 +21,9 @@ final class SystemStatusFalseGreenTest extends TestCase
 {
     private const ADMIN = ['id' => 1, 'role' => 'admin'];
 
+    /** One status badge: the variant, the decorative icon span and the word (SY2). */
+    private const BADGE = '<span class="badge badge-[a-z]+"><span class="badge-icon badge-icon-[a-z-]+" aria-hidden="true"><\/span>[^<]*<\/span>';
+
     protected function setUp(): void
     {
         require_once dirname(__DIR__, 2) . '/lib/portal_time.php';
@@ -90,7 +93,7 @@ final class SystemStatusFalseGreenTest extends TestCase
     {
         self::assertSame(
             1,
-            preg_match('/<a class="status-overview-card" href="system_status\.php#' . preg_quote($anchor, '/') . '">.*?(<span class="badge[^"]*">[^<]*<\/span>).*?<\/a>/s', $html, $match),
+            preg_match('/<a class="status-overview-card" href="system_status\.php#' . preg_quote($anchor, '/') . '"[^>]*>.*?(' . self::BADGE . ').*?<\/a>/s', $html, $match),
             $anchor . ' card missing'
         );
 
@@ -154,7 +157,7 @@ final class SystemStatusFalseGreenTest extends TestCase
         $badge = $this->card($this->overview(null, $this->hostData(['backup' => $failed])), VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP);
 
         self::assertStringContainsString('badge-danger', $badge);
-        self::assertStringContainsString(h(backup_status_label(VIRTUSPHERE_BACKUP_STATE_FAILED)), $badge);
+        self::assertStringContainsString(h(status_tone_word('critical')), $badge);
     }
 
     public function testTheHostCardShowsTheWorstRowAndUnknownIsNeverOk(): void
@@ -165,14 +168,14 @@ final class SystemStatusFalseGreenTest extends TestCase
         // One row without evidence keeps the card from reading OK.
         $unknown = $this->card($this->overview(null, $this->hostData(['drill' => null])), VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP);
         self::assertStringContainsString('badge-neutral', $unknown);
-        self::assertStringContainsString(h(__t('system_status_backup.state_unknown')), $unknown);
+        self::assertStringContainsString(h(status_tone_word('no_data')), $unknown);
 
         // Yellow outranks grey, red outranks yellow.
         $due = ['state' => VIRTUSPHERE_BACKUP_EVIDENCE_DUE, 'ts' => 1_800_000_000, 'age_days' => 90, 'backup_ts' => ''];
         $mismatch = ['state' => VIRTUSPHERE_BACKUP_EVIDENCE_FAILED, 'ts' => 1_800_000_000, 'sets_checked' => 4, 'sets_failed' => 1, 'failed_sets' => ['x']];
         $warning = $this->card($this->overview(null, $this->hostData(['backup' => null, 'drill' => $due])), VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP);
         self::assertStringContainsString('badge-warning', $warning);
-        self::assertStringContainsString(h(__t('system_status_backup.state_due')), $warning);
+        self::assertStringContainsString(h(status_tone_word('warning')), $warning);
         $danger = $this->card($this->overview(null, $this->hostData(['drill' => $due, 'scrub' => $mismatch])), VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP);
         self::assertStringContainsString('badge-danger', $danger);
 
@@ -182,7 +185,7 @@ final class SystemStatusFalseGreenTest extends TestCase
             VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP
         );
         self::assertStringContainsString('badge-danger', $expired);
-        self::assertStringContainsString(h(__t('system_status_backup.state_expired')), $expired);
+        self::assertStringContainsString(h(status_tone_word('critical')), $expired);
 
         // A caller without host data gets unknown, never OK.
         $none = $this->card($this->overview(), VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP);
@@ -199,7 +202,7 @@ final class SystemStatusFalseGreenTest extends TestCase
         $section = (string) ob_get_clean();
 
         self::assertStringContainsString('<section class="panel status-section" id="' . VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP . '">', $section);
-        self::assertSame(1, preg_match('/data-host-state="backup-scrub">.*?(<span class="badge[^"]*">[^<]*<\/span>)/s', $section, $row));
+        self::assertSame(1, preg_match('/data-host-state="backup-scrub">.*?(' . self::BADGE . ')/s', $section, $row));
         self::assertSame($card, $row[1], 'the worst row and the card are the same badge');
     }
 
@@ -208,7 +211,7 @@ final class SystemStatusFalseGreenTest extends TestCase
         foreach ([['fully_current' => false, 'fully_evaluable' => false], ['fully_current' => false, 'fully_evaluable' => true], null] as $report) {
             $badge = $this->card($this->overview(null, null, 0, $report), VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS);
             self::assertStringContainsString('badge-neutral', $badge);
-            self::assertStringContainsString(h(__t('system_status.dev_count_none_unconfirmed')), $badge);
+            self::assertStringContainsString(h(status_tone_word('evidence_incomplete')), $badge);
         }
 
         $clean = $this->card($this->overview(null, null, 0, ['fully_current' => true]), VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS);

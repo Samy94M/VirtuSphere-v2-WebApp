@@ -173,19 +173,25 @@ function virtusphere_heartbeat_meta(string $staleness): array
  * for every group (heartbeat sources, ESXi credentials, Ansible credentials):
  * three copies used to exist and had already disagreed about whether `missing`
  * outranks `warning`, which is a difference the tiles must never show.
+ *
+ * The tones of the status vocabulary (lib/status_vocabulary.php) rank on the
+ * same scale (SY2), so a roll-up over tones and one over tokens cannot order two
+ * states differently: critical/unreachable with danger, limited with missing.
  */
 function virtusphere_heartbeat_state_rank(string $state): int
 {
     return match ($state) {
-        'danger' => 5,
+        'danger', 'critical', 'unreachable' => 5,
         // Worse than a delayed source: it has never reported at all, while its
-        // siblings do, so nothing is going to recover on its own.
-        'missing' => 4,
+        // siblings do, so nothing is going to recover on its own. A limited
+        // area (works, but a part is missing) shares the rank.
+        'missing', 'limited' => 4,
         'warning' => 3,
         // A fresh legacy heartbeat: the task is alive but its result is
         // unconfirmed, milder than a stale reporter.
         'legacy' => 2,
-        'ok' => 0,
+        // Healthy states, and a function deliberately switched off.
+        'ok', 'current', 'running', 'disabled' => 0,
         // 'stale' shares the rank of 'unknown' (the default) on purpose: an
         // expired green and a never-tested credential say the same thing about
         // the present, so a roll-up must not report one as healthier.

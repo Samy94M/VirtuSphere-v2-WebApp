@@ -59,7 +59,7 @@ function system_status_capability_badges(?array $state): string
             VIRTUSPHERE_ESXI_CAPABILITY_MAINTENANCE => __t('system_status.cap_in_maintenance'),
             default => (string) $warning['key'],
         };
-        $html .= portal_badge((string) $warning['level'], $label);
+        $html .= status_value_badge(status_tone_for_variant((string) $warning['level']), $label);
     }
 
     return $html;
@@ -91,7 +91,7 @@ function system_status_host_facts(array $row): string
     // the warning into noise nobody reads.
     $skew = isset($meta['clock_skew_seconds']) ? (int) $meta['clock_skew_seconds'] : 0;
     if (abs($skew) >= VIRTUSPHERE_ESXI_CLOCK_SKEW_WARN_SECONDS) {
-        $html .= ' ' . portal_badge('warning', __t('system_status.inv_clock_skew', [
+        $html .= ' ' . status_value_badge('warning', __t('system_status.inv_clock_skew', [
             'minutes' => (string) (int) round(abs($skew) / 60),
         ]));
     }
@@ -144,10 +144,10 @@ function system_status_datastore_health_badge(array $row): string
     $health = esxi_datastore_health($row['meta_json'] ?? null);
     $html = '';
     if ($health['maintenance'] === true) {
-        $html .= ' ' . portal_badge('warning', __t('system_status.inv_ds_maintenance'));
+        $html .= ' ' . status_value_badge('warning', __t('system_status.inv_ds_maintenance'));
     }
     if ($health['accessible'] === false) {
-        $html .= ' ' . portal_badge('danger', __t('system_status.inv_ds_inaccessible'));
+        $html .= ' ' . status_value_badge('critical', __t('system_status.inv_ds_inaccessible'));
     }
 
     return $html;
@@ -231,6 +231,9 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
             $pending = $entry['pending_job'];
             $counts = $entry['counts'];
             $isSelected = $credentialId === $selectedId && $selectedDetail !== null;
+            // Every card repeats the same links and buttons; the hidden name keeps
+            // them apart in a screen reader's link list (SY2).
+            $linkContext = system_status_link_context((string) $credential['name']);
             ?>
             <article class="inventory-card<?php echo $isSelected ? ' inventory-card-open' : ''; ?>" data-deep-link-target id="credential-<?php echo h((string) $credentialId); ?>">
                 <header><div><h3><?php echo h((string) $credential['name']); ?></h3><code class="break-anywhere"><?php echo h((string) $credential['host']); ?></code></div><?php echo esxi_state_badge((string) $entry['health']); ?></header>
@@ -296,22 +299,22 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                             <div class="alert-actions">
                                 <?php if ($showAnsibleLink) { ?><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('system_status.inv_open_ansible_status')); ?></a><?php } ?>
                                 <?php if ($showAnsibleLink && $showJobLog) { ?><span class="muted" aria-hidden="true">&middot;</span><?php } ?>
-                                <?php if ($showJobLog) { ?><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_failed_job_log')); ?></a><?php } elseif ($showJobLogGap) { ?><span><?php echo h(__t('system_status.inv_job_log_unavailable')); ?></span><?php } ?>
+                                <?php if ($showJobLog) { ?><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_failed_job_log')); ?><?php echo $linkContext; ?></a><?php } elseif ($showJobLogGap) { ?><span><?php echo h(__t('system_status.inv_job_log_unavailable')); ?></span><?php } ?>
                             </div>
                         <?php } ?>
                     </div>
                 <?php } ?>
                 <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'ok' && $lastJobId > 0 && can('deploy.run', $user)) { ?>
-                    <p><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_last_job_log')); ?></a></p>
+                    <p><a href="<?php echo h(deploy_job_log_url($lastJobId)); ?>"><?php echo h(__t('system_status.inv_open_last_job_log')); ?><?php echo $linkContext; ?></a></p>
                 <?php } ?>
                 <?php // The pause names its own release condition, and that condition is
                       // met on another page: without the link the row states a fix and
                       // hides where it happens. ?>
                 <?php if ($state !== null && (int) ($state['paused_until_credential_change'] ?? 0) === 1) { ?><div class="alert alert-warning"><?php echo h(__t('system_status.inv_paused')); ?><?php if (can('credentials.manage', $user)) { ?> <a href="credentials.php"><?php echo h(__t('system_status.inv_open_credentials')); ?></a><?php } ?></div><?php } ?>
-                <?php if ($pending !== null) { ?><p><?php echo portal_badge($pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? 'info' : 'warning', $pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? __t('system_status.inv_job_running') : __t('system_status.inv_job_queued')); ?> <?php if (can('deploy.run', $user)) { ?><a href="<?php echo h(deploy_job_log_url((int) $pending['id'])); ?>"><?php echo h(__t('system_status.inv_open_job_log')); ?></a><?php } ?></p><?php } ?>
+                <?php if ($pending !== null) { ?><p><?php echo status_value_badge($pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? 'running' : 'warning', $pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? __t('system_status.inv_job_running') : __t('system_status.inv_job_queued')); ?> <?php if (can('deploy.run', $user)) { ?><a href="<?php echo h(deploy_job_log_url((int) $pending['id'])); ?>"><?php echo h(__t('system_status.inv_open_job_log')); ?><?php echo $linkContext; ?></a><?php } ?></p><?php } ?>
                 <div class="actions">
-                    <?php if ($isSelected) { ?><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('system_status.inv_close_details')); ?></a><?php } else { ?><a class="button button-secondary" href="<?php echo h(system_status_url('credential-' . $credentialId, ['inventory' => $credentialId])); ?>"><?php echo h(__t('system_status.inv_open_details')); ?></a><?php } ?>
-                    <?php if (can('deploy.run', $user)) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><input type="hidden" name="credential_id" value="<?php echo h((string) $credentialId); ?>"><button class="button" type="submit"<?php echo $pending !== null ? ' disabled' : ''; ?> data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_one')); ?></button></form><?php } ?>
+                    <?php if ($isSelected) { ?><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('system_status.inv_close_details')); ?><?php echo $linkContext; ?></a><?php } else { ?><a class="button button-secondary" href="<?php echo h(system_status_url('credential-' . $credentialId, ['inventory' => $credentialId])); ?>"><?php echo h(__t('system_status.inv_open_details')); ?><?php echo $linkContext; ?></a><?php } ?>
+                    <?php if (can('deploy.run', $user)) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><input type="hidden" name="credential_id" value="<?php echo h((string) $credentialId); ?>"><button class="button" type="submit"<?php echo $pending !== null ? ' disabled' : ''; ?> data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_one')); ?><?php echo $linkContext; ?></button></form><?php } ?>
                 </div>
                 <?php if ($isSelected) {
                     ?><div class="inventory-details"><?php system_status_render_inventory_detail($selectedDetail, $state); ?></div><?php } ?>
@@ -352,7 +355,7 @@ function system_status_render_deviations(array $view, array $activeVlanNames, ar
                         <a href="<?php echo h(mission_details_url((int) $entry['mission_id'])); ?>"><?php echo h((string) $entry['mission_name']); ?></a>
                         <?php // A deviation on a template is not an outage: it becomes one only when a mission is created from it.
                               // The flag the scan computed, not a second str_starts_with: one predicate, one answer. ?>
-                        <?php if (!empty($entry['is_template'])) { echo ' ' . portal_badge('info', __t('system_status.dev_template_badge')); } ?>
+                        <?php if (!empty($entry['is_template'])) { echo ' ' . portal_label_badge(__t('system_status.dev_template_badge')); } ?>
                         <?php if (!empty($entry['vm_name'])) { ?> · <a href="vm_edit.php?mission_id=<?php echo h((string) $entry['mission_id']); ?>&amp;vm_id=<?php echo h((string) $entry['vm_id']); ?>"><?php echo h((string) $entry['vm_name']); ?></a><?php } ?>
                     </h3>
                     <ul><?php foreach ($entry['issues'] as $issue) { ?>

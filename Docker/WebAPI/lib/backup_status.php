@@ -201,30 +201,20 @@ function backup_status_alert_class(string $state): string
 }
 
 /**
- * Maps a backup state to the bare variant for portal_badge() on the settings card.
+ * The status-vocabulary tone of a backup state (lib/status_vocabulary.php), for
+ * the settings card and the System status row alike (SY2). An overdue run is a
+ * warning, not "stale": "Veraltet" is the grey reporter word everywhere else,
+ * while a backup that did not run is a domain problem. The alert next to the
+ * badge names the cause (backup_status_message()).
  */
-function backup_status_badge_class(string $state): string
+function backup_status_tone(string $state): string
 {
     return match ($state) {
-        VIRTUSPHERE_BACKUP_STATE_OK => 'success',
-        VIRTUSPHERE_BACKUP_STATE_FAILED => 'danger',
+        VIRTUSPHERE_BACKUP_STATE_OK => 'ok',
+        VIRTUSPHERE_BACKUP_STATE_FAILED => 'critical',
         VIRTUSPHERE_BACKUP_STATE_STALE,
         VIRTUSPHERE_BACKUP_STATE_DISK_LOW => 'warning',
-        default => 'neutral',
-    };
-}
-
-/**
- * Localized short label for a backup state (settings card badge).
- */
-function backup_status_label(string $state): string
-{
-    return match ($state) {
-        VIRTUSPHERE_BACKUP_STATE_OK => __t('settings.backup_state_ok'),
-        VIRTUSPHERE_BACKUP_STATE_FAILED => __t('settings.backup_state_failed'),
-        VIRTUSPHERE_BACKUP_STATE_STALE => __t('settings.backup_state_stale'),
-        VIRTUSPHERE_BACKUP_STATE_DISK_LOW => __t('settings.backup_state_disk_low'),
-        default => __t('settings.backup_state_unknown'),
+        default => 'no_data',
     };
 }
 

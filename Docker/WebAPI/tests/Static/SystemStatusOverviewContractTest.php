@@ -31,13 +31,13 @@ final class SystemStatusOverviewContractTest extends TestCase
         return (string) file_get_contents($path);
     }
 
-    /** The card list of system_status_render_overview(), as anchor constants. */
+    /** The card list of system_status_overview_cards() (SY2), as anchor constants in card order. */
     private function overviewCards(): array
     {
-        $source = $this->source('lib/system_status_panels.php');
-        $start = strpos($source, 'function system_status_render_overview(');
-        self::assertNotFalse($start, 'system_status_render_overview() must build its cards in one list');
-        $end = strpos($source, '?>', $start);
+        $source = $this->source('lib/system_status_overview.php');
+        $start = strpos($source, 'function system_status_overview_cards(');
+        self::assertNotFalse($start, 'system_status_overview_cards() must build the cards in one list');
+        $end = strpos($source, 'return $cards;', $start);
         self::assertNotFalse($end);
         $block = substr($source, $start, $end - $start);
 
@@ -128,6 +128,35 @@ final class SystemStatusOverviewContractTest extends TestCase
         self::assertContains('VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY', $cards);
     }
 
+    /**
+     * SY2: the cards run in the order of the sections they jump to. Both orders
+     * are derived: the sections from the renderer calls of the page and the id
+     * each renderer gives its section, the cards from the card list.
+     */
+    public function testTheCardsRunInTheOrderOfTheirSections(): void
+    {
+        preg_match_all('/system_status_render_([a-z_]+)\(/', $this->source('portal/system_status.php'), $calls);
+        $libraries = '';
+        foreach (glob($this->repoRoot() . '/lib/system_status*.php') ?: [] as $path) {
+            $libraries .= (string) file_get_contents($path) . "\n";
+        }
+        $sections = [];
+        foreach ($calls[1] as $renderer) {
+            $start = strpos($libraries, 'function system_status_render_' . $renderer . '(');
+            if ($start === false) {
+                continue;
+            }
+            $next = strpos($libraries, "\nfunction ", $start + 1);
+            $body = substr($libraries, $start, $next === false ? null : $next - $start);
+            if (preg_match('/id="<\?php echo h\((VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_[A-Z_]+)\)/', $body, $id) === 1) {
+                $sections[] = $id[1];
+            }
+        }
+        $cards = $this->overviewCards();
+        self::assertCount(count($cards), $sections, 'every card must have a section the page renders');
+        self::assertSame($sections, $cards, 'the overview cards must run in the order of their sections');
+    }
+
     public function testTheDeviationScanHasItsOwnCard(): void
     {
         self::assertContains(
@@ -143,9 +172,12 @@ final class SystemStatusOverviewContractTest extends TestCase
         // with no card, so the strip stayed green. The card and the section read
         // one list of row badges; a second roll-up would be a second opinion.
         self::assertContains('VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP', $this->overviewCards());
-        self::assertStringContainsString("'host' => system_status_host_overview_badge(", $this->overviewFunction());
+        $cards = $this->source('lib/system_status_overview.php');
+        self::assertStringContainsString("'tone' => system_status_host_overview_tone(", $cards);
+        self::assertStringContainsString("'html' => system_status_host_overview_badge(", $cards);
+        self::assertStringContainsString('foreach ($cards as $card)', $this->overviewFunction(), 'the strip renders the card list');
         $panel = $this->source('lib/system_status_backup_panels.php');
-        self::assertStringContainsString('foreach (system_status_host_checks($data) as $badge)', $panel);
+        self::assertStringContainsString('foreach (system_status_host_checks($data) as $tone)', $panel);
         self::assertStringContainsString('$checks = system_status_host_checks($data);', $panel);
         self::assertDoesNotMatchRegularExpression(
             '/system_status_render_(host_backup|backup_rows)\(/',
@@ -218,7 +250,7 @@ final class SystemStatusOverviewContractTest extends TestCase
 
         // No reader may re-sum the issue lists. The renderer did exactly this
         // before the strip existed, which is why the rule is worth a guard.
-        foreach (['lib/system_status_esxi_panels.php', 'lib/system_status_panels.php', 'portal/system_status.php'] as $reader) {
+        foreach (['lib/system_status_esxi_panels.php', 'lib/system_status_panels.php', 'lib/system_status_overview.php', 'portal/system_status.php'] as $reader) {
             self::assertDoesNotMatchRegularExpression(
                 "/array_sum\(array_map\([^;]*'issues'/s",
                 $this->source($reader),
@@ -229,7 +261,7 @@ final class SystemStatusOverviewContractTest extends TestCase
 
     public function testBothReadersRenderTheCountThroughOneBadge(): void
     {
-        foreach (['lib/system_status_esxi_panels.php', 'lib/system_status_panels.php'] as $reader) {
+        foreach (['lib/system_status_esxi_panels.php', 'lib/system_status_overview.php'] as $reader) {
             self::assertStringContainsString(
                 'deviation_count_badge(',
                 $this->source($reader),

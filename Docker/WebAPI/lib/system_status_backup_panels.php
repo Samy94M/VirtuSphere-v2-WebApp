@@ -13,8 +13,8 @@ declare(strict_types=1);
 // dashboard banner or health.php (ADR-0021 amendment).
 //
 // Every row has its own badge over its own facts, so no badge ever summarizes a
-// fact another row shows. Missing evidence reads "unknown", never "OK". The
-// badge of each row is computed once (system_status_host_checks()) and read by
+// fact another row shows. Missing evidence reads "no data", never "OK". The
+// tone of each row is computed once (system_status_host_checks()) and read by
 // both the row and the overview card, so the two cannot disagree.
 //
 // The filename ends in `*panels.php` on purpose; see
@@ -70,14 +70,13 @@ function system_status_backup_age_label(int $days): string
 }
 
 /**
+ * Tone of the backup row (status vocabulary, SY2).
+ *
  * @param array<string,mixed>|null $backup
- * @return array{variant: string, label: string}
  */
-function system_status_backup_run_badge(?array $backup): array
+function system_status_backup_run_tone(?array $backup): string
 {
-    $state = (string) ($backup['state'] ?? VIRTUSPHERE_BACKUP_STATE_UNKNOWN);
-
-    return ['variant' => backup_status_badge_class($state), 'label' => backup_status_label($state)];
+    return backup_status_tone((string) ($backup['state'] ?? VIRTUSPHERE_BACKUP_STATE_UNKNOWN));
 }
 
 /** @param array<string,mixed>|null $drill */
@@ -89,15 +88,17 @@ function system_status_backup_drill_known(?array $drill): bool
 }
 
 /**
+ * Tone of the restore-drill row: no proven drill is "no data", an aged one a
+ * warning.
+ *
  * @param array<string,mixed>|null $drill
- * @return array{variant: string, label: string}
  */
-function system_status_backup_drill_badge(?array $drill): array
+function system_status_backup_drill_tone(?array $drill): string
 {
     return match (true) {
-        !system_status_backup_drill_known($drill) => ['variant' => 'neutral', 'label' => __t('system_status_backup.state_unknown')],
-        ($drill['state'] ?? '') === VIRTUSPHERE_BACKUP_EVIDENCE_DUE => ['variant' => 'warning', 'label' => __t('system_status_backup.state_due')],
-        default => ['variant' => 'success', 'label' => __t('system_status_backup.state_ok')],
+        !system_status_backup_drill_known($drill) => 'no_data',
+        ($drill['state'] ?? '') === VIRTUSPHERE_BACKUP_EVIDENCE_DUE => 'warning',
+        default => 'ok',
     };
 }
 
@@ -110,15 +111,18 @@ function system_status_backup_scrub_known(?array $scrub): bool
 }
 
 /**
+ * Tone of the checksum row. A checksum mismatch is critical: those backups are
+ * not fit for a restore. It used to read "Abweichung", the word of the
+ * deviation section with another colour and another meaning (SY2).
+ *
  * @param array<string,mixed>|null $scrub
- * @return array{variant: string, label: string}
  */
-function system_status_backup_scrub_badge(?array $scrub): array
+function system_status_backup_scrub_tone(?array $scrub): string
 {
     return match (true) {
-        !system_status_backup_scrub_known($scrub) => ['variant' => 'neutral', 'label' => __t('system_status_backup.state_unknown')],
-        ($scrub['state'] ?? '') === VIRTUSPHERE_BACKUP_EVIDENCE_FAILED => ['variant' => 'danger', 'label' => __t('system_status_backup.state_mismatch')],
-        default => ['variant' => 'success', 'label' => __t('system_status_backup.state_ok')],
+        !system_status_backup_scrub_known($scrub) => 'no_data',
+        ($scrub['state'] ?? '') === VIRTUSPHERE_BACKUP_EVIDENCE_FAILED => 'critical',
+        default => 'ok',
     };
 }
 
@@ -143,86 +147,91 @@ function system_status_backup_https_expiry(array $https): array
 }
 
 /**
+ * Tone of the certificate row. Unreadable metadata is "unknown" (there is a
+ * certificate, its date cannot be read), not "no data".
+ *
  * @param array<string,mixed> $https certificate metadata of a live listener
- * @return array{variant: string, label: string}
  */
-function system_status_backup_https_badge(array $https): array
+function system_status_backup_https_tone(array $https): string
 {
     $expiry = system_status_backup_https_expiry($https);
 
     return match (true) {
-        $expiry['valid_to'] <= 0 => ['variant' => 'neutral', 'label' => __t('system_status_backup.state_unknown')],
-        $expiry['expired'] => ['variant' => 'danger', 'label' => __t('system_status_backup.state_expired')],
-        $expiry['expiring'] => ['variant' => 'warning', 'label' => __t('system_status_backup.state_expiring')],
-        default => ['variant' => 'success', 'label' => __t('system_status_backup.state_ok')],
+        $expiry['valid_to'] <= 0 => 'unknown',
+        $expiry['expired'] => 'critical',
+        $expiry['expiring'] => 'warning',
+        default => 'ok',
     };
 }
 
 /**
- * The badge of every row the section renders, in row order. The certificate
+ * The tone of every row the section renders, in row order. The certificate
  * row exists only while nginx serves HTTPS: on the documented HTTP-first setup
  * there is no certificate to expire, so it cannot colour the card either.
  *
  * @param array<string, array<string,mixed>|null> $data from system_status_backup_panel_data()
- * @return array<string, array{variant: string, label: string}> row kind => badge
+ * @return array<string, string> row kind => tone
  */
 function system_status_host_checks(array $data): array
 {
     $checks = [
-        'backup' => system_status_backup_run_badge($data['backup'] ?? null),
-        'restore-drill' => system_status_backup_drill_badge($data['drill'] ?? null),
-        'backup-scrub' => system_status_backup_scrub_badge($data['scrub'] ?? null),
+        'backup' => system_status_backup_run_tone($data['backup'] ?? null),
+        'restore-drill' => system_status_backup_drill_tone($data['drill'] ?? null),
+        'backup-scrub' => system_status_backup_scrub_tone($data['scrub'] ?? null),
     ];
     $https = $data['https'] ?? null;
     if ($https !== null) {
-        $checks['https-certificate'] = system_status_backup_https_badge($https);
+        $checks['https-certificate'] = system_status_backup_https_tone($https);
     }
 
     return $checks;
 }
 
 /**
- * The overview card: the worst row, with that row's own word and colour.
+ * The overview card's tone: the worst row.
  *
- * Ranked by virtusphere_heartbeat_state_rank(), the one roll-up order of the
- * page: red before yellow before grey before green. Grey ranks above green on
- * purpose, so a row without evidence keeps the card from reading OK. The first
- * row wins a tie, which is the order the section lists them in.
+ * Ranked by status_tone_rank(), the one roll-up order of the page: red before
+ * yellow before grey before green. Grey ranks above green on purpose, so a row
+ * without evidence keeps the card from reading OK. The first row wins a tie,
+ * which is the order the section lists them in.
+ *
+ * @param array<string, array<string,mixed>|null> $data from system_status_backup_panel_data()
+ */
+function system_status_host_overview_tone(array $data): string
+{
+    $worst = 'no_data';
+    $worstRank = -1;
+    foreach (system_status_host_checks($data) as $tone) {
+        $rank = status_tone_rank($tone);
+        if ($rank > $worstRank) {
+            $worst = $tone;
+            $worstRank = $rank;
+        }
+    }
+
+    return $worst;
+}
+
+/**
+ * The overview card: the worst row, in the vocabulary word of its tone.
  *
  * @param array<string, array<string,mixed>|null> $data from system_status_backup_panel_data()
  */
 function system_status_host_overview_badge(array $data): string
 {
-    $worst = null;
-    $worstRank = -1;
-    foreach (system_status_host_checks($data) as $badge) {
-        $rank = virtusphere_heartbeat_state_rank(match ($badge['variant']) {
-            'success' => 'ok',
-            'warning' => 'warning',
-            'danger' => 'danger',
-            default => 'unknown',
-        });
-        if ($rank > $worstRank) {
-            $worst = $badge;
-            $worstRank = $rank;
-        }
-    }
-    $worst ??= ['variant' => 'neutral', 'label' => __t('system_status_backup.state_unknown')];
-
-    return portal_badge($worst['variant'], $worst['label']);
+    return status_tone_badge(system_status_host_overview_tone($data));
 }
 
 /**
  * One row: head with label and badge, a fixed fact list, and an optional
  * repair hint whose HTML the caller has already escaped.
  *
- * @param array{variant: string, label: string} $badge
  * @param list<array{label: string, html: string}> $facts
  */
-function system_status_backup_row(string $kind, string $label, array $badge, array $facts, string $hintHtml): string
+function system_status_backup_row(string $kind, string $label, string $tone, array $facts, string $hintHtml): string
 {
     $html = '<article class="status-row" data-host-state="' . h($kind) . '">'
-        . '<div class="status-row-head"><strong>' . h($label) . '</strong>' . portal_badge($badge['variant'], $badge['label']) . '</div>'
+        . '<div class="status-row-head"><strong>' . h($label) . '</strong>' . status_tone_badge($tone) . '</div>'
         . system_status_fact_list($facts);
     if ($hintHtml !== '') {
         $html .= '<p class="status-action">' . $hintHtml . '</p>';
@@ -233,9 +242,9 @@ function system_status_backup_row(string $kind, string $label, array $badge, arr
 
 /**
  * @param array<string,mixed>|null $backup
- * @param array{variant: string, label: string} $badge
+ * @param string $tone status vocabulary tone of the row
  */
-function system_status_backup_run_row(?array $backup, array $badge, array $user): string
+function system_status_backup_run_row(?array $backup, string $tone, array $user): string
 {
     $state = (string) ($backup['state'] ?? VIRTUSPHERE_BACKUP_STATE_UNKNOWN);
     $lastTs = isset($backup['last']['ts']) && is_numeric($backup['last']['ts']) ? (int) $backup['last']['ts'] : 0;
@@ -250,7 +259,7 @@ function system_status_backup_run_row(?array $backup, array $badge, array $user)
     return system_status_backup_row(
         'backup',
         __t('system_status_backup.row_backup'),
-        $badge,
+        $tone,
         [['label' => __t('system_status_backup.fact_last_run'), 'html' => $lastTs > 0 ? h(portal_format_epoch($lastTs)) : '&mdash;']],
         $hint
     );
@@ -258,9 +267,9 @@ function system_status_backup_run_row(?array $backup, array $badge, array $user)
 
 /**
  * @param array<string,mixed>|null $drill
- * @param array{variant: string, label: string} $badge
+ * @param string $tone status vocabulary tone of the row
  */
-function system_status_backup_drill_row(?array $drill, array $badge): string
+function system_status_backup_drill_row(?array $drill, string $tone): string
 {
     $known = system_status_backup_drill_known($drill);
     $due = $known && ($drill['state'] ?? '') === VIRTUSPHERE_BACKUP_EVIDENCE_DUE;
@@ -275,13 +284,13 @@ function system_status_backup_drill_row(?array $drill, array $badge): string
     return system_status_backup_row(
         'restore-drill',
         __t('system_status_backup.row_drill'),
-        $badge,
+        $tone,
         [
             [
                 'label' => __t('system_status_backup.fact_drill_last'),
                 'html' => $known
                     ? '<time title="' . h(portal_format_epoch((int) ($drill['ts'] ?? 0))) . '">' . h(system_status_backup_age_label((int) ($drill['age_days'] ?? 0))) . '</time>'
-                    : h(__t('system_status_backup.state_unknown')),
+                    : h(status_tone_word('no_data')),
             ],
             ['label' => __t('system_status_backup.fact_drill_backup'), 'html' => $known && $stamp !== '' ? '<code>' . h($stamp) . '</code>' : '&mdash;'],
         ],
@@ -291,9 +300,9 @@ function system_status_backup_drill_row(?array $drill, array $badge): string
 
 /**
  * @param array<string,mixed>|null $scrub
- * @param array{variant: string, label: string} $badge
+ * @param string $tone status vocabulary tone of the row
  */
-function system_status_backup_scrub_row(?array $scrub, array $badge): string
+function system_status_backup_scrub_row(?array $scrub, string $tone): string
 {
     $known = system_status_backup_scrub_known($scrub);
     $failed = $known && ($scrub['state'] ?? '') === VIRTUSPHERE_BACKUP_EVIDENCE_FAILED;
@@ -309,7 +318,7 @@ function system_status_backup_scrub_row(?array $scrub, array $badge): string
     return system_status_backup_row(
         'backup-scrub',
         __t('system_status_backup.row_scrub'),
-        $badge,
+        $tone,
         [
             ['label' => __t('system_status_backup.fact_scrub_last'), 'html' => $known ? h(portal_format_epoch((int) ($scrub['ts'] ?? 0))) : '&mdash;'],
             [
@@ -325,9 +334,9 @@ function system_status_backup_scrub_row(?array $scrub, array $badge): string
 
 /**
  * @param array<string,mixed> $https certificate metadata of a live listener
- * @param array{variant: string, label: string} $badge
+ * @param string $tone status vocabulary tone of the row
  */
-function system_status_backup_https_row(array $https, array $badge, array $user): string
+function system_status_backup_https_row(array $https, string $tone, array $user): string
 {
     $expiry = system_status_backup_https_expiry($https);
     $hint = match (true) {
@@ -342,7 +351,7 @@ function system_status_backup_https_row(array $https, array $badge, array $user)
     return system_status_backup_row(
         'https-certificate',
         __t('system_status_backup.row_https'),
-        $badge,
+        $tone,
         [['label' => __t('system_status_backup.fact_https_valid_to'), 'html' => $expiry['valid_to'] > 0 ? h(portal_format_epoch($expiry['valid_to'])) : '&mdash;']],
         $hint
     );

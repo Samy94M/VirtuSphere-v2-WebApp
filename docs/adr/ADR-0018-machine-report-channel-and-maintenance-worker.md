@@ -397,3 +397,29 @@ only: red still requires raw status 2, but raw status 2 is no longer always red.
 change shows the new words at once; the counts appear after
 `install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly` brings
 `site-health/1.1`.
+
+## Amendment (2026-11-11, SY2): one status vocabulary for every source
+
+The words of the MSB amendment move into the portal-wide status vocabulary
+(`lib/status_vocabulary.php`, `docs/ai/reference/portal.md` R59). The verdicts
+and thresholds of this ADR do not change; only their words, icons and ranks do.
+
+- The site state keeps its five domain words (OK, Warnung/Warning,
+  Eingeschränkt/Limited, Kritisch/Critical, Unbekannt/Unknown). The English
+  word for "limited" is now "Limited", the same as in every other area.
+- The reporter axis speaks reporter words: an overdue site report is
+  "Warnung"/"Warning" (no own word "Überfällig"), stale evidence stays
+  "Veraltet"/"Stale", a reporter that never reported is "Keine Daten"/"No data".
+  The reporter fact on the card and the internal-services rows use the liveness
+  mapping (`heartbeat_badge($state, 'liveness')`): fresh is "Aktuell"/"Current",
+  a fail or the danger threshold is "Nicht erreichbar"/"Unreachable".
+- Sync result rows use the domain words: `danger` is "Kritisch", `warning`,
+  `missing` and `legacy` are "Warnung" (the legend still explains missing and
+  legacy), `unknown` is "Keine Daten".
+- The MECM card of the System status overview shows two lines, "Datenfluss"
+  (worst sync row) and "Standort" (site verdict), like the Dashboard tile,
+  instead of the worse of both. Only the headline over the cards takes the worse
+  one (`system_status_mecm_overview_tone()`, the integration on equal rank).
+- In the shared rank (`virtusphere_heartbeat_state_rank()`) "limited" now sits
+  above "warning" and below "critical", so a limited site outranks a delayed
+  sync in every worst-of roll-up.

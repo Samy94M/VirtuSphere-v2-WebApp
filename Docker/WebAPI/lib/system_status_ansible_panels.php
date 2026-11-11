@@ -45,6 +45,8 @@ function system_status_render_ansible(array $snapshot, array $user): void
                 $stateRow = $entry['state_row'];
                 $lastMissionJob = is_array($entry['last_mission_job'] ?? null) ? $entry['last_mission_job'] : null;
                 $component = trim((string) ($stateRow['last_component'] ?? ''));
+                // Hidden credential name on the repeated links and buttons (SY2).
+                $linkContext = system_status_link_context((string) $credential['name']);
                 ?>
                 <article class="status-row" data-deep-link-target id="credential-<?php echo h((string) $credential['id']); ?>">
                     <?php // The snapshot's state, not a fresh derivation from the row: re-deriving
@@ -76,7 +78,7 @@ function system_status_render_ansible(array $snapshot, array $user): void
                                     <input type="hidden" name="action" value="test">
                                     <input type="hidden" name="credential_id" value="<?php echo h((string) $credential['id']); ?>">
                                     <input type="hidden" name="return_to" value="ansible_status">
-                                    <button class="button button-secondary" type="submit" data-busy-label="<?php echo h(__t('system_status.ansible_testing')); ?>"><?php echo h(__t('system_status.ansible_test_now')); ?></button>
+                                    <button class="button button-secondary" type="submit" data-busy-label="<?php echo h(__t('system_status.ansible_testing')); ?>"><?php echo h(__t('system_status.ansible_test_now')); ?><?php echo $linkContext; ?></button>
                                 </form>
                             <?php } ?>
                             <?php if ($canViewCredentialAudit) { ?>

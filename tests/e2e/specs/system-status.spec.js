@@ -105,6 +105,31 @@ echo 'JSON' . json_encode(['c' => (int) $stmt->get_result()->fetch_assoc()['c']]
     await expect(page.locator('#directory-status')).toHaveCount(1);
   }
 
+  // SY2: the cards run in the order of the sections they jump to, derived from
+  // the page itself rather than restated here.
+  const order = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('.status-overview-card')].map((card) => card.getAttribute('href').split('#')[1]);
+    const sections = [...document.querySelectorAll('section[id]')].map((section) => section.id).filter((id) => cards.includes(id));
+    return { cards, sections };
+  });
+  expect(order.cards, 'card order equals section order').toEqual(order.sections);
+
+  // The headline is the page's one live region and names areas as links that
+  // jump to sections on this page; "everything in order" carries no link.
+  const headline = page.locator('[data-status-headline]');
+  await expect(headline).toHaveCount(1);
+  await expect(headline).toHaveAttribute('role', 'status');
+  // A copy button's own confirmation (A44) is the one other region allowed;
+  // no badge, card or row may announce itself.
+  await expect(page.locator('[role="status"]:not([data-copy-status])'), 'only the headline is a live region').toHaveCount(1);
+  for (const href of await headline.locator('a').evaluateAll((links) => links.map((link) => link.getAttribute('href')))) {
+    const anchor = href.split('#')[1];
+    expect(order.cards, `headline link ${href} names an overview area`).toContain(anchor);
+  }
+  // Every badge of the strip carries its decorative icon.
+  const badges = page.locator('.status-overview .badge');
+  await expect(badges.locator('.badge-icon[aria-hidden="true"]')).toHaveCount(await badges.count());
+
   const firstTimestamp = await page.locator('.status-generated time').textContent();
   await page.waitForTimeout(1100);
   await page.getByRole('link', { name: /Status aktualisieren|Refresh status/ }).click();
@@ -191,7 +216,7 @@ test('MECM site: only supporting parts critical reads limited, with the parts by
     });
     await page.goto('system_status.php');
     const mecm = page.locator('#mecm');
-    await expect(mecm).toContainText(/Eingeschränkt|Degraded/);
+    await expect(mecm).toContainText(/Eingeschränkt|Limited/);
     await expect(mecm).toContainText(/MECM meldet kritisch|MECM reports critical/);
     await expect(mecm).toContainText(/Verteilungspunkt|Distribution point/);
     await expect(mecm.locator('.status-subgroup').nth(1).locator('table code')).toHaveText('SMS_AD_SYSTEM_DISCOVERY_AGENT');
@@ -200,7 +225,7 @@ test('MECM site: only supporting parts critical reads limited, with the parts by
 
     await page.goto('dashboard.php');
     const siteRow = page.locator('a.card.kpi .signal-row').filter({ hasText: /MECM-Site|MECM site/ });
-    await expect(siteRow.locator('.badge')).toHaveText(/Eingeschränkt|Degraded/);
+    await expect(siteRow.locator('.badge')).toHaveText(/Eingeschränkt|Limited/);
   } finally {
     restoreSite(snapshot);
   }

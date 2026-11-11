@@ -1502,9 +1502,9 @@ kann er die feste Frist überschreiten, und die Karte meldet ihn bis zu seinem
 Abschluss als verspätet.
 „Synchronisationslauf fehlgeschlagen“ kann auch einen abgebrochenen
 Dateiscan bezeichnen; der historische Wire-Code `mecm_unavailable` bleibt
-kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die bestehenden
-Ampellabels „Ausgefallen“ und „Verzögert“ bleiben aus Kompatibilitätsgründen
-erhalten; die Legende grenzt ihre Aussage auf Bericht und Laufergebnis ein.
+kompatibel, ist aber kein Beweis für einen MECM-Ausfall. Die Ampel nennt
+solche Läufe mit den Wörtern des Statusvokabulars („Kritisch“, „Warnung“);
+die Legende grenzt ihre Aussage auf Bericht und Laufergebnis ein.
 Ein nachfolgender Legacy-Heartbeat verwirft die Herkunftszuordnung eines
 früheren Scanabschlusses. Er darf dessen Ergebnis, Zeit, Zähler oder Details
 nicht zu einer neuen Beobachtung zusammensetzen.
@@ -1572,7 +1572,7 @@ Erste Anlaufstelle ist immer der **Systemstatus** (Klartext-Ampel
 je Quelle mit Handlungsanweisung). Die Handlungsanweisung ist eine
 Reparaturanweisung und steht deshalb nur an einer Zeile, die nicht `ok` ist;
 verschwindet sie nach einem Eingriff, hat die Quelle wieder gemeldet. An einer
-Sync-Aufgabe folgt sie der Ursache von „Verzögert“: Ist die Meldung überfällig,
+Sync-Aufgabe folgt sie der Ursache einer „Warnung“: Ist die Meldung überfällig,
 nennt sie die Aufgabenplanung. Meldet die Aufgabe pünktlich und endet nur ihr
 Lauf mit offenen Punkten, sagt sie, dass ein Neustart nicht hilft, und zeigt,
 wo die Punkte stehen; beim Devices Sync sind das die Ursache je VM und die
