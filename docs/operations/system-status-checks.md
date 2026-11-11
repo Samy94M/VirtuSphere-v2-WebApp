@@ -6,12 +6,13 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 
 | Bereich | Quelle | Ampel je Zeile | Kachel in der Übersicht |
 |---|---|---|---|
-| Bereitstellungsdienst | Laufzeitidentität, Supervisor, Worker-Status, Warteschlange, Prüffälle | Verfügbarkeit plus Aufmerksamkeit | Summe der Karte |
+| Bereitstellungsdienst | Laufzeitidentität, Supervisor, Worker-Status, Warteschlange, Auftragsannahme, Prüffälle | Verfügbarkeit, Auftragsannahme und Aufmerksamkeit | Summe der Karte; eine Pause ist nie grün |
 | MECM | Laufberichte der drei Sync-Aufgaben und des Site-Health-Reporters | je Aufgabe | schlechteste Zeile |
 | Ansible-Test | Volltest je Ansible-Zugang, manuell oder geplant | je Zugang | schlechteste Zeile |
 | ESXi-Inventar | Inventarabruf je ESXi-Zugang | je Zugang | schlechteste Zeile |
-| Abweichungen | Missionen und VMs gegen den Inventar-Cache | Anzahl Befunde | Anzahl |
-| Interne Dienste | Wartungsdienst und Deploy-Worker; darunter Hostzustand aus dem Backup-Statuskanal | je Dienst; Hostzustand je Zeile | schlechteste Dienstzeile |
+| Abweichungen | Missionen und VMs gegen den Inventar-Cache | Anzahl Befunde | Anzahl; null ist nur mit vollständigem, aktuellem Nachweis grün |
+| Host und Backup | Backup-Statuskanal des Docker-Hosts: Backup, Restore-Test, Prüfsummen, HTTPS-Zertifikat | je Prüfung | schlechteste Zeile; „Unbekannt“ ist nie grün |
+| Interne Dienste | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Dienstzeile |
 | Active Directory | LDAPS-Konfiguration und Domänencontroller | je Controller | Gesamtzustand |
 
 Über der Übersicht stehen vier Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; die Backups sind nicht verschlüsselt (`backup_encryption_finding()`, kein Zertifikat hinterlegt oder der letzte erfolgreiche Lauf nicht an das hinterlegte verschlüsselt); Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`); offene ESXi-Zugangsdateien auf einem Ansible-Host (`repo_remote_secret_notice_groups()`). Der letzte Hinweis hat eine Gruppe je Zugang und Ziel. Sie erscheint, wenn eine ihrer Zeilen älter als 24 Stunden ist, sofort bei einem gelöschten Zugang oder einem Ziel, das nicht mehr zum Zugang passt. Laufende Leases und aktive Aufträge zählen nicht. Die Gruppe nennt die vollständige Anzahl, die älteste Zeile, Host und Grund. Benutzer mit `credentials.manage` bestätigen dort eine Gruppe mit Begründung; das ist dieselbe Bestätigung wie unter dem Zugang auf der Seite Zugangsdaten. Für `system.config` verlinkt jeder der ersten drei Hinweise die Einstellung, die ihn behebt.
@@ -45,12 +46,15 @@ flowchart TD
   DG --> X
   BU --> X
   RE --> X
-  X{"Prüffälle?"} -->|manuelle Prüfung nötig oder ungeklärter Altfall| XR["Badge rot"]
-  X -->|Wiederherstellung läuft| XY["Badge gelb, sofern nicht schon rot"]
-  X -->|keine| XN["Badge aus Verfügbarkeit: Nicht erreichbar rot, Beeinträchtigt und Wartet vor Neustart gelb, Arbeitet blau, Bereit grün"]
+  X{"Nicht erreichbar, oder Prüffall mit manueller Prüfung bzw. ungeklärtem Altfall?"} -->|ja| XR["Badge rot"]
+  X -->|nein| Y{"Beeinträchtigt, Wartet vor Neustart oder Wiederherstellung läuft?"}
+  Y -->|ja| XY["Badge gelb"]
+  Y -->|nein| P{"Auftragsannahme pausiert oder pausiert nach dem aktuellen Auftrag?"}
+  P -->|ja| XP["Badge gelb mit dem Wort der Auftragsannahme, Handlungshinweis auf der Karte"]
+  P -->|nein| XN["Badge aus Verfügbarkeit: Arbeitet blau, Bereit grün"]
 ```
 
-Die Schonfrist für einen nicht beanspruchten Auftrag ist `VIRTUSPHERE_DEPLOY_CLAIM_GRACE_SECONDS`. Ist die Annahme pausiert, sagt die Karte das ausdrücklich, statt einen Rückstand zu melden.
+Die Schonfrist für einen nicht beanspruchten Auftrag ist `VIRTUSPHERE_DEPLOY_CLAIM_GRACE_SECONDS`. Ist die Annahme pausiert, sagt die Karte das ausdrücklich, statt einen Rückstand zu melden. Die Verfügbarkeit bleibt bei einer Pause unverändert, die Überblickskarte aber nicht: Badge (`deploy_service_badge_variant()`) und Wort (`deploy_service_summary_label()`) folgen derselben Rangfolge wie im Diagramm, und eine Pause heißt dort wie die Achse Auftragsannahme der Karte („Nimmt keine Aufträge an“ oder „Pausiert nach dem aktuellen Auftrag“). Unter den Achsen steht dann ein Satz, was die Pause kostet und wie sie endet (`deploy_service_claim_hint()`).
 
 ## MECM
 
@@ -190,9 +194,14 @@ flowchart TD
   D -->|ja| D1["kein Befund"]
   D -->|nein| D2["Befund mit Feld und Wert"]
   D2 --> E["Zählen, filtern, seitenweise anzeigen; VLAN-Befunde lassen sich gesammelt auf eine vorhandene Portgruppe umhängen"]
+  E --> Z{"Anzahl der Befunde?"}
+  Z -->|größer null| ZW["n Abweichungen (gelb)"]
+  Z -->|null| ZN{"Alle Arten auswertbar und aktuell?"}
+  ZN -->|ja| ZG["Keine Abweichungen (grün)"]
+  ZN -->|nein| ZU["Keine Treffer, Nachweis unvollständig (grau)"]
 ```
 
-Verglichen wird exakt, auch in der Groß- und Kleinschreibung. Ist keine Art auswertbar, zeigt der Bereich keine Zahl, sondern einen Hinweis mit Link zum ESXi-Inventar. Mit Inventarintervall 0 entfällt die Altersgrenze. Deploy-Missionswarnung und Missionslisten-Badge verwenden denselben Bericht und zeigen nur aktuelle Treffer für Arten mit Namenssemantik v2. Die Host-Warnung vergleicht dieselbe Art für den gewählten Host und mindestens einen anderen Host; beide Nachweise müssen aktuell sein. Historische Treffer bleiben Diagnose im Systemstatus und erscheinen nicht als aktuelle Warnung. Die Host-Warnung nennt nur Werte, die auf einem anderen aktuellen Host vorhanden sind; ein Wert, der auf keinem aktuellen Host vorkommt, bleibt ausschließlich in der Missionswarnung.
+Karte und Abschnittsüberschrift rendern dieselbe Zahl mit demselben Badge (`deviation_count_badge()`), die Vollständigkeit liest beide aus `system_status_deviation_evidence_current()`. Verglichen wird exakt, auch in der Groß- und Kleinschreibung. Ist keine Art auswertbar, zeigt der Bereich keine Zahl, sondern einen Hinweis mit Link zum ESXi-Inventar. Mit Inventarintervall 0 entfällt die Altersgrenze. Deploy-Missionswarnung und Missionslisten-Badge verwenden denselben Bericht und zeigen nur aktuelle Treffer für Arten mit Namenssemantik v2. Die Host-Warnung vergleicht dieselbe Art für den gewählten Host und mindestens einen anderen Host; beide Nachweise müssen aktuell sein. Historische Treffer bleiben Diagnose im Systemstatus und erscheinen nicht als aktuelle Warnung. Die Host-Warnung nennt nur Werte, die auf einem anderen aktuellen Host vorhanden sind; ein Wert, der auf keinem aktuellen Host vorkommt, bleibt ausschließlich in der Missionswarnung.
 
 ## Interne Dienste
 
@@ -211,10 +220,18 @@ flowchart TD
   C -->|frisch| GR["OK (grün)"]
 ```
 
-Unter den Dienstzeilen steht der Block **Hostzustand** (`lib/system_status_backup_panels.php`). Seine Zeilen haben je eine eigene Plakette und ändern die Ampel der Kachel nicht: Es sind Hinweise des Docker-Hosts, kein Dienstzustand. Quelle ist der Backup-Statuskanal (`docs/operations/backup.md`): Backup aus `backup_status_read()` mit den Zuständen der Backup-Karte, Restore-Test aus `backup_drill_status_read()` (schreibt der Drill `scripts/restore_test.sh` selbst), Prüfsummen aus `backup_scrub_status_read()` (schreibt `scripts/backup-scrub.sh`). Die Zertifikatszeile erscheint nur, solange `https_listener_live()` gilt. Ein fehlender, unlesbarer oder in der Zukunft datierter Nachweis heißt „Unbekannt“, nie „OK“.
+## Host und Backup
+
+Eigener Bereich mit eigener Kachel (`lib/system_status_backup_panels.php`, Anker `host-backup`). Bis SY1 stand er als Block „Hostzustand“ ohne Kachel unter „Interne Dienste“, und ein fehlgeschlagenes Backup ließ die Übersicht grün. Die Zeilen haben je eine eigene Plakette; die Kachel zeigt die schlechteste davon mit deren eigenem Wort (`system_status_host_overview_badge()` über `system_status_host_checks()`, dieselbe Liste, aus der der Abschnitt seine Zeilen rendert). Der Bereich ändert weder die Ampel „Interne Dienste“ noch den Dashboard-Hinweis oder `health.php`.
+
+Quelle ist der Backup-Statuskanal (`docs/operations/backup.md`), auf der Seite einmal je Aufruf gelesen (`system_status_backup_panel_data()`): Backup aus `backup_status_read()` mit den Zuständen der Backup-Karte, Restore-Test aus `backup_drill_status_read()` (schreibt der Drill `scripts/restore_test.sh` selbst), Prüfsummen aus `backup_scrub_status_read()` (schreibt `scripts/backup-scrub.sh`). Die Zertifikatszeile erscheint nur, solange `https_listener_live()` gilt, und zählt nur dann für die Kachel. Ein fehlender, unlesbarer oder in der Zukunft datierter Nachweis heißt „Unbekannt“, nie „OK“.
 
 ```mermaid
 flowchart TD
+  B{"Backup: Zustand aus backup_status_read()?"} -->|fehlgeschlagen| BF["Fehlgeschlagen (rot)"]
+  B -->|veraltet oder wenig Speicher| BW["Veraltet / Wenig Speicher (gelb)"]
+  B -->|ok| BO["OK (grün)"]
+  B -->|kein Nachweis| BU["Unbekannt (grau)"]
   D{"Restore-Test: bestandener Drill nachgewiesen?"} -->|nein| DU["Unbekannt (grau)"]
   D -->|ja| DA{"Alter in ganzen Tagen ab VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS?"}
   DA -->|ja| DF["Fällig (gelb)"]
@@ -223,9 +240,10 @@ flowchart TD
   S -->|ja| SF{"Ein Satz weicht ab?"}
   SF -->|ja| SA["Abweichung (rot)"]
   SF -->|nein| SO["OK (grün)"]
-  H{"Zertifikat: Restlaufzeit?"} -->|abgelaufen| HA["Abgelaufen (rot)"]
+  H{"Zertifikat, nur solange HTTPS ausgeliefert wird: Restlaufzeit?"} -->|abgelaufen| HA["Abgelaufen (rot)"]
   H -->|bis VIRTUSPHERE_HTTPS_CERT_EXPIRY_WARN_DAYS| HB["Läuft bald ab (gelb)"]
   H -->|länger| HO["OK (grün)"]
+  BF & BW & BO & BU & DU & DF & DO & SU & SA & SO & HA & HB & HO --> K["Kachel: schlechteste Zeile mit ihrem Wort, rot vor gelb vor grau vor grün; bei Gleichstand die erste Zeile des Abschnitts"]
 ```
 
 ## Active Directory

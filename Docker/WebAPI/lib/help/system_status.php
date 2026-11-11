@@ -18,6 +18,7 @@ require_once __DIR__ . '/../system_status.php';
             <li><a href="<?php echo h(help_url('system-status', 'help-status-overview')); ?>"><?php echo h(__t('help_system_status.jump_overview')); ?></a></li>
             <li><a href="<?php echo h(help_url('system-status', 'help-status-deploy')); ?>"><?php echo h(__t('help_system_status.jump_deploy')); ?></a></li>
             <li><a href="<?php echo h(help_url('system-status', 'help-status-directory')); ?>"><?php echo h(__t('help_system_status.jump_directory')); ?></a></li>
+            <li><a href="<?php echo h(help_url('system-status', 'help-status-host')); ?>"><?php echo h(__t('help_system_status.jump_host')); ?></a></li>
             <li><a href="<?php echo h(help_url('system-status', 'help-status-mecm')); ?>"><?php echo h(__t('help_system_status.jump_mecm')); ?></a></li>
             <li><a href="<?php echo h(help_url('system-status', 'help-status-esxi')); ?>"><?php echo h(__t('help_system_status.jump_esxi')); ?></a></li>
         </ul></nav>
@@ -133,6 +134,12 @@ require_once __DIR__ . '/../system_status.php';
                   // looked up here. ?>
             <?php system_status_legend_items('directory'); ?>
             <p><?php echo h(__t('help_system_status.directory_p2')); ?></p>
+        </section>
+
+        <section class="panel">
+            <h2 id="help-status-host" tabindex="-1"><?php echo h(__t('help_system_status.host_heading')); ?></h2>
+            <p><?php echo h(__t('help_system_status.host_p1')); ?></p>
+            <p><?php echo h(__t('help_system_status.host_p2')); ?></p>
         </section>
 
         <section class="panel">

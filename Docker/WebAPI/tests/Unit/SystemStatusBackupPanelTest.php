@@ -5,7 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 /**
- * The host-state rows under "Internal services". Each row's badge speaks only
+ * The rows of the "Host and backup" section. Each row's badge speaks only
  * for its own facts, missing evidence never renders as OK, and a hint that
  * names another page links it only for a user who may open it.
  */
@@ -29,7 +29,7 @@ final class SystemStatusBackupPanelTest extends TestCase
     private function render(array $data, array $user = self::ADMIN): string
     {
         ob_start();
-        system_status_render_backup_rows(array_merge(['backup' => null, 'drill' => null, 'scrub' => null, 'https' => null], $data), $user);
+        system_status_render_host_backup(array_merge(['backup' => null, 'drill' => null, 'scrub' => null, 'https' => null], $data), $user);
 
         return (string) ob_get_clean();
     }

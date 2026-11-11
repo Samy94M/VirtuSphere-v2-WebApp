@@ -349,7 +349,8 @@ echo 'JSON' . json_encode(['esxi' => $esxi]) . 'JSON';
     await expect(page.locator('article.inventory-card').first()).toBeVisible();
 
     const label = (await badge.textContent()).trim();
-    expect(label).toMatch(/^(Keine Abweichungen|No deviations|1 Abweichung|1 deviation|\d+ Abweichungen|\d+ deviations)$/);
+    // A zero over incomplete or old evidence is grey and says so (SY1).
+    expect(label).toMatch(/^(Keine Abweichungen|No deviations|Keine Treffer, Nachweis unvollständig|No findings, evidence incomplete|1 Abweichung|1 deviation|\d+ Abweichungen|\d+ deviations)$/);
     expect(label).not.toMatch(/^1 Abweichungen|^1 deviations/);
     expect(label).not.toContain(':count');
   } finally {

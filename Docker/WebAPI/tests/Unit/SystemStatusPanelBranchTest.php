@@ -323,6 +323,24 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString('badge-success', $html);
     }
 
+    public function testAZeroOverPartialEvidenceIsNoGreenReleaseInTheSectionEither(): void
+    {
+        ob_start();
+        system_status_render_deviations(
+            system_status_deviation_view([], 'all', '', 1),
+            [],
+            ['id' => 1, 'role' => 'admin'],
+            '',
+            0,
+            ['source_count' => 1, 'has_evidence' => true, 'fully_evaluable' => false, 'fully_current' => false, 'kinds' => []]
+        );
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString(__t('system_status.dev_count_none_unconfirmed'), $html);
+        self::assertStringContainsString(__t('system_status.dev_none_partial'), $html);
+        self::assertStringNotContainsString('badge-success', $html);
+    }
+
     public function testTheCountPicksTheSentenceByNumber(): void
     {
         $one = $this->renderDeviations($this->deviation('PROD-WEB', 1), true);
