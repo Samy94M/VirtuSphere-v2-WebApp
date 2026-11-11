@@ -164,6 +164,6 @@ function system_status_render_overview_headline(array $cards, array $query = [])
     $meta = status_tone_meta($headline['tone']);
 
     return '<p class="status-headline status-headline-' . h($meta['variant']) . '" role="status" data-status-headline="' . h($headline['tone']) . '">'
-        . '<span class="badge-icon badge-icon-' . h($meta['icon']) . '" aria-hidden="true"></span>'
+        . portal_badge_icon($meta['icon'])
         . '<span>' . implode(' ', $sentences) . '</span></p>';
 }

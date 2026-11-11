@@ -231,8 +231,7 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
             $pending = $entry['pending_job'];
             $counts = $entry['counts'];
             $isSelected = $credentialId === $selectedId && $selectedDetail !== null;
-            // Every card repeats the same links and buttons; the hidden name keeps
-            // them apart in a screen reader's link list (SY2).
+            // Repeated links per card: the hidden name keeps them apart for screen readers (SY2).
             $linkContext = system_status_link_context((string) $credential['name']);
             ?>
             <article class="inventory-card<?php echo $isSelected ? ' inventory-card-open' : ''; ?>" data-deep-link-target id="credential-<?php echo h((string) $credentialId); ?>">

@@ -420,6 +420,8 @@ and thresholds of this ADR do not change; only their words, icons and ranks do.
   (worst sync row) and "Standort" (site verdict), like the Dashboard tile,
   instead of the worse of both. Only the headline over the cards takes the worse
   one (`system_status_mecm_overview_tone()`, the integration on equal rank).
-- In the shared rank (`virtusphere_heartbeat_state_rank()`) "limited" now sits
-  above "warning" and below "critical", so a limited site outranks a delayed
-  sync in every worst-of roll-up.
+- Tones rank on the shared scale through `status_tone_rank()`, which maps each
+  tone to the token it stands for: "limited" ranks with "missing", above
+  "warning" and below "critical", so a limited site outranks a delayed sync in
+  every worst-of roll-up. `virtusphere_heartbeat_state_rank()` itself stays
+  token-only.

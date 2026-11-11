@@ -19,7 +19,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 
 Die Bereiche heißen hier wie die Kacheln der Übersicht auf der Seite und stehen in deren Reihenfolge; die Kacheln laufen in der Reihenfolge der Abschnitte auf der Seite. `SystemStatusChecksDocContractTest` leitet Namen und Reihenfolge aus der Kartenliste ab (`system_status_overview_cards()`).
 
-## Statusvokabular und Kopfzeile
+### Statusvokabular und Kopfzeile
 
 Jedes Statusbadge der Seite, der Dashboard-Kacheln und der Backup-Karte in den Einstellungen ist ein Ton aus `lib/status_vocabulary.php`: eine feste Kombination aus Farbe, Symbol und Wort, überall gleich (SY2). Drei Achsen bleiben getrennt:
 
@@ -39,7 +39,7 @@ Jedes Statusbadge der Seite, der Dashboard-Kacheln und der Backup-Karte in den E
 
 Ein fest registrierter Zusatz gehört zum Ton `unknown`: „Keine Treffer, Nachweis unvollständig“ (Abweichungen). Werte mit eigenem Wort (die drei Achsen des Bereitstellungsdienstes, die Anzahl der Abweichungen, der Zustand eines Inventarauftrags) tragen Farbe und Symbol ihres Tons. Jede Quelle ordnet ihre Zustände in einer Tabelle einem Ton zu (`status_tone_for()`, der Backup-Kanal in `backup_status_tone()`); kein Bereich hat eigene Wörter für eine Stufe. Das Symbol ist dekorativ (`aria-hidden`), das Wort ist der ganze Text des Badges.
 
-Die Rangfolge für „schlechteste Zeile“ ist für alle Bereiche dieselbe (`virtusphere_heartbeat_state_rank()`, die Töne auf derselben Skala): Kritisch und Nicht erreichbar vor „Erwartet, nie gemeldet“ und Eingeschränkt vor Warnung vor „Legacy“ vor grau vor grün. Grau (Unbekannt, Veraltet, Keine Daten) ist nie grün.
+Die Rangfolge für „schlechteste Zeile“ ist für alle Bereiche dieselbe (`virtusphere_heartbeat_state_rank()`; `status_tone_rank()` setzt jeden Ton auf den Rang seines Tokens): Kritisch und Nicht erreichbar vor „Erwartet, nie gemeldet“ und Eingeschränkt vor Warnung vor „Legacy“ vor grau vor grün. Grau (Unbekannt, Veraltet, Keine Daten) ist nie grün.
 
 Über den Kacheln steht eine Kopfzeile (`system_status_render_overview_headline()`), die einzige Live-Region der Seite (`role="status"`). Sie liest die Töne der Kacheln, nicht eine zweite Auswertung. Die Kacheln selbst bleiben an ihrem Platz; die Kopfzeile nennt die Bereiche, die Aufmerksamkeit brauchen, als Links.
 
@@ -222,7 +222,7 @@ flowchart TD
   C0 -->|nein| U
   C0 -->|ja| C{"Älter als max(VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS, doppeltes Volltestintervall)?"}
   C -->|ja| S["Veraltet (stale, grau)"]
-  C -->|nein| O["bestanden: OK (grün); eingeschränkt: Eingeschränkt (gelb)"]
+  C -->|nein| O["bestanden: OK (ok, grün); eingeschränkt: Eingeschränkt (warning, gelb)"]
 ```
 
 Die Deploy-Seite übernimmt die Ansible-Volltest-Ampel und den Prüfzeitpunkt aus `integration_health_snapshot()`. Der gewählte Zugang zeigt dieselbe Evidenz wie seine Systemstatus-Karte; ohne JavaScript bleiben die beschrifteten Nachweise aller Zugänge sichtbar. Der Hinweis sperrt keinen Auftrag. Seine Karte bietet berechtigten Benutzern **Volltest jetzt starten**.

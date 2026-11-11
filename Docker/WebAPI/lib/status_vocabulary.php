@@ -15,8 +15,9 @@ declare(strict_types=1);
 // A source never invents a word for a level. It maps its own state tokens to a
 // tone in status_tone_for() below (or, for the backup channel, next to its own
 // state constants) and the badge renderer takes word, colour and icon from the
-// tone. The tables here are pure; the renderer is status_tone_badge() in
-// lib/layout_presenters.php. Visible words live in lang/{de,en}/status_vocabulary.php.
+// tone. The tables here are pure (workers load them too); the renderers are in
+// lib/status_badges.php, portal only. Visible words live in
+// lang/{de,en}/status_vocabulary.php.
 
 const VIRTUSPHERE_STATUS_LEVEL_TONES = ['ok', 'warning', 'limited', 'critical', 'unknown'];
 const VIRTUSPHERE_STATUS_REPORTER_TONES = ['current', 'stale', 'no_data', 'unreachable', 'disabled'];
@@ -69,6 +70,7 @@ function status_tone_meta(string $tone): array
         'unreachable' => ['variant' => 'danger', 'icon' => 'unreachable'],
         'disabled' => ['variant' => 'neutral', 'icon' => 'disabled'],
         'running' => ['variant' => 'info', 'icon' => 'running'],
+        default => throw new InvalidArgumentException('Unknown status tone: ' . $tone),
     };
 }
 
@@ -143,6 +145,7 @@ function status_tone_for(string $kind, string $state): string
             'none' => 'no_data',
             default => 'unknown',
         },
+        default => throw new InvalidArgumentException('Unknown status source kind: ' . $kind),
     };
 }
 
@@ -163,10 +166,17 @@ function status_tone_for_variant(string $variant): string
 
 /**
  * Severity of a tone for roll-ups and the System status headline, on the one
- * scale of virtusphere_heartbeat_state_rank(): critical before limited before
- * warning before grey before green.
+ * scale of virtusphere_heartbeat_state_rank(): each tone ranks like the token it
+ * stands for, so critical and unreachable rank with danger, limited with missing
+ * (above warning), the healthy tones with ok, and the grey tones with unknown.
+ * The token rank stays token-only; its arms are the audit's integration states.
  */
 function status_tone_rank(string $tone): int
 {
-    return virtusphere_heartbeat_state_rank($tone);
+    return virtusphere_heartbeat_state_rank(match ($tone) {
+        'critical', 'unreachable' => 'danger',
+        'limited' => 'missing',
+        'current', 'running', 'disabled' => 'ok',
+        default => $tone,
+    });
 }

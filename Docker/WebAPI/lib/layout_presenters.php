@@ -7,7 +7,7 @@ declare(strict_types=1);
 // which is required here rather than by the facade so this file's own require
 // closure stays complete.
 require_once __DIR__ . '/portal_status_display.php';
-require_once __DIR__ . '/status_vocabulary.php';
+require_once __DIR__ . '/status_badges.php';
 
 // Single source for the badge markup. Callers pass a variant (the palette suffix
 // success/warning/danger/info/neutral) and the already-resolved label; both are
@@ -17,43 +17,25 @@ require_once __DIR__ . '/status_vocabulary.php';
 // and colour is never the only signal (WCAG 1.4.1).
 function portal_badge(string $variant, string $label, string $icon = ''): string
 {
-    $iconHtml = $icon === '' ? '' : '<span class="badge-icon badge-icon-' . h($icon) . '" aria-hidden="true"></span>';
+    $iconHtml = $icon === '' ? '' : portal_badge_icon($icon);
 
     return '<span class="badge badge-' . h($variant) . '">' . $iconHtml . h($label) . '</span>';
 }
 
-/**
- * A badge of the status vocabulary: word, colour and icon of the tone, or of a
- * registered phrase bound to a tone (VIRTUSPHERE_STATUS_PHRASES).
- */
-function status_tone_badge(string $toneOrPhrase): string
+/** The decorative icon of a tone, also used where a sentence leads like a badge (the System status headline). */
+function portal_badge_icon(string $icon): string
 {
-    $tone = VIRTUSPHERE_STATUS_PHRASES[$toneOrPhrase] ?? $toneOrPhrase;
-    $meta = status_tone_meta($tone);
-
-    return portal_badge($meta['variant'], status_tone_word($toneOrPhrase), $meta['icon']);
+    return '<span class="badge-icon badge-icon-' . h($icon) . '" aria-hidden="true"></span>';
 }
 
 /**
  * A label badge that names a kind of thing ("Vorlage"), not a state: no tone,
- * so no icon. The System status modules use this or the two tone renderers,
- * never portal_badge() directly (StatusVocabularyTest).
+ * so no icon. The System status modules use this or the two tone renderers of
+ * lib/status_badges.php, never portal_badge() directly (StatusVocabularyTest).
  */
 function portal_label_badge(string $label): string
 {
     return portal_badge('info', $label);
-}
-
-/**
- * A value badge (a count, a deploy-service axis value, a job state): the value
- * is its own word, colour and icon are its tone's. Never pass a level word here;
- * a level is status_tone_badge().
- */
-function status_value_badge(string $tone, string $label): string
-{
-    $meta = status_tone_meta($tone);
-
-    return portal_badge($meta['variant'], $label, $meta['icon']);
 }
 
 function status_badge(string $legacyStatus): string
