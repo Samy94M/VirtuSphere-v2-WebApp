@@ -296,7 +296,9 @@ function system_status_backup_drill_row(?array $drill, string $tone): string
             [
                 'label' => __t('system_status_backup.fact_drill_last'),
                 'html' => $known
-                    ? portal_time_html(gmdate('Y-m-d H:i:s', (int) ($drill['ts'] ?? 0)))
+                    // The age is the one the host reported with the drill, so it stays the relative part.
+                    ? '<time datetime="' . h(portal_time_iso(gmdate('Y-m-d H:i:s', (int) ($drill['ts'] ?? 0)))) . '">'
+                        . h(__t('common.time_relative_absolute', ['relative' => system_status_backup_age_label((int) ($drill['age_days'] ?? 0)), 'absolute' => portal_format_epoch((int) ($drill['ts'] ?? 0))])) . '</time>'
                     : h(status_tone_word('no_data')),
             ],
             ['label' => __t('system_status_backup.fact_drill_backup'), 'html' => $known && $stamp !== '' ? '<code>' . h($stamp) . '</code>' : '&mdash;'],

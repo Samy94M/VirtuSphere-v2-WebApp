@@ -188,7 +188,7 @@ final class SystemStatusCardContentsTest extends TestCase
             ARRAY_FILTER_USE_BOTH
         ));
         $sources = [];
-        foreach (glob(dirname(__DIR__, 2) . '/lib/system_status_*panels.php') ?: [] as $file) {
+        foreach (glob(dirname(__DIR__, 2) . '/lib/system_status_*panel*.php') ?: [] as $file) {
             $sources[basename($file)] = (string) file_get_contents($file);
         }
         foreach ($anchors as $anchor) {
