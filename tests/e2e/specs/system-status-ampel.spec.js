@@ -145,6 +145,7 @@ test('the page legend explains every Ampel state the page can render, and says t
   // fourth place a state set was written down: adding `stale` to the Ansible
   // Ampel turned a green suite red on two numbers that named no decision.
   const sizes = phpJson(`
+require_once '/var/www/html/lib/status_vocabulary.php';
 echo 'JSON' . json_encode([
     'heartbeat' => count(VIRTUSPHERE_HEARTBEAT_STATES),
     'esxi' => count(VIRTUSPHERE_ESXI_AMPEL_STATES),
