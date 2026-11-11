@@ -99,23 +99,29 @@ final class AmpelLegendContractTest extends TestCase
 
     public function testEveryBadgeLabelExistsForEveryState(): void
     {
-        // A state whose badge falls through to the "unknown" label would render
-        // two different states with the same word, which is the failure the
-        // separate label sets exist to prevent.
+        // SY2: the badge word of every state is the status vocabulary's word of
+        // its tone, so each state must map to a tone the vocabulary catalog
+        // names in both locales. The token sets of the tone table must be the
+        // page's own state constants, or a new state would render through a
+        // fallback branch nobody chose.
+        require_once str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/status_vocabulary.php';
+        $tokenSets = [
+            'heartbeat' => ['result', 'liveness'],
+            'esxi' => ['esxi'],
+            'ansible' => ['ansible'],
+        ];
         foreach (self::AMPELN as $kind => [$states, $unusedPrefix]) {
-            $labelPrefix = match ($kind) {
-                'esxi' => 'esxi_state_',
-                'ansible' => 'ansible_state_',
-                default => 'status_',
-            };
-            foreach (['de', 'en'] as $locale) {
-                $catalog = $this->catalog($locale);
-                foreach ($states as $state) {
-                    self::assertArrayHasKey(
-                        $labelPrefix . $state,
-                        $catalog,
-                        $locale . ' has no badge label for the ' . $kind . ' state "' . $state . '"'
-                    );
+            foreach ($tokenSets[$kind] as $toneKind) {
+                self::assertEqualsCanonicalizing($states, VIRTUSPHERE_STATUS_TONE_KINDS[$toneKind], $toneKind . ' must map exactly the ' . $kind . ' states');
+                foreach (['de', 'en'] as $locale) {
+                    $catalog = require str_replace('\\', '/', dirname(__DIR__, 2)) . '/lang/' . $locale . '/status_vocabulary.php';
+                    foreach ($states as $state) {
+                        self::assertArrayHasKey(
+                            status_tone_for($toneKind, $state),
+                            $catalog,
+                            $locale . ' has no badge word for the ' . $kind . ' state "' . $state . '"'
+                        );
+                    }
                 }
             }
         }

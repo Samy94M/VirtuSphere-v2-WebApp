@@ -33,7 +33,7 @@ final class SystemStatusChecksDocContractTest extends TestCase
         }
         $root = dirname(__DIR__, 2);
         $rendered = self::renderedAnchors($root . '/lib');
-        $cards = self::overviewCards($root . '/lib/system_status_panels.php');
+        $cards = self::overviewCards($root . '/lib/system_status_overview.php');
 
         self::assertNotSame([], $rendered, 'No rendered status sections found (zero-match must not pass).');
         $cardAnchors = array_keys($cards);
@@ -49,6 +49,10 @@ final class SystemStatusChecksDocContractTest extends TestCase
 
         $doc = str_replace("\r\n", "\n", (string) file_get_contents($docPath));
         self::assertSame([], self::areaProblems($names, $doc));
+        // SY2: the document runs in the order of the cards, which is the order
+        // of the sections on the page.
+        self::assertSame($names, self::overviewRows($doc), 'the overview table must list the areas in card order');
+        self::assertSame($names, array_values(array_intersect(array_keys(self::sections($doc)), $names)), 'the sections must follow the card order');
     }
 
     public function testGuardRejectsMissingSection(): void
@@ -234,7 +238,7 @@ final class SystemStatusChecksDocContractTest extends TestCase
     private static function overviewCards(string $panels): array
     {
         $source = (string) file_get_contents($panels);
-        preg_match_all('/\[(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_[A-Z_]+), __t\(\'system_status\.(overview_[a-z_]+)\'\)/', $source, $matches, PREG_SET_ORDER);
+        preg_match_all('/\'anchor\' => (VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_[A-Z_]+),\s*\'label\' => __t\(\'system_status\.(overview_[a-z_]+)\'\)/', $source, $matches, PREG_SET_ORDER);
         $cards = [];
         foreach ($matches as $match) {
             $cards[$match[1]] = $match[2];

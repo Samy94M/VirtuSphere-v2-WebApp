@@ -14,6 +14,8 @@ final class AutoimporterStatusPresentationTest extends TestCase
         foreach (['ok', 'warning', 'danger', 'unknown'] as $state) {
             $html = system_status_run_badge($state, true);
             self::assertStringContainsString(__t('system_status.run_completion_open'), $html);
+            // SY2: the open run keeps the colour and icon of the previous result.
+            self::assertSame(status_value_badge(status_tone_for('result', $state), __t('system_status.run_completion_open')), $html);
         }
         self::assertSame(heartbeat_badge('danger'), system_status_run_badge('danger', false));
     }
@@ -39,10 +41,21 @@ final class AutoimporterStatusPresentationTest extends TestCase
 
     public function testActivityIsIndependentOfDistributionAndResultSeverity(): void
     {
-        foreach ([VIRTUSPHERE_RUN_EVENT_STARTED, VIRTUSPHERE_RUN_EVENT_COMPLETED, 'heartbeat', 'future'] as $event) {
-            self::assertStringContainsString('badge-neutral', system_status_autoimporter_activity($event));
+        // SY2: activity is the reporter axis (running, current, no data); it
+        // never takes a warning or critical colour from the scan result.
+        foreach ([
+            VIRTUSPHERE_RUN_EVENT_STARTED => 'badge-info',
+            VIRTUSPHERE_RUN_EVENT_COMPLETED => 'badge-success',
+            'heartbeat' => 'badge-neutral',
+            'future' => 'badge-neutral',
+        ] as $event => $class) {
+            $html = system_status_autoimporter_activity($event);
+            self::assertStringContainsString($class, $html, $event);
+            self::assertStringNotContainsString('badge-warning', $html);
+            self::assertStringNotContainsString('badge-danger', $html);
         }
         self::assertStringContainsString(__t('system_status.run_activity_unknown'), system_status_autoimporter_activity('future'));
+        self::assertStringContainsString('badge-icon-no-data', system_status_autoimporter_activity('future'));
     }
 
     public function testLastCompletedScanHasItsOwnOutcomeBadge(): void

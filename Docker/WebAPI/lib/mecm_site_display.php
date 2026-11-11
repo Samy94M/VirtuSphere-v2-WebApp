@@ -9,23 +9,18 @@ require_once __DIR__ . '/layout_presenters.php';
 require_once __DIR__ . '/mecm_site_assessment.php';
 
 /**
- * MECM site state in its own words, never the reporter liveness words of
- * heartbeat_badge(): a MECM verdict is not "down" or "delayed". `limited` is
- * MECM critical where only supporting parts are critical. `overdue` and
- * `stale` belong to the reporter and its evidence, `none` means no report yet.
+ * MECM site state in the status vocabulary (SY2): the five verdicts are the five
+ * domain tones, so a MECM "Kritisch" is the same word, colour and icon as every
+ * other critical area. `overdue` (the reporter is late) is a warning, `stale`
+ * the grey reporter word, `none` (no report yet) "no data". The mapping is the
+ * 'mecm_site' row of status_tone_for().
  */
 function mecm_site_badge(string $state): string
 {
-    [$variant, $key] = match ($state) {
-        VIRTUSPHERE_MECM_SITE_VERDICT_OK => ['success', 'site_state_ok'],
-        VIRTUSPHERE_MECM_SITE_VERDICT_WARNING => ['warning', 'site_state_warning'],
-        VIRTUSPHERE_MECM_SITE_VERDICT_LIMITED => ['warning', 'site_state_limited'],
-        VIRTUSPHERE_MECM_SITE_VERDICT_CRITICAL => ['danger', 'site_state_critical'],
-        'overdue' => ['warning', 'site_reporter_overdue'],
-        'stale' => ['neutral', 'status_stale'],
-        'none' => ['neutral', 'status_unknown'],
-        default => ['neutral', 'site_state_unknown'],
-    };
+    return status_tone_badge(mecm_site_tone($state));
+}
 
-    return portal_badge($variant, __t('system_status.' . $key));
+function mecm_site_tone(string $state): string
+{
+    return status_tone_for('mecm_site', $state);
 }

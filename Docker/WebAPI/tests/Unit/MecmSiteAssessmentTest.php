@@ -328,21 +328,36 @@ final class MecmSiteAssessmentTest extends TestCase
         self::assertSame('overdue', integration_health_site_group_state($old));
     }
 
-    public function testTheOverviewCardShowsTheWorseGroupInItsOwnWords(): void
+    public function testTheOverviewCardShowsDataFlowAndSiteAsTwoRows(): void
     {
+        // SY2: the card no longer folds both groups into one worst-of badge; it
+        // carries one row per group, and only the headline takes the worse.
         $snapshot = static fn (string $sync, string $siteRank, string $site): array => [
             'mecm_sync' => ['state' => $sync],
             'mecm_site' => ['state' => $siteRank, 'site_state' => $site],
         ];
-        $critical = system_status_mecm_overview_badge($snapshot('ok', 'danger', 'critical'));
-        self::assertStringContainsString('badge-danger', $critical);
-        self::assertStringContainsString('>Kritisch<', $critical);
-        self::assertStringContainsString('>Eingeschränkt<', system_status_mecm_overview_badge($snapshot('ok', 'warning', 'limited')));
-        self::assertStringContainsString('>Überfällig<', system_status_mecm_overview_badge($snapshot('ok', 'warning', 'overdue')));
-        // A failed sync keeps its own words, also next to a limited site.
-        self::assertStringContainsString('>Ausgefallen<', system_status_mecm_overview_badge($snapshot('danger', 'warning', 'limited')));
-        self::assertStringContainsString('>OK<', system_status_mecm_overview_badge($snapshot('ok', 'ok', 'ok')));
-        self::assertStringContainsString('>Noch keine Daten<', system_status_mecm_overview_badge($snapshot('unknown', 'unknown', 'none')));
+        $rows = static function (string $html): array {
+            preg_match_all('#<span class="signal-row"><span class="signal-label">([^<]+)</span>(.*?</span>)</span>#', $html, $m);
+
+            return array_combine($m[1], $m[2]);
+        };
+        $critical = $rows(system_status_mecm_overview_badge($snapshot('ok', 'danger', 'critical')));
+        self::assertSame([__t('system_status_overview.mecm_flow'), __t('system_status_overview.mecm_site')], array_keys($critical));
+        self::assertStringContainsString('>OK<', $critical[__t('system_status_overview.mecm_flow')]);
+        self::assertStringContainsString('badge-danger', $critical[__t('system_status_overview.mecm_site')]);
+        self::assertStringContainsString('>Kritisch<', $critical[__t('system_status_overview.mecm_site')]);
+        self::assertSame('critical', system_status_mecm_overview_tone($snapshot('ok', 'danger', 'critical')));
+
+        // A failed sync is critical in the data-flow row, next to a limited site.
+        $failed = $rows(system_status_mecm_overview_badge($snapshot('danger', 'warning', 'limited')));
+        self::assertStringContainsString('>Kritisch<', $failed[__t('system_status_overview.mecm_flow')]);
+        self::assertStringContainsString('>Eingeschränkt<', $failed[__t('system_status_overview.mecm_site')]);
+        self::assertSame('critical', system_status_mecm_overview_tone($snapshot('danger', 'warning', 'limited')));
+
+        self::assertSame('warning', system_status_mecm_overview_tone($snapshot('ok', 'warning', 'overdue')));
+        self::assertSame('ok', system_status_mecm_overview_tone($snapshot('ok', 'ok', 'ok')));
+        self::assertSame('no_data', system_status_mecm_overview_tone($snapshot('unknown', 'unknown', 'none')));
+        self::assertStringContainsString('>Keine Daten<', system_status_mecm_overview_badge($snapshot('unknown', 'unknown', 'none')));
     }
 
     /** @return iterable<string, array{0: string, 1: string, 2: string}> */
@@ -353,9 +368,9 @@ final class MecmSiteAssessmentTest extends TestCase
         yield 'limited' => ['limited', 'badge-warning', 'Eingeschränkt'];
         yield 'critical' => ['critical', 'badge-danger', 'Kritisch'];
         yield 'unknown' => ['unknown', 'badge-neutral', 'Unbekannt'];
-        yield 'overdue reporter' => ['overdue', 'badge-warning', 'Überfällig'];
+        yield 'overdue reporter' => ['overdue', 'badge-warning', 'Warnung'];
         yield 'stale evidence' => ['stale', 'badge-neutral', 'Veraltet'];
-        yield 'no report yet' => ['none', 'badge-neutral', 'Noch keine Daten'];
+        yield 'no report yet' => ['none', 'badge-neutral', 'Keine Daten'];
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('badges')]

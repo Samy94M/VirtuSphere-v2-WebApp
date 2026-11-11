@@ -62,12 +62,23 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
   // loop's next rendering step, so the badge is painted only in its fixture
   // state; a text node appended later is corrected the same way.
   await page.addInitScript((overviewBadges) => {
+    // A badge is its decorative icon span plus its word (SY2). The fixture owns
+    // both, and the MECM card holds two signal rows, addressed by `signal`.
+    const badgeSelector = (fixture) => `.status-overview-card[href="${fixture.href}"]`
+      + (fixture.signal ? ` .signal-row:nth-child(${fixture.signal})` : '') + ' .badge';
     const applyOverviewBadges = () => {
       for (const fixture of overviewBadges) {
-        const node = document.querySelector(`.status-overview-card[href="${fixture.href}"] .badge`);
+        const node = document.querySelector(badgeSelector(fixture));
         if (!node) continue;
         if (node.className !== fixture.className) node.className = fixture.className;
-        if (node.textContent !== fixture.text) node.textContent = fixture.text;
+        const iconClass = `badge-icon badge-icon-${fixture.icon}`;
+        const icon = node.firstElementChild;
+        if (!icon || icon.className !== iconClass || node.childNodes.length !== 2 || node.textContent !== fixture.text) {
+          const span = document.createElement('span');
+          span.className = iconClass;
+          span.setAttribute('aria-hidden', 'true');
+          node.replaceChildren(span, fixture.text);
+        }
       }
     };
     new MutationObserver(applyOverviewBadges).observe(document, { childList: true, subtree: true, characterData: true });
@@ -95,13 +106,15 @@ test('captures only deterministic synthetic portal states', async ({ page }) => 
       const response = await page.goto(target.url, { waitUntil: 'networkidle' });
       expect(response && response.ok()).toBeTruthy();
       for (const badgeFixture of target.fixture?.overviewBadges || []) {
-        const badge = page.locator(`.status-overview-card[href="${badgeFixture.href}"] .badge`);
+        const badge = page.locator(`.status-overview-card[href="${badgeFixture.href}"]`
+          + (badgeFixture.signal ? ` .signal-row:nth-child(${badgeFixture.signal})` : '') + ' .badge');
         const count = await badge.count();
         if (badgeFixture.optional && count === 0) continue;
         expect(count, `visual fixture target ${badgeFixture.href}`).toBe(1);
         // Verified, not set: the init-script observer above owns the change.
         await expect(badge).toHaveClass(badgeFixture.className);
         await expect(badge).toHaveText(badgeFixture.text);
+        await expect(badge.locator(`.badge-icon.badge-icon-${badgeFixture.icon}[aria-hidden="true"]`)).toHaveCount(1);
       }
       await expect(page.locator('[data-session-timer]')).toHaveAttribute(
         'data-expires-in',

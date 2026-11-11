@@ -41,8 +41,10 @@ final class SystemStatusSiteEvidenceTest extends TestCase
         ob_start();
         system_status_render_site($entries);
         $html = (string) ob_get_clean();
-        self::assertStringContainsString('Überfällig', $html);
-        self::assertStringContainsString('Veraltet', $html);
+        // SY2: the overdue reporter speaks the vocabulary ("Warnung"), the
+        // historical site verdict is grey "Veraltet".
+        self::assertStringContainsString(status_tone_badge('warning'), $html);
+        self::assertStringContainsString(status_tone_badge('stale'), $html);
         self::assertStringContainsString(h(__t('system_status.site_historical_result')), $html);
         self::assertStringContainsString(h(__t('system_status.err_site_critical')), $html);
         self::assertStringNotContainsString('badge-danger', $html, 'old criticality is not a current critical verdict');
@@ -86,8 +88,10 @@ final class SystemStatusSiteEvidenceTest extends TestCase
             ['source' => VIRTUSPHERE_INTEGRATION_SOURCE_SITE_HEALTH, 'row' => $this->row(3600, VIRTUSPHERE_RUN_ERROR_SITE_CRITICAL), 'state' => 'stale'],
         ]);
         $html = (string) ob_get_clean();
-        self::assertStringContainsString('Überfällig', $html);
-        self::assertStringContainsString('Veraltet', $html);
-        self::assertStringNotContainsString('Noch keine Daten', $html);
+        // SY2: the late reporter reads the vocabulary's "Warnung" (reporter
+        // row), the aged verdict "Veraltet"; neither is "no data".
+        self::assertStringContainsString('>' . status_tone_word('warning') . '<', $html);
+        self::assertStringContainsString('>' . status_tone_word('stale') . '<', $html);
+        self::assertStringNotContainsString(status_tone_word('no_data'), $html);
     }
 }

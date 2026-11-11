@@ -126,8 +126,8 @@ echo 'RESTORED';
 }
 
 /** Badge texts of one legend group, in render order. */
-async function legendGroup(page, index) {
-  return page.locator('details.status-legend ul.ampel-legend').nth(index).locator('.badge').allTextContents();
+async function legendGroup(page, kind) {
+  return page.locator(`details.status-legend ul.ampel-legend[data-legend="${kind}"]`).locator('.badge').allTextContents();
 }
 
 test('the page legend explains every Ampel state the page can render, and says the same as help', async ({ page }) => {
@@ -135,9 +135,9 @@ test('the page legend explains every Ampel state the page can render, and says t
   await page.locator('details.status-legend summary').click();
 
   const [heartbeat, esxi, ansible] = await Promise.all([
-    legendGroup(page, 0),
-    legendGroup(page, 1),
-    legendGroup(page, 2),
+    legendGroup(page, 'heartbeat'),
+    legendGroup(page, 'esxi'),
+    legendGroup(page, 'ansible'),
   ]);
 
   // The state sets are owned by lib/constants.php, so the expected sizes are
@@ -145,24 +145,29 @@ test('the page legend explains every Ampel state the page can render, and says t
   // fourth place a state set was written down: adding `stale` to the Ansible
   // Ampel turned a green suite red on two numbers that named no decision.
   const sizes = phpJson(`
+require_once '/var/www/html/lib/status_vocabulary.php';
 echo 'JSON' . json_encode([
     'heartbeat' => count(VIRTUSPHERE_HEARTBEAT_STATES),
     'esxi' => count(VIRTUSPHERE_ESXI_AMPEL_STATES),
     'ansible' => count(VIRTUSPHERE_ANSIBLE_AMPEL_STATES),
+    'vocabulary' => count(status_tones()) + count(VIRTUSPHERE_STATUS_PHRASES),
 ]) . 'JSON';
 `);
   expect(heartbeat).toHaveLength(sizes.heartbeat);
   expect(esxi).toHaveLength(sizes.esxi);
   expect(ansible).toHaveLength(sizes.ansible);
 
-  const missing = heartbeat.find((label) => /Erwartet, nie gemeldet|Expected, never reported/.test(label));
-  expect(missing, 'the `missing` state must have a legend entry on the page itself').toBeTruthy();
-  const legacy = heartbeat.find((label) => /^Legacy$/.test(label));
-  expect(legacy, 'the `legacy` state must have a legend entry').toBeTruthy();
+  // SY2: the badge words come from the one status vocabulary, so `missing` and
+  // `legacy` share the word "Warning" with a delayed source; what tells them
+  // apart is the sentence next to each, which every entry must carry.
+  const vocabulary = await page
+    .locator('details.status-legend ul.ampel-legend[data-legend^="axis_"] .badge')
+    .allTextContents();
+  expect(vocabulary, 'the legend must explain every tone and phrase of the vocabulary').toHaveLength(sizes.vocabulary);
 
   // Every group is explained by a sentence, not left as a bare badge.
   const items = page.locator('details.status-legend ul.ampel-legend li');
-  await expect(items).toHaveCount(sizes.heartbeat + sizes.esxi + sizes.ansible);
+  await expect(items).toHaveCount(sizes.heartbeat + sizes.esxi + sizes.ansible + sizes.vocabulary);
   for (const text of await items.allTextContents()) {
     expect(text.replace(/\s+/g, ' ').trim().length, `legend entry "${text}" has no explanation`).toBeGreaterThan(20);
   }
@@ -170,11 +175,15 @@ echo 'JSON' . json_encode([
   // The cross-page comparison: help must list exactly the same states.
   await page.goto('help.php#panel-system-status');
   const helpHeartbeat = await page
-    .locator('#panel-system-status ul.ampel-legend')
+    .locator('#panel-system-status ul.ampel-legend[data-legend="heartbeat"]')
     .first()
     .locator('.badge')
     .allTextContents();
   expect(helpHeartbeat, 'help and the page must explain the same heartbeat states').toEqual(heartbeat);
+  const helpVocabulary = await page
+    .locator('#panel-system-status ul.ampel-legend[data-legend^="axis_"] .badge')
+    .allTextContents();
+  expect(helpVocabulary, 'help and the page must explain the same status words').toEqual(vocabulary);
 });
 
 test('a help section hash reveals its tab and moves focus to the exact section', async ({ page }) => {
@@ -216,7 +225,8 @@ echo 'SEEDED';
     await expect(healthy.locator('.badge')).toHaveText(/^OK$/);
     await expect(healthy.locator('.status-action')).toHaveCount(0);
 
-    await expect(broken.locator('.badge')).toHaveText(/Ausgefallen|Verzögert|Down|Delayed/);
+    // A run result in the vocabulary: failed or very late is "Critical", late "Warning".
+    await expect(broken.locator('.badge')).toHaveText(/Kritisch|Warnung|Critical|Warning/);
     await expect(broken.locator('.status-action')).toHaveCount(1);
     await expect(broken.locator('.status-action')).toContainText(/Aufgabenplanung|Task Scheduler/);
   } finally {
@@ -358,7 +368,7 @@ echo 'JSON' . json_encode(['esxi' => $esxi]) . 'JSON';
   }
 });
 
-test('without an ESXi credential the scan says "Not checked" instead of a green zero it never verified', async ({ page }) => {
+test('without an ESXi credential the scan says "No data" instead of a green zero it never verified', async ({ page }) => {
   // The scan needs an inventory to compare against, so the precondition is
   // removed rather than simulated: the ESXi credential is parked as an Ansible
   // one for the duration (the ENUM allows both, the FKs of its cached inventory
@@ -376,7 +386,7 @@ echo 'JSON' . json_encode(['ids' => $rows]) . 'JSON';
     await expect(page.locator('article.inventory-card')).toHaveCount(0);
 
     const badge = page.locator('#deviations h2 .badge');
-    await expect(badge).toHaveText(/Nicht geprüft|Not checked/);
+    await expect(badge).toHaveText(/Keine Daten|No data/);
     await expect(badge).toHaveClass(/badge-neutral/);
     await expect(badge).not.toHaveClass(/badge-success/);
     await expect(page.locator('#deviations')).toContainText(
@@ -402,7 +412,7 @@ test('a restricted Ansible credential explains the allowlist instead of claiming
     await page.goto('system_status.php');
 
     const restricted = page.locator('#ansible article.status-row').filter({ hasText: warned });
-    await expect(restricted.locator('.status-row-head .badge')).toHaveText(/Eingeschränkt|Restricted/);
+    await expect(restricted.locator('.status-row-head .badge')).toHaveText(/Eingeschränkt|Limited/);
     await expect(restricted.locator('.alert-warning')).toContainText(
       /IP-Freigaben|IP allowlist/,
     );
@@ -413,7 +423,7 @@ test('a restricted Ansible credential explains the allowlist instead of claiming
     // A real failure still names its component, so suppressing the warning
     // wording did not suppress the diagnosis.
     const broken = page.locator('#ansible article.status-row').filter({ hasText: failed });
-    await expect(broken.locator('.status-row-head .badge')).toHaveText(/Fehlgeschlagen|Failed/);
+    await expect(broken.locator('.status-row-head .badge')).toHaveText(/Kritisch|Critical/);
     await expect(broken).toContainText(/pyvmomi/);
     await expect(broken.locator('.alert-warning')).toHaveCount(0);
 
@@ -425,7 +435,7 @@ test('a restricted Ansible credential explains the allowlist instead of claiming
     // `#ansible` no longer exists on the page.
     await expect(
       page.locator('.status-overview-card[href$="#ansible"] .badge'),
-    ).toHaveText(/Fehlgeschlagen|Failed/);
+    ).toHaveText(/Kritisch|Critical/);
   } finally {
     cleanupSeeded();
   }
@@ -445,7 +455,10 @@ echo 'SEEDED';
 `);
     await page.goto('system_status.php#mecm');
     const row = page.locator('#mecm article.status-row').filter({ hasText: /Device-Sync|device sync/ }).first();
-    await expect(row.locator('.badge').first()).toHaveText(/^Legacy$/);
+    // SY2: the badge word is the vocabulary's "Warning"; the reporter note next
+    // to it is what names the legacy script.
+    await expect(row.locator('.badge').first()).toHaveText(/^(Warnung|Warning)$/);
+    await expect(row.locator('.badge').first()).toHaveClass(/badge-warning/);
     await expect(row).toContainText(/Legacy: Ergebnis nicht bestätigt|Legacy: result not confirmed/);
   } finally {
     restoreHeartbeats(snapshot);

@@ -7,7 +7,7 @@ declare(strict_types=1);
 // constants in lib/backup_evidence.php and lib/constants.php.
 return [
     'heading' => 'Host and backup',
-    'hint' => 'The Docker host reports these values through the backup status channel. Without a report the value reads "Unknown". The overview card shows the worst row; "Unknown" never counts as OK there.',
+    'hint' => 'The Docker host reports these values through the backup status channel. Without a report the value reads "No data". The overview card shows the worst row; "No data" never counts as OK there.',
     'row_backup' => 'Backup',
     'row_drill' => 'Restore test',
     'row_scrub' => 'Checksums',
@@ -21,12 +21,6 @@ return [
     'age_today' => 'today',
     'age_days_one' => ':days day ago',
     'age_days' => ':days days ago',
-    'state_ok' => 'OK',
-    'state_unknown' => 'Unknown',
-    'state_due' => 'Due',
-    'state_mismatch' => 'Mismatch',
-    'state_expiring' => 'Expires soon',
-    'state_expired' => 'Expired',
     'drill_unknown_hint' => 'No restore test on record. A drill run on another machine does not appear here. Drill with record:',
     'drill_due_hint' => 'The last recorded restore test is :days days old or older. Drill with record:',
     'scrub_unknown_hint' => 'No checksum check reported yet. Start a check:',

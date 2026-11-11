@@ -27,6 +27,8 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // status section below it explains each phase and finding in words.
     'help-vm-path' => 'missions',
     'help-status-overview' => 'system-status',
+    // The status vocabulary (SY2): every tone with its word, colour and icon.
+    'help-status-vocabulary' => 'system-status',
     'help-status-deploy' => 'system-status',
     'help-status-directory' => 'system-status',
     'help-status-host' => 'system-status',

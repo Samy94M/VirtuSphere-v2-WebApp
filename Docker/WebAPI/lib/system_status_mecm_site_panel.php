@@ -11,23 +11,34 @@ require_once __DIR__ . '/system_status_shared_panels.php';
 require_once __DIR__ . '/mecm_site_display.php';
 
 /**
- * The MECM card of the overview strip: one badge for the whole MECM area, so it
- * shows the worse of the two groups in that group's own words. A critical site
- * reads "Kritisch", never the reporter word "Ausgefallen"; a failed sync keeps
- * its liveness words. On equal rank the integration wins, because the portal
- * can act on it. The colour is the same worst-of as before.
+ * The MECM card of the overview strip: two signal rows, "Datenfluss" (the sync
+ * tasks' results) and "Standort" (the site verdict), like the dashboard tile.
+ * They are never folded into one worst-of badge (SY2): a red MECM card did not
+ * say whether the portal's data flow or MECM itself was meant. The headline
+ * takes the worse of the two (system_status_mecm_overview_tone()).
  *
  * @param array<string,mixed> $snapshot
  */
 function system_status_mecm_overview_badge(array $snapshot): string
 {
-    $syncState = (string) ($snapshot['mecm_sync']['state'] ?? 'unknown');
-    $siteRankState = (string) ($snapshot['mecm_site']['state'] ?? 'unknown');
-    if (virtusphere_heartbeat_state_rank($siteRankState) > virtusphere_heartbeat_state_rank($syncState)) {
-        return mecm_site_badge((string) ($snapshot['mecm_site']['site_state'] ?? 'none'));
-    }
+    return '<span class="status-overview-signals">'
+        . portal_signal_row(__t('system_status_overview.mecm_flow'), (string) ($snapshot['mecm_sync']['state'] ?? 'unknown'))
+        . portal_signal_row(__t('system_status_overview.mecm_site'), '', mecm_site_badge((string) ($snapshot['mecm_site']['site_state'] ?? 'none')))
+        . '</span>';
+}
 
-    return heartbeat_badge($syncState);
+/**
+ * The tone the MECM card stands for in the headline: the worse of data flow and
+ * site. On equal rank the data flow wins, because the portal can act on it.
+ *
+ * @param array<string,mixed> $snapshot
+ */
+function system_status_mecm_overview_tone(array $snapshot): string
+{
+    $flow = status_tone_for('result', (string) ($snapshot['mecm_sync']['state'] ?? 'unknown'));
+    $site = mecm_site_tone((string) ($snapshot['mecm_site']['site_state'] ?? 'none'));
+
+    return status_tone_rank($site) > status_tone_rank($flow) ? $site : $flow;
 }
 
 /**
@@ -67,8 +78,9 @@ function system_status_render_site(array $rows): void
         // block sat left while the job cards sat right: an asymmetry that was
         // pure accident and read as a difference in kind.
         echo system_status_fact_list([
-            ['label' => __t('system_status.site_reporter_label'), 'html' => $reporterState === 'warning'
-                ? portal_badge('warning', __t('system_status.site_reporter_overdue')) : heartbeat_badge($reporterState)],
+            // The reporter row is liveness, so it reads reporter words: "Aktuell",
+            // a late reporter "Warnung", never a site verdict (SY2).
+            ['label' => __t('system_status.site_reporter_label'), 'html' => heartbeat_badge($reporterState, 'liveness')],
             ['label' => __t('system_status.site_code_label'), 'html' => $siteCode !== '' ? '<code>' . h($siteCode) . '</code>' : '&mdash;'],
             ['label' => __t('system_status.site_provider_label'), 'html' => $provider !== '' ? '<code>' . h($provider) . '</code>' : '&mdash;'],
             // The badge is the portal's reading, the text next to it what MECM itself reported.

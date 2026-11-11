@@ -49,7 +49,7 @@ final class SystemStatusBackupPanelTest extends TestCase
             $row = $this->row($html, $kind);
             self::assertStringNotContainsString('badge-success', $row, $kind . ' must not claim OK without evidence');
         }
-        self::assertStringContainsString(h(__t('system_status_backup.state_unknown')), $this->row($html, 'restore-drill'));
+        self::assertStringContainsString(h(status_tone_word('no_data')), $this->row($html, 'restore-drill'));
         self::assertStringContainsString('<code>' . h(VIRTUSPHERE_RESTORE_DRILL_RECORD_COMMAND) . '</code>', $html);
         self::assertStringContainsString('<code>' . h(VIRTUSPHERE_BACKUP_SCRUB_COMMAND) . '</code>', $html);
         self::assertStringNotContainsString('data-host-state="https-certificate"', $html, 'no certificate row without a live HTTPS listener');

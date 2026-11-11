@@ -21,21 +21,16 @@ require_once __DIR__ . '/system_status_internal_panels.php';
 require_once __DIR__ . '/system_status_backup_panels.php';
 require_once __DIR__ . '/system_status_service_panel.php';
 require_once __DIR__ . '/system_status_directory_panels.php';
+require_once __DIR__ . '/system_status_overview.php';
 
 /**
- * The overview strip.
+ * The headline and the overview strip.
  *
- * The fifth card is the deviation scan. It reads the count the page computed
- * once and handed to the section below as well, so the strip and the section
- * can never disagree about how many there are. The scan is a health signal like
- * the other four: an inventory that pulls perfectly while three missions point
- * at a portgroup that no longer exists is not a green installation, and until
- * now that fact lived only at the bottom of the page.
- *
- * The "Host and backup" card reads the same host data the section below it
- * renders (system_status_host_checks()), so a failed backup or a checksum
- * mismatch turns the strip red instead of hiding behind "Internal services"
- * (SY1). Without data it reads unknown, never OK.
+ * The cards come from system_status_overview_cards() in section order and carry
+ * the tone their badge renders; the headline over them reads the same tones
+ * (lib/system_status_overview.php). The deviation card reads the count the page
+ * computed once and handed to the section below as well, so the strip and the
+ * section can never disagree about how many there are.
  *
  * The hrefs go through system_status_url() with the query the page is currently
  * showing. That keeps them same-document (the browser compares everything left
@@ -49,43 +44,20 @@ require_once __DIR__ . '/system_status_directory_panels.php';
  */
 function system_status_render_overview(array $snapshot, ?int $deviationCount = null, array $query = [], ?array $serviceSnapshot = null, ?array $directoryData = null, ?array $hostData = null, ?array $deviationReport = null): void
 {
-    $cards = [
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE, __t('system_status.overview_deploy_service'), $serviceSnapshot, 'deploy'],
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM, __t('system_status.overview_mecm'), '', 'mecm'],
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE, __t('system_status.overview_ansible'), $snapshot['ansible']['state'] ?? 'unknown', 'ansible'],
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI, __t('system_status.overview_esxi'), $snapshot['esxi']['state'] ?? 'unknown', 'esxi'],
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS, __t('system_status.overview_deviations'), '', 'deviations'],
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP, __t('system_status.overview_host_backup'), '', 'host'],
-        [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_INTERNAL, __t('system_status.overview_internal'), $snapshot['internal']['state'], 'heartbeat'],
-    ];
-    if ($directoryData !== null) {
-        $cards[] = [VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DIRECTORY, __t('system_status.overview_directory'), $directoryData['snapshot']['overall'], 'directory'];
-    }
+    $cards = system_status_overview_cards($snapshot, $deviationCount, $serviceSnapshot, $directoryData, $hostData, $deviationReport);
     // Three cards per row on desktop. A count that would leave a single card
     // alone in the last row (seven: 3 + 3 + 1) switches to four columns (4 + 3)
     // instead. It is derived from the same list the strip renders, so the
     // optional directory card cannot put the grid out of step with its cards.
     // The list always holds the seven fixed cards, so no lower bound is needed.
     $overviewModifier = count($cards) % 3 === 1 ? ' status-overview-four' : '';
+    echo system_status_render_overview_headline($cards, $query);
     ?>
     <nav class="status-overview<?php echo $overviewModifier; ?>" aria-label="<?php echo h(__t('system_status.overview_heading')); ?>">
-        <?php foreach ($cards as [$anchor, $label, $state, $kind]) { ?>
-            <a class="status-overview-card" href="<?php echo h(system_status_url((string) $anchor, $query)); ?>">
-                <span class="status-overview-label"><?php echo h((string) $label); ?></span>
-                <?php
-                echo match ($kind) {
-                    'esxi' => esxi_state_badge((string) $state),
-                    'ansible' => ansible_state_badge((string) $state),
-                    'deviations' => deviation_count_badge($deviationCount, system_status_deviation_evidence_current($deviationReport)),
-                    'deploy' => $state === null
-                        ? portal_badge('neutral', __t('system_status.service_unknown'))
-                        : portal_badge((string) $state['badge'], deploy_service_summary_label($state)),
-                    'directory' => directory_state_badge((string) $state),
-                    'mecm' => system_status_mecm_overview_badge($snapshot),
-                    'host' => system_status_host_overview_badge($hostData ?? []),
-                    default => heartbeat_badge((string) $state),
-                };
-                ?>
+        <?php foreach ($cards as $card) { ?>
+            <a class="status-overview-card" href="<?php echo h(system_status_url($card['anchor'], $query)); ?>" data-overview-tone="<?php echo h($card['tone']); ?>">
+                <span class="status-overview-label"><?php echo h($card['label']); ?></span>
+                <?php echo $card['html']; ?>
             </a>
         <?php } ?>
     </nav>

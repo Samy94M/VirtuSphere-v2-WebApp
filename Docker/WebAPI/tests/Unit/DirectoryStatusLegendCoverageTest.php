@@ -24,7 +24,8 @@ final class DirectoryStatusLegendCoverageTest extends TestCase
         foreach (Lang::LOCALES as $locale) {
             Lang::load($locale);
             foreach (VIRTUSPHERE_DIRECTORY_CONTROLLER_AMPEL_STATES as $state) {
-                $badgeKey = 'system_status.directory_controller_state_' . $state;
+                // SY2: the badge word is the status vocabulary's word of the tone.
+                $badgeKey = 'status_vocabulary.' . status_tone_for('directory_controller', $state);
                 self::assertNotSame($badgeKey, __t($badgeKey), "$locale: controller badge label missing for state '$state'.");
                 $legendKey = 'system_status.directory_legend_' . $state;
                 self::assertNotSame($legendKey, __t($legendKey), "$locale: legend line missing for state '$state'.");
@@ -37,7 +38,7 @@ final class DirectoryStatusLegendCoverageTest extends TestCase
         foreach (Lang::LOCALES as $locale) {
             Lang::load($locale);
             foreach (VIRTUSPHERE_DIRECTORY_AMPEL_STATES as $state) {
-                $key = 'system_status.directory_state_' . $state;
+                $key = 'status_vocabulary.' . status_tone_for('directory', $state);
                 self::assertNotSame($key, __t($key), "$locale: overall badge label missing for state '$state'.");
             }
         }

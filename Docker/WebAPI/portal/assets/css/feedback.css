@@ -18,6 +18,58 @@
     white-space: nowrap;
 }
 
+/* The icon of a status badge (SY2, lib/status_vocabulary.php): one shape per
+   tone, so the tones stay apart without colour (WCAG 1.4.1) and in greyscale.
+   The span is aria-hidden and empty; the glyph is generated here, so the word
+   stays the badge's whole text for a screen reader and for every text check.
+   It takes the badge's colour. */
+.badge-icon {
+    display: inline-block;
+    margin-right: 4px;
+    line-height: 1;
+}
+
+.badge-icon-ok::before,
+.badge-icon-current::before {
+    content: "\2713";
+}
+
+.badge-icon-warning::before {
+    content: "!";
+}
+
+.badge-icon-limited::before {
+    content: "\25D0";
+}
+
+.badge-icon-critical::before {
+    content: "\2715";
+}
+
+.badge-icon-unknown::before {
+    content: "?";
+}
+
+.badge-icon-stale::before {
+    content: "\25F7";
+}
+
+.badge-icon-no-data::before {
+    content: "\25CB";
+}
+
+.badge-icon-unreachable::before {
+    content: "\2298";
+}
+
+.badge-icon-disabled::before {
+    content: "\2212";
+}
+
+.badge-icon-running::before {
+    content: "\25B6";
+}
+
 .badge-success {
     color: var(--success);
 }

@@ -79,16 +79,50 @@ function deploy_service_attention_label(string $state): string
     };
 }
 
-/** Badge colour for the availability axis alone. */
-function deploy_service_availability_variant(string $state): string
+/**
+ * Tone of the claim axis. Accepting is the normal state and reads green: grey is
+ * reserved for "unknown" and "no data", and a grey badge with the question-mark
+ * icon next to a healthy service read like missing evidence.
+ */
+function deploy_service_claim_tone(string $claimState): string
 {
-    return match ($state) {
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_READY => 'success',
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY => 'info',
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN => 'warning',
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE => 'danger',
-        default => 'neutral',
+    return $claimState === VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING ? 'ok' : 'warning';
+}
+
+/** Tone of the recovery axis; "nothing to clarify" is the normal, green state. */
+function deploy_service_attention_tone(string $attention): string
+{
+    return match ($attention) {
+        VIRTUSPHERE_DEPLOY_ATTENTION_NONE => 'ok',
+        VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING => 'warning',
+        VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW => 'critical',
+        default => 'unknown',
     };
+}
+
+/**
+ * Tone of the compact badge: the snapshot's own precedence
+ * (deploy_service_badge_tone()), never a second one.
+ *
+ * @param array<string,mixed>|null $snapshot
+ */
+function deploy_service_summary_tone(?array $snapshot): string
+{
+    return $snapshot === null
+        ? 'unknown'
+        : deploy_service_badge_tone((string) $snapshot['availability'], (string) $snapshot['recovery_attention'], (string) $snapshot['claim_state']);
+}
+
+/**
+ * The compact badge of the overview card: the summary word in the summary tone.
+ *
+ * @param array<string,mixed>|null $snapshot
+ */
+function deploy_service_summary_badge(?array $snapshot): string
+{
+    return $snapshot === null
+        ? status_tone_badge('unknown')
+        : status_value_badge(deploy_service_summary_tone($snapshot), deploy_service_summary_label($snapshot));
 }
 
 /**
@@ -221,17 +255,13 @@ function system_status_render_deploy_service(?array $snapshot, array $user): voi
                 <?php // All three, always. The compact badge exists for a table
                       // cell; a detail view that shows only it would hide the
                       // half its precedence dropped. ?>
-                <span><?php echo h(__t('system_status.service_axis_availability')); ?>: <?php echo portal_badge(deploy_service_availability_variant((string) $snapshot['availability']), deploy_service_availability_label((string) $snapshot['availability'])); ?></span>
-                <span><?php echo h(__t('system_status.service_axis_claim')); ?>: <?php echo portal_badge(
-                    $claimState === VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING ? 'neutral' : 'warning',
+                <span><?php echo h(__t('system_status.service_axis_availability')); ?>: <?php echo status_value_badge(deploy_service_availability_tone((string) $snapshot['availability']), deploy_service_availability_label((string) $snapshot['availability'])); ?></span>
+                <span><?php echo h(__t('system_status.service_axis_claim')); ?>: <?php echo status_value_badge(
+                    deploy_service_claim_tone($claimState),
                     deploy_service_claim_label($claimState)
                 ); ?></span>
-                <span><?php echo h(__t('system_status.service_axis_recovery')); ?>: <?php echo portal_badge(
-                    match ((string) $snapshot['recovery_attention']) {
-                        VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW => 'danger',
-                        VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING => 'warning',
-                        default => 'neutral',
-                    },
+                <span><?php echo h(__t('system_status.service_axis_recovery')); ?>: <?php echo status_value_badge(
+                    deploy_service_attention_tone((string) $snapshot['recovery_attention']),
                     deploy_service_attention_label((string) $snapshot['recovery_attention'])
                 ); ?></span>
             </div>

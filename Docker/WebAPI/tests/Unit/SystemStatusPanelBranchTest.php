@@ -307,7 +307,7 @@ final class SystemStatusPanelBranchTest extends TestCase
     public function testWithoutInventoryTheScanReportsNotCheckedInsteadOfZero(): void
     {
         $html = $this->renderDeviations([], false);
-        self::assertStringContainsString(__t('system_status.dev_count_unknown'), $html);
+        self::assertStringContainsString(status_tone_word('no_data'), $html);
         self::assertStringContainsString(__t('system_status.dev_no_sources'), $html);
         self::assertStringNotContainsString(__t('system_status.dev_count_none'), $html);
         // Neutral, not green: nothing was verified, so nothing may look verified.
@@ -336,7 +336,7 @@ final class SystemStatusPanelBranchTest extends TestCase
         );
         $html = (string) ob_get_clean();
 
-        self::assertStringContainsString(__t('system_status.dev_count_none_unconfirmed'), $html);
+        self::assertStringContainsString(status_tone_badge('evidence_incomplete'), $html);
         self::assertStringContainsString(__t('system_status.dev_none_partial'), $html);
         self::assertStringNotContainsString('badge-success', $html);
     }
@@ -404,7 +404,7 @@ final class SystemStatusPanelBranchTest extends TestCase
         $html = $this->renderAnsible('warning', ['last_status' => 'warning', 'last_component' => 'allowlist', 'last_checked_at' => '2026-07-23 10:00:00']);
         self::assertStringContainsString(__t('system_status.ansible_allowlist_detail'), $html);
         self::assertStringNotContainsString(__t('system_status.ansible_failed_component', ['component' => 'allowlist']), $html);
-        self::assertStringContainsString(__t('system_status.ansible_state_warning'), $html);
+        self::assertStringContainsString(status_tone_word('limited'), $html);
     }
 
     public function testAStaleAllowlistWarningDoesNotTurnIntoAClaimedFailure(): void
@@ -412,7 +412,7 @@ final class SystemStatusPanelBranchTest extends TestCase
         $html = $this->renderAnsible('stale', ['last_status' => 'warning', 'last_component' => 'allowlist', 'last_checked_at' => '2026-07-01 10:00:00']);
         self::assertStringContainsString(__t('system_status.ansible_allowlist_detail'), $html);
         self::assertStringNotContainsString(__t('system_status.ansible_failed_component', ['component' => 'allowlist']), $html);
-        self::assertStringContainsString(__t('system_status.ansible_state_stale'), $html);
+        self::assertStringContainsString(status_tone_word('stale'), $html);
         self::assertStringContainsString(__t('system_status.ansible_stale_detail', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS]), $html);
         self::assertStringContainsString('action="credentials.php"', $html);
         self::assertStringContainsString('name="return_to" value="ansible_status"', $html);
@@ -433,7 +433,7 @@ final class SystemStatusPanelBranchTest extends TestCase
             ]
         );
 
-        self::assertStringContainsString(__t('system_status.ansible_state_stale'), $html);
+        self::assertStringContainsString(status_tone_word('stale'), $html);
         self::assertStringContainsString(__t('system_status.ansible_job_succeeded'), $html);
         self::assertStringContainsString(__t('system_status.ansible_job_identity', ['id' => 812, 'mission' => 'MISSION-ALPHA']), $html);
         self::assertStringContainsString('href="deploy_log.php?id=812"', $html);
@@ -500,6 +500,12 @@ final class SystemStatusPanelBranchTest extends TestCase
         $ok = (string) ob_get_clean();
         self::assertStringNotContainsString($hint, $ok);
         self::assertStringNotContainsString('status-action', $ok);
+        // SY2: a service row is a liveness signal and speaks reporter words.
+        self::assertStringContainsString(status_tone_badge('current'), $ok);
+
+        ob_start();
+        system_status_render_source_rows($row('danger'));
+        self::assertStringContainsString(status_tone_badge('unreachable'), (string) ob_get_clean());
 
         foreach (['warning', 'danger', 'missing', 'unknown'] as $state) {
             ob_start();
@@ -529,7 +535,7 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringNotContainsString(h(__t('system_status.action_device_sync')), $suppressed);
         self::assertStringNotContainsString('status-action', $suppressed);
         self::assertStringContainsString(h(integration_source_label(VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC)), $suppressed);
-        self::assertStringContainsString(__t('system_status.status_unknown'), $suppressed);
+        self::assertStringContainsString(status_tone_word('no_data'), $suppressed);
 
         ob_start();
         system_status_render_source_rows($rows, false);
@@ -706,6 +712,6 @@ final class SystemStatusPanelBranchTest extends TestCase
         // A provider fault must be textually distinct from a MECM-confirmed
         // critical: grey, never the red critical hint.
         self::assertStringNotContainsString(h(__t('system_status.site_hint_console')), $html);
-        self::assertStringNotContainsString(h(__t('system_status.status_danger')), $html);
+        self::assertStringNotContainsString(h(status_tone_word('critical')), $html);
     }
 }

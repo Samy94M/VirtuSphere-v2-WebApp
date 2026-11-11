@@ -7,13 +7,35 @@ declare(strict_types=1);
 // which is required here rather than by the facade so this file's own require
 // closure stays complete.
 require_once __DIR__ . '/portal_status_display.php';
+require_once __DIR__ . '/status_badges.php';
 
 // Single source for the badge markup. Callers pass a variant (the palette suffix
 // success/warning/danger/info/neutral) and the already-resolved label; both are
-// escaped here, so the label must be the raw text, not pre-escaped.
-function portal_badge(string $variant, string $label): string
+// escaped here, so the label must be the raw text, not pre-escaped. A status
+// badge also carries its tone's icon (SY2): a decorative, aria-hidden span whose
+// glyph comes from feedback.css, so the text stays the badge's whole text content
+// and colour is never the only signal (WCAG 1.4.1).
+function portal_badge(string $variant, string $label, string $icon = ''): string
 {
-    return '<span class="badge badge-' . h($variant) . '">' . h($label) . '</span>';
+    $iconHtml = $icon === '' ? '' : portal_badge_icon($icon);
+
+    return '<span class="badge badge-' . h($variant) . '">' . $iconHtml . h($label) . '</span>';
+}
+
+/** The decorative icon of a tone, also used where a sentence leads like a badge (the System status headline). */
+function portal_badge_icon(string $icon): string
+{
+    return '<span class="badge-icon badge-icon-' . h($icon) . '" aria-hidden="true"></span>';
+}
+
+/**
+ * A label badge that names a kind of thing ("Vorlage"), not a state: no tone,
+ * so no icon. The System status modules use this or the two tone renderers of
+ * lib/status_badges.php, never portal_badge() directly (StatusVocabularyTest).
+ */
+function portal_label_badge(string $label): string
+{
+    return portal_badge('info', $label);
 }
 
 function status_badge(string $legacyStatus): string
@@ -41,21 +63,14 @@ function mecm_sync_badge(string $mecmSyncState): string
     return portal_badge((string) $meta['badge'], portal_mecm_sync_label($mecmSyncState));
 }
 
-// Heartbeat/staleness badge (ADR-0018) with a localized, portal-authored label.
-function heartbeat_badge(string $state): string
+// Heartbeat/staleness badge (ADR-0018) in the status vocabulary. A run result
+// (MECM sync tasks) reads domain words; a pure heartbeat (internal services,
+// $kind 'liveness') reads reporter words, so a silent worker is "unreachable"
+// and never "critical", and its green is "current" next to the deploy-service
+// card's "ready" instead of a second "OK" for the same service.
+function heartbeat_badge(string $state, string $kind = 'result'): string
 {
-    $meta = virtusphere_heartbeat_meta($state);
-    $label = match ($state) {
-        'ok' => __t('system_status.status_ok'),
-        'legacy' => __t('system_status.status_legacy'),
-        'warning' => __t('system_status.status_warning'),
-        'danger' => __t('system_status.status_danger'),
-        'missing' => __t('system_status.status_missing'),
-        'stale' => __t('system_status.status_stale'),
-        default => __t('system_status.status_unknown'),
-    };
-
-    return portal_badge((string) $meta['badge'], $label);
+    return status_tone_badge(status_tone_for($kind, $state));
 }
 
 // One labeled signal row for the dashboard's split MECM tile: a short label and
@@ -68,51 +83,51 @@ function portal_signal_row(string $label, string $state, ?string $badgeHtml = nu
 }
 
 /**
- * ESXi credential badge (ADR-0023): the same palette as the heartbeat badge, but
- * its own labels. A heartbeat's `warning` means "delayed", which is true of a
- * stale inventory pull and plainly false of a host that pulls perfectly and
- * simply has a licence that forbids writing. Sharing the colours is right;
- * sharing the words was not.
+ * ESXi credential badge (ADR-0023) in the status vocabulary (SY2). It used to
+ * carry its own words ("Prüfen", "Fehler", "Noch kein Abruf"); the tone table in
+ * lib/status_vocabulary.php now decides the word, so a paused sign-in no longer
+ * reads "Fehler" and "never pulled" reads like every other "never checked".
  */
 function esxi_state_badge(string $state): string
 {
-    $meta = virtusphere_heartbeat_meta($state);
-    $label = match ($state) {
-        'ok' => __t('system_status.esxi_state_ok'),
-        'warning' => __t('system_status.esxi_state_warning'),
-        'danger' => __t('system_status.esxi_state_danger'),
-        'stale' => __t('system_status.esxi_state_stale'),
-        default => __t('system_status.esxi_state_unknown'),
-    };
-
-    return portal_badge((string) $meta['badge'], $label);
+    return status_tone_badge(status_tone_for('esxi', $state));
 }
 
 /**
  * Badge for the mission/VM deviation count, from the count alone.
  *
- * The overview card and the section heading render the same three answers from
- * the same number (system_status_deviation_count()), so the strip cannot report
- * a colour or a wording the section below it contradicts. `null` is neutral and
- * says the scan did not run; it is deliberately not green, because "not
+ * The overview card and the section heading render the same answers from the
+ * same number (system_status_deviation_count()), so the strip cannot report a
+ * colour or a wording the section below it contradicts. `null` says the scan did
+ * not run and reads "no data"; it is deliberately not green, because "not
  * checked" and "nothing found" are different facts and only one of them is
  * reassuring. A zero is green only on complete, current evidence (SY1): a zero
- * over some kinds or over old names is no release, and the section says so.
+ * over some kinds or over old names is the registered phrase
+ * "evidence_incomplete", grey, and the section says why.
  */
 function deviation_count_badge(?int $count, bool $evidenceCurrent): string
 {
-    if ($count === null) {
-        return portal_badge('neutral', __t('system_status.dev_count_unknown'));
-    }
-    if ($count === 0 && !$evidenceCurrent) {
-        return portal_badge('neutral', __t('system_status.dev_count_none_unconfirmed'));
-    }
+    return match (true) {
+        $count === null => status_tone_badge('no_data'),
+        $count === 0 && !$evidenceCurrent => status_tone_badge('evidence_incomplete'),
+        $count === 0 => status_value_badge('ok', __t('system_status.dev_count_none')),
+        $count === 1 => status_value_badge('warning', __t('system_status.dev_count_one')),
+        default => status_value_badge('warning', __t('system_status.dev_count_many', ['count' => $count])),
+    };
+}
 
-    return portal_badge($count > 0 ? 'warning' : 'success', match (true) {
-        $count === 0 => __t('system_status.dev_count_none'),
-        $count === 1 => __t('system_status.dev_count_one'),
-        default => __t('system_status.dev_count_many', ['count' => $count]),
-    });
+/**
+ * The tone of the deviation count, for the overview headline. Same branches as
+ * deviation_count_badge(), which renders it.
+ */
+function deviation_count_tone(?int $count, bool $evidenceCurrent): string
+{
+    return match (true) {
+        $count === null => 'no_data',
+        $count === 0 && !$evidenceCurrent => VIRTUSPHERE_STATUS_PHRASES['evidence_incomplete'],
+        $count === 0 => 'ok',
+        default => 'warning',
+    };
 }
 
 /**
@@ -122,16 +137,7 @@ function deviation_count_badge(?int $count, bool $evidenceCurrent): string
  */
 function ansible_state_badge(string $state): string
 {
-    $meta = virtusphere_heartbeat_meta($state);
-    $label = match ($state) {
-        'ok' => __t('system_status.ansible_state_ok'),
-        'stale' => __t('system_status.ansible_state_stale'),
-        'warning' => __t('system_status.ansible_state_warning'),
-        'danger' => __t('system_status.ansible_state_danger'),
-        default => __t('system_status.ansible_state_unknown'),
-    };
-
-    return portal_badge((string) $meta['badge'], $label);
+    return status_tone_badge(status_tone_for('ansible', $state));
 }
 
 /** @param array<string, mixed>|null $state */
@@ -142,19 +148,12 @@ function ansible_preflight_badge(?array $state, ?int $now = null, int $intervalH
 
 /**
  * Badge for the overall AD status (directory_health_snapshot()'s 'overall').
- * Same ok/warning/danger/unknown palette as esxi_state_badge(), own labels.
+ * Green reads "OK" like every other area (it read "Aktiv"); a switched-off
+ * directory reads "Deaktiviert" and counts as nothing to do.
  */
 function directory_state_badge(string $state): string
 {
-    $meta = virtusphere_heartbeat_meta($state);
-    $label = match ($state) {
-        'ok' => __t('system_status.directory_state_ok'),
-        'warning' => __t('system_status.directory_state_warning'),
-        'danger' => __t('system_status.directory_state_danger'),
-        default => __t('system_status.directory_state_unknown'),
-    };
-
-    return portal_badge((string) $meta['badge'], $label);
+    return status_tone_badge(status_tone_for('directory', $state));
 }
 
 /**
@@ -164,16 +163,7 @@ function directory_state_badge(string $state): string
  */
 function directory_controller_state_badge(string $state): string
 {
-    $meta = virtusphere_heartbeat_meta($state);
-    $label = match ($state) {
-        'ok' => __t('system_status.directory_controller_state_ok'),
-        'warning' => __t('system_status.directory_controller_state_warning'),
-        'danger' => __t('system_status.directory_controller_state_danger'),
-        'stale' => __t('system_status.directory_controller_state_stale'),
-        default => __t('system_status.directory_controller_state_unknown'),
-    };
-
-    return portal_badge((string) $meta['badge'], $label);
+    return status_tone_badge(status_tone_for('directory_controller', $state));
 }
 
 // Client deploy-phase badge (none|running|unconfirmed|finished|failed).

@@ -80,6 +80,31 @@ function system_status_deviation_count(array $deviations, bool $hasInventory): ?
 }
 
 /**
+ * The legend of the status vocabulary itself (SY2): every tone and every
+ * registered phrase with its badge and one sentence, grouped by axis. Derived
+ * from the tone lists, so a new tone appears here without a second list; shared
+ * by the System status page and the help panel.
+ */
+function system_status_vocabulary_legend(int $headingLevel = 3): void
+{
+    $axes = [
+        'axis_level' => VIRTUSPHERE_STATUS_LEVEL_TONES,
+        'axis_reporter' => VIRTUSPHERE_STATUS_REPORTER_TONES,
+        'axis_activity' => VIRTUSPHERE_STATUS_ACTIVITY_TONES,
+    ];
+    foreach ($axes as $axisKey => $tones) {
+        echo '<h' . $headingLevel . '>' . h(__t('status_vocabulary.' . $axisKey)) . '</h' . $headingLevel . '><ul class="ampel-legend" data-legend="' . h($axisKey) . '">';
+        foreach ($tones as $tone) {
+            echo '<li>' . status_tone_badge($tone) . ' ' . h(__t('status_vocabulary.legend_' . $tone)) . '</li>';
+            foreach (array_keys(VIRTUSPHERE_STATUS_PHRASES, $tone, true) as $phrase) {
+                echo '<li>' . status_tone_badge($phrase) . ' ' . h(__t('status_vocabulary.legend_' . $phrase)) . '</li>';
+            }
+        }
+        echo '</ul>';
+    }
+}
+
+/**
  * SSoT renderer for one Ampel legend, shared by the System status page and the
  * help panel. Both used to hand-list their states and had drifted: the heartbeat
  * `missing` state was explained in help and absent from the page's own legend,
@@ -114,7 +139,7 @@ function system_status_legend_items(string $kind): void
         'directory_legend_stale' => ['days' => VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS],
     ];
 
-    echo '<ul class="ampel-legend">';
+    echo '<ul class="ampel-legend" data-legend="' . h($kind) . '">';
     foreach ($states as $state) {
         $badge = match ($kind) {
             'esxi' => esxi_state_badge($state),

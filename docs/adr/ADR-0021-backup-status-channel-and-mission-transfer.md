@@ -52,3 +52,11 @@ Amendment 1 put the host-state rows under "Internal services" without an overvie
 - System status renders them as the section "Host und Backup" with the anchor `host-backup` (`VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP`) and its own overview card. The card shows the worst row in that row's own word and colour, ranked by `virtusphere_heartbeat_state_rank()`, so `unknown` outranks `ok` and a row without evidence keeps the card from reading green. Card and section read one list of row badges (`system_status_host_checks()`) from one read of the channel per request.
 - The certificate row counts for the card only while it is rendered, that is while `https_listener_live()` holds.
 - Unchanged: the evidence still does not feed the heartbeat state of "Internal services", the dashboard banner or `health.php`, and missing, broken or future-dated evidence is still `unknown`, never `ok`.
+
+## Amendment 4 (2026-11-11, SY2): host rows speak the status vocabulary
+
+The rows and their evidence do not change; their words do. Each row maps its state to a tone of the portal-wide status vocabulary (`lib/status_vocabulary.php`, `docs/ai/reference/portal.md` R59), and the card shows the worst tone (`system_status_host_overview_tone()` over `system_status_host_checks()`).
+
+- Backup: `backup_status_tone()` replaces the separate badge class and label of the settings card and the host row. Failed is "Kritisch", overdue and low disk are "Warnung" (the hint names the cause), OK is "OK", no evidence is "Keine Daten".
+- Restore drill: due is "Warnung", no passed drill is "Keine Daten". Checksums: a mismatch is "Kritisch", not "Abweichung", which stays the word of the deviation area. Certificate: expired "Kritisch", expiring "Warnung", an unreadable expiry "Unbekannt".
+- Missing, broken or future-dated evidence is "Keine Daten" (grey) and still never green; the rank is the shared one (`virtusphere_heartbeat_state_rank()`).

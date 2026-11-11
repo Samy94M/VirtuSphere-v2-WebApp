@@ -29,6 +29,18 @@ declare(strict_types=1);
 require_once __DIR__ . '/system_status.php';
 
 /**
+ * The hidden context of a link or button that repeats on every credential card
+ * (SY2, WCAG 2.4.4): a screen reader's link list read "Inventardetails öffnen"
+ * once per ESXi credential with nothing to tell them apart. The visible text
+ * stays first, so the accessible name still starts with what is on screen
+ * (WCAG 2.5.3); the name of the card follows for assistive technology only.
+ */
+function system_status_link_context(string $name): string
+{
+    return '<span class="sr-only"> ' . h(__t('system_status_overview.link_context', ['name' => $name])) . '</span>';
+}
+
+/**
  * A fixed fact list.
  *
  * `html` is inserted verbatim, so every caller escapes its own value: the values
@@ -77,7 +89,7 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
             $detail = trim((string) ($row['last_detail'] ?? ''));
             ?>
             <article class="status-row">
-                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($entry['state']); ?></div>
+                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($entry['state'], 'liveness'); ?></div>
                 <?php
                 // Fixed fields, including the check that equals the report: a
                 // column that appears only when the two timestamps differ moved
