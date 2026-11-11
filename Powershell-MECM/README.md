@@ -545,12 +545,21 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
     `Get-CMDistributionStatus` als Hinweis. Unlesbare Identität oder
     Verteilstand meldet `package_content_unknown` und autorisiert keine blinde
     erneute Verteilung.
-  - Optionales Available-Deployment an die Collection aus `DeployTo`. Fehlt die
-    Ziel-Collection oder scheitert das Deployment, ist das ein offener Punkt
-    (`package_deploy_failed` mit Collection-Name); der nächste Durchlauf
-    versucht es erneut, bis die Collection existiert.
-- Traten Warnungen auf, wird der Datei-Stamp **nicht** gemerkt; der nächste
-  Durchlauf wiederholt die offenen Punkte.
+  - Optionales Available-Deployment an die Collection aus `DeployTo`. Vorher
+    prüft der Autoimporter exakt mit `Get-CMCollection -Name` (Device- oder
+    User-Collection), ob es sie gibt. Fehlt sie, ist das ein offener Punkt
+    `package_deployto_missing` mit Collection-Name, ohne Deployment-Versuch;
+    mehrere gleichnamige Collections sind `package_deployto_ambiguous`, die
+    eigene Collection des Pakets ist `package_deployto_invalid`. Scheitert das
+    Deployment an einer vorhandenen Collection, bleibt es `package_deploy_failed`.
+  - Jedes Paket hat einen eigenen Fehlerrahmen: Ein unerwarteter MECM-Fehler in
+    einem Paket ist dessen offener Punkt `package_scan_failed`, solange MECM
+    antwortet, und die übrigen Pakete laufen weiter.
+- Offene Punkte halten den Datei-Stamp nicht zurück: Sie stehen je Paket in
+  einer Wiederholliste, werden in jedem Lauf gemeldet und mit Abstand allein
+  wiederholt (vorübergehend ab dem Takt, verdoppelt bis eine Stunde; nur in MECM
+  behebbar nach einer Stunde; nur per Dateiänderung behebbar nie, weil die
+  Änderung ohnehin einen Vollscan auslöst).
 
 ### Site Health (`mecm_site-health.ps1`, alle 300 s)
 
@@ -660,9 +669,12 @@ Ordner ohne `ProjectName`/`version` oder mit fehlendem bzw. ungültigem
 (`package_config_invalid`) und werden nicht importiert. `version`
 darf keinen Bindestrich enthalten (der Katalog trennt `Name-Version` am letzten
 Bindestrich). `ErrorAction` (`Stop`/`Continue`, ohne Unterschied bei Groß- und
-Kleinschreibung) steuert die paketeigene `install.ps1`; `DeployTo` leer lassen,
-sonst wird ein Available-Deployment an eine Collection erzeugt, die es meist noch
-nicht gibt.
+Kleinschreibung) steuert die paketeigene `install.ps1`. `DeployTo` leer lassen
+oder genau einen vorhandenen Collection-Namen als Zeichenkette eintragen (ohne
+Randleerraum und ohne `*`, `?`, `[`, `]`); dorthin entsteht ein
+Available-Deployment. Eine Liste, eine Zahl oder ein solcher Name macht die
+`config.json` ungültig (`package_config_invalid`). Gibt es die Collection nicht,
+meldet der Autoimporter `package_deployto_missing`, bis sie existiert.
 
 `InstallationBehaviorType` kennt genau zwei Werte, `InstallForSystem` und
 `InstallForUser`; Groß-/Kleinschreibung spielt keine Rolle. Fehlt das Feld oder
