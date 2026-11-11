@@ -15,36 +15,45 @@ require_once __DIR__ . '/help_page.php';
 // The site-health card and the overview badge (split by domain, ADR-0006).
 require_once __DIR__ . '/system_status_mecm_site_panel.php';
 
-/** Presentation only: a start report is not proof that the process is still alive. */
+/**
+ * Presentation only: a start report is not proof that the process is still
+ * alive. An open run keeps the tone of the previous result and says so in its
+ * own words (status vocabulary, R59).
+ */
 function system_status_run_badge(string $state, bool $started): string
 {
     if (!$started) {
         return heartbeat_badge($state);
     }
-    $meta = virtusphere_heartbeat_meta($state);
-    return portal_badge((string) $meta['badge'], __t('system_status.run_completion_open'));
+    return status_value_badge(status_tone_for('result', $state), __t('system_status.run_completion_open'));
 }
 
-/** Explanations supplement the bounded technical detail; they never drive state. */
+/**
+ * The activity axis is the reporter's, never the scan result's: a started run
+ * is "running", a reported completion is current evidence, anything else has
+ * no data. Explanations supplement the bounded technical detail; they never
+ * drive state.
+ */
 function system_status_autoimporter_activity(string $event): string
 {
-    $key = match ($event) {
-        VIRTUSPHERE_RUN_EVENT_STARTED => 'run_completion_open',
-        VIRTUSPHERE_RUN_EVENT_COMPLETED => 'run_activity_completed',
-        default => 'run_activity_unknown',
+    [$tone, $key] = match ($event) {
+        VIRTUSPHERE_RUN_EVENT_STARTED => ['running', 'run_completion_open'],
+        VIRTUSPHERE_RUN_EVENT_COMPLETED => ['current', 'run_activity_completed'],
+        default => ['no_data', 'run_activity_unknown'],
     };
-    return portal_badge('neutral', __t('system_status.' . $key));
+    return status_value_badge($tone, __t('system_status.' . $key));
 }
 
+/** The last completed scan in its own words, coloured by its domain tone. */
 function system_status_autoimporter_result(?string $outcome): string
 {
-    [$variant, $key] = match ($outcome) {
-        VIRTUSPHERE_RUN_OUTCOME_OK => ['success', 'run_result_ok'],
+    [$tone, $key] = match ($outcome) {
+        VIRTUSPHERE_RUN_OUTCOME_OK => ['ok', 'run_result_ok'],
         VIRTUSPHERE_RUN_OUTCOME_WARNING => ['warning', 'run_result_warning'],
-        VIRTUSPHERE_RUN_OUTCOME_FAIL => ['danger', 'run_result_fail'],
-        default => ['neutral', 'run_result_unknown'],
+        VIRTUSPHERE_RUN_OUTCOME_FAIL => ['critical', 'run_result_fail'],
+        default => ['no_data', 'run_result_unknown'],
     };
-    return portal_badge($variant, __t('system_status.' . $key));
+    return status_value_badge($tone, __t('system_status.' . $key));
 }
 
 /**
