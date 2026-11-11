@@ -41,34 +41,6 @@ function deploy_service_verdict_action(array $snapshot): array
 }
 
 /**
- * The parts of the deploy service that need the dashboard's attention, each in
- * its axis word, and only those (SY3): a ready service or "no open case" next to
- * a pause is normal and does not belong in a warning. An empty list means no
- * banner. A busy service or a job scheduled for later is normal operation.
- *
- * @param array<string,mixed> $snapshot
- * @return list<string>
- */
-function deploy_service_attention_parts(array $snapshot): array
-{
-    $availability = (string) $snapshot['availability'];
-    $attention = (string) $snapshot['recovery_attention'];
-    $claimState = (string) $snapshot['claim_state'];
-    $parts = [];
-    if (in_array($availability, [VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE], true)) {
-        $parts[] = deploy_service_availability_label($availability);
-    }
-    if ($claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING) {
-        $parts[] = deploy_service_claim_label($claimState);
-    }
-    if ($attention !== VIRTUSPHERE_DEPLOY_ATTENTION_NONE) {
-        $parts[] = deploy_service_attention_label($attention);
-    }
-
-    return $parts;
-}
-
-/**
  * The verdict line of the deploy service card in the tone of its overview card.
  *
  * @param array<string,mixed> $snapshot
