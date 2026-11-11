@@ -169,6 +169,8 @@ flowchart TD
   R -.->|nächster Lauf| S
 ```
 
+Im Portal (SY3) nennt die Fazitzeile der Karte Scan und Verteilung getrennt, ein laufender Lauf steht als „Läuft seit … (letzter Lauf …)“ neben dem letzten Ergebnis, und die Technischen Details zerlegen die Ursachenzeile in eine Tabelle je Ursache mit Anzahl und Paketliste; die gemeldete Zeile bleibt unter „Rohdaten“ unverändert. Der Zähler `unchanged` erscheint als „Lauf ohne Änderung: Ja/Nein“. Die Grammatik der Ursachenzeile liest das Portal; sie ändert sich nur zusammen mit `lib/system_status_autoimporter_panels.php` ([Systemstatus-Prüfungen](system-status-checks.md#mecm)).
+
 ## Site Health
 
 Fragt den Status der konfigurierten MECM-Site ab und meldet ihn als Ampel. Gemeldet werden nur Site-Code, Provider und der Rohstatus, bei Warnung oder kritisch dazu die Zahl der Rollen und Komponenten je Typname und Status (`site_parts`), nie ein Servername und nie der Text der MECM-Statusmeldung.

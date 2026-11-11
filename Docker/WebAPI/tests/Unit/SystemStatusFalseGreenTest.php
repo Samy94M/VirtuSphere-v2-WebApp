@@ -143,12 +143,27 @@ final class SystemStatusFalseGreenTest extends TestCase
             ob_start();
             system_status_render_deploy_service($this->serviceSnapshot(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, $claim), ['id' => 2, 'role' => 'user']);
             $html = (string) ob_get_clean();
-            self::assertStringContainsString('<p class="status-action" data-claim-hint>' . h(__t($key)) . '</p>', $html, $claim);
+            // SY3: the pause is the card's verdict, so the verdict line carries
+            // the sentence once instead of a second hint paragraph below.
+            self::assertSame(1, preg_match('/<p class="status-verdict status-verdict-act" data-verdict="act" data-verdict-tone="warning">.*?<\/p>/s', $html, $verdict), $claim);
+            self::assertStringContainsString(h(__t($key)), $verdict[0], $claim);
+            self::assertSame(1, substr_count($html, h(__t($key))), $claim);
+            self::assertStringNotContainsString('data-claim-hint', $html, $claim);
         }
+
+        // Offline AND paused: the verdict names the outage, the pause keeps its own line (R39).
+        ob_start();
+        system_status_render_deploy_service($this->serviceSnapshot(VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE, VIRTUSPHERE_DEPLOY_CLAIM_PAUSED), self::ADMIN);
+        $both = (string) ob_get_clean();
+        self::assertStringContainsString('<p class="status-action" data-claim-hint>' . h(__t('system_status.service_paused_hint')) . '</p>', $both);
+        self::assertSame(1, preg_match('/<p class="status-verdict[^>]*data-verdict-tone="unreachable">.*?<\/p>/s', $both, $verdict));
+        self::assertStringContainsString(h(__t('system_status.action_deploy_worker')), $verdict[0]);
 
         ob_start();
         system_status_render_deploy_service($this->serviceSnapshot(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING), self::ADMIN);
-        self::assertStringNotContainsString('data-claim-hint', (string) ob_get_clean());
+        $ready = (string) ob_get_clean();
+        self::assertStringNotContainsString('data-claim-hint', $ready);
+        self::assertStringContainsString('data-verdict="none"', $ready);
     }
 
     public function testAFailedBackupTurnsTheHostCardRed(): void

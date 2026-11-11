@@ -12,6 +12,7 @@ require_once __DIR__ . '/deploy_service_health.php';
 require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/system_status_service_actions.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
+require_once __DIR__ . '/system_status_service_verdict.php';
 
 /** The localized name of one availability state. */
 function deploy_service_availability_label(string $state): string
@@ -250,6 +251,7 @@ function system_status_render_deploy_service(?array $snapshot, array $user): voi
                 <p class="muted"><?php echo h(__t('system_status.service_hint')); ?></p>
             </div>
         </div>
+        <?php echo deploy_service_verdict($snapshot); ?>
         <article class="status-row">
             <div class="status-row-head">
                 <?php // All three, always. The compact badge exists for a table
@@ -297,7 +299,10 @@ function system_status_render_deploy_service(?array $snapshot, array $user): voi
                 <ul><?php foreach ($snapshot['recovery']['cases'] as $case) { ?><li><a href="<?php echo h(deploy_job_log_url((int) $case['job_id'])); ?>"><?php echo h(__t('system_status.service_fact_active_job', ['id' => (int) $case['job_id']])); ?></a> · <?php echo h(__t('system_status.service_case_' . $case['kind'])); ?></li><?php } ?></ul>
                 <?php if (($snapshot['recovery']['case_omitted'] ?? 0) > 0) { ?><p class="muted"><?php echo h(__t('system_status.service_cases_more', ['count' => (int) $snapshot['recovery']['case_omitted']])); ?></p><?php } ?>
             <?php } ?>
-            <?php $claimHint = deploy_service_claim_hint($claimState); ?>
+            <?php // A hint the verdict already names is not repeated; a second
+                  // reason (offline AND paused) keeps its own line (R39). ?>
+            <?php $verdictReason = deploy_service_verdict_action($snapshot)['reason']; ?>
+            <?php $claimHint = $verdictReason === 'claim' ? '' : deploy_service_claim_hint($claimState); ?>
             <?php if ($claimHint !== '') { ?>
                 <p class="status-action" data-claim-hint><?php echo h($claimHint); ?></p>
             <?php } ?>
@@ -310,7 +315,7 @@ function system_status_render_deploy_service(?array $snapshot, array $user): voi
                     'time' => portal_format_timestamp((string) $snapshot['claim']['changed_at']),
                 ])); ?></p>
             <?php } ?>
-            <?php if ($snapshot['availability'] === VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED) { ?>
+            <?php if ($snapshot['availability'] === VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED && $verdictReason !== 'degraded') { ?>
                 <p class="status-action"><?php echo h(__t('system_status.service_degraded_hint')); ?></p>
             <?php } ?>
             <?php // The explanation stays visible without the permission; only

@@ -14,6 +14,7 @@ require_once __DIR__ . '/system_status_urls.php';
 require_once __DIR__ . '/system_status_backup_panels.php';
 require_once __DIR__ . '/system_status_service_panel.php';
 require_once __DIR__ . '/system_status_mecm_site_panel.php';
+require_once __DIR__ . '/system_status_verdict.php';
 
 /**
  * The cards of the overview strip, in the order of the sections below them:
@@ -111,11 +112,13 @@ function system_status_overview_headline(array $cards): array
 {
     $attention = [];
     $noEvidence = [];
+    // The same classification as every card's verdict line (SY3), so the
+    // headline and the sections cannot sort one tone differently.
     foreach ($cards as $position => $card) {
-        $rank = status_tone_rank($card['tone']);
-        if ($rank >= status_tone_rank('warning')) {
-            $attention[] = ['rank' => $rank, 'position' => $position, 'card' => $card];
-        } elseif ($rank > status_tone_rank('ok')) {
+        $need = system_status_tone_need($card['tone']);
+        if ($need === 'act') {
+            $attention[] = ['rank' => status_tone_rank($card['tone']), 'position' => $position, 'card' => $card];
+        } elseif ($need === 'evidence') {
             $noEvidence[] = $card;
         }
     }

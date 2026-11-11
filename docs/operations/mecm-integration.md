@@ -1454,7 +1454,13 @@ Verteilhinweise (`package_content_failed`, `package_content_in_progress`) sind
 keine offenen Punkte: Sie stehen im Detail hinter den offenen Punkten, und ein
 Lauf ohne offene Punkte bleibt `ok`. Das Detail nennt so viele Ursachen, wie in
 1024 Zeichen passen (die Kappung des Portals), jede ganz oder gar nicht, den Rest
-als „(+n weitere)“; bis AR1 waren es fest zehn.
+als „(+n weitere)“; bis AR1 waren es fest zehn. Das Portal zerlegt diese Zeile
+seit SY3 in eine Tabelle je Ursache (Klartext, Anzahl, aufklappbare Paketliste;
+unbekannte Codes roh) und zeigt die unveränderte Zeile unter „Rohdaten“ mit
+Kopieren-Knopf. Die Grammatik `code target=… [collection=…]` ist damit ein
+Lesevertrag des Portals: Ein neuer Code braucht seinen Eintrag in
+`VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES`, eine Änderung der Grammatik beide
+Seiten im selben Paket ([Systemstatus-Prüfungen](system-status-checks.md#mecm)).
 
 **Ein Paket, das scheitert, stoppt die folgenden nicht (AR1, F-4).** Jedes Paket
 läuft in einem eigenen Fehlerrahmen. Bricht es mit einem MECM-Fehler ab, fragt
@@ -1539,7 +1545,7 @@ ist nicht nötig.
 
 **Drei getrennte Bereiche.** Die Autoimporter-Karte zeigt Laufzustand, letztes Scanergebnis und DP-Verteilung getrennt. Verteilhinweise stammen aus dem letzten Scan und werden höchstens alle 30 Minuten aufgefrischt. Der Bericht liefert keine DP-Zahlen je Paket; den genauen Stand je DP zeigt die MECM-Konsole. Offene Punkte werden niemals als Anzahl fehlgeschlagener DPs oder als DP-Quote ausgegeben. Jeder `package_`-Code aus der Tabelle oben hat auf der Karte eine Erklärung und in der Portalhilfe (Systemstatus, MECM) einen Eintrag mit Maßnahme.
 
-**Status lesen.** „Abschluss offen“ zeigt eine Startmeldung ohne Abschluss.
+**Status lesen.** Die Karte beginnt mit einer Fazitzeile („Kein Eingriff nötig.“ oder „Handlung nötig.“), die das letzte Scanergebnis und die Verteilhinweise an Distribution Points (DP) getrennt nennt (SY3). „Abschluss offen“ zeigt eine Startmeldung ohne Abschluss; darunter steht „Läuft seit … (letzter Lauf …)“, und erst nach der Laufschonfrist der Hinweis „Länger als üblich“.
 Der Laufzustand bleibt neutral und beschreibt nur die empfangene Meldung; er beweist keinen laufenden oder gestoppten Prozess. Dauer, Zähler und
 Fehlerdetails gehören währenddessen zum letzten abgeschlossenen Lauf.
 Ein offener Lauf darf die feste Frist und, wenn das länger ist, bis zum Doppelten der Dauer brauchen, die sein letzter

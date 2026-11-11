@@ -25,6 +25,7 @@ require_once __DIR__ . '/https_config.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
+require_once __DIR__ . '/system_status_backup_encryption_panels.php';
 
 /**
  * Reads everything the section shows. Fail-soft per source: a broken reader
@@ -179,6 +180,12 @@ function system_status_host_checks(array $data): array
         'restore-drill' => system_status_backup_drill_tone($data['drill'] ?? null),
         'backup-scrub' => system_status_backup_scrub_tone($data['scrub'] ?? null),
     ];
+    // An unencrypted backup (backup_encryption_finding(), read by the page from
+    // the same backup status) counts in this card instead of in a banner no card
+    // knew about (SY3); the row exists only while there is a finding.
+    if (is_string($data['encryption']['finding'] ?? null)) {
+        $checks['backup-encryption'] = 'warning';
+    }
     $https = $data['https'] ?? null;
     if ($https !== null) {
         $checks['https-certificate'] = system_status_backup_https_tone($https);
@@ -289,7 +296,7 @@ function system_status_backup_drill_row(?array $drill, string $tone): string
             [
                 'label' => __t('system_status_backup.fact_drill_last'),
                 'html' => $known
-                    ? '<time title="' . h(portal_format_epoch((int) ($drill['ts'] ?? 0))) . '">' . h(system_status_backup_age_label((int) ($drill['age_days'] ?? 0))) . '</time>'
+                    ? portal_time_html(gmdate('Y-m-d H:i:s', (int) ($drill['ts'] ?? 0)))
                     : h(status_tone_word('no_data')),
             ],
             ['label' => __t('system_status_backup.fact_drill_backup'), 'html' => $known && $stamp !== '' ? '<code>' . h($stamp) . '</code>' : '&mdash;'],
@@ -368,6 +375,9 @@ function system_status_render_host_backup(array $data, array $user): void
     $rows = system_status_backup_run_row($data['backup'] ?? null, $checks['backup'], $user)
         . system_status_backup_drill_row($data['drill'] ?? null, $checks['restore-drill'])
         . system_status_backup_scrub_row($data['scrub'] ?? null, $checks['backup-scrub']);
+    if (isset($checks['backup-encryption'])) {
+        $rows .= system_status_backup_encryption_row((string) $data['encryption']['finding'], $checks['backup-encryption'], $user);
+    }
     $https = $data['https'] ?? null;
     if ($https !== null && isset($checks['https-certificate'])) {
         $rows .= system_status_backup_https_row($https, $checks['https-certificate'], $user);
@@ -376,6 +386,7 @@ function system_status_render_host_backup(array $data, array $user): void
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP); ?>">
         <h2><?php echo h(__t('system_status_backup.heading')); ?></h2>
         <p class="muted"><?php echo h(__t('system_status_backup.hint')); ?></p>
+        <?php echo system_status_verdict(system_status_host_overview_tone($data)); ?>
         <div class="status-list"><?php echo $rows; ?></div>
     </section>
     <?php

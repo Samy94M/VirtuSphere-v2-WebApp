@@ -60,3 +60,11 @@ The rows and their evidence do not change; their words do. Each row maps its sta
 - Backup: `backup_status_tone()` replaces the separate badge class and label of the settings card and the host row. Failed is "Kritisch", overdue and low disk are "Warnung" (the hint names the cause), OK is "OK", no evidence is "Keine Daten".
 - Restore drill: due is "Warnung", no passed drill is "Keine Daten". Checksums: a mismatch is "Kritisch", not "Abweichung", which stays the word of the deviation area. Certificate: expired "Kritisch", expiring "Warnung", an unreadable expiry "Unbekannt".
 - Missing, broken or future-dated evidence is "Keine Daten" (grey) and still never green; the rank is the shared one (`virtusphere_heartbeat_state_rank()`).
+
+## Amendment 5 (2026-11-11, SY3): backup encryption is a host row, not a banner
+
+The banner "backups are not encrypted" stood above the overview and counted in no card, so an unencrypted backup sat next to a green "Host und Backup" card (SY1 follow-up).
+
+- `backup_encryption_finding()` stays the one derivation shared with the settings backup card. System status evaluates it on the same backup status read the host rows use (no second read of the channel) and passes it in the host data as `encryption`.
+- `system_status_host_checks()` adds the row `backup-encryption` with tone `warning` only while there is a finding; without a finding there is no row. The card and the section read it from that one list, so the card turns yellow and the headline names the area. The row links the backup setting for `system.config`.
+- Unchanged: the finding still does not feed "Internal services", the dashboard or `health.php`.

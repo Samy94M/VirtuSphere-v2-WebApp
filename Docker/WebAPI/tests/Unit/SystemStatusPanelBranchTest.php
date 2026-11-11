@@ -664,7 +664,10 @@ final class SystemStatusPanelBranchTest extends TestCase
             self::EMPTY_SITE
         );
 
-        self::assertStringContainsString(h(__t('system_status.run_running_since', ['time' => portal_format_timestamp('2026-07-23 11:59:30')])), $html);
+        // SY3: the run in progress is its own line with the elapsed time; the
+        // start time stays in the facts as relative and absolute.
+        self::assertSame(1, preg_match('/<p data-run-running>[^<]+<\/p>/', $html));
+        self::assertStringContainsString('<time datetime="' . h(portal_time_iso('2026-07-23 11:59:30')) . '">', $html);
         self::assertStringContainsString(h(__t('system_status.run_reporter_v2')), $html);
     }
 

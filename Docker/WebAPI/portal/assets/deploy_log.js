@@ -487,6 +487,14 @@
                 // day the server sends something new.
                 status.textContent = payload.job.label || '';
                 status.className = 'badge badge-' + (payload.job.badge || 'neutral');
+                // The status vocabulary's icon goes back in front of the word
+                // (SY3); it is decorative, the word carries the meaning.
+                if (/^[a-z-]+$/.test(payload.job.icon || '')) {
+                    var icon = document.createElement('span');
+                    icon.className = 'badge-icon badge-icon-' + payload.job.icon;
+                    icon.setAttribute('aria-hidden', 'true');
+                    status.insertBefore(icon, status.firstChild);
+                }
                 lastUpdatedAt = payload.job.updated_at || lastUpdatedAt;
             }
             if (typeof payload.terminal_html === 'string' && terminalBlocks) {

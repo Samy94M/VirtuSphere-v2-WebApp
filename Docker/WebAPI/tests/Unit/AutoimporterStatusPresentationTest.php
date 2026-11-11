@@ -267,6 +267,8 @@ final class AutoimporterStatusPresentationTest extends TestCase
             $catalogs[$locale] = [
                 'card' => require __DIR__ . '/../../lang/' . $locale . '/system_status.php',
                 'help' => require __DIR__ . '/../../lang/' . $locale . '/help_system_status.php',
+                // SY3: the plain-language name in the cause table.
+                'table' => require __DIR__ . '/../../lang/' . $locale . '/system_status_cards.php',
             ];
         }
         foreach ($vocabulary as $code) {
@@ -280,7 +282,10 @@ final class AutoimporterStatusPresentationTest extends TestCase
             foreach ($catalogs as $locale => $catalog) {
                 self::assertNotSame('', trim((string) ($catalog['card']['finding_' . $code] ?? '')), $locale . ' card ' . $code);
                 self::assertNotSame('', trim((string) ($catalog['help']['system_status_status_code_' . $code] ?? '')), $locale . ' help ' . $code);
+                self::assertNotSame('', trim((string) ($catalog['table']['cause_' . $code] ?? '')), $locale . ' table ' . $code);
             }
+            $row = system_status_render_autoimporter_details($code . ' target=Agent-1');
+            self::assertStringContainsString('<tr data-cause="' . $code . '"><td>' . h(__t('system_status_cards.cause_' . $code)) . ' <code>', $row, $code);
         }
     }
 

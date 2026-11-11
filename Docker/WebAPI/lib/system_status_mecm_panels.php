@@ -11,6 +11,7 @@ require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/system_status.php';
 require_once __DIR__ . '/system_status_shared_panels.php';
+require_once __DIR__ . '/system_status_autoimporter_panels.php';
 require_once __DIR__ . '/help_page.php';
 // The site-health card and the overview badge (split by domain, ADR-0006).
 require_once __DIR__ . '/system_status_mecm_site_panel.php';
@@ -57,23 +58,75 @@ function system_status_autoimporter_result(?string $outcome): string
 }
 
 /**
+ * The explanations of the known causes in a detail line, read through the one
+ * grammar reader (system_status_autoimporter_causes(), SY3).
+ *
+ * package_content_group_empty (AV-F27) is a distribution finding by its prefix:
+ * a DP group without members gives the initial request no target (AV2).
+ * package_folder_failed (PS-09) is a placement finding and stays configuration.
+ *
  * @return list<string>
  */
 function system_status_autoimporter_findings(string $detail, ?bool $distribution = null): array
 {
+    $parsed = system_status_autoimporter_causes($detail);
     $findings = [];
-    // package_content_group_empty (AV-F27) is a distribution finding by its prefix:
-    // a DP group without members gives the initial request no target (AV2).
-    // package_folder_failed (PS-09) is a placement finding and stays configuration.
-    foreach (VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES as $code) {
-        if ($distribution !== null && str_starts_with($code, 'package_content_') !== $distribution) {
-            continue;
-        }
-        if (preg_match('/(?:^|;\s*)' . preg_quote($code, '/') . '\s+target=/u', $detail) === 1) {
-            $findings[] = __t('system_status.finding_' . $code);
+    foreach ([false, true] as $kind) {
+        if ($distribution === null || $distribution === $kind) {
+            $findings = [...$findings, ...array_column(system_status_autoimporter_cause_findings($parsed, $kind), 'text')];
         }
     }
+
     return $findings;
+}
+
+/**
+ * "Läuft seit 3 Minuten (letzter Lauf 8 Minuten 15 Sekunden)": the run in
+ * progress apart from the last result (SY3). The previous duration comes from
+ * the row, because a `started` report keeps last_duration_ms.
+ *
+ * @param array<string,mixed> $row
+ */
+function system_status_run_running_line(array $row, int $now): string
+{
+    $started = virtusphere_evidence_timestamp(isset($row['last_attempt_at']) ? (string) $row['last_attempt_at'] : null, $now);
+    if ($started === null) {
+        return '';
+    }
+    $elapsed = portal_format_duration(max(0, $now - $started));
+    $last = $row['last_duration_ms'] ?? null;
+
+    return is_numeric($last) && (int) $last > 0
+        ? __t('system_status_cards.run_running_last', ['elapsed' => $elapsed, 'last' => portal_format_duration_ms((int) $last)])
+        : __t('system_status_cards.run_running', ['elapsed' => $elapsed]);
+}
+
+/**
+ * The autoimporter's summary in its verdict: the last scan and the distribution
+ * named apart, so "no open points" never sits unexplained next to DP notes.
+ *
+ * @param array{causes: list<array<string,mixed>>, more: int} $parsed
+ */
+function system_status_autoimporter_fact(?string $outcome, array $parsed, ?array $summary): string
+{
+    $openPoints = is_array($summary) && isset($summary['open_points']) ? (int) $summary['open_points'] : 0;
+    $scan = match ($outcome) {
+        VIRTUSPHERE_RUN_OUTCOME_OK => __t('system_status_cards.fact_scan_ok'),
+        VIRTUSPHERE_RUN_OUTCOME_WARNING => $openPoints > 0
+            ? __t('system_status_cards.fact_scan_open_points', ['count' => $openPoints])
+            : __t('system_status_cards.fact_scan_warning'),
+        VIRTUSPHERE_RUN_OUTCOME_FAIL => __t('system_status_cards.fact_scan_fail'),
+        default => __t('system_status_cards.fact_scan_none'),
+    };
+    $notes = 0;
+    foreach ($parsed['causes'] as $cause) {
+        $notes += $cause['distribution'] ? count($cause['entries']) : 0;
+    }
+    $distribution = $notes === 0
+        ? __t('system_status_cards.fact_distribution_none')
+        : __t($notes === 1 ? 'system_status_cards.fact_distribution_one' : 'system_status_cards.fact_distribution_many', ['count' => $notes]);
+
+    return $scan . ' ' . $distribution;
 }
 
 // Localized label for one summary counter key.
@@ -190,12 +243,14 @@ function system_status_render_mecm(array $snapshot, array $user): void
         <div class="status-subgroup">
             <h3><?php echo h(__t('system_status.mecm_sync_heading')); ?> <?php echo heartbeat_badge($syncState); ?></h3>
             <p class="muted"><?php echo h(__t('system_status.mecm_sync_hint')); ?></p>
+            <?php if (!$setupPending) { echo system_status_verdict(status_tone_for('result', $syncState)); } ?>
             <?php system_status_render_run_rows($snapshot['mecm_sync']['rows'], $setupPending, $user); ?>
         </div>
 
         <div class="status-subgroup">
             <h3><?php echo h(__t('system_status.mecm_site_heading')); ?> <?php echo mecm_site_badge($siteState); ?></h3>
             <p class="muted"><?php echo h(__t('system_status.mecm_site_hint')); ?></p>
+            <?php if (!$setupPending) { echo system_status_verdict(mecm_site_tone($siteState)); } ?>
             <?php system_status_render_site($snapshot['mecm_site']['rows']); ?>
         </div>
         <?php if ($setupPending) { ?></details><?php } ?>
@@ -212,8 +267,9 @@ function system_status_render_mecm(array $snapshot, array $user): void
  * @param list<array{source:string,row:array|null,state:string,report_overdue?:bool}> $rows
  * @param array<string,mixed>|null $user gates the settings link of a rejected catalog
  */
-function system_status_render_run_rows(array $rows, bool $suppressHints = false, ?array $user = null): void
+function system_status_render_run_rows(array $rows, bool $suppressHints = false, ?array $user = null, ?int $now = null): void
 {
+    $clock = $now ?? time();
     ?>
     <div class="status-list">
         <?php foreach ($rows as $entry) {
@@ -235,12 +291,21 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false,
             $summary = ($row !== null && (!$isAutoimporter || $hasCompletedResult) && !empty($row['last_summary']))
                 ? json_decode((string) $row['last_summary'], true)
                 : null;
+            $parsed = system_status_autoimporter_causes($completionDetail);
+            // The run in progress is a line of its own, apart from the last
+            // result; a warning appears only once it outlives its grace (SY3).
+            $runningLine = $isRunning ? system_status_run_running_line($row, $clock) : '';
+            $runOverdue = $isRunning && (bool) ($entry['report_overdue'] ?? virtusphere_run_report_overdue($row, $clock));
             ?>
             <article class="status-row">
                 <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_activity_heading')); ?></h4><?php } ?>
-                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo $isAutoimporter ? system_status_autoimporter_activity($event) : system_status_run_badge($state, $isRunning); ?><?php if ($isRunning && !empty($row['last_attempt_at'])) { ?><span class="muted"><?php echo h(__t('system_status.run_running_since', ['time' => portal_format_timestamp($row['last_attempt_at'])])); ?></span><?php } ?><?php if ($row !== null) { ?><span class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></span><?php } ?></div>
-                <?php if ($isRunning) { ?><p class="muted"><?php echo h(__t('system_status.run_completion_hint')); ?></p><?php } ?>
-                <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_result_heading')); ?></h4><p><?php echo system_status_autoimporter_result($hasCompletedResult ? (string) ($row['last_status'] ?? '') : null); ?></p><p class="muted"><?php echo h(__t('system_status.run_result_scope')); ?></p><?php } elseif ($isRunning && !empty($row['last_result_at'])) { ?><p><strong><?php echo h(__t('system_status.run_last_completed_heading')); ?></strong></p><?php } ?>
+                <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo $isAutoimporter ? system_status_autoimporter_activity($event) : system_status_run_badge($state, $isRunning); ?><?php if ($row !== null) { ?><span class="muted"><?php echo h(system_status_run_reporter_note($row)); ?></span><?php } ?></div>
+                <?php if ($isAutoimporter && $row !== null && !$suppressHints) {
+                    echo system_status_verdict(status_tone_for('result', $state), '', h(system_status_autoimporter_fact($hasCompletedResult ? (string) ($row['last_status'] ?? '') : null, $parsed, is_array($summary) ? $summary : null)));
+                } ?>
+                <?php if ($runningLine !== '') { ?><p data-run-running><?php echo h($runningLine); ?></p><?php } ?>
+                <?php if ($runOverdue) { ?><p class="status-action" data-run-overdue><?php echo h(__t('system_status.run_completion_hint', ['limit' => portal_format_duration(virtusphere_run_grace_seconds($row))])); ?></p><?php } ?>
+                <?php if ($isAutoimporter) { ?><h4><?php echo h(__t('system_status.run_result_heading')); ?></h4><p><?php echo system_status_autoimporter_result($hasCompletedResult ? (string) ($row['last_status'] ?? '') : null); ?></p><?php if ($isRunning) { ?><p class="muted"><?php echo h(__t('system_status.run_result_scope')); ?></p><?php } ?><?php } elseif ($isRunning && !empty($row['last_result_at'])) { ?><p><strong><?php echo h(__t('system_status.run_last_completed_heading')); ?></strong></p><?php } ?>
                 <?php
                 // All six fields, always, in this order. They used to appear only
                 // when they had a value, so the number of columns differed per
@@ -267,7 +332,8 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false,
                 ?>
                 <?php if (is_array($summary) && $summary !== []) { ?>
                     <dl class="status-counters">
-                        <?php foreach ($summary as $summaryKey => $summaryValue) { if (!is_string($summaryKey)) { continue; } ?><div><dt><?php echo h(system_status_run_summary_label($summaryKey)); ?></dt><dd><?php echo h((string) $summaryValue); ?></dd></div><?php } ?>
+                        <?php // `unchanged` is a flag (1 = a run without any change), not a count. ?>
+                        <?php foreach ($summary as $summaryKey => $summaryValue) { if (!is_string($summaryKey)) { continue; } ?><div><dt><?php echo h(system_status_run_summary_label($summaryKey)); ?></dt><dd><?php echo h($summaryKey === 'unchanged' ? __t((int) $summaryValue === 1 ? 'common.yes' : 'common.no') : (string) $summaryValue); ?></dd></div><?php } ?>
                     </dl>
                 <?php } ?>
                 <?php
@@ -286,7 +352,7 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false,
                 } ?>
                 <?php if ($errorLabel !== '') { ?><p class="alert-inline"><?php echo h($errorLabel); ?></p><?php } ?>
                 <?php if ($isAutoimporter && !$suppressHints) {
-                    foreach (system_status_autoimporter_findings($completionDetail, false) as $finding) { ?><p class="status-action"><?php echo h($finding); ?></p><?php }
+                    foreach (system_status_autoimporter_cause_findings($parsed, false) as $finding) { ?><p class="status-action" data-finding="<?php echo h($finding['code']); ?>"><strong><?php echo h($finding['count']); ?>:</strong> <?php echo h($finding['text']); ?></p><?php }
                 } ?>
                 <?php if ($isAutoimporter) { ?>
                     <h4><?php echo h(__t('system_status.run_distribution_heading')); ?></h4>
@@ -294,14 +360,18 @@ function system_status_render_run_rows(array $rows, bool $suppressHints = false,
                     <?php echo system_status_fact_list([
                         ['label' => __t('system_status.th_last_result'), 'html' => system_status_fact_time($hasCompletedResult ? ($row['last_result_at'] ?? null) : null)],
                     ]);
-                    $distributionFindings = system_status_autoimporter_findings($completionDetail, true);
+                    // Distribution notes block nothing: an information note, not
+                    // the action style of an open point (SY3).
+                    $distributionFindings = system_status_autoimporter_cause_findings($parsed, true);
                     if ($distributionFindings === []) { ?><p><?php echo h(__t('system_status.run_distribution_unknown')); ?></p><?php }
-                    foreach ($distributionFindings as $finding) { ?><p class="status-action"><?php echo h($finding); ?></p><?php }
+                    foreach ($distributionFindings as $finding) { ?><p class="status-note" data-finding="<?php echo h($finding['code']); ?>"><strong><?php echo h($finding['count']); ?>:</strong> <?php echo h($finding['text']); ?></p><?php }
                     if (!$suppressHints) {
                     ?><p><a href="<?php echo h(help_url('system-status', 'help-status-mecm')); ?>"><?php echo h(__t('system_status.autoimporter_help')); ?></a></p><?php
                     }
                 } ?>
-                <?php if ($completionDetail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($completionDetail); ?></pre></details><?php } ?>
+                <?php if ($completionDetail !== '' && $isAutoimporter) {
+                    echo system_status_render_autoimporter_details($completionDetail);
+                } elseif ($completionDetail !== '') { ?><details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($completionDetail); ?></pre></details><?php } ?>
             </article>
         <?php } ?>
     </div>

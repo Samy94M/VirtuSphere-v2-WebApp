@@ -8,6 +8,7 @@ declare(strict_types=1);
 // closure stays complete.
 require_once __DIR__ . '/portal_status_display.php';
 require_once __DIR__ . '/status_badges.php';
+require_once __DIR__ . '/portal_time_display.php';
 
 // Single source for the badge markup. Callers pass a variant (the palette suffix
 // success/warning/danger/info/neutral) and the already-resolved label; both are
@@ -355,19 +356,23 @@ function integration_action_hint(string $source, bool $openPoints = false): stri
     };
 }
 
+/**
+ * A duration in at most two units, the largest first (operator decision
+ * 09.11.2026): 495 s is "8 Minuten 15 Sekunden", not "495 Sekunden"; 3725 s is
+ * "1 Stunde 2 Minuten" (the seconds drop out). A zero second unit is left out.
+ */
 function portal_format_duration(int $seconds): string
 {
     $seconds = max(0, $seconds);
-    if ($seconds > 0 && $seconds % 3600 === 0) {
-        $hours = intdiv($seconds, 3600);
-        return __t($hours === 1 ? 'common.duration_hour' : 'common.duration_hours', ['count' => $hours]);
+    $unit = static fn (int $count, string $one, string $many): string => __t($count === 1 ? 'common.duration_' . $one : 'common.duration_' . $many, ['count' => $count]);
+    if ($seconds < 60) {
+        return $unit($seconds, 'second', 'seconds');
     }
-    if ($seconds >= 60 && $seconds % 60 === 0) {
-        $minutes = intdiv($seconds, 60);
-        return __t($minutes === 1 ? 'common.duration_minute' : 'common.duration_minutes', ['count' => $minutes]);
-    }
+    [$first, $second] = $seconds < 3600
+        ? [$unit(intdiv($seconds, 60), 'minute', 'minutes'), $seconds % 60 === 0 ? '' : $unit($seconds % 60, 'second', 'seconds')]
+        : [$unit(intdiv($seconds, 3600), 'hour', 'hours'), intdiv($seconds % 3600, 60) === 0 ? '' : $unit(intdiv($seconds % 3600, 60), 'minute', 'minutes')];
 
-    return __t($seconds === 1 ? 'common.duration_second' : 'common.duration_seconds', ['count' => $seconds]);
+    return $second === '' ? $first : __t('common.duration_pair', ['first' => $first, 'second' => $second]);
 }
 
 // Sub-second run durations are reported in milliseconds; anything longer rounds
