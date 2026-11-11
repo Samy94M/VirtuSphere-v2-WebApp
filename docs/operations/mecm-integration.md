@@ -1431,12 +1431,55 @@ im 10s/60s-Takt zu vermeiden; Sichtbarkeit entsteht anderweitig (Heartbeat/Porta
 
 **Autoimporter**
 
-Ein offener Punkt hält den Manifest-Stamp zurück: der nächste Durchlauf scannt
-denselben Baum erneut, und der Lauf meldet `warning` mit `partial_failure` samt
-Ursachencodes im Detail, statt `ok`. Nur ein Durchlauf ohne offene Punkte merkt
-den Stamp. Verteilhinweise (`package_content_failed`,
-`package_content_in_progress`) sind keine offenen Punkte: Sie stehen im Detail
-hinter den offenen Punkten, der Lauf bleibt `ok`, und der Stamp wird gemerkt.
+Ein offener Punkt hält den Manifest-Stamp nicht mehr zurück (AR1, 10.11.2026).
+Bis dahin scannte jeder Folgelauf den ganzen Baum erneut, solange irgendein Paket
+einen offenen Punkt hatte; elf dauerhaft fehlende `DeployTo`-Collections
+erzwangen so jede Minute einen Vollscan mit allen MECM-Abfragen je Paket. Jetzt
+merkt der Scan den Stamp immer, und jedes Paket mit offenen Punkten steht mit
+seinen Ursachen in einer **Wiederholliste**. Ist sein Termin fällig, bearbeitet
+der nächste Lauf nur dieses Paket erneut (Logzeile „Wiederholung offener
+Punkte“). Abstand: vorübergehende Ursachen nach dem Takt, dann doppelt so lange
+bis höchstens eine Stunde; Ursachen, die nur eine Änderung in MECM behebt
+(`package_deployto_missing`, `package_deployto_ambiguous`,
+`package_definition_drift`), gleich nach einer Stunde; Ursachen, die nur eine
+Dateiänderung behebt (`package_config_invalid`, `package_deployto_invalid`), nie,
+weil die Dateiänderung ohnehin einen Vollscan auslöst. Wer eine fehlende
+Collection angelegt hat und nicht warten will, speichert die `config.json` des
+Pakets erneut. Jeder Lauf, auch ein ruhiger ohne Scan, meldet alle offenen
+Punkte der Liste: `warning` mit `partial_failure`, Zähler „offene Punkte“ und
+Ursachencodes im Detail. Behoben ist ein Punkt erst, wenn sein Paket ohne Ursache
+durchläuft (Logzeile „Offene Punkte dieses Pakets sind behoben“). Die Liste lebt
+im Prozess; nach einem Neustart der Aufgabe scannt der erste Lauf voll.
+Verteilhinweise (`package_content_failed`, `package_content_in_progress`) sind
+keine offenen Punkte: Sie stehen im Detail hinter den offenen Punkten, und ein
+Lauf ohne offene Punkte bleibt `ok`. Das Detail nennt so viele Ursachen, wie in
+1024 Zeichen passen (die Kappung des Portals), jede ganz oder gar nicht, den Rest
+als „(+n weitere)“; bis AR1 waren es fest zehn.
+
+**Ein Paket, das scheitert, stoppt die folgenden nicht (AR1, F-4).** Jedes Paket
+läuft in einem eigenen Fehlerrahmen. Bricht es mit einem MECM-Fehler ab, fragt
+der Autoimporter MECM selbst (`Get-CMSite`): Antwortet MECM, ist es der offene
+Punkt `package_scan_failed` dieses Pakets (MECM-Text im Tageslog), und die
+alphabetisch folgenden Pakete laufen weiter. Nur wenn MECM nicht mehr antwortet,
+endet der Lauf mit `fail`/`mecm_unavailable`, die Verbindung wird neu aufgebaut,
+und nach 60 s Pause scannt der nächste Lauf voll. Früher führte jeder Fehler in
+einem Paket zu diesem Abbruch, obwohl MECM erreichbar war.
+
+**`DeployTo` wird geprüft, bevor ein Deployment entsteht (AR1, F-3).** In der
+`config.json` muss `DeployTo` fehlen, `null`, leer oder genau ein
+Collection-Name als Zeichenkette sein: ohne Randleerraum, Steuerzeichen und
+Wildcards (`*`, `?`, `[`, `]`). Eine Liste, eine Zahl oder ein solcher Name macht
+die `config.json` ungültig (`package_config_invalid`), wie bei `ProjectName` und
+`version`. Danach prüft der Autoimporter exakt mit `Get-CMCollection -Name`
+(Device- oder User-Collection), ob es die Collection gibt. Fehlt sie, ist das
+`package_deployto_missing` mit dem Collection-Namen im Detail, ohne
+Deployment-Versuch; mehrere gleichnamige Collections sind
+`package_deployto_ambiguous`. Nennt `DeployTo` die eigene Collection des Pakets
+(bei `generateOwnDeviceColletion: "true"`), ist das `package_deployto_invalid`:
+dort besteht schon das Deployment „Erforderlich“. Ein Providerfehler bei der
+Prüfung wird nicht mehr verschluckt, sondern ist vorübergehend
+(`package_scan_failed`, siehe oben). `package_deploy_failed` bleibt für ein
+Deployment, das MECM trotz vorhandener Collection ablehnt.
 
 **Verteilung an die DPs ist Sache von MECM (AV2, ADR-0034 Amendment 7).** Der
 Autoimporter fordert je neuem Dateimanifest höchstens einen Auftrag an: die
@@ -1450,6 +1493,13 @@ nächste Lauf den Aufruf nur, wenn MECM ihn nachweislich nicht angenommen hat:
 Bei einem Update ist die DT-ContentId unverändert, bei einer Erstverteilung ist
 kein Ziel sichtbar. Hat MECM ihn angenommen, wird der Intent ohne zweiten Aufruf
 bestätigt.
+
+Das Dateimanifest umfasst alle Dateien des Paketordners einschließlich der
+`config.json`. Auch eine Änderung nur an der `config.json` (etwa an `DeployTo`
+oder `removeOldVersion`, ebenso an Leerraum oder Zeilenenden) ergibt deshalb ein
+neues Manifest und genau einen Auftrag für eine neue Contentversion. Das ist
+gewollt (Nutzerentscheid 09.11.2026); der frühere Plan AV-R01, nach dem nur eine
+angehobene `version` wirken sollte, ist nicht umgesetzt.
 
 Danach liest der Autoimporter nur das Aggregat von `Get-CMDistributionStatus`.
 Offline-DPs, ersetzte oder entfernte DPs, laufende Kopien, ein von Hand
@@ -1546,24 +1596,42 @@ Applications `ObjectPath` liefert, etwa mit
 Lokale Fixtures ersetzen diese Abnahme der realen Provider- und DP-Wirkung
 nicht.
 
+**Abnahme im MECM-Labor (AR1):** Nach `-Upgrade -ServerOnly` zeigt die
+Portalzeile `autoimporter/2.4` (Common-Vertrag 4). Ein Paket mit einer nicht
+vorhandenen `DeployTo`-Collection: Detail `package_deployto_missing` mit Namen,
+kein Deployment-Versuch im Tageslog; die folgenden Läufe sind ruhig
+(unverändert), melden den Punkt aber weiter. Collection anlegen, dann
+`config.json` des Pakets neu speichern: Der nächste Lauf legt das Deployment
+„Verfügbar“ an und meldet „behoben“. Eine Collection gleichen Namens als Device-
+und als User-Collection anlegen: `package_deployto_ambiguous`. Einmal lesend
+prüfen, dass `Get-CMApplicationDeployment -Name <Name-Version> -CollectionName
+<Collection> -ErrorAction Stop` ohne Deployment still nichts liefert und
+`Get-CMSite -SiteCode <Site-Code>` die Site zurückgibt; beides tragen die neuen
+Prüfungen.
+
 | Fall | Verhalten | Log |
 |---|---|---|
 | `config.json` fehlt im Ordner | Ordner ignoriert | still |
-| `config.json` ungültig / ohne ProjectName+version / ohne gültiges ErrorAction (`Stop` oder `Continue`) | übersprungen, **offener Punkt** (`package_config_invalid`). Ohne gültiges `ErrorAction` wird das Paket nicht importiert, weil der Paketwrapper sonst auf jedem Client mit Exit-Code 1 abbricht | WARN |
+| `config.json` ungültig / ohne ProjectName+version / ohne gültiges ErrorAction (`Stop` oder `Continue`) / `DeployTo` keine Zeichenkette oder mit Randleerraum, Steuerzeichen oder Wildcards | übersprungen, **offener Punkt** (`package_config_invalid`), gemeldet bis zur nächsten Dateiänderung, ohne Wiederholung dazwischen. Ohne gültiges `ErrorAction` wird das Paket nicht importiert, weil der Paketwrapper sonst auf jedem Client mit Exit-Code 1 abbricht | WARN |
 | `PackagesShare` fehlt in Registry | wartet in 60-s-Schleife auf den Installer | ERROR einmalig |
 | files-Baum unverändert (SHA-256-Manifest) | kein Scan. Gehasht werden nur neue Dateien und solche mit geänderter Größe, Änderungszeit oder NTFS-ChangeTime (auch bei zurückgesetzter Änderungszeit); die übrigen Hashes merkt sich der laufende Prozess je Datei, höchstens 12 bis 24 Stunden lang (AL1). Der erste Lauf nach einem Neustart der Aufgabe hasht einmal alles | still |
 | files-Pfad fehlt | Scan übersprungen, Stamp wird nicht gemerkt (`package_source_missing`) | WARN |
 | Alt-Version erkannt und `removeOldVersion=true` | automatische Entfernung von altem Deployment, Application und Collection nach Eigentums-, vollständigem Referenz- und Ersatznachweis. Ein von MECM angenommener Ersatzauftrag, eine sichtbar begonnene Verteilung und das neue Deployment genügen; der DP-Stand spielt keine Rolle. Eine gesperrte oder fehlgeschlagene Einheit meldet `package_cleanup_failed` | INFO je entfernter Einheit, WARN bei Sperre/Fehler |
 | Alt-Version ohne eigene Collection | wird über die Application als Kandidat erkannt und ebenfalls erhalten | WARN je Kandidat |
 | Vorlagen-install.ps1 nicht kopierbar oder beide install.ps1-Dateien fehlen | Keine Application-/DT-/Contentmutation für dieses Paket; Kopie muss den SHA-256-Vergleich bestehen. Ein vorhandenes lesbares Paketskript bleibt auch ohne Vorlage zulässig. Retry im nächsten Durchlauf (`package_template_failed`). | WARN |
-| Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Retry (`package_deploy_failed`, `collection_folder_failed`) | WARN |
+| Deployment/Collection fehlt (auch nach früherem Teilfehler) | wird idempotent nachgezogen; bei Fehlschlag Wiederholung mit Abstand (`package_deploy_failed`, `collection_folder_failed`) | WARN |
+| Ein Paket bricht mit einem MECM-Fehler ab, MECM antwortet | Nur dieses Paket ist offen (`package_scan_failed`, MECM-Text im Tageslog); die übrigen Pakete laufen weiter, keine Verbindungspause. Wiederholung nach dem Takt, dann mit doppeltem Abstand bis eine Stunde | WARN |
+| Ein Paket bricht ab, MECM antwortet nicht mehr (`Get-CMSite` scheitert) | Lauf `fail` (`mecm_unavailable`), Dateistand verworfen, Verbindung neu, 60 s Pause, nächster Lauf scannt voll | ERROR |
 | DP-Gruppe der Erstverteilung hat keine Mitglieder | Keine Erstanforderung, solange die Gruppe leer ist; Collection und Deployments werden trotzdem nachgezogen. Sobald ein Verteilungspunkt in der Gruppe ist, fordert der nächste Durchlauf die Erstverteilung an (`package_content_group_empty`). | WARN |
 | DP-Gruppe nicht konfiguriert oder MECM nimmt den Contentauftrag nicht an | Kein Auftrag beziehungsweise Intent bleibt stehen; Collection und Deployments werden trotzdem nachgezogen. Der nächste Lauf wiederholt den Aufruf nur, wenn MECM ihn nachweislich nicht angenommen hat (`package_content_request_failed`). | WARN |
 | Neue Application lässt sich nicht in `VirtuSphere_Applications` verschieben | Die Application bleibt im Wurzelordner und funktioniert. Der Verschub wird im nächsten Durchlauf wiederholt (`package_folder_failed`); der Paket-Sync liest nur den Collection-Ordner. | WARN |
 | DPs offline, ersetzt oder entfernt; Verteilung läuft noch oder meldet Fehler | Hinweis, kein offener Punkt: Lauf `ok`, Stamp gemerkt, Collection und Deployments nachgezogen. Gleiche Manifeste lösen keinen Auftrag aus, ein neues Manifest genau einen (`package_content_failed`, `package_content_in_progress` als Hinweis). | INFO |
 | Application oder Deployment Type nicht eindeutig lesbar, oder Verteilstand unlesbar, wenn ein Auftrag nötig wäre | Kein Auftrag in diesem Lauf; Collection und Deployments werden trotzdem nachgezogen, der nächste Lauf versucht es erneut (`package_content_unknown`). | WARN |
 | Namensgleich neu angelegte Application | Mit Marker oder im Ordner `VirtuSphere_Applications`: neu gebunden, bei gleichem Manifest ohne Auftrag. Fremd: kein Content, kein Deployment (`package_definition_drift`). | INFO beziehungsweise WARN |
-| `DeployTo`-Ziel-Collection fehlt | Offener Punkt mit Collection-Name; der Dateistand wird nicht gemerkt, der nächste Lauf versucht das Available-Deployment erneut, bis die Collection existiert | WARN `package_deploy_failed` |
+| `DeployTo`-Ziel-Collection fehlt | Offener Punkt mit Collection-Name, kein Deployment-Versuch; der Dateistand wird gemerkt, das Paket nach einer Stunde (oder sofort nach einer Dateiänderung) erneut geprüft. Sobald die Collection existiert, entsteht das Deployment „Verfügbar“ | WARN `package_deployto_missing` |
+| Mehrere Collections tragen den `DeployTo`-Namen | Kein Deployment, offener Punkt mit Collection-Name, Prüfung nach einer Stunde | WARN `package_deployto_ambiguous` |
+| `DeployTo` nennt die eigene Collection des Pakets | Kein Deployment „Verfügbar“ (dort besteht „Erforderlich“), offener Punkt bis zur Dateiänderung | WARN `package_deployto_invalid` |
+| Lesefehler des Providers bei der `DeployTo`-Prüfung oder der Deploymentabfrage | Nicht mehr als „kein Deployment“ verschluckt; vorübergehender offener Punkt des Pakets | WARN `package_scan_failed` |
 | Application existiert bereits | Anlage übersprungen, Vorlagenskript/Collection/Deployment werden trotzdem geprüft | still (Konsole) |
 
 ## Troubleshooting

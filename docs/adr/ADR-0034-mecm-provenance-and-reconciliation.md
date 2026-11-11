@@ -1,5 +1,41 @@
 # ADR-0034: MECM-Provenienz und sichere Reconciliation
 
+## Amendment 8 (10.11.2026): Wiederholliste statt zurückgehaltenem Stamp, DeployTo-Prüfung, Fehlerrahmen je Paket (AR1)
+
+Ersetzt die Regel, dass ein offener Punkt des Autoimporters den Manifest-Stamp
+zurückhält (B7, Amendment 5). Anlass: Audit vom 09.11.2026, Funde F-1, F-3, F-4
+und F-16. Elf dauerhaft fehlende `DeployTo`-Collections erzwangen jede Minute
+einen Vollscan mit allen MECM-Abfragen je Paket, ein Fehler in einem Paket
+brach den ganzen Scan ab und meldete `mecm_unavailable`, obwohl MECM antwortete,
+und `DeployTo` wurde weder geprüft noch auf Existenz gelesen.
+
+Der Autoimporter merkt den Stamp nach jedem vollständigen Paketdurchlauf. Jedes
+Paket mit offenen Punkten steht mit seinen Ursachen in einer prozessinternen
+Wiederholliste und wird allein erneut bearbeitet, wenn sein Termin fällig ist:
+vorübergehende Ursachen nach dem Takt, dann mit doppeltem Abstand bis eine
+Stunde; Ursachen, die nur eine Änderung in MECM behebt, nach einer Stunde;
+Ursachen, die nur eine Dateiänderung behebt, nicht, weil die Dateiänderung
+einen Vollscan auslöst. Jeder Lauf meldet alle offenen Punkte der Liste; ein
+offener Punkt wird also nicht unsichtbar, auch wenn kein Scan läuft. Behoben
+ist er erst, wenn sein Paket ohne Ursache durchläuft.
+
+Jedes Paket hat einen eigenen Fehlerrahmen. Ein MECM-Fehler darin ist der offene
+Punkt `package_scan_failed` dieses Pakets, solange der Provider antwortet
+(`Get-CMSite`); nur ein Quellzustand (`source_changing`) oder ein Provider, der
+nicht mehr antwortet, beendet den Lauf wie bisher. `DeployTo` folgt der Regel
+von `ProjectName`/`version` (Zeichenkette ohne Randleerraum und Wildcards) und
+wird vor jedem Deployment exakt in MECM gelesen; fehlende, mehrdeutige und auf
+die eigene Collection zeigende Ziele haben eigene Ursachen
+(`package_deployto_missing`, `package_deployto_ambiguous`,
+`package_deployto_invalid`). Lesefehler werden nicht mehr per
+`SilentlyContinue` als „kein Deployment“ gelesen.
+
+Unverändert: DP-Zustände bleiben Hinweise (Amendment 7), das Manifest umfasst
+weiter die ganze `config.json` (Nutzerentscheid 09.11.2026), Wire-Vertrag,
+Summary-Schlüssel und Kategorien bleiben gleich; die neuen Codes nimmt jedes
+Portal an, weil `detail` Freitext ist. Common-Vertrag 4, `autoimporter/2.4`.
+Register: `docs/register/2026-11-10-AR1.md`.
+
 ## Amendment 7 (04.11.2026): DP-Verteilung nur anfordern und anzeigen (AV2)
 
 Ersetzt die DP-Grenzen aus Amendment 5 und 6 sowie die Verteilwahrheit (B7),
