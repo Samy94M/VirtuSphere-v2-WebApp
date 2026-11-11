@@ -302,6 +302,26 @@ final class AutoimporterStatusPresentationTest extends TestCase
         );
     }
 
+    public function testDeployToAndPackageFrameCausesAreConfigurationFindings(): void
+    {
+        // AR1: the DeployTo check names the collection after target=, a package that
+        // stopped on its own MECM error is package_scan_failed; the filled detail line
+        // ends with the rest count. None of them is a distribution note.
+        $detail = 'package_deployto_missing target=Agent-1.0 collection=Pilot-Gruppe; '
+            . 'package_scan_failed target=Agent-2.0; package_deployto_ambiguous target=Agent-3.0 collection=Doppelt; '
+            . 'package_deployto_invalid target=Agent-4.0 collection=Agent-4.0; (+3 weitere)';
+        self::assertSame(
+            [
+                __t('system_status.finding_package_deployto_missing'),
+                __t('system_status.finding_package_deployto_ambiguous'),
+                __t('system_status.finding_package_deployto_invalid'),
+                __t('system_status.finding_package_scan_failed'),
+            ],
+            system_status_autoimporter_findings($detail, false)
+        );
+        self::assertSame([], system_status_autoimporter_findings($detail, true));
+    }
+
     public function testMissingReportRendersThreeAxesWithoutClaimingDistributionSuccess(): void
     {
         $html = $this->renderAutoimporter(null, 'unknown');
