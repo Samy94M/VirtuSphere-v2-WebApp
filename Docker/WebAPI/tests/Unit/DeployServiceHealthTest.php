@@ -233,27 +233,52 @@ final class DeployServiceHealthTest extends TestCase
     {
         // The two combinations the plan calls out by name: both halves stay
         // true at once, and the badge must take its colour from the worse one.
+        $accepting = VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING;
         self::assertSame(
             'info',
-            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY, VIRTUSPHERE_DEPLOY_ATTENTION_NONE)
+            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY, VIRTUSPHERE_DEPLOY_ATTENTION_NONE, $accepting)
         );
         self::assertSame(
             'danger',
-            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE, VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW)
+            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE, VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW, $accepting)
         );
         // Attention alone is enough to colour it, even while the service runs.
         self::assertSame(
             'danger',
-            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW)
+            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW, $accepting)
         );
         self::assertSame(
             'warning',
-            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING)
+            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING, $accepting)
         );
         self::assertSame(
             'success',
-            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_ATTENTION_NONE)
+            deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_ATTENTION_NONE, $accepting)
         );
+    }
+
+    public function testAPausedClaimIsNeverGreenButNeverOutranksAFault(): void
+    {
+        // SY1 K1: a service that takes no new job read green "Ready" in the
+        // overview. A pause is not a fault, so it is yellow, not red, and both
+        // pause shapes count; a busy service pausing after its job too.
+        foreach ([VIRTUSPHERE_DEPLOY_CLAIM_PAUSED, VIRTUSPHERE_DEPLOY_CLAIM_PAUSE_AFTER_CURRENT] as $claim) {
+            foreach ([VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY] as $availability) {
+                self::assertSame(
+                    'warning',
+                    deploy_service_badge_variant($availability, VIRTUSPHERE_DEPLOY_ATTENTION_NONE, $claim),
+                    $availability . ' + ' . $claim
+                );
+            }
+            self::assertSame(
+                'danger',
+                deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE, VIRTUSPHERE_DEPLOY_ATTENTION_NONE, $claim)
+            );
+            self::assertSame(
+                'danger',
+                deploy_service_badge_variant(VIRTUSPHERE_DEPLOY_AVAILABILITY_READY, VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW, $claim)
+            );
+        }
     }
 
     public function testEveryDeclaredAvailabilityStateIsReachable(): void

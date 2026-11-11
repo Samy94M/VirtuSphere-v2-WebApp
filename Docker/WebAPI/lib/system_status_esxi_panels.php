@@ -339,7 +339,7 @@ function system_status_render_deviations(array $view, array $activeVlanNames, ar
     $hasVlanDeviation = (bool) ($view['has_vlan'] ?? false);
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS); ?>">
-        <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount); ?></h2>
+        <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount, system_status_deviation_evidence_current($report)); ?></h2>
         <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p>
         <?php system_status_render_deviation_evidence($report); ?>
         <?php if ($hasEvaluableEvidence) { ?>

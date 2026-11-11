@@ -91,11 +91,18 @@ function deploy_service_availability_variant(string $state): string
     };
 }
 
-/** Label following the same precedence as the compact combined badge. */
+/**
+ * Label following the same precedence as the compact combined badge.
+ *
+ * A pause comes after every fault and before the availability word, exactly
+ * where deploy_service_badge_variant() puts it, and it is named with the claim
+ * badge's own words, so the overview card and the card below say the same.
+ */
 function deploy_service_summary_label(array $snapshot): string
 {
     $availability = (string) $snapshot['availability'];
     $attention = (string) $snapshot['recovery_attention'];
+    $claimState = (string) $snapshot['claim_state'];
     if ($availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE) {
         return deploy_service_availability_label($availability);
     }
@@ -108,8 +115,27 @@ function deploy_service_summary_label(array $snapshot): string
     if ($attention === VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING) {
         return deploy_service_attention_label($attention);
     }
+    if ($claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING) {
+        return deploy_service_claim_label($claimState);
+    }
 
     return deploy_service_availability_label($availability);
+}
+
+/**
+ * The next step for a claim that is not accepting, or '' while it accepts.
+ *
+ * The overview card names the pause; this sentence says what it costs and how
+ * it ends. It stays visible without the permission, like every explanation on
+ * this page; only the button that resumes is gated.
+ */
+function deploy_service_claim_hint(string $claimState): string
+{
+    return match ($claimState) {
+        VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING => '',
+        VIRTUSPHERE_DEPLOY_CLAIM_PAUSE_AFTER_CURRENT => __t('system_status.service_pause_after_current_hint'),
+        default => __t('system_status.service_paused_hint'),
+    };
 }
 
 /**
@@ -240,6 +266,10 @@ function system_status_render_deploy_service(?array $snapshot, array $user): voi
                 <h3><?php echo h(__t('system_status.service_cases_heading')); ?></h3>
                 <ul><?php foreach ($snapshot['recovery']['cases'] as $case) { ?><li><a href="<?php echo h(deploy_job_log_url((int) $case['job_id'])); ?>"><?php echo h(__t('system_status.service_fact_active_job', ['id' => (int) $case['job_id']])); ?></a> · <?php echo h(__t('system_status.service_case_' . $case['kind'])); ?></li><?php } ?></ul>
                 <?php if (($snapshot['recovery']['case_omitted'] ?? 0) > 0) { ?><p class="muted"><?php echo h(__t('system_status.service_cases_more', ['count' => (int) $snapshot['recovery']['case_omitted']])); ?></p><?php } ?>
+            <?php } ?>
+            <?php $claimHint = deploy_service_claim_hint($claimState); ?>
+            <?php if ($claimHint !== '') { ?>
+                <p class="status-action" data-claim-hint><?php echo h($claimHint); ?></p>
             <?php } ?>
             <?php if ($claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING && $snapshot['claim']['changed_at'] !== null) { ?>
                 <?php // Who and when, with the same deleted-user fallback the

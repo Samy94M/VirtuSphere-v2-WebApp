@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-// Hostzustand im Systemstatus, Abschnitt Interne Dienste
+// Abschnitt Host und Backup im Systemstatus
 // (lib/system_status_backup_panels.php). Zahlen kommen als Platzhalter aus den
 // Konstanten in lib/backup_evidence.php und lib/constants.php.
 return [
-    'heading' => 'Hostzustand',
-    'hint' => 'Der Docker-Host meldet diese Werte über den Backup-Statuskanal. Fehlt eine Meldung, steht dort „Unbekannt“.',
+    'heading' => 'Host und Backup',
+    'hint' => 'Der Docker-Host meldet diese Werte über den Backup-Statuskanal. Fehlt eine Meldung, steht dort „Unbekannt“. Die Karte im Überblick zeigt die schlechteste Zeile; „Unbekannt“ zählt dort nie als OK.',
     'row_backup' => 'Backup',
     'row_drill' => 'Restore-Test',
     'row_scrub' => 'Prüfsummen',

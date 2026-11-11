@@ -127,8 +127,14 @@ function deploy_service_recovery_attention(array $facts): string
  * still shows all three, because the badge is a summary and a summary is not
  * allowed to be the only place a fact appears: `busy + pause_after_current` and
  * `offline + manual_review` are both real and both matter.
+ *
+ * The claim axis takes part too (SY1). A pause is not a fault, so it never
+ * outranks one, but it stops every new job: a summary that stays green while
+ * nothing will start is the green an operator trusts and walks away from. It
+ * reads like the card's own claim badge, which is yellow whenever the claim is
+ * anything but accepting.
  */
-function deploy_service_badge_variant(string $availability, string $attention): string
+function deploy_service_badge_variant(string $availability, string $attention, string $claimState): string
 {
     if ($availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE
         || $attention === VIRTUSPHERE_DEPLOY_ATTENTION_MANUAL_REVIEW
@@ -138,6 +144,7 @@ function deploy_service_badge_variant(string $availability, string $attention): 
     if ($availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED
         || $availability === VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN
         || $attention === VIRTUSPHERE_DEPLOY_ATTENTION_RECOVERING
+        || $claimState !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING
     ) {
         return 'warning';
     }
@@ -211,7 +218,7 @@ function deploy_service_health_snapshot(mysqli $db, ?int $now = null): array
         'claim_state' => $claim['state'],
         'recovery_attention' => $attention,
         'source_contract' => $contract,
-        'badge' => deploy_service_badge_variant($availability, $attention),
+        'badge' => deploy_service_badge_variant($availability, $attention, $claim['state']),
         'queue' => $queue,
         'active' => $active,
         'service_heartbeat_at' => $workerStatus['row']['last_checked_at']

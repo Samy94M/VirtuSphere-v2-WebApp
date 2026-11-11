@@ -137,6 +137,23 @@ final class SystemStatusOverviewContractTest extends TestCase
         );
     }
 
+    public function testHostAndBackupHasItsOwnCardFromTheSectionsOwnChecks(): void
+    {
+        // SY1 K2: a failed backup used to sit as a row inside "Internal services"
+        // with no card, so the strip stayed green. The card and the section read
+        // one list of row badges; a second roll-up would be a second opinion.
+        self::assertContains('VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_HOST_BACKUP', $this->overviewCards());
+        self::assertStringContainsString("'host' => system_status_host_overview_badge(", $this->overviewFunction());
+        $panel = $this->source('lib/system_status_backup_panels.php');
+        self::assertStringContainsString('foreach (system_status_host_checks($data) as $badge)', $panel);
+        self::assertStringContainsString('$checks = system_status_host_checks($data);', $panel);
+        self::assertDoesNotMatchRegularExpression(
+            '/system_status_render_(host_backup|backup_rows)\(/',
+            $this->source('lib/system_status_internal_panels.php'),
+            'the host rows belong to their own section, not to "Internal services"'
+        );
+    }
+
     public function testEveryCardLinksThroughTheUrlBuilder(): void
     {
         $source = $this->source('lib/system_status_panels.php');
