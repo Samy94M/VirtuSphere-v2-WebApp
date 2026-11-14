@@ -26,8 +26,9 @@
 .PARAMETER Partitions
     Die Pester-Suite in so vielen Kindprozessen gleichzeitig fahren (Standard
     3, hoechstens so viele wie Testdateien; 1 = ein Prozess wie bis C2). Die
-    Dateien werden nach ihrem Gewicht verteilt (siehe Get-PesterFileWeight),
-    nie nach einer Namensliste. Zaehler, gescheiterte Container und die
+    Dateien werden nach ihrer im letzten Lauf dieses Checkouts gemessenen
+    Laufzeit verteilt, ohne Messwert nach ihrer Groesse (siehe
+    Get-PesterFileWeights), nie nach einer Namensliste. Zaehler, gescheiterte Container und die
     Coverage der Kinder werden zu einem Ergebnis vereinigt; Floor, Ausgabe
     und Exitcodes sind dieselben wie im Einzelprozess.
 
@@ -100,6 +101,19 @@ function Get-PesterContainerErrorLine {
         Write-Debug $_
         return ''
     }
+}
+
+# Gemessene Laufzeit eines Containers in Sekunden (Pester: Discovery, Testcode
+# und Framework zusammen); ohne Messwert 0. Nur fuer die Teilung (QL3 A1).
+function Get-PesterContainerSeconds {
+    param($Container)
+    $duration = Get-PesterRunValue $Container 'Duration'
+    if ($duration -is [TimeSpan]) { return [Math]::Round($duration.TotalSeconds, 3) }
+    if ($null -ne $duration) {
+        $seconds = 0.0
+        if ([double]::TryParse([string]$duration, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$seconds)) { return $seconds }
+    }
+    return 0.0
 }
 
 # Das Haertungsregister (Tag 'Haertung') ist absichtlich rot, bis der jeweilige
@@ -202,7 +216,8 @@ if ($PartitionSpec -ne '') {
         failedBlocksCount     = [int](Get-PesterRunValue $run 'FailedBlocksCount')
         containers            = @(foreach ($container in @($run.Containers)) {
                 if ($null -eq $container) { continue }
-                [ordered]@{ item = [string]$container.Item; result = [string]$container.Result; error = (Get-PesterContainerErrorLine $container) }
+                [ordered]@{ item = [string]$container.Item; result = [string]$container.Result; error = (Get-PesterContainerErrorLine $container)
+                    duration = (Get-PesterContainerSeconds $container) }
             })
         coverage              = $coverageOut
     }
@@ -214,22 +229,115 @@ if ($PartitionSpec -ne '') {
     exit 0
 }
 
-# Gewicht einer Testdatei fuer die Verteilung auf Partitionen: ihre Groesse in
-# Bytes. Abgeleitet, nicht gelistet: eine neue Datei wird ohne Pflege verteilt.
-function Get-PesterFileWeight {
-    param([System.IO.FileInfo]$File)
-    return [double]$File.Length
+# --- Gewicht je Testdatei: gemessene Dauer des letzten Laufs (QL3 A1) ----------
+# Bis 11.11.2026 war das Gewicht die Dateigroesse. Sie sagt wenig ueber die
+# Laufzeit: die RestoreRoot-Tests haben 63 Faelle in einer kleinen Datei und
+# brauchten 224 s, die Teile liefen 473, 179 und 105 s. Jetzt zaehlt die
+# Laufzeit, die Pester im letzten Lauf dieses Checkouts je Datei gemessen hat.
+# Der Speicher liegt unter dem Temp-Pfad, getrennt je Checkout ueber denselben
+# Schluessel wie der PHPStan-Cache (Get-CheckoutCacheKey, runtime.ps1); zwei
+# Worktrees teilen ihn nie. Er ist nur ein Hinweis fuer die Teilung: fehlt er,
+# ist er unlesbar oder fehlt einer Datei der Messwert, gilt fuer sie die Groesse,
+# umgerechnet ueber das Verhaeltnis Sekunden je Byte der gemessenen Dateien.
+# Welche Tests laufen, Coverage, Klassifikation und Exitcodes haengen nie daran.
+function Get-PesterDurationStorePath {
+    param([string]$Root)
+    return (Join-Path ([System.IO.Path]::GetTempPath()) ('virtusphere-pester-durations-' + (Get-CheckoutCacheKey $Root) + '.json'))
+}
+
+# Schluessel einer Testdatei im Speicher: Pfad unter tests/powershell mit '/'.
+function Get-PesterDurationKey {
+    param([string]$Path)
+    if (-not [System.IO.Path]::IsPathRooted($Path)) { $Path = Join-Path $testRoot $Path }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $base = [System.IO.Path]::GetFullPath($testRoot).TrimEnd('\', '/')
+    if ($full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)) { $full = $full.Substring($base.Length).TrimStart('\', '/') }
+    return ($full -replace '\\', '/')
+}
+
+# Liest den Speicher als Tabelle Schluessel -> Sekunden; alles Unlesbare ist leer.
+function Read-PesterDurations {
+    param([string]$Path)
+    $table = @{}
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $table }
+    try {
+        $data = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+        foreach ($property in @($data.files.PSObject.Properties)) {
+            $seconds = [double]$property.Value
+            if ($seconds -gt 0) { $table[[string]$property.Name] = $seconds }
+        }
+    } catch {
+        Write-Debug $_
+        return @{}
+    }
+    return $table
+}
+
+# Gewichte aller Dateien in Sekunden. Ohne einen einzigen Messwert bleibt es bei
+# der Groesse in Bytes; die Reihenfolge ist dann dieselbe wie vor A1.
+function Get-PesterFileWeights {
+    param([System.IO.FileInfo[]]$Files, [hashtable]$Durations)
+    $measuredSeconds = 0.0
+    $measuredBytes = 0.0
+    foreach ($file in $Files) {
+        $key = Get-PesterDurationKey $file.FullName
+        if ($Durations.ContainsKey($key)) { $measuredSeconds += $Durations[$key]; $measuredBytes += [double]$file.Length }
+    }
+    $perByte = 1.0
+    if ($measuredSeconds -gt 0 -and $measuredBytes -gt 0) { $perByte = $measuredSeconds / $measuredBytes }
+    $weights = @{}
+    $measured = 0
+    foreach ($file in $Files) {
+        $key = Get-PesterDurationKey $file.FullName
+        if ($Durations.ContainsKey($key)) {
+            $weights[$file.FullName] = [double]$Durations[$key]
+            $measured++
+        } else {
+            $weights[$file.FullName] = [double]$file.Length * $perByte
+        }
+    }
+    return @{ Weights = $weights; Measured = $measured }
+}
+
+# Schreibt die Messwerte dieses Laufs in den Speicher. Uebernommen wird nur ein
+# Container, der gruen lief: ein frueh gescheiterter waere zu leicht. Dateien,
+# die es nicht mehr gibt, fallen heraus. Erst vollstaendig schreiben, dann
+# umbenennen; ein Fehler hier ist nur eine Warnung, nie ein Gate-Ergebnis.
+function Save-PesterDurations {
+    param([string]$Path, [hashtable]$Previous, [object[]]$Containers, [System.IO.FileInfo[]]$Files)
+    try {
+        $known = @{}
+        foreach ($file in $Files) { $known[(Get-PesterDurationKey $file.FullName)] = $true }
+        $next = @{}
+        foreach ($key in $Previous.Keys) { if ($known.ContainsKey($key)) { $next[$key] = $Previous[$key] } }
+        foreach ($container in @($Containers)) {
+            if ($null -eq $container -or [string]$container.Result -ne 'Passed') { continue }
+            $item = $container.Item
+            if ($item -is [System.IO.FileInfo]) { $item = $item.FullName }
+            $seconds = [double](Get-PesterContainerSeconds $container)
+            $key = Get-PesterDurationKey ([string]$item)
+            if ($seconds -gt 0 -and $known.ContainsKey($key)) { $next[$key] = $seconds }
+        }
+        $ordered = [ordered]@{}
+        foreach ($key in @($next.Keys | Sort-Object)) { $ordered[$key] = $next[$key] }
+        $partial = $Path + '.' + $PID + '.partial'
+        [System.IO.File]::WriteAllText($partial, (ConvertTo-Json -InputObject ([ordered]@{ version = 1; files = $ordered }) -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $partial -Destination $Path -Force
+    } catch {
+        Write-Host ('    Pester-Laufzeiten nicht gespeichert ({0}); der naechste Lauf teilt nach Groesse' -f $_.Exception.Message) -ForegroundColor Yellow
+    }
 }
 
 # Verteilung nach der LPT-Regel: schwerste Datei zuerst in die leichteste
-# Partition. Leere Partitionen entstehen nicht (Anzahl <= Dateien).
+# Partition, bei gleichem Gewicht nach Pfad. Leere Partitionen entstehen nicht
+# (Anzahl <= Dateien). Gleicher Speicher, gleiche Dateien: gleicher Plan.
 function Get-PesterPartitionPlan {
-    param([System.IO.FileInfo[]]$Files, [int]$Count)
-    $parts = @(for ($i = 0; $i -lt $Count; $i++) { @{ Files = New-Object System.Collections.Generic.List[string]; Weight = 0.0 } })
-    foreach ($file in @($Files | Sort-Object @{ Expression = { Get-PesterFileWeight $_ }; Descending = $true }, FullName)) {
-        $target = $parts | Sort-Object { $_.Weight } | Select-Object -First 1
+    param([System.IO.FileInfo[]]$Files, [int]$Count, [hashtable]$Weights)
+    $parts = @(for ($i = 0; $i -lt $Count; $i++) { @{ Files = New-Object System.Collections.Generic.List[string]; Weight = 0.0; Index = $i } })
+    foreach ($file in @($Files | Sort-Object @{ Expression = { $Weights[$_.FullName] }; Descending = $true }, FullName)) {
+        $target = $parts | Sort-Object { $_.Weight }, { $_.Index } | Select-Object -First 1
         $target.Files.Add($file.FullName)
-        $target.Weight += (Get-PesterFileWeight $file)
+        $target.Weight += $Weights[$file.FullName]
     }
     return $parts
 }
@@ -436,18 +544,31 @@ if (-not $SkipTests) {
     $testFiles = @(Get-ChildItem -LiteralPath $testRoot -Recurse -File -Filter '*.Tests.ps1' | Sort-Object FullName)
     $config.TestRegistry.Enabled = (Test-PesterUsesTestRegistry @($testFiles | ForEach-Object { $_.FullName }))
     $partitionCount = [Math]::Min($Partitions, $testFiles.Count)
+    # Laufzeitspeicher dieses Checkouts (QL3 A1); runtime.ps1 definiert nur Funktionen.
+    . (Join-Path (Join-Path (Join-Path $PSScriptRoot 'lib') 'check') 'runtime.ps1')
+    $durationStore = Get-PesterDurationStorePath $repoRoot
+    $previousDurations = Read-PesterDurations $durationStore
     if ($partitionCount -le 1) {
         try { $result = Invoke-Pester -Configuration $config } catch {
             Write-Host ('[{0}/{1}] infrastructure_error {2}: {3}' -f $unitPosition, $unitTotal, $unitName, $_.Exception.Message) -ForegroundColor Red
             exit 3
         }
+        $resultRun = @($result) | Where-Object { $null -ne $_ -and $_.PSObject.Properties['Containers'] } | Select-Object -Last 1
+        if ($null -ne $resultRun) { Save-PesterDurations -Path $durationStore -Previous $previousDurations -Containers @($resultRun.Containers) -Files $testFiles }
     } else {
         # --- Partitionen: K Kindprozesse, Zeilen live mit Praefix [Teil k/K] ---
         . (Join-Path (Join-Path (Join-Path $PSScriptRoot 'lib') 'check') 'child-streams.ps1')
         $partRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('vs-pester-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $partRoot -ErrorAction Stop | Out-Null
         $engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-        $plan = @(Get-PesterPartitionPlan -Files $testFiles -Count $partitionCount)
+        $weighting = Get-PesterFileWeights -Files $testFiles -Durations $previousDurations
+        $plan = @(Get-PesterPartitionPlan -Files $testFiles -Count $partitionCount -Weights $weighting.Weights)
+        if ($weighting.Measured -gt 0) {
+            $expected = @($plan | ForEach-Object { $_.Weight.ToString('0', [System.Globalization.CultureInfo]::InvariantCulture) + 's' }) -join '/'
+            Write-Host ('    Teilung nach gemessener Laufzeit: {0} von {1} Dateien gemessen, erwartet {2}' -f $weighting.Measured, $testFiles.Count, $expected)
+        } else {
+            Write-Host ('    Teilung nach Dateigroesse: keine Laufzeiten dieses Checkouts ({0})' -f $durationStore)
+        }
         $children = @()
         $parts = @()
         $partMissing = @()
@@ -501,6 +622,7 @@ if (-not $SkipTests) {
             Write-Host ('[{0}/{1}] infrastructure_error {2}: Pester-Teil(e) {3} ohne Ergebnis' -f $unitPosition, $unitTotal, $unitName, ($partMissing -join ', ')) -ForegroundColor Red
             exit 3
         }
+        Save-PesterDurations -Path $durationStore -Previous $previousDurations -Containers @($parts | ForEach-Object { @($_.containers) }) -Files $testFiles
         $result = Merge-PesterPartitionResult -Parts $parts -CoverageConfigured ($null -ne $coverageFloor)
     }
 

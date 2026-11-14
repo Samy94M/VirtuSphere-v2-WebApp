@@ -236,6 +236,15 @@ Describe 'Visible progress reporting contract' {
         $script:PowerShellRunner | Should -Match 'Coverage-Ergebnis fehlt'
     }
 
+    It 'announces the duration-based split as an indented note before the part counters (QL3 A1)' {
+        # Die Teilungszeile ist kein Zaehler: eingerueckt, vor dem ersten
+        # '[k/K] RUN  Pester-Teil', und die Teil-Zeilen behalten ihre Form.
+        $script:PowerShellRunner | Should -Match "Write-Host \('    Teilung nach gemessener Laufzeit: \{0\} von \{1\} Dateien gemessen, erwartet \{2\}'"
+        $script:PowerShellRunner | Should -Match "Write-Host \('    Teilung nach Dateigroesse: keine Laufzeiten dieses Checkouts \(\{0\}\)'"
+        $script:PowerShellRunner.IndexOf('Teilung nach gemessener Laufzeit') | Should -BeLessThan $script:PowerShellRunner.IndexOf("RUN  Pester-Teil {0}/{1} ({2} Dateien)")
+        $script:PowerShellRunner | Should -Match "'\[\{0\}/\{1\}\] \{2\} Pester-Teil \{0\}/\{1\}: \{3\} Test\(s\), \{4\} rot \(\{5\}s\)'"
+    }
+
     It 'shows named historical results and distinguishes discovery failure from an empty register without blocking the gate' {
         $script:PowerShellRunner | Should -Match '\$regConfig\.Output\.Verbosity\s*=\s*''Detailed'''
         $script:PowerShellRunner | Should -Match '\$registerFailedContainers\s*=\s*@\(\$reg\.FailedContainers'

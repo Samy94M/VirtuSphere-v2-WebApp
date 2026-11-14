@@ -83,7 +83,12 @@ function Invoke-Pester {
                 $broken = ($env:VS_STUB_SCENARIO -eq 'partition-container-fails' -and $item -eq 'beta.Tests.ps1')
                 $errors = @()
                 if ($broken) { $errors = @(New-StubError 'Discovery broke in beta') }
-                [pscustomobject]@{ Item = $item; Result = $(if ($broken) { 'Failed' } else { 'Passed' }); ErrorRecord = $errors }
+                # Laufzeit je Datei aus VS_STUB_DURATIONS ('alpha=9;beta=1'), sonst keine.
+                $seconds = $null
+                foreach ($pair in @(([string]$env:VS_STUB_DURATIONS) -split ';')) {
+                    if ($pair -match '^([a-z]+)=([0-9.]+)$' -and $item -eq ($Matches[1] + '.Tests.ps1')) { $seconds = [double]$Matches[2] }
+                }
+                [pscustomobject]@{ Item = $item; Result = $(if ($broken) { 'Failed' } else { 'Passed' }); ErrorRecord = $errors; Duration = $seconds }
             })
         $failedContainers = @($containers | Where-Object { $_.Result -eq 'Failed' }).Count
         $run = New-StubRun -Result $(if ($failedContainers -gt 0) { 'Failed' } else { 'Passed' }) -Total $items.Count -Passed ($items.Count - $failedContainers) `
@@ -140,7 +145,9 @@ function Invoke-Pester {
         Copy-Item -LiteralPath $script:RealRunner -Destination (Join-Path $scriptsDir 'run-pester.ps1') -Force
         $checkLib = Join-Path (Join-Path $scriptsDir 'lib') 'check'
         New-Item -ItemType Directory -Path $checkLib -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') 'child-streams.ps1') -Destination $checkLib -Force
+        foreach ($module in @('child-streams.ps1', 'runtime.ps1')) {
+            Copy-Item -LiteralPath (Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') $module) -Destination $checkLib -Force
+        }
         $lock = '{ "version": 1, "powershellModules": { "Pester": "' + $script:PesterVersion + '" }'
         if ($WithCoverageFloor) { $lock += ', "pesterCoverageFloorPercent": 55' }
         $lock += ' }'
@@ -172,11 +179,25 @@ Describe 'Dummy' { It 'laeuft' { $true | Should -BeTrue } }
     $registryDrive = 'TestRegistry' + ':\'
     [System.IO.File]::WriteAllText((Join-Path (Join-Path (Join-Path $script:RegistryRoot 'tests') 'powershell') 'gamma.Tests.ps1'),
         ("Describe 'Dummy' { It 'laeuft' { Test-Path '" + $registryDrive + "' | Should -BeTrue } }`n"), $script:Utf8)
+    # Teilung nach Laufzeit (QL3 A1): vier gleich grosse Dateien, also teilt die
+    # Groesse anders als die gemessene Laufzeit.
+    $script:DurationRoot = Join-Path $TestDrive 'duration'
+    New-FakeRepo -Root $script:DurationRoot -WithCoverageFloor $true -ExtraTests @('alpha', 'beta', 'gamma', 'delta')
+
+    # Der Laufzeitspeicher eines Fake-Repos: Temp-Pfad mit dem Schluessel je
+    # Checkout aus runtime.ps1, wie ihn der Runner ableitet.
+    . (Join-Path (Join-Path (Join-Path (Join-Path $script:RepoRoot 'scripts') 'lib') 'check') 'runtime.ps1')
+    function Get-FakeDurationStore {
+        param([string]$Root)
+        return (Join-Path ([System.IO.Path]::GetTempPath()) ('virtusphere-pester-durations-' + (Get-CheckoutCacheKey $Root) + '.json'))
+    }
+    $script:FakeRoots = @($script:PlainRoot, $script:FloorRoot, $script:PartitionRoot, $script:RegistryRoot, $script:DurationRoot)
+    foreach ($root in $script:FakeRoots) { Remove-Item -LiteralPath (Get-FakeDurationStore $root) -Force -ErrorAction SilentlyContinue }
 
     # Startet den Runner als Kindprozess. Das Testdouble steht nur in der Umgebung
     # dieses Kindes vorn im Modulpfad; die Umgebung der Suite bleibt unberuehrt.
     function Invoke-StubRunner {
-        param([string]$Root, [string]$Scenario, [string]$ExtraArguments = '')
+        param([string]$Root, [string]$Scenario, [string]$ExtraArguments = '', [string]$Durations = '')
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $script:EngineExe
         $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path (Join-Path $Root 'scripts') 'run-pester.ps1') + '" -SkipAnalyzer ' + $ExtraArguments
@@ -186,6 +207,7 @@ Describe 'Dummy' { It 'laeuft' { $true | Should -BeTrue } }
         $psi.CreateNoWindow = $true
         $psi.EnvironmentVariables['PSModulePath'] = $script:StubRoot + [System.IO.Path]::PathSeparator + $env:PSModulePath
         $psi.EnvironmentVariables['VS_STUB_SCENARIO'] = $Scenario
+        $psi.EnvironmentVariables['VS_STUB_DURATIONS'] = $Durations
         $process = [System.Diagnostics.Process]::Start($psi)
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrText = $process.StandardError.ReadToEnd()
@@ -297,4 +319,78 @@ Describe 'run-pester.ps1 partitions the Pester suite into child processes' {
         $result.Output | Should -Match 'infrastructure_error Pester \(tests\\powershell\): Pester-Teil\(e\) \d ohne Ergebnis'
         $result.Output | Should -Not -Match 'pass Pester \('
     }
+}
+
+Describe 'run-pester.ps1 splits the parts by measured duration (QL3 A1)' {
+    BeforeEach {
+        $script:DurationStore = Get-FakeDurationStore $script:DurationRoot
+        Remove-Item -LiteralPath $script:DurationStore -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path (Join-Path (Join-Path $script:DurationRoot 'tests') 'powershell') 'epsilon.Tests.ps1') -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'splits by size without measurements, stores the green durations, then splits by them' {
+        $first = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 2' -Durations 'alpha=9;beta=1;gamma=1;delta=1'
+        $first.ExitCode | Should -Be 0
+        $first.Output | Should -Match 'Teilung nach Dateigroesse: keine Laufzeiten dieses Checkouts'
+        # Gleich grosse Dateien: nach Pfad abwechselnd, alpha und delta in Teil 1.
+        $first.Output | Should -Match '\[Teil 1/2\] stub ran alpha\.Tests\.ps1,delta\.Tests\.ps1'
+        $first.Output | Should -Match '\[Teil 2/2\] stub ran beta\.Tests\.ps1,gamma\.Tests\.ps1'
+        $stored = (Get-Content -Raw -LiteralPath $script:DurationStore | ConvertFrom-Json).files
+        $stored.'alpha.Tests.ps1' | Should -Be 9
+        $stored.'beta.Tests.ps1' | Should -Be 1
+        @($stored.PSObject.Properties).Count | Should -Be 4
+
+        $second = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 2'
+        $second.ExitCode | Should -Be 0
+        $second.Output | Should -Match 'Teilung nach gemessener Laufzeit: 4 von 4 Dateien gemessen, erwartet 9s/3s'
+        $second.Output | Should -Match '\[Teil 1/2\] stub ran alpha\.Tests\.ps1(\r?\n|$)'
+        $second.Output | Should -Match '\[Teil 2/2\] stub ran beta\.Tests\.ps1,delta\.Tests\.ps1,gamma\.Tests\.ps1'
+        # Coverage und Zaehler haengen nie an der Teilung.
+        $second.Output | Should -Match 'Coverage 75% \(Floor 55%\)'
+        $second.Output | Should -Match 'pass Pester \(tests\\powershell\): 4 Test\(s\) gruen'
+        # Ohne Messwerte dieses Laufs bleiben die alten stehen.
+        (Get-Content -Raw -LiteralPath $script:DurationStore | ConvertFrom-Json).files.'alpha.Tests.ps1' | Should -Be 9
+    }
+
+    It 'weighs a file without measurement by its size at the measured seconds per byte' {
+        $null = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 2' -Durations 'alpha=9;beta=1;gamma=1;delta=1'
+        $testsDir = Join-Path (Join-Path $script:DurationRoot 'tests') 'powershell'
+        Copy-Item -LiteralPath (Join-Path $testsDir 'alpha.Tests.ps1') -Destination (Join-Path $testsDir 'epsilon.Tests.ps1')
+        # 12 s auf vier gleich grosse Dateien: epsilon wiegt 3 s und kommt vor beta.
+        $result = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 2'
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Teilung nach gemessener Laufzeit: 4 von 5 Dateien gemessen, erwartet 9s/6s'
+        $result.Output | Should -Match '\[Teil 2/2\] stub ran epsilon\.Tests\.ps1,beta\.Tests\.ps1,delta\.Tests\.ps1,gamma\.Tests\.ps1'
+    }
+
+    It 'keeps the old duration of a failed container and drops files that are gone' {
+        $null = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 2' -Durations 'alpha=9;beta=1;gamma=1;delta=1'
+        $data = Get-Content -Raw -LiteralPath $script:DurationStore | ConvertFrom-Json
+        $data.files | Add-Member -NotePropertyName 'removed.Tests.ps1' -NotePropertyValue 7
+        [System.IO.File]::WriteAllText($script:DurationStore, (ConvertTo-Json -InputObject $data -Depth 3), $script:Utf8)
+        $result = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-container-fails' -ExtraArguments '-Partitions 2' -Durations 'alpha=2;beta=50;gamma=2;delta=2'
+        $result.ExitCode | Should -Be 1
+        $stored = (Get-Content -Raw -LiteralPath $script:DurationStore | ConvertFrom-Json).files
+        $stored.'beta.Tests.ps1' | Should -Be 1
+        $stored.'alpha.Tests.ps1' | Should -Be 2
+        $stored.PSObject.Properties['removed.Tests.ps1'] | Should -BeNullOrEmpty
+    }
+
+    It 'falls back to size when the store is unreadable and stays green' {
+        [System.IO.File]::WriteAllText($script:DurationStore, '{ kaputt', $script:Utf8)
+        $result = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 2'
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Teilung nach Dateigroesse'
+        $result.Output | Should -Match '\[Teil 1/2\] stub ran alpha\.Tests\.ps1,delta\.Tests\.ps1'
+    }
+
+    It 'stores the durations of a single-process run as well' {
+        $result = Invoke-StubRunner -Root $script:DurationRoot -Scenario 'partition-healthy' -ExtraArguments '-Partitions 1' -Durations 'alpha=4;beta=3;gamma=2;delta=1'
+        $result.ExitCode | Should -Be 0
+        (Get-Content -Raw -LiteralPath $script:DurationStore | ConvertFrom-Json).files.'beta.Tests.ps1' | Should -Be 3
+    }
+}
+
+AfterAll {
+    foreach ($root in @($script:FakeRoots)) { Remove-Item -LiteralPath (Get-FakeDurationStore $root) -Force -ErrorAction SilentlyContinue }
 }
