@@ -72,6 +72,34 @@ for f in docs/operations/*.md docs/security/*.md; do
   [ -f "$f" ] && active_docs="$active_docs $f"
 done
 
+# --- Ein grep je Regel ueber alle aktiven Dokus (QL3 A2) -------------------------
+#
+# Bis 11.11.2026 lief jede Zeilenregel als eigene Prozesskette je Dokument: rund
+# 20 Prozesse je Datei bei 36 Dateien. Unter Git Bash kostet jeder Prozessstart
+# Millisekunden, die Summe war fast die ganze Laufzeit des Gates und jedes seiner
+# Harness-Faelle. Jetzt liest ein grep alle Dateien einer Regel auf einmal. Er
+# prueft den Zeilentext, gibt aber "datei:zeile:text" aus. Jede weitere Stufe,
+# die diese Ausgabe filtert, verankert ihr Muster mit $doc_line hinter dem
+# Praefix, damit es nur den Text trifft, nie Pfad oder Zeilennummer. Pfade im
+# Scope enthalten keinen Doppelpunkt.
+doc_line='^[^:]*:[0-9]+:.*'
+
+# Liest Trefferzeilen "datei:zeile:text" von stdin, gibt sie auf stderr aus und
+# nennt auf stdout jede Datei mit Treffer einmal, in der Reihenfolge des Scopes.
+report_doc_hits() {
+  hits=$(cat)
+  [ -n "$hits" ] || return 0
+  printf '%s\n' "$hits" >&2
+  printf '%s\n' "$hits" | sed 's/:.*//' | uniq
+}
+
+# docs_matching <ERE>: Dateien des Scopes mit einer Zeile, deren Text <ERE> trifft.
+docs_matching() {
+  [ -n "$active_docs" ] || return 0
+  # shellcheck disable=SC2086
+  grep -nHE "$1" $active_docs 2>/dev/null | report_doc_hits
+}
+
 # --- 1. PRE-SHIP-CHECKLIST bleibt leere Vorlage --------------------------------
 if [ -f PRE-SHIP-CHECKLIST.md ]; then
   if grep -nE '^\s*[-*] \[[xX]\]' PRE-SHIP-CHECKLIST.md >&2; then
@@ -83,16 +111,14 @@ if [ -f PRE-SHIP-CHECKLIST.md ]; then
 fi
 
 # --- 2.-4. Zahlen, die still veralten ------------------------------------------
-for f in $active_docs; do
-  if grep -nE '\b[0-9]+ ?(PHPUnit-|Pester-|E2E-|Playwright-)?([Tt]ests?|[Tt]estdateien|[Ss]pecs?|[Aa]ssertions?)\b' "$f" >&2; then
-    fail test-count "$f nennt eine Testanzahl; Testzahlen gehoeren ausschliesslich in erzeugte QA-Artefakte."
-  fi
-  if grep -nE '\bMigrationsstand [0-9]{4}|\b[0-9]+\+? (incremental |delta )*[Mm]igration(s|en)\b' "$f" >&2; then
-    fail migration-count "$f behauptet einen Migrationsstand/-umfang; der veraltet mit der naechsten Migration (konkrete Namen wie 'migration 0020' sind als fachliche Referenz erlaubt, ebenso die Anweisung, den Stand zu pruefen)."
-  fi
-  if grep -nE '\b[0-9]+ ?ms\b|\b[0-9]+ [Rr]equests\b|\b[0-9]+ ?VUs\b' "$f" >&2; then
-    fail load-metric "$f enthaelt Lastmesswerte; Baselines und Schwellen leben ausschliesslich bei den Lasttests (tests/load/README.md)."
-  fi
+for f in $(docs_matching '\b[0-9]+ ?(PHPUnit-|Pester-|E2E-|Playwright-)?([Tt]ests?|[Tt]estdateien|[Ss]pecs?|[Aa]ssertions?)\b'); do
+  fail test-count "$f nennt eine Testanzahl; Testzahlen gehoeren ausschliesslich in erzeugte QA-Artefakte."
+done
+for f in $(docs_matching '\bMigrationsstand [0-9]{4}|\b[0-9]+\+? (incremental |delta )*[Mm]igration(s|en)\b'); do
+  fail migration-count "$f behauptet einen Migrationsstand/-umfang; der veraltet mit der naechsten Migration (konkrete Namen wie 'migration 0020' sind als fachliche Referenz erlaubt, ebenso die Anweisung, den Stand zu pruefen)."
+done
+for f in $(docs_matching '\b[0-9]+ ?ms\b|\b[0-9]+ [Rr]equests\b|\b[0-9]+ ?VUs\b'); do
+  fail load-metric "$f enthaelt Lastmesswerte; Baselines und Schwellen leben ausschliesslich bei den Lasttests (tests/load/README.md)."
 done
 
 # --- 5. PHPStan-Level gegen phpstan.neon.dist -----------------------------------
@@ -102,10 +128,10 @@ stan_level=''
 if [ -z "$stan_level" ]; then
   fail no-ssot "PHPStan-Level nicht aus $stan_ssot lesbar; ohne SSoT kann keine Level-Nennung geprueft werden."
 else
-  for f in $active_docs; do
-    if grep -inE 'phpstan' "$f" 2>/dev/null | grep -iE 'level [0-9]+' | grep -viE "level $stan_level\b" >&2; then
-      fail phpstan-level "$f nennt ein anderes PHPStan-Level als $stan_ssot (level $stan_level); an der Nennung fixen, nicht am SSoT."
-    fi
+  # shellcheck disable=SC2086
+  for f in $([ -n "$active_docs" ] && grep -inHE 'phpstan' $active_docs 2>/dev/null \
+      | grep -iE "${doc_line}level [0-9]+" | grep -viE "${doc_line}level $stan_level\b" | report_doc_hits); do
+    fail phpstan-level "$f nennt ein anderes PHPStan-Level als $stan_ssot (level $stan_level); an der Nennung fixen, nicht am SSoT."
   done
 fi
 
@@ -119,10 +145,10 @@ mysql_ssot=$(sed -n 's/.*image:.*mysql:\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' dock
 if [ -z "$mysql_ssot" ]; then
   fail no-ssot "MySQL-Version nicht aus docker-compose.yml lesbar; ohne SSoT kann keine Versionsnennung geprueft werden."
 else
-  for f in $active_docs; do
-    if grep -nE "MySQL [0-9]+\.[0-9]+" "$f" 2>/dev/null | grep -vE "MySQL $mysql_ssot\b" >&2; then
-      fail mysql-version "$f nennt eine andere MySQL-Version als docker-compose.yml ($mysql_ssot)."
-    fi
+  # shellcheck disable=SC2086
+  for f in $([ -n "$active_docs" ] && grep -nHE 'MySQL [0-9]+\.[0-9]+' $active_docs 2>/dev/null \
+      | grep -vE "${doc_line}MySQL $mysql_ssot\b" | report_doc_hits); do
+    fail mysql-version "$f nennt eine andere MySQL-Version als docker-compose.yml ($mysql_ssot)."
   done
 fi
 
@@ -131,18 +157,18 @@ node_ssot=$(sed -n "s/.*node-version:[[:space:]]*'\{0,1\}\([0-9][0-9]*\)'\{0,1\}
 if [ -z "$node_ssot" ]; then
   fail no-ssot "Node-Version nicht aus .github/workflows/ci.yml lesbar; ohne SSoT kann keine Versionsnennung geprueft werden."
 else
-  for f in $active_docs; do
-    if grep -nE '\bNode(\.js)? [0-9]+\b' "$f" 2>/dev/null | grep -vE "\bNode(\.js)? $node_ssot\b" >&2; then
-      fail node-version "$f nennt eine andere Node-Version als ci.yml ($node_ssot)."
-    fi
+  # shellcheck disable=SC2086
+  for f in $([ -n "$active_docs" ] && grep -nHE '\bNode(\.js)? [0-9]+\b' $active_docs 2>/dev/null \
+      | grep -vE "${doc_line}\bNode(\.js)? $node_ssot\b" | report_doc_hits); do
+    fail node-version "$f nennt eine andere Node-Version als ci.yml ($node_ssot)."
   done
 fi
 
 # --- 8. Stillgelegte Backup-Pfade nur mit Marker --------------------------------
-for f in $active_docs; do
-  if grep -nE 'Docker/scripts/(backup|restore)\.sh' "$f" 2>/dev/null | grep -viE 'stillgelegt|retired|hard-fail|brechen|bricht' >&2; then
-    fail backup-path "$f referenziert Docker/scripts/backup.sh|restore.sh ohne Stilllegungs-Marker; kanonisch sind scripts/backup.sh + scripts/restore_test.sh (ADR-0017/E5)."
-  fi
+# shellcheck disable=SC2086
+for f in $([ -n "$active_docs" ] && grep -nHE 'Docker/scripts/(backup|restore)\.sh' $active_docs 2>/dev/null \
+    | grep -viE "${doc_line}(stillgelegt|retired|hard-fail|brechen|bricht)" | report_doc_hits); do
+  fail backup-path "$f referenziert Docker/scripts/backup.sh|restore.sh ohne Stilllegungs-Marker; kanonisch sind scripts/backup.sh + scripts/restore_test.sh (ADR-0017/E5)."
 done
 
 # --- 10. "`KONSTANTE` (aktuell N)" gegen den PHP-Wert ---------------------------
@@ -152,14 +178,16 @@ done
 # Form, die den Namen mitliefert, also genau die Stellen, die einen Vergleich
 # ueberhaupt zulassen; eine Zahl ohne Konstantennamen bleibt Review-Sache.
 const_ssot_files='Docker/WebAPI/lib/constants.php Docker/WebAPI/lib/deploy_constants.php'
-for f in $active_docs; do
-  # grep -o statt sed s///: eine Zeile nennt oft zwei Konstanten ("... STALE_FACTOR
-  # ..., aktuell 2x); danger ab ... FAILURE_STREAK_DANGER (aktuell 3)"), und eine
-  # Substitution pro Zeile haette die erste stillschweigend uebergangen. Das
-  # `[^`]*` zwischen Name und Zahl kann keinen zweiten Namen ueberspringen, so
-  # dass jede Nennung an ihre eigene Zahl gebunden bleibt, mit oder ohne Klammer.
-  grep -oE '`VIRTUSPHERE_[A-Z0-9_]+`[^`]*aktuell [0-9]+' "$f" 2>/dev/null \
-    | sed -E 's/^`([A-Z0-9_]+)`.*aktuell ([0-9]+)$/\1 \2/' | while read -r name claimed; do
+# grep -o statt sed s///: eine Zeile nennt oft zwei Konstanten ("... STALE_FACTOR
+# ..., aktuell 2x); danger ab ... FAILURE_STREAK_DANGER (aktuell 3)"), und eine
+# Substitution pro Zeile haette die erste stillschweigend uebergangen. Das
+# `[^`]*` zwischen Name und Zahl kann keinen zweiten Namen ueberspringen, so
+# dass jede Nennung an ihre eigene Zahl gebunden bleibt, mit oder ohne Klammer.
+# Ein grep fuer alle Dateien (-H: "datei:nennung"); die Schleife nennt jede Datei
+# mit Abweichung, uniq macht daraus einen Befund je Datei.
+# shellcheck disable=SC2086
+for f in $([ -n "$active_docs" ] && grep -oHE '`VIRTUSPHERE_[A-Z0-9_]+`[^`]*aktuell [0-9]+' $active_docs 2>/dev/null \
+    | sed -E 's/^([^:]*):`([A-Z0-9_]+)`.*aktuell ([0-9]+)$/\1 \2 \3/' | while read -r doc name claimed; do
     actual=''
     for ssot in $const_ssot_files; do
       [ -f "$ssot" ] || continue
@@ -167,13 +195,14 @@ for f in $active_docs; do
       [ -n "$value" ] && actual="$value"
     done
     if [ -z "$actual" ]; then
-      echo "$f nennt \`$name\` mit einem Ist-Wert, aber die Konstante ist in keinem SSoT-File numerisch auffindbar." >&2
-      echo "MISMATCH"
+      echo "$doc nennt \`$name\` mit einem Ist-Wert, aber die Konstante ist in keinem SSoT-File numerisch auffindbar." >&2
+      echo "$doc"
     elif [ "$actual" != "$claimed" ]; then
-      echo "$f behauptet $name = $claimed, tatsaechlich $actual." >&2
-      echo "MISMATCH"
+      echo "$doc behauptet $name = $claimed, tatsaechlich $actual." >&2
+      echo "$doc"
     fi
-  done | grep -q MISMATCH && fail const-mirror "$f nennt einen anderen Konstantenwert als der Code; an der Nennung fixen, nicht am SSoT."
+  done | uniq); do
+  fail const-mirror "$f nennt einen anderen Konstantenwert als der Code; an der Nennung fixen, nicht am SSoT."
 done
 
 # --- 11. Ein von aktiver Doku behaupteter Dateipfad braucht einen Erzeuger ------
@@ -212,14 +241,21 @@ claimed_paths=$(grep -hE "$path_pattern" $doc_path_scope 2>/dev/null \
 # Verzeichnis plus Dateinamen zusammen). *.log faellt heraus: eine Logzeile, die
 # den Namen zufaellig enthaelt, ist kein Erzeuger. Ein Durchlauf fuer alle
 # Basisnamen; gesammelt wird, welche davon irgendwo vorkommen.
+#
+# git grep statt git ls-files | xargs grep (QL3 A2): dieselbe Menge, die
+# versionierten Dateien mit ihrem Inhalt im Arbeitsbaum, ohne die Ordner docs/,
+# vendor/, node_modules/ und dist/ in jeder Tiefe und ohne *.log, aber in einem
+# Prozess mit eigenen Threads statt einer Prozesskette ueber 4000 Dateien.
+# Basisnamen per ${path##*/} statt basename, also ohne Prozess je Pfad.
 found_bases=''
 if [ -n "$claimed_paths" ]; then
   if git -C "$real_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     set --
-    for path in $claimed_paths; do set -- "$@" -e "$(basename "$path")"; done
-    found_bases=$(git -C "$real_root" ls-files -z 2>/dev/null \
-      | grep -zvE '(^|/)(docs|vendor|node_modules|dist)/|\.log$' \
-      | (cd "$real_root" && xargs -0 -r grep -ohsIF "$@" 2>/dev/null) \
+    for path in $claimed_paths; do set -- "$@" -e "${path##*/}"; done
+    found_bases=$(git -C "$real_root" grep --no-color -ohIF "$@" -- . \
+      ':(exclude,glob)**/docs/**' ':(exclude,glob)**/vendor/**' \
+      ':(exclude,glob)**/node_modules/**' ':(exclude,glob)**/dist/**' \
+      ':(exclude,glob)**/*.log' 2>/dev/null \
       | LC_ALL=C sort -u || true)
   else
     fail phantom-path "die versionierte Dateiliste von '$real_root' ist nicht lesbar (git ls-files); ohne sie laesst sich kein Erzeuger nachweisen."
@@ -227,8 +263,17 @@ if [ -n "$claimed_paths" ]; then
   fi
 fi
 for path in $claimed_paths; do
-  base=$(basename "$path")
-  if ! printf '%s\n' "$found_bases" | grep -qxF -- "$base"; then
+  base=${path##*/}
+  # Ganze Zeile von $found_bases, wie grep -qxF, ohne eigenen Prozess.
+  case "
+$found_bases
+" in
+    *"
+$base
+"*) base_found=1 ;;
+    *) base_found=0 ;;
+  esac
+  if [ "$base_found" -eq 0 ]; then
     fail phantom-path "aktive Doku nennt '$path', aber nichts ausserhalb von docs/ erzeugt oder liest '$base'; ein Pfad, der nur in der Doku existiert, schickt den Leser ins Leere."
   fi
 done
@@ -250,9 +295,25 @@ if [ -f "$env_example" ] && [ -f "$compose_file" ] && [ -f "$runbook" ]; then
   # ${NAME} ja, ${NAME:-default} und ${NAME-default} nein: mit Vorgabewert
   # startet der Stack auch ohne den Schluessel.
   interpolated=$(grep -ohE '\$\{[A-Z][A-Z0-9_]*\}' "$compose_file" | tr -d '${}' | LC_ALL=C sort -u)
+  # Schluessel der Vorlage und Text des Runbooks einmal lesen; der Vergleich je
+  # Schluessel laeuft dann ohne eigenen Prozess (QL3 A2). Dieselben Klassen wie
+  # zuvor: "^#? *KEY=" in der Vorlage, KEY irgendwo im Runbook.
+  env_keys=$(sed -n 's/^#\{0,1\} *\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$env_example")
+  runbook_text=$(cat "$runbook")
   for key in $interpolated; do
-    grep -qE "^#? *$key=" "$env_example" || continue
-    if ! grep -q "$key" "$runbook"; then
+    case "
+$env_keys
+" in
+      *"
+$key
+"*) ;;
+      *) continue ;;
+    esac
+    case "$runbook_text" in
+      *"$key"*) runbook_names_key=1 ;;
+      *) runbook_names_key=0 ;;
+    esac
+    if [ "$runbook_names_key" -eq 0 ]; then
       fail env-key-unnamed "$key wird von $compose_file ohne Vorgabewert interpoliert und steht in $env_example, kommt aber in $runbook nicht vor; wer das Runbook abarbeitet, kann ihn nicht setzen."
     fi
   done
@@ -267,10 +328,8 @@ fi
 # "migrations 0001 bis 0028"). Die veraltet genauso mit der naechsten Migration,
 # sieht aber wie eine fachliche Referenz aus, weil beide Enden konkrete Namen sind.
 # Eine einzelne Nennung bleibt erlaubt, eine Spanne nicht.
-for f in $active_docs; do
-  if grep -nE '\b0[0-9]{3} ?(-|–|bis|to|\.\.\.?) ?0[0-9]{3}\b' "$f" >&2; then
-    fail migration-range "$f behauptet einen Migrationsumfang als Spanne; die veraltet mit der naechsten Migration. Eine einzelne Migration namentlich zu nennen bleibt erlaubt."
-  fi
+for f in $(docs_matching '\b0[0-9]{3} ?(-|–|bis|to|\.\.\.?) ?0[0-9]{3}\b'); do
+  fail migration-range "$f behauptet einen Migrationsumfang als Spanne; die veraltet mit der naechsten Migration. Eine einzelne Migration namentlich zu nennen bleibt erlaubt."
 done
 
 # --- 14. Deutsche Dokumente schreiben echte Umlaute -----------------------------
@@ -287,12 +346,14 @@ done
 # ein String-Literal, das ein PowerShell-Skript wirklich so vergleicht; dort einen
 # Umlaut zu erzwingen wuerde die Doku falsch machen.
 umlaut_words='fuer|ueber|Ueber|waehrend|naechst|moeglich|Moeglich|koenn|Koenn|wuerde|Wuerde|gehoert|loesch|Loesch|oeffn|Oeffn|aender|Aender|Groesse|laeng|Laeng|pruef|Pruef|ausfuehr|Ausfuehr|zurueck|Zurueck|muess|Muess|Loesung|Schluessel|Verzoeger|maessig|gemaess|hoechst|spaeter|gueltig|Gueltig|erfuellt|Uebersicht|bestaetig|Bestaetig|zusaetzlich|Zusaetzlich|taeglich|urspruenglich|beruecksichtig|verfuegbar|Verfuegbar|noetig|Noetig|stoer|Stoer'
-for f in $active_docs; do
-  prose=$(awk '/^[[:space:]]*```/ { fence = !fence; print ""; next } { print (fence ? "" : $0) }' "$f" \
-    | sed 's/`[^`]*`//g')
-  if printf '%s\n' "$prose" | grep -nE "\b($umlaut_words)" >&2; then
-    fail doc-ascii-umlaut "$f schreibt Umlaute als ue/ae/oe (Zeilennummern oben, Code ausgenommen); deutsche Dokumente benutzen echte Umlaute wie der Portalkatalog."
-  fi
+# Ein awk fuer alle Dateien: der Fence-Zustand beginnt je Datei neu (FNR == 1),
+# jede Zeile kommt als "datei:zeile:prosa" mit ihrer echten Zeilennummer heraus.
+# shellcheck disable=SC2086
+for f in $([ -n "$active_docs" ] && awk 'FNR == 1 { fence = 0 }
+    /^[[:space:]]*```/ { fence = !fence; print FILENAME ":" FNR ":"; next }
+    { line = (fence ? "" : $0); gsub(/`[^`]*`/, "", line); print FILENAME ":" FNR ":" line }' $active_docs \
+    | grep -E "${doc_line}\b($umlaut_words)" | report_doc_hits); do
+  fail doc-ascii-umlaut "$f schreibt Umlaute als ue/ae/oe (Zeilennummern oben, Code ausgenommen); deutsche Dokumente benutzen echte Umlaute wie der Portalkatalog."
 done
 
 # --- 15. Hardware-Version der VM-Erstellung vs. Support-Matrix ------------------

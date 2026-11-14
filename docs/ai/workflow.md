@@ -17,6 +17,8 @@ Run applicable gates through `scripts/check.ps1`; `docs/QA.md` supplies setup an
 
 Reuse evidence only with a valid source manifest, relevant environment and scope. A changed dependency can invalidate tests whose own files stayed unchanged. A hook or selected early gate is not final release evidence. Preserve actual result classes; missing tools are not passing skips, and no-network runs cannot discharge mandatory network checks.
 
+A package that changes portal rendering, e2e specs or reviewed target images runs the browser part first: `scripts/check.ps1 -Lane Integration -Gate qa-stack,e2e-portal,visual-contract`. If target images are due, the user writes and reviews them with `scripts/update-visual-baselines.ps1` (`docs/QA.md`, reviewed target baselines); agents never do. Only then does the full Integration lane run, once. This order changes no gate or lane and the full lane stays required evidence. A run with `-KeepArtifacts` leaves the QA stack up; tear it down with the command that run prints before the full lane, or rerun `-Gate qa-stack` after an edit.
+
 After a failed command distinguish invocation, prerequisite, sandbox/infrastructure and product errors. Correct the identified cause before retrying. Do not repeat identical failed calls or restart full suites for the same information. Preserve canonical progress and QA isolation.
 
 ## Models and delegation
