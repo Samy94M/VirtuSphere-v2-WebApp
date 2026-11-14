@@ -42,6 +42,11 @@ if ($serviceSnapshot !== null) {
 $directoryData = system_status_directory_panel_data($connection, $user);
 // Read once: the overview card and the section below must judge the same files.
 $hostData = system_status_backup_panel_data();
+// K19 (VT-E2): the same derivation as the settings backup card, on the backup
+// status read above. Since SY3 it is a row of "Host und Backup" that colours
+// its card, not a banner above the overview that no card counted.
+$encryptionFinding = backup_encryption_finding(backup_encryption_certificate($connection), $hostData['backup'] ?? []);
+$hostData['encryption'] = $encryptionFinding === null ? null : ['finding' => $encryptionFinding];
 
 // A detail query is accepted only for an ESXi credential already present in
 // the snapshot. Invalid, deleted and type-confused IDs collapse to no selection
@@ -116,13 +121,6 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
             <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('settings.allowlist_title')); ?></a><?php } ?>
         </div>
     <?php } ?>
-    <?php // K19 (VT-E2): the same derivation as the settings backup card. ?>
-    <?php $backupEncryptionFinding = backup_encryption_finding(backup_encryption_certificate($connection), backup_status_read()); ?>
-    <?php if ($backupEncryptionFinding !== null) { ?>
-        <div class="alert alert-warning" data-backup-encryption-finding><?php echo h(backup_encryption_finding_message($backupEncryptionFinding)); ?>
-            <?php if (can('system.config', $user)) { ?><a href="<?php echo h(settings_url('backup')); ?>"><?php echo h(__t('settings.backup_title')); ?></a><?php } ?>
-        </div>
-    <?php } ?>
     <?php // K21-F: ESXi access files still open on an Ansible host. Silent without a group. ?>
     <?php system_status_render_remote_secret_notice(repo_remote_secret_notice_groups($connection), $user); ?>
     <?php // The topbar (lib/layout.php) already renders the page title and the
@@ -135,7 +133,7 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
               // display timezone while the database holds UTC (ADR-0022), so
               // the zone is named once here rather than left to be guessed from
               // a row that may be hours off the reader's own clock. ?>
-        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('system_status.timezone_note', ['tz' => portal_timezone()])); ?> &middot; <?php echo h(__t('system_status.hint')); ?></p>
+        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time datetime="<?php echo h(portal_time_iso($snapshot['generated_at'])); ?>"><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('system_status.timezone_note', ['tz' => portal_timezone()])); ?> &middot; <?php echo h(__t('system_status.hint')); ?></p>
         <div class="actions">
             <a class="button" href="<?php echo h($refreshUrl); ?>"><?php echo h(__t('system_status.refresh_status')); ?></a>
         </div>

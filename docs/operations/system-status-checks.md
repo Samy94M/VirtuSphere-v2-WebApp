@@ -12,10 +12,10 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 | Ansible-Test | Volltest je Ansible-Zugang, manuell oder geplant | je Zugang | schlechteste Zeile |
 | ESXi-Inventar | Inventarabruf je ESXi-Zugang | je Zugang | schlechteste Zeile |
 | Abweichungen | Missionen und VMs gegen den Inventar-Cache | Anzahl Befunde | Anzahl; null ist nur mit vollständigem, aktuellem Nachweis grün |
-| Host und Backup | Backup-Statuskanal des Docker-Hosts: Backup, Restore-Test, Prüfsummen, HTTPS-Zertifikat | je Prüfung | schlechteste Zeile; „Keine Daten“ ist nie grün |
+| Host und Backup | Backup-Statuskanal des Docker-Hosts: Backup, Restore-Test, Prüfsummen, bei Befund Backup-Verschlüsselung, HTTPS-Zertifikat | je Prüfung | schlechteste Zeile; „Keine Daten“ ist nie grün |
 | Interne Dienste | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Dienstzeile |
 
-Über der Übersicht stehen vier Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; die Backups sind nicht verschlüsselt (`backup_encryption_finding()`, kein Zertifikat hinterlegt oder der letzte erfolgreiche Lauf nicht an das hinterlegte verschlüsselt); Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`); offene ESXi-Zugangsdateien auf einem Ansible-Host (`repo_remote_secret_notice_groups()`). Der letzte Hinweis hat eine Gruppe je Zugang und Ziel. Sie erscheint, wenn eine ihrer Zeilen älter als 24 Stunden ist, sofort bei einem gelöschten Zugang oder einem Ziel, das nicht mehr zum Zugang passt. Laufende Leases und aktive Aufträge zählen nicht. Die Gruppe nennt die vollständige Anzahl, die älteste Zeile, Host und Grund. Benutzer mit `credentials.manage` bestätigen dort eine Gruppe mit Begründung; das ist dieselbe Bestätigung wie unter dem Zugang auf der Seite Zugangsdaten. Für `system.config` verlinkt jeder der ersten drei Hinweise die Einstellung, die ihn behebt.
+Über der Übersicht stehen drei Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`); offene ESXi-Zugangsdateien auf einem Ansible-Host (`repo_remote_secret_notice_groups()`). Der letzte Hinweis hat eine Gruppe je Zugang und Ziel. Sie erscheint, wenn eine ihrer Zeilen älter als 24 Stunden ist, sofort bei einem gelöschten Zugang oder einem Ziel, das nicht mehr zum Zugang passt. Laufende Leases und aktive Aufträge zählen nicht. Die Gruppe nennt die vollständige Anzahl, die älteste Zeile, Host und Grund. Benutzer mit `credentials.manage` bestätigen dort eine Gruppe mit Begründung; das ist dieselbe Bestätigung wie unter dem Zugang auf der Seite Zugangsdaten. Für `system.config` verlinken die ersten beiden Hinweise die Einstellung, die sie behebt. Diese drei betreffen die ganze Installation (Transport, Freigabeliste) oder einen Ansible-Host außerhalb jeder Kachel und bleiben deshalb Hinweise. Unverschlüsselte Backups (`backup_encryption_finding()`) standen bis SY3 ebenfalls hier und ließen die Kachel „Host und Backup“ grün; sie sind jetzt eine Zeile dieses Bereichs (siehe dort).
 
 Die Bereiche heißen hier wie die Kacheln der Übersicht auf der Seite und stehen in deren Reihenfolge; die Kacheln laufen in der Reihenfolge der Abschnitte auf der Seite. `SystemStatusChecksDocContractTest` leitet Namen und Reihenfolge aus der Kartenliste ab (`system_status_overview_cards()`).
 
@@ -58,6 +58,21 @@ flowchart TD
 
 Ein abgeschalteter Bereich (Active Directory „Deaktiviert“) und ein laufender Auftrag zählen als in Ordnung.
 
+### Fazitzeile, Zeiten und laufende Läufe
+
+Jeder Abschnitt beginnt unter seiner Überschrift mit einer Fazitzeile (`system_status_verdict()`, `lib/system_status_verdict.php`, SY3), die die Frage „Muss ich etwas tun?“ beantwortet. Sie liest denselben Ton wie die Kachel des Bereichs und ordnet ihn mit derselben Funktion ein wie die Kopfzeile (`system_status_tone_need()`); MECM hat je eine Zeile für Datenfluss und Standort. Nennt der Abschnitt einen nächsten Schritt für genau diesen Zustand, steht er in der Zeile (Bereitstellungsdienst); sonst verweist sie auf den Hinweis beim betroffenen Eintrag. `SystemStatusCardContentsTest` leitet die Bereiche aus der Kartenliste ab und prüft, dass jeder Abschnitt eine Fazitzeile rendert.
+
+```mermaid
+flowchart TD
+  T["Ton der Kachel des Bereichs"] --> R{"Rang ab Warnung (gelb oder rot)?"}
+  R -->|ja| A["„Handlung nötig.“ und der nächste Schritt des Abschnitts, sonst Verweis auf den Eintrag"]
+  R -->|nein| G{"Rang über OK (grau)?"}
+  G -->|ja| E["„Kein aktueller Nachweis.“ und Verweis auf den Eintrag"]
+  G -->|nein, auch Läuft und Deaktiviert| N["„Kein Eingriff nötig.“"]
+```
+
+Zeiten stehen in den Faktenlisten relativ und absolut in einem `<time datetime>` (`portal_time_html()`, `lib/portal_time_display.php`): „vor 3 Minuten (09.11.2026 14:02:05)“, der absolute Teil im Format von `portal_format_timestamp()`. Der relative Teil bezieht sich auf den Stand der Anzeige im Seitenkopf und entfällt ab `VIRTUSPHERE_TIME_RELATIVE_MAX_SECONDS`. Dauern stehen in höchstens zwei Einheiten, die größte zuerst (`portal_format_duration()`: „8 Minuten 15 Sekunden“, „1 Stunde 2 Minuten“).
+
 ## Bereitstellungsdienst
 
 ```mermaid
@@ -94,6 +109,26 @@ flowchart TD
 ```
 
 Die Schonfrist für einen nicht beanspruchten Auftrag ist `VIRTUSPHERE_DEPLOY_CLAIM_GRACE_SECONDS`. Ist die Annahme pausiert, sagt die Karte das ausdrücklich, statt einen Rückstand zu melden. Die Verfügbarkeit bleibt bei einer Pause unverändert, die Überblickskarte aber nicht: Ton (`deploy_service_badge_tone()`, die Farbe `deploy_service_badge_variant()` folgt daraus) und Wort (`deploy_service_summary_label()`) folgen derselben Rangfolge wie im Diagramm, und eine Pause heißt dort wie die Achse Auftragsannahme der Karte („Nimmt keine Aufträge an“ oder „Pausiert nach dem aktuellen Auftrag“). Unter den Achsen steht dann ein Satz, was die Pause kostet und wie sie endet (`deploy_service_claim_hint()`). Auf der Karte tragen alle drei Achsen ihr eigenes Wort mit dem Symbol ihres Tons; die Normalwerte „Nimmt Aufträge an“ und „Keine offene Klärung“ sind grün, nicht grau, denn grau heißt „kein Nachweis“.
+
+Die Fazitzeile der Karte nennt den nächsten Schritt in derselben Rangfolge (`deploy_service_verdict_action()`, `lib/system_status_service_verdict.php`). Bis SY3 hatten „Nicht erreichbar“ und „Wartet vor Neustart“ keinen. Ein Satz, den die Fazitzeile schon trägt, steht nicht noch einmal darunter; ein zweiter Grund (nicht erreichbar und pausiert) behält seine eigene Zeile (R39). Die Lebenszeichen-Zeile „Bereitstellungsdienst (Portal)“ unter „Interne Dienste“ verweist auf diese Karte, statt einen zweiten Reparaturhinweis zu zeigen.
+
+```mermaid
+flowchart TD
+  O{"Nicht erreichbar?"} -->|ja| O1["Dienst auf dem Portal-Server prüfen und neu starten (Hinweis action_deploy_worker)"]
+  O -->|nein| M{"Manuelle Klärung nötig?"}
+  M -->|ja| M1["Protokoll des Falls öffnen und Ergebnis festhalten"]
+  M -->|nein| D{"Beeinträchtigt?"}
+  D -->|ja| D1["Protokoll des aktuellen Auftrags und Zustand des Workers prüfen"]
+  D -->|nein| C{"Wartet vor Neustart?"}
+  C -->|ja| C1["Die Aufsicht startet selbst neu; nächster Versuch mit Zeit (next_retry_at)"]
+  C -->|nein| W{"Wiederherstellung läuft?"}
+  W -->|ja| W1["Abwarten; erst ein Fall mit manueller Klärung braucht eine Entscheidung"]
+  W -->|nein| P{"Auftragsannahme nicht offen?"}
+  P -->|ja| P1["Was die Pause kostet und wie sie endet (deploy_service_claim_hint())"]
+  P -->|nein| N["Kein Eingriff nötig"]
+```
+
+Der Dashboard-Hinweis nennt nur die Teile, die nicht in Ordnung sind (`deploy_service_attention_parts()`): eine beeinträchtigte oder nicht erreichbare Verfügbarkeit, eine nicht offene Auftragsannahme, eine offene Klärung. „Bereit“ oder „Keine offene Klärung“ stehen dort nicht mehr.
 
 ## Active Directory
 
@@ -164,6 +199,27 @@ flowchart TD
 
 Verteilhinweise des Package Import (`package_content_failed`, `package_content_in_progress`) erscheinen auf der Karte, ändern aber das Ergebnis nicht: Die Verteilung an die DPs ist Sache von MECM (AV2), ein Lauf mit nur solchen Hinweisen bleibt grün.
 
+Die Karte des Package Import (SY3) beginnt mit ihrer Fazitzeile, die Scan und Verteilung getrennt nennt („Letzter Scan ohne offene Punkte. 12 Verteilhinweise an Distribution Points (DP); sie blockieren nichts.“, `system_status_autoimporter_fact()`). Ein laufender Lauf steht in einer eigenen Zeile „Läuft seit … (letzter Lauf …)“ (`system_status_run_running_line()`, für alle drei Sync-Aufgaben); das Ergebnis darunter bleibt das des letzten Abschlusses. Der Hinweis „Länger als üblich“ erscheint erst, wenn der Lauf seine Laufschonfrist überschreitet (`virtusphere_run_report_overdue()`), und nennt sie. Die Zähler sagen, was sie zählen („Bearbeitete Paketordner“, „Neue Anwendungen“); `unchanged` ist kein Zähler, sondern „Lauf ohne Änderung: Ja/Nein“. Offene Punkte und Verteilhinweise nennen die Zahl der Pakete, mit Rest „mindestens“; Verteilhinweise stehen als Information, nicht im Stil eines Handlungshinweises.
+
+Die Technischen Details des Package Import sind eine Tabelle je Ursache (`system_status_render_autoimporter_details()`, `lib/system_status_autoimporter_panels.php`). Sie liest die feste Grammatik des Reporters (`Format-VsRunDetail`, `Add-VsRunCause`, AR1) und verändert sie nicht:
+
+```mermaid
+flowchart TD
+  L["Ursachenzeile (Wire-Detail, unverändert gespeichert)"] --> S["An „; “ trennen"]
+  S --> R{"Teil ist „(+n weitere)“?"}
+  R -->|ja| RN["Rest zählen: Hinweis unter der Tabelle, Anzahlen auf der Karte als „mindestens“"]
+  R -->|nein| C{"Code am Anfang, danach nur target= und collection=?"}
+  C -->|nein| U0["Eintrag ohne bekanntes Format (roh, letzte Zeile)"]
+  C -->|ja| K{"Code in VIRTUSPHERE_AUTOIMPORTER_PACKAGE_CAUSES?"}
+  K -->|nein| U1["Unbekannter Code: roh mit Code, nie verworfen, färbt nichts"]
+  K -->|ja| D{"Präfix package_content_?"}
+  D -->|nein| P0["Konfiguration und Paket: zuerst"]
+  D -->|ja, außer in_progress| P1["Verteilproblem: danach"]
+  D -->|package_content_in_progress| P2["Laufende Verteilung: zuletzt vor unbekannten Codes"]
+  P0 & P1 & P2 & U1 & U0 --> T["Zeile je Ursache: Klartext mit Code, Anzahl, aufklappbare Paketliste (Werte dekodiert und escaped)"]
+  T --> RAW["Rohdaten: die gespeicherte Zeile mit Kopieren-Knopf"]
+```
+
 Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt den Reporter gelb („Warnung“, Melderzeile). Der letzte Site-Befund bleibt getrennt sichtbar, grau als „Veraltet“ und historisch markiert. Sein Alter behauptet keinen aktuellen kritischen MECM-Zustand. Dashboard und Systemstatus lesen beide Achsen aus demselben Snapshot. Der Standortzustand nutzt die fünf Wörter des fachlichen Zustands (OK, Warnung, Eingeschränkt, Kritisch, Unbekannt), nie ein Melderwort wie „Nicht erreichbar“. Bei MECM-kritisch ordnet das Portal die gemeldeten Rollen und Komponenten je Typ über die Tabelle in `lib/mecm_site_assessment.php` ein (ADR-0018 Amendment 2026-11-09). Die Einordnungstabelle mit Quellen und die MECM-Schwellen (Fehlermeldungen seit Mitternacht) stehen in `mecm-integration.md`, Abschnitte „Wie MECM den Standort rot färbt“ und „Einordnung der Rollen und Komponenten“.
 
 ```mermaid
@@ -180,7 +236,7 @@ flowchart TD
   SC -->|Provider nicht lesbar oder Abfrage gescheitert| UU["Unbekannt (grau)"]
 ```
 
-Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle, `VIRTUSPHERE_RUN_GRACE_SECONDS` und dem `VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR`-fachen der Dauer, die der Reporter mit seinem letzten Abschluss gemeldet hat (dieser Anteil höchstens `VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS`). Ein langer Autoimporter-Scan bleibt so in der Farbe des vorigen Ergebnisses, statt nach 10 Minuten rot und beim Abschluss wieder gelb zu werden; ein Lauf, der deutlich länger braucht als der letzte, wird weiterhin rot. Seit AL1 hasht der Autoimporter nur neue oder geänderte Dateien, ruhige Läufe sind daher kurz. Der erste Lauf nach einem Neustart der Aufgabe hasht dagegen den ganzen Baum und kann bei vielen großen Installern die feste Frist überschreiten; die Karte zeigt ihn dann bis zum Abschluss als verspätet. Ohne gemeldete Dauer (erster Lauf, Legacy-Vorgeschichte) gelten nur die festen Werte. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Warnung und Kritisch. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
+Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle, `VIRTUSPHERE_RUN_GRACE_SECONDS` und dem `VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR`-fachen der Dauer, die der Reporter mit seinem letzten Abschluss gemeldet hat (dieser Anteil höchstens `VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS`). Ein langer Autoimporter-Scan bleibt so in der Farbe des vorigen Ergebnisses, statt nach 10 Minuten rot und beim Abschluss wieder gelb zu werden; ein Lauf, der deutlich länger braucht als der letzte, wird weiterhin rot. Seit AL1 hasht der Autoimporter nur neue oder geänderte Dateien, ruhige Läufe sind daher kurz. Der erste Lauf nach einem Neustart der Aufgabe hasht dagegen den ganzen Baum und kann bei vielen großen Installern die feste Frist überschreiten; die Karte zeigt ihn dann bis zum Abschluss als verspätet. Dasselbe gilt für einen langen Vollscan nach kurzen ruhigen Läufen, weil die Schonfrist an der zuletzt gemeldeten Dauer hängt (AR1-Folgepunkt, in SY3 geprüft und offen gelassen: Die Statuszeile speichert nur die letzte Dauer, eine längste jüngere Scandauer bräuchte Laufhistorie oder ein Reporterfeld). Ohne gemeldete Dauer (erster Lauf, Legacy-Vorgeschichte) gelten nur die festen Werte. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Warnung und Kritisch. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
 
 ## Ansible-Test
 
@@ -279,7 +335,7 @@ Karte und Abschnittsüberschrift rendern dieselbe Zahl mit demselben Badge (`dev
 
 Eigener Bereich mit eigener Kachel (`lib/system_status_backup_panels.php`, Anker `host-backup`). Bis SY1 stand er als Block „Hostzustand“ ohne Kachel unter „Interne Dienste“, und ein fehlgeschlagenes Backup ließ die Übersicht grün. Die Zeilen haben je einen eigenen Ton; die Kachel zeigt den schlechtesten davon (`system_status_host_overview_tone()` über `system_status_host_checks()`, dieselbe Liste, aus der der Abschnitt seine Zeilen rendert). Der Bereich ändert weder die Ampel „Interne Dienste“ noch den Dashboard-Hinweis oder `health.php`.
 
-Quelle ist der Backup-Statuskanal (`docs/operations/backup.md`), auf der Seite einmal je Aufruf gelesen (`system_status_backup_panel_data()`): Backup aus `backup_status_read()` mit den Zuständen der Backup-Karte (`backup_status_tone()`, dieselbe Zuordnung wie in den Einstellungen), Restore-Test aus `backup_drill_status_read()` (schreibt der Drill `scripts/restore_test.sh` selbst), Prüfsummen aus `backup_scrub_status_read()` (schreibt `scripts/backup-scrub.sh`). Die Zertifikatszeile erscheint nur, solange `https_listener_live()` gilt, und zählt nur dann für die Kachel. Ein fehlender, unlesbarer oder in der Zukunft datierter Nachweis heißt „Keine Daten“, nie „OK“.
+Quelle ist der Backup-Statuskanal (`docs/operations/backup.md`), auf der Seite einmal je Aufruf gelesen (`system_status_backup_panel_data()`): Backup aus `backup_status_read()` mit den Zuständen der Backup-Karte (`backup_status_tone()`, dieselbe Zuordnung wie in den Einstellungen), Restore-Test aus `backup_drill_status_read()` (schreibt der Drill `scripts/restore_test.sh` selbst), Prüfsummen aus `backup_scrub_status_read()` (schreibt `scripts/backup-scrub.sh`). Die Zertifikatszeile erscheint nur, solange `https_listener_live()` gilt, und zählt nur dann für die Kachel. Die Zeile „Backup-Verschlüsselung“ erscheint nur bei einem Befund von `backup_encryption_finding()` (kein Zertifikat hinterlegt oder letzter erfolgreicher Lauf nicht an das hinterlegte verschlüsselt), aus demselben gelesenen Backup-Status, und färbt die Kachel gelb (SY3; vorher ein Hinweis über der Übersicht). Ein fehlender, unlesbarer oder in der Zukunft datierter Nachweis heißt „Keine Daten“, nie „OK“.
 
 ```mermaid
 flowchart TD
@@ -299,12 +355,14 @@ flowchart TD
   H -->|bis VIRTUSPHERE_HTTPS_CERT_EXPIRY_WARN_DAYS| HB["Warnung (gelb)"]
   H -->|länger| HO["OK (grün)"]
   H -->|Ablaufdatum unlesbar| HU["Unbekannt (grau)"]
-  BF & BW & BO & BU & DU & DF & DO & SU & SA & SO & HA & HB & HO & HU --> K["Kachel: schlechtester Ton, rot vor gelb vor grau vor grün; bei Gleichstand die erste Zeile des Abschnitts"]
+  V{"Verschlüsselung: Befund von backup_encryption_finding()?"} -->|ja| VW["Zeile Backup-Verschlüsselung: Warnung (gelb), Link zur Backup-Einstellung"]
+  V -->|nein| VN["keine Zeile"]
+  BF & BW & BO & BU & DU & DF & DO & SU & SA & SO & VW & HA & HB & HO & HU --> K["Kachel: schlechtester Ton, rot vor gelb vor grau vor grün; bei Gleichstand die erste Zeile des Abschnitts"]
 ```
 
 ## Interne Dienste
 
-Wartungsdienst und Deploy-Worker schreiben ihren Status direkt in dieselbe Tabelle wie die MECM-Aufgaben, im Takt `VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS` beziehungsweise `VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS`. Ihre Zeilen sind reine Lebenszeichen und sprechen deshalb Melderwörter (`heartbeat_badge($state, 'liveness')`): Die Zeile des Bereitstellungsdienstes sagt „Aktuell“ neben der Karte „Bereit“, statt ein zweites Wort für den Zustand des Dienstes zu behaupten.
+Wartungsdienst und Deploy-Worker schreiben ihren Status direkt in dieselbe Tabelle wie die MECM-Aufgaben, im Takt `VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS` beziehungsweise `VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS`. Ihre Zeilen sind reine Lebenszeichen und sprechen deshalb Melderwörter (`heartbeat_badge($state, 'liveness')`): Die Zeile des Bereitstellungsdienstes sagt „Aktuell“ neben der Karte „Bereit“, statt ein zweites Wort für den Zustand des Dienstes zu behaupten. Seit SY3 trägt sie keinen eigenen Reparaturhinweis mehr, sondern verweist auf die Karte Bereitstellungsdienst, deren Fazitzeile den Schritt nennt; sie bleibt, weil die Kachel „Interne Dienste“ sie mitzählt.
 
 ```mermaid
 flowchart TD

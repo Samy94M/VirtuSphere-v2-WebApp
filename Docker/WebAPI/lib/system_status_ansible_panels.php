@@ -26,7 +26,7 @@ function system_status_render_ansible(array $snapshot, array $user): void
               // link to the credentials page is this section's action and belongs
               // beside the title, not as a loose paragraph under the last row. ?>
         <div class="section-heading-actions">
-            <div><h2><?php echo h(__t('system_status.ansible_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.ansible_hint')); ?></p></div>
+            <div><h2><?php echo h(__t('system_status.ansible_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.ansible_hint')); ?></p><?php echo system_status_verdict(status_tone_for('ansible', (string) ($snapshot['ansible']['state'] ?? 'unknown'))); ?></div>
             <?php // Not in the empty case: the empty-state below already carries this
                   // link as its call to action, and two identical buttons above each
                   // other read as two different destinations. ?>
@@ -57,7 +57,7 @@ function system_status_render_ansible(array $snapshot, array $user): void
                     <?php echo system_status_fact_list([
                         ['label' => __t('system_status.ansible_th_host'), 'html' => '<code>' . h((string) $credential['host']) . '</code>'],
                         ['label' => __t('system_status.ansible_th_last_full_test'), 'html' => ($stateRow !== null && !empty($stateRow['last_checked_at']))
-                            ? h(portal_format_timestamp($stateRow['last_checked_at']))
+                            ? portal_time_html((string) $stateRow['last_checked_at'])
                             : h(__t('system_status.ansible_never_tested'))],
                         ['label' => __t('system_status.ansible_th_last_mission_job'), 'html' => system_status_ansible_job_fact($lastMissionJob, $canOpenJobLog)],
                     ]); ?>

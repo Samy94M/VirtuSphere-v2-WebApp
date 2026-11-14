@@ -46,7 +46,8 @@ function deploy_job_status_label(string $status): string
  */
 function deploy_job_status_badge(string $status): string
 {
-    return portal_badge(deploy_job_status_badge_class($status), deploy_job_status_label($status));
+    // Through the status vocabulary (SY3): the icon follows the colour.
+    return status_value_badge(status_tone_for_variant(deploy_job_status_badge_class($status)), deploy_job_status_label($status));
 }
 
 /**

@@ -219,7 +219,7 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
     $claimState = (string) ($snapshot['esxi']['claim_state'] ?? VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING);
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI); ?>">
-        <div class="section-heading-actions"><div><h2><?php echo h(__t('system_status.inv_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.inv_hint')); ?></p></div>
+        <div class="section-heading-actions"><div><h2><?php echo h(__t('system_status.inv_heading')); ?></h2><p class="muted"><?php echo h(__t('system_status.inv_hint')); ?></p><?php echo system_status_verdict(status_tone_for('esxi', (string) ($snapshot['esxi']['state'] ?? 'unknown'))); ?></div>
         <?php if (can('deploy.run', $user) && $snapshot['esxi']['rows'] !== []) { ?><form method="post" action="system_status.php"><?php echo csrf_field(); ?><input type="hidden" name="action" value="refresh_inventory"><button class="button" type="submit" data-busy-label="<?php echo h(__t('system_status.refreshing')); ?>"><?php echo h(__t('system_status.inv_refresh_all')); ?></button></form><?php } ?></div>
         <?php if ($snapshot['esxi']['rows'] === []) { ?>
             <div class="empty-state"><p><?php echo h(__t('system_status.inv_empty')); ?></p><?php if (can('credentials.manage', $user)) { ?><a class="button button-secondary" href="credentials.php"><?php echo h(__t('system_status.inv_configure_credentials')); ?></a><?php } ?></div>
@@ -251,10 +251,10 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                 </dl>
                 <?php echo system_status_fact_list([
                     ['label' => __t('system_status.inv_last_attempt'), 'html' => ($state !== null && !empty($state['last_attempt_at']))
-                        ? h(portal_format_timestamp($state['last_attempt_at']))
+                        ? portal_time_html((string) $state['last_attempt_at'])
                         : h(__t('system_status.inv_never'))],
                     ['label' => __t('system_status.inv_last_success'), 'html' => ($state !== null && !empty($state['last_success_at']))
-                        ? h(portal_format_timestamp($state['last_success_at']))
+                        ? portal_time_html((string) $state['last_success_at'])
                         : h(__t('system_status.inv_never'))],
                 ]); ?>
                 <?php // Which cycle actually refreshes these two timestamps, named by the
@@ -342,7 +342,7 @@ function system_status_render_deviations(array $view, array $activeVlanNames, ar
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS); ?>">
         <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount, system_status_deviation_evidence_current($report)); ?></h2>
-        <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p>
+        <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p><?php echo system_status_verdict(deviation_count_tone($deviationCount, system_status_deviation_evidence_current($report))); ?>
         <?php system_status_render_deviation_evidence($report); ?>
         <?php if ($hasEvaluableEvidence) { ?>
             <?php system_status_render_deviation_filters($view, $query); ?>

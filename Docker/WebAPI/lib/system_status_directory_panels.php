@@ -9,6 +9,7 @@ require_once __DIR__ . '/directory_status.php';
 require_once __DIR__ . '/repo/directory.php';
 require_once __DIR__ . '/repo/log.php';
 require_once __DIR__ . '/users_page.php';
+require_once __DIR__ . '/system_status_verdict.php';
 
 /**
  * Read-only AD overview (plan section 15.1). Gated on users.manage like the
@@ -56,11 +57,12 @@ function system_status_render_directory(mysqli $db, array $user, ?array $data = 
             <div><h2><?php echo h(__t('system_status.directory_heading')); ?></h2><p><?php echo h(__t('system_status.directory_hint')); ?></p></div>
             <?php echo directory_state_badge($snapshot['overall']); ?>
         </div>
+        <?php echo system_status_verdict(status_tone_for('directory', (string) $snapshot['overall'])); ?>
         <div class="table-wrap"><table><tbody>
             <tr><th><?php echo h(__t('system_status.directory_state')); ?></th><td><?php echo h($state); ?><?php if ((int) $config['enabled'] === 1 && (int) ($config['automatic_bind_blocked_revision'] ?? 0) === $revision) { ?><p class="hint"><?php echo h(directory_outcome_message(directory_bind_block_outcome($config))); ?></p><?php } ?></td></tr>
             <tr><th><?php echo h(__t('system_status.directory_revision')); ?></th><td><?php echo h((string) $revision); ?></td></tr>
             <tr><th><?php echo h(__t('system_status.directory_controllers')); ?></th><td><?php echo h(__t('system_status.directory_controller_evidence_count', ['admitted' => $counts['admitted'], 'current' => $counts['current_ok'], 'disturbed' => $counts['disturbed'], 'stale' => $counts['stale'], 'total' => count($controllers)])); ?></td></tr>
-            <tr><th><?php echo h(__t('system_status.directory_last_success')); ?></th><td><?php echo $snapshot['last_admitted_success_at'] === null ? '&mdash;' : h(portal_format_timestamp($snapshot['last_admitted_success_at'])); ?></td></tr>
+            <tr><th><?php echo h(__t('system_status.directory_last_success')); ?></th><td><?php echo $snapshot['last_admitted_success_at'] === null ? '&mdash;' : portal_time_html((string) $snapshot['last_admitted_success_at']); ?></td></tr>
         </tbody></table></div>
         <p class="hint"><?php echo h(__t('system_status.directory_cadence')); ?></p>
         <?php if ($controllers !== []): ?>
@@ -79,9 +81,9 @@ function system_status_render_directory(mysqli $db, array $user, ?array $data = 
                     <td><?php echo h((string) $controller['priority']); ?></td>
                     <td><?php echo h($controller['host'] . ':' . $controller['port']); ?></td>
                     <td><?php echo directory_controller_state_badge($row['state']); ?></td>
-                    <td><?php echo empty($controller['validated_at']) ? '&mdash;' : h(portal_format_timestamp((string) $controller['validated_at'])); ?></td>
-                    <td><?php echo empty($controller['last_success_at']) ? '&mdash;' : h(portal_format_timestamp((string) $controller['last_success_at'])); ?></td>
-                    <td><?php echo empty($controller['certificate_not_after']) ? '&mdash;' : h(portal_format_timestamp((string) $controller['certificate_not_after'])); ?></td>
+                    <td><?php echo empty($controller['validated_at']) ? '&mdash;' : portal_time_html((string) $controller['validated_at']); ?></td>
+                    <td><?php echo empty($controller['last_success_at']) ? '&mdash;' : portal_time_html((string) $controller['last_success_at']); ?></td>
+                    <td><?php echo empty($controller['certificate_not_after']) ? '&mdash;' : portal_time_html((string) $controller['certificate_not_after']); ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>

@@ -109,6 +109,9 @@ if ($format === 'json') {
             'status' => (string) $job['status'],
             'badge' => deploy_job_status_badge_class((string) $job['status']),
             'label' => deploy_job_status_label((string) $job['status']),
+            // Additive (SY3): the vocabulary icon of the badge colour, so the
+            // live badge keeps its icon after a refresh.
+            'icon' => status_tone_meta(status_tone_for_variant(deploy_job_status_badge_class((string) $job['status'])))['icon'],
             'updated_at' => portal_format_timestamp((string) $job['updated_at']),
             'terminal' => in_array((string) $job['status'], VIRTUSPHERE_DEPLOY_JOB_TERMINAL_STATUSES, true),
         ],
@@ -264,7 +267,7 @@ layout_header(__t('deploy.log_title'), $user, 'deploy', 'deploy');
 
     <section class="grid" aria-label="<?php echo h(__t('deploy.log_title')); ?>">
         <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.kpi_job')); ?></span><span class="value"><?php echo portal_copy_value((string) $job['id'], __t('deploy.kpi_job'), true); ?></span></article>
-        <article class="card kpi"><span class="muted"><?php echo h(__t('common.status')); ?></span><span class="value"><span data-deploy-status class="badge badge-<?php echo h(deploy_job_status_badge_class((string) $job['status'])); ?>"><?php echo h(deploy_job_status_label((string) ($job['status'] ?? ''))); ?></span></span></article>
+        <article class="card kpi"><span class="muted"><?php echo h(__t('common.status')); ?></span><span class="value"><span data-deploy-status class="badge badge-<?php echo h(deploy_job_status_badge_class((string) $job['status'])); ?>"><?php echo portal_badge_icon(status_tone_meta(status_tone_for_variant(deploy_job_status_badge_class((string) $job['status'])))['icon']); ?><?php echo h(deploy_job_status_label((string) ($job['status'] ?? ''))); ?></span></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('deploy.label_mode')); ?></span><span class="value value-small"><?php echo h(deploy_job_payload_display($job['payload_json'] ?? null)); ?></span></article>
         <article class="card kpi"><span class="muted"><?php echo h(__t('common.mission')); ?></span><span class="value value-small"><?php echo h((int) $job['mission_id'] > 0 ? (string) ($job['mission_name'] ?? '') : __t('deploy.system_job')); ?></span></article>
         <?php // K18: only a late scheduled start earns a card; an on-time job shows nothing extra. ?>

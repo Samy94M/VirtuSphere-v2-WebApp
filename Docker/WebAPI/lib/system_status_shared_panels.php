@@ -27,6 +27,8 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/system_status.php';
+require_once __DIR__ . '/system_status_urls.php';
+require_once __DIR__ . '/system_status_verdict.php';
 
 /**
  * The hidden context of a link or button that repeats on every credential card
@@ -61,16 +63,17 @@ function system_status_fact_list(array $facts): string
 }
 
 /**
- * One timestamp cell: the formatted value, or the em dash for "not stored".
+ * One timestamp cell: relative and absolute in a `<time>` element
+ * (portal_time_html(), SY3), or the em dash for "not stored".
  *
  * A NULL and an empty string mean the same thing here (the column exists, the
  * reporter never filled it), and both used to make the whole field disappear.
  */
-function system_status_fact_time(?string $timestamp): string
+function system_status_fact_time(?string $timestamp, ?int $now = null): string
 {
     $value = trim((string) ($timestamp ?? ''));
 
-    return $value === '' ? '&mdash;' : h(portal_format_timestamp($value));
+    return $value === '' ? '&mdash;' : portal_time_html($value, $now);
 }
 
 /** @param list<array{source:string,row:array|null,state:string}> $rows */
@@ -81,12 +84,17 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
         <?php foreach ($rows as $entry) {
             $row = $entry['row'];
             $lastSeen = $row !== null && !empty($row['last_seen_at'])
-                ? portal_format_timestamp($row['last_seen_at'])
-                : __t('system_status.never_seen');
+                ? portal_time_html((string) $row['last_seen_at'])
+                : h(__t('system_status.never_seen'));
             $lastChecked = $row !== null && !empty($row['last_checked_at'])
-                ? portal_format_timestamp($row['last_checked_at'])
-                : __t('system_status.never_seen');
+                ? portal_time_html((string) $row['last_checked_at'])
+                : h(__t('system_status.never_seen'));
             $detail = trim((string) ($row['last_detail'] ?? ''));
+            // The deploy service has one card with its own state and actions
+            // (SY3). Its liveness row here stays, because the internal roll-up
+            // reads it, but it points to that card instead of repeating a
+            // second repair instruction that could disagree with the card.
+            $isDeployWorker = $entry['source'] === VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER;
             ?>
             <article class="status-row">
                 <div class="status-row-head"><strong><?php echo h(integration_source_label($entry['source'])); ?></strong><?php echo heartbeat_badge($entry['state'], 'liveness'); ?></div>
@@ -96,8 +104,8 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
                 // every following column one place to the left, so the same
                 // label sat under a different one in the row above.
                 echo system_status_fact_list([
-                    ['label' => __t('system_status.th_last_seen'), 'html' => h($lastSeen)],
-                    ['label' => __t('system_status.th_last_checked'), 'html' => h($lastChecked)],
+                    ['label' => __t('system_status.th_last_seen'), 'html' => $lastSeen],
+                    ['label' => __t('system_status.th_last_checked'), 'html' => $lastChecked],
                     ['label' => __t('system_status.th_interval'), 'html' => $row !== null ? h(portal_format_duration((int) $row['interval_seconds'])) : '&mdash;'],
                 ]);
                 ?>
@@ -113,8 +121,9 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
                 // verdict: nothing was ever set up, so "restart the task" names a
                 // task that does not exist. The caller says so once for the whole
                 // group instead of five rows repeating a premature instruction.
-                $actionHint = !$suppressHints && $entry['state'] !== 'ok' ? integration_action_hint($entry['source']) : '';
+                $actionHint = !$suppressHints && $entry['state'] !== 'ok' && !$isDeployWorker ? integration_action_hint($entry['source']) : '';
                 if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php } ?>
+                <?php if ($isDeployWorker) { ?><p class="muted" data-deploy-worker-pointer><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE)); ?>"><?php echo h(__t('system_status_cards.deploy_worker_pointer')); ?></a></p><?php } ?>
                 <?php if ($detail !== '') { ?>
                     <details class="technical-details"><summary><?php echo h(__t('common.technical_details')); ?></summary><pre><?php echo h($detail); ?></pre></details>
                 <?php } ?>

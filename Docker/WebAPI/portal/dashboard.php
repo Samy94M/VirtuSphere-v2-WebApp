@@ -72,9 +72,9 @@ $recentMissions = repo_fetch_all($stmt->get_result());
 // for tonight, is normal operation and must not put a warning on the landing
 // page. A warning that appears every day is a warning nobody reads.
 $serviceSnapshot = deploy_service_health_snapshot($connection);
-$serviceNeedsAttention = in_array($serviceSnapshot['availability'], [VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE], true)
-    || $serviceSnapshot['recovery_attention'] !== VIRTUSPHERE_DEPLOY_ATTENTION_NONE
-    || $serviceSnapshot['claim_state'] !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING;
+// The banner names only the parts that are not in order (SY3).
+$serviceAttentionParts = deploy_service_attention_parts($serviceSnapshot);
+$serviceNeedsAttention = $serviceAttentionParts !== [];
 
 layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
 ?>
@@ -85,11 +85,7 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
               // can act on it, per the rule that a message naming a condition
               // carries the way to it. ?>
         <div class="alert alert-warning">
-            <p><?php echo h(__t('dashboard.service_attention', [
-                'availability' => deploy_service_availability_label((string) $serviceSnapshot['availability']),
-                'claim' => deploy_service_claim_label((string) $serviceSnapshot['claim_state']),
-                'attention' => deploy_service_attention_label((string) $serviceSnapshot['recovery_attention']),
-            ])); ?></p>
+            <p data-service-attention><?php echo h(__t('dashboard.service_attention', ['parts' => implode('; ', $serviceAttentionParts)])); ?></p>
             <p class="alert-actions"><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE)); ?>"><?php echo h(__t('dashboard.service_attention_link')); ?></a></p>
         </div>
     <?php } ?>

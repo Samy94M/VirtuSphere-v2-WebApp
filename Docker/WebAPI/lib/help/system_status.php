@@ -80,6 +80,8 @@ require_once __DIR__ . '/../system_status.php';
                   // same column; that only reads correctly if the placeholder is
                   // explained once, here, instead of guessed at per card. ?>
             <p><?php echo h(__t('help_system_status.system_status_status_p2')); ?></p>
+            <?php // SY3: the verdict line, times and the run in progress, before the cause line. ?>
+            <p><?php echo h(__t('help_system_status.system_status_status_verdict')); ?></p>
             <?php // Directly after the field explanation, because the cause line sits
                   // in the same card and is the only place a counter names a VM. ?>
             <p><?php echo h(__t('help_system_status.system_status_status_p3')); ?></p>
