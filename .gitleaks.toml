@@ -70,3 +70,14 @@ paths = [
     '''^Docker/WebAPI/tests/Unit/DeployWorkerStepFailureTest\.php$''',
 ]
 regexes = ['''^Esxi-Secret-4711$''']
+
+# Der Audit-Atomaritaetstest (W3A, Commit 3494b86e) legt Konten mit einem
+# synthetischen Passwort an: festes Praefix plus random_bytes() je Lauf. Die
+# Regel sieht nur das Praefix-Literal; ein echtes Passwort steht dort nie.
+# Erstmals in der Release-Lane 2026.11.6 gemeldet (Nutzerfreigabe 14.11.2026).
+[[allowlists]]
+description = "synthetisches Kontopasswort im Audit-Atomaritaetstest (W3A)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^Docker/WebAPI/tests/Integration/AuditAtomicityIntegrationTest\.php$''']
+regexes = ['''^W3a-Synthetic-$''']
