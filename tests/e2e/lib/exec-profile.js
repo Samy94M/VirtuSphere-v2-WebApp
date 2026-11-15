@@ -51,7 +51,10 @@ function emptyBuckets() {
 function callerSpec(stack, specsDir = SPECS_DIR) {
   const prefix = specsDir + path.sep;
   for (const line of String(stack).split('\n')) {
-    const m = line.match(/\(?((?:[A-Za-z]:)?[^():]+\.js):\d+:\d+\)?\s*$/);
+    // The path starts after "(" or after "at " (a frame without a function
+    // name has no parentheses). Unanchored, a POSIX path swallowed the leading
+    // "    at " on Linux, where no drive colon cuts the match short.
+    const m = line.match(/(?:\(|\bat )((?:[A-Za-z]:)?[^():]+\.js):\d+:\d+\)?\s*$/);
     if (!m) continue;
     const file = path.resolve(m[1]);
     if (file.startsWith(prefix)) {

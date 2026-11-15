@@ -101,7 +101,9 @@ else
   if awk '/^## / { exit } /^[-*] / { printf "%d: %s\n", NR, substr($0, 1, 160); found = 1 } END { exit !found }' "$changelog" >&2; then
     fail preamble-entry "$changelog hat Eintraege vor der ersten Release-Ueberschrift; neue Eintraege gehoeren nach $DOC_FRAGMENT_CHANGELOG_DIR/<PAKET>.md."
   fi
-  first_heading=$(grep -m 1 '^## ' "$changelog" || true)
+  # tr: a CRLF checkout (core.autocrlf on Windows) must not fail the anchored
+  # pattern on Linux, where grep keeps the CR.
+  first_heading=$(grep -m 1 '^## ' "$changelog" | tr -d '\r' || true)
   if ! printf '%s\n' "$first_heading" | grep -qE "$release_heading_re"; then
     fail first-heading "die erste Ueberschrift in $changelog ist '$first_heading', erwartet '## JJJJ.MM.N (TT.MM.JJJJ)'."
   fi

@@ -1235,7 +1235,15 @@ namespace VirtuSphere {
         }
     }
     if (-not $script:VsFileChangeTimeReady) { return 0L }
-    return [VirtuSphere.FileChangeTime]::GetUtcTicks($Path)
+    try {
+        return [VirtuSphere.FileChangeTime]::GetUtcTicks($Path)
+    } catch {
+        # Without kernel32 (pwsh outside Windows) the P/Invoke throws on the
+        # first call. That is "not readable" as well: the cache stays off.
+        $script:VsFileChangeTimeReady = $false
+        Write-VsLog -Level WARN -Message ('Aenderungszeit der Paketdateien nicht lesbar, Hash-Cache des Datei-Stamps bleibt aus: {0}' -f $_.Exception.Message)
+        return 0L
+    }
 }
 
 function Get-VsStampHashCacheEntry {
