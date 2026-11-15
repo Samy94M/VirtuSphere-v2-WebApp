@@ -1,7 +1,7 @@
 // Etappe 14: dynamic form semantics that a static source scan cannot prove.
 // Covers the server-error state, repeated-row template IDs, keyboard insertion,
 // the deploy form's live describedby changes and one screen-reader description
-// sample. The page-wide negative reference scan lives in accessibility.spec.js.
+// sample. The page-wide negative reference scan lives in health-matrix.spec.js (a11y step).
 
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
