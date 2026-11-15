@@ -35,7 +35,8 @@ final class PhpImageStagesContractTest extends TestCase
         self::assertSame(1, preg_match_all('/^\s+context: \.\/Docker\/php$/m', $compose));
         self::assertSame('virtusphere-php:8.4-tooling', $toolLock['dockerImages']['php']['ref'] ?? null);
         self::assertSame('tooling', $toolLock['dockerImages']['php']['target'] ?? null);
-        self::assertSame(2, substr_count($workflow, 'docker build --target tooling -t virtusphere-php:8.4-tooling Docker/php'));
+        // fast-lane, integration-lane and advisory-gates (composer-audit, QL3 A5).
+        self::assertSame(3, substr_count($workflow, 'docker build --target tooling -t virtusphere-php:8.4-tooling Docker/php'));
         self::assertStringNotContainsString('virtusphere-v2-webapp-php composer', $workflow);
     }
 

@@ -112,12 +112,17 @@ function Get-VsCurrentSids {
 function Get-VsFileSystemRoot {
     $root = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)
     if ([string]::IsNullOrEmpty($root)) {
-        # Outside Windows (the suite under pwsh on Linux) there is no system
-        # directory and no CM drive. A provider-qualified '/' fails there with
-        # a null drive; the plain root is a FileSystem path.
-        $root = [IO.Path]::GetPathRoot([IO.Path]::GetTempPath())
+        $root = 'Microsoft.PowerShell.Core\FileSystem::' + [IO.Path]::GetPathRoot([IO.Path]::GetTempPath())
     }
     return $root
+}
+
+# A UNC content path joined the way MECM stores it, with a backslash. Join-Path
+# would resolve \\server\share as a drive under pwsh on Linux (Linux Pester
+# lane) and fail there; on Windows both give the same string.
+function Join-VsUncPath {
+    param([string]$Base, [string]$Child)
+    return ($Base.TrimEnd('\', '/') + '\' + $Child.TrimStart('\', '/'))
 }
 
 # ModelName is ScopeId_<guid>/Application_<guid>. Only the second part is
@@ -941,7 +946,7 @@ function Get-VsClientPreflightReport {
     try {
         $markerName = '.virtusphere-source-identity'
         $localMarker = Join-Path ([string]$Config.PackagesBase) $markerName
-        $shareMarker = Join-Path ([string]$Config.ContentShare) $markerName
+        $shareMarker = Join-VsUncPath ([string]$Config.ContentShare) $markerName
         foreach ($pair in @(@('local', $localMarker), @('unc', $shareMarker))) {
             try {
                 $value = Read-VsSourceMarkerText -LiteralPath $pair[1]
@@ -967,7 +972,7 @@ function Get-VsClientPreflightReport {
                 }
             }
             $localPath = Join-Path ([string]$Config.PackagesBase) ([string]$spec.Folder)
-            $sharePath = Join-Path ([string]$Config.ContentShare) ([string]$spec.Folder)
+            $sharePath = Join-VsUncPath ([string]$Config.ContentShare) ([string]$spec.Folder)
             try {
                 if (-not (Test-Path -LiteralPath $localPath -PathType Container) -or
                     -not (Test-Path -LiteralPath $sharePath -PathType Container)) { throw 'local or UNC content folder missing' }
@@ -1081,7 +1086,7 @@ function Get-VsClientPreflightReport {
                 continue
             }
             $codes = @(Get-CMDeploymentTypeReturnCode -InputObject $types[0] -ErrorAction Stop)
-            $issues = @(Get-VsClientDeploymentTypeContractIssues -DeploymentType $types[0] -Spec $spec -ContentLocation (Join-Path ([string]$Config.ContentShare) ([string]$spec.Folder)) -InstallCommand (Get-VsClientInstallCommand -Spec $spec) -ReturnCodes $codes)
+            $issues = @(Get-VsClientDeploymentTypeContractIssues -DeploymentType $types[0] -Spec $spec -ContentLocation (Join-VsUncPath ([string]$Config.ContentShare) ([string]$spec.Folder)) -InstallCommand (Get-VsClientInstallCommand -Spec $spec) -ReturnCodes $codes)
             foreach ($issue in $issues) { $findings.Add([pscustomobject]@{ Code = 'deployment_type_drift'; Target = $name; Detail = [string]$issue; Blocking = $true }) }
             $runtimes.Add((Get-VsClientRuntimeState -Spec $spec -DeploymentType $types[0] -Issues $issues))
             try {

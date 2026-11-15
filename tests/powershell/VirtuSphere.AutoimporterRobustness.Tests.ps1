@@ -384,6 +384,12 @@ Describe 'AR1 F-1: ein Hash je Datei je Lauf' {
         @{ name = 'ohne Laufgrenze (AL1-Verhalten)'; startRun = $false; changeTicks = 'real'; expected = 2 }
         @{ name = 'ohne lesbare ChangeTime'; startRun = $true; changeTicks = 'none'; expected = 2 }
     ) {
+        # Der Laufspeicher merkt nur Dateien mit lesbarer NTFS-ChangeTime; unter
+        # pwsh auf Linux gibt es sie nicht (Nutzerwort 15.11.2026, QL3 A5).
+        if ($changeTicks -eq 'real' -and $startRun -and [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+            Set-ItResult -Skipped -Because 'needs a readable NTFS ChangeTime (Windows only)'
+            return
+        }
         $r = Invoke-InFileScope -Path $script:MecmCommon -Arguments @($script:RunRoot, $script:RunPkg, $startRun, $changeTicks) -Body {
             param($root, $pkg, $start, $ticks)
             $calls = New-Object System.Collections.Generic.List[string]
