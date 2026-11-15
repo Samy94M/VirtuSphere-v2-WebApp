@@ -112,7 +112,10 @@ function Get-VsCurrentSids {
 function Get-VsFileSystemRoot {
     $root = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)
     if ([string]::IsNullOrEmpty($root)) {
-        $root = 'Microsoft.PowerShell.Core\FileSystem::' + [IO.Path]::GetPathRoot([IO.Path]::GetTempPath())
+        # Outside Windows (the suite under pwsh on Linux) there is no system
+        # directory and no CM drive. A provider-qualified '/' fails there with
+        # a null drive; the plain root is a FileSystem path.
+        $root = [IO.Path]::GetPathRoot([IO.Path]::GetTempPath())
     }
     return $root
 }

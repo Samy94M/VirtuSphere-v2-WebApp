@@ -979,6 +979,12 @@ Describe 'AV2 Contentidentitaet, Uebernahme und Entscheidung (Common)' {
                 ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'XYZ00001'; BaselineContentId = 'ContentA'
             }
             $script:RegistryFixture = @{ ContentRequests = $valid; ContentTracking = [pscustomobject]@{ ApplicationName = 'Agent-1'; State = 'complete'; Manifest = ('F' * 64) } }
+            if (-not (Get-PSDrive -Name HKLM -ErrorAction SilentlyContinue)) {
+                # pwsh on Linux has no registry drive, so Join-Path on HKLM: throws
+                # before the fixture reader runs. Windows keeps the real key builders.
+                function Get-VsPackageContentRequestKey { param($ApplicationName) "HKLM:\SOFTWARE\VirtuSphere\ContentRequests\$ApplicationName" }
+                function Get-VsPackageContentTrackingKey { param($ApplicationName) "HKLM:\SOFTWARE\VirtuSphere\ContentTracking\$ApplicationName" }
+            }
             function Read-VsRegistryKeyProperties {
                 param($Key)
                 if ($Key -match '\\ContentRequests\\') { return $script:RegistryFixture.ContentRequests }

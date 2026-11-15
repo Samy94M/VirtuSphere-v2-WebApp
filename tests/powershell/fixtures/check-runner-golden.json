@@ -1,5 +1,5 @@
 {
-  "parameters": ["Lane", "Gate", "List", "Json", "KeepArtifacts", "FailFast", "NoNetwork"],
+  "parameters": ["Lane", "Gate", "List", "Json", "KeepArtifacts", "FailFast", "NoNetwork", "Advisory"],
   "lanes": {
     "Fast": [
       "compose-config", "compose-hardening", "php-lint", "phpunit-unit", "phpstan", "composer-validate", "composer-audit",
@@ -28,6 +28,11 @@
   },
   "invalidLane": "check.ps1: unbekannte Lane 'Bogus' (gueltig: Fast, Integration, Release)",
   "invalidGate": "check.ps1: unbekanntes Gate 'does-not-exist' (siehe -List)",
+  "advisory": {
+    "Fast": ["composer-audit"],
+    "Release": ["composer-audit", "image-cve", "npm-audit", "dependency-osv"]
+  },
+  "invalidAdvisoryGate": "check.ps1: -Advisory und -Gate schliessen sich aus (-Advisory waehlt selbst aus der Registry)",
   "jsonTopLevel": ["commit", "durationSeconds", "exitCode", "lane", "noNetwork", "results", "started", "summary", "version"],
   "jsonResult": ["class", "detail", "durationSeconds", "kind", "name", "network"],
   "jsonSummary": ["fail", "infrastructure_error", "not_applicable", "pass", "skip"]

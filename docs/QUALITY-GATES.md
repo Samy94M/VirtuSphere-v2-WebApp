@@ -47,7 +47,7 @@ Ausführungsformen: **nativ** (Host-Tools), **containerisiert** (läuft über Do
 | `shellcheck` / `hadolint` | Shell-Skripte und Dockerfiles | containerisiert | Echte Findings; Ausnahmen nur inline mit Grund |
 | `python-client-tests` | `upload_mac_list.py` (stdlib-only) inkl. Exitcode-Vertrag 0/20-24 sowie geschlossener 8R-O-Runner-Vertrag, Redaction, Atomizität und read-only Preflight | containerisiert | Rückkanal-Contract (ADR-0030) oder Durable-Runner-Protokoll (ADR-0040) verletzt |
 
-## Integration-Lane (Merge, Nightly, Release-Kandidaten)
+## Integration-Lane (Push auf main, Release-Kandidaten)
 
 Zusätzlich zur Fast-Lane; erstes Gate ist der Wegwerf-Stack.
 

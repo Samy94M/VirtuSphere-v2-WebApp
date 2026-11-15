@@ -413,7 +413,7 @@ Describe 'QA stack reads only the verified copy' {
         $baseServices = Get-ServiceBlocks $composeBase
         $qaServices = Get-ServiceBlocks $composeOverride
         $checked = 0
-        foreach ($service in (Get-QaStackIdentity 'C:/synthetic').Services) {
+        foreach ($service in (Get-QaStackIdentity (Join-Path $TestDrive 'synthetic')).Services) {
             if (-not $baseServices.ContainsKey($service)) { continue }
             $qaTargets = @()
             if ($qaServices.ContainsKey($service)) {
@@ -442,7 +442,7 @@ Describe 'QA stack reads only the verified copy' {
         $qaServices['qa-source'] | Should -Match 'profiles: \["qa-source"\]'
         $qaServices['qa-source'] | Should -Match 'network_mode: none'
         $qaServices['qa-source'] | Should -Match '(?ms)target: /qa-source\n\s+read_only: true'
-        (Get-QaStackIdentity 'C:/synthetic').Services | Should -Not -Contain 'qa-source'
+        (Get-QaStackIdentity (Join-Path $TestDrive 'synthetic')).Services | Should -Not -Contain 'qa-source'
         $composeOverride | Should -Match '(?m)^  qa-repo:$'
     }
 
@@ -455,7 +455,7 @@ Describe 'QA stack reads only the verified copy' {
         $phpunitFull = $phpunitFull.Substring(0, $phpunitFull.IndexOf("Add-Gate -Name 'schema-convergence'"))
         $phpunitFull | Should -Not -Match ([regex]::Escape("(`$repoRoot + ':/repo')"))
         $phpunitFull.IndexOf('Confirm-QaSourceCurrent') | Should -BeLessThan $phpunitFull.IndexOf("'stop'")
-        (Get-QaStackIdentity 'C:/synthetic').SourceVolume | Should -Be 'virtusphere-qa_qa-repo'
+        (Get-QaStackIdentity (Join-Path $TestDrive 'synthetic')).SourceVolume | Should -Be 'virtusphere-qa_qa-repo'
     }
 
     It 'attaches the phpunit-full container to every network of the stack before it starts (C-07)' {
@@ -466,7 +466,7 @@ Describe 'QA stack reads only the verified copy' {
         $block = [regex]::Match($compose, '(?ms)^networks:\n(.*?)(?=^\S|\z)').Groups[1].Value
         $declared = @([regex]::Matches($block, '(?m)^  ([A-Za-z0-9_.-]+):') | ForEach-Object { $_.Groups[1].Value })
         $declared | Should -Contain 'front'
-        $identity = Get-QaStackIdentity 'C:/synthetic'
+        $identity = Get-QaStackIdentity (Join-Path $TestDrive 'synthetic')
         foreach ($net in @($declared | Where-Object { $_ -ne 'default' })) {
             $identity.FrontNetwork | Should -Be ('{0}_{1}' -f $identity.Project, $net)
         }

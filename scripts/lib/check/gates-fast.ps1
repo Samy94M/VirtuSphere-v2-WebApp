@@ -161,7 +161,7 @@ function Register-FastCheckGates {
         Format-ToolResult $p 'composer.json valide, Plattform-Anforderungen erfuellt' 'composer check-platform-reqs rot'
     }
 
-    Add-Gate -Name 'composer-audit' -Lanes $allLanes -Kind 'container' -Network $true -Body {
+    Add-Gate -Name 'composer-audit' -Lanes $allLanes -Kind 'container' -Network $true -Advisory $true -Body {
         $r = Invoke-AppComposer @('audit', '--locked')
         if ($null -eq $r) { return New-InfraResult ('weder Container {0} noch Image {1} verfuegbar' -f $phpContainer, $toolImages.php) }
         Format-ToolResult $r 'keine bekannten Advisories' 'composer audit meldet Advisories'

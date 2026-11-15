@@ -204,6 +204,30 @@ Describe 'Visible progress reporting contract' {
         $script:CheckRunner | Should -Match "'\[\{0\}/\{1\}\] \{2\} \{3\}"
     }
 
+    It 'counts the advisory selection with the same per-gate lines (QL3 A5)' {
+        # The selection filter must run before the total is taken, and an
+        # advisory run must print RUN and result lines for exactly its gates.
+        # -NoNetwork keeps the run offline: every advisory gate is a network gate.
+        $filterAt = $script:CheckRunner.IndexOf('$selected = @($selected | Where-Object { $_.Advisory })')
+        $totalAt = $script:CheckRunner.IndexOf('$gateTotal = $selected.Count')
+        $filterAt | Should -BeGreaterThan -1
+        $filterAt | Should -BeLessThan $totalAt
+
+        $engine = (Get-Process -Id $PID).Path
+        $runner = Join-Path (Join-Path $script:RepoRoot 'scripts') 'check.ps1'
+        $output = @(& $engine -NoProfile -ExecutionPolicy Bypass -File $runner -Lane Release -Advisory -NoNetwork 2>&1 | ForEach-Object { "$_" })
+        $LASTEXITCODE | Should -Be 0
+        $runLines = @($output | Where-Object { $_ -match '^\[\d+/\d+\] RUN ' })
+        $resultLines = @($output | Where-Object { $_ -match '^\[\d+/\d+\] not_applicable ' })
+        $runLines.Count | Should -BeGreaterThan 0
+        $resultLines.Count | Should -Be $runLines.Count
+        $total = $runLines.Count
+        for ($i = 1; $i -le $total; $i++) {
+            $runLines[$i - 1] | Should -Match ('^\[{0}/{1}\] RUN ' -f $i, $total)
+            $resultLines[$i - 1] | Should -Match ('^\[{0}/{1}\] not_applicable ' -f $i, $total)
+        }
+    }
+
     It 'streams the long PowerShell child while preserving its captured artifact' {
         $script:CheckRuntime | Should -Match 'param\(\[string\]\$Exe, \[string\[\]\]\$Arguments = @\(\), \[switch\]\$Live\)'
         $script:CheckRuntime | Should -Match 'if \(\$Live\) \{ Write-Host \$line \}'

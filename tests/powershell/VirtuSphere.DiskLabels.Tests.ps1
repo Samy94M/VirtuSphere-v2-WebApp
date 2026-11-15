@@ -74,7 +74,8 @@ Describe 'DN1 Datentraegername: Spiegel und Grenzen' {
         $php = Get-Content -Path $script:LayoutPhp -Raw
         $php | Should -Match 'const VIRTUSPHERE_DISK_VOLUME_LABEL_MAX = (\d+);'
         $phpMax = [int]([regex]::Match($php, 'const VIRTUSPHERE_DISK_VOLUME_LABEL_MAX = (\d+);').Groups[1].Value)
-        $script:ClientText | Should -Match ('(?m)^\$volumeLabelMax = {0}$' -f $phpMax)
+        # \r?: the Windows CI runner checks out with core.autocrlf=true (CRLF).
+        $script:ClientText | Should -Match ('(?m)^\$volumeLabelMax = {0}\r?$' -f $phpMax)
     }
 
     It 'prueft dieselbe Zeichenklasse, die vm_disk_volume_label() ersetzt' {

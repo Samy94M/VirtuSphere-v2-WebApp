@@ -31,7 +31,7 @@
     infrastructure_error (Zero-Match darf nie leer gruen werden).
 
 .PARAMETER Lane
-    Fast (jeder PR, lokaler Vorabcheck), Integration (Merge/Nightly),
+    Fast (jeder PR, lokaler Vorabcheck), Integration (Push auf main),
     Release (vor Auslieferung). Default: Fast.
 
 .PARAMETER Gate
@@ -55,8 +55,18 @@
     Netzabhaengige Gates als not_applicable markieren; fehlende Tool-Images
     werden nicht nachgezogen.
 
+.PARAMETER Advisory
+    Nur die Advisory-Gates der gewaehlten Lane ausfuehren: Gates, deren
+    Ergebnis sich ohne Commit aendern kann, weil sie externe Advisory- oder
+    CVE-Daten lesen (Registry-Flag Advisory). Die Auswahl leitet der Runner
+    aus der Registry ab; der Nightly-CI-Lauf nutzt -Lane Release -Advisory.
+    Nicht mit -Gate kombinierbar (Exit 3).
+
 .EXAMPLE
     powershell -NoProfile -File scripts\check.ps1 -Lane Fast -Json qa-artifacts/qa-fast.json
+
+.EXAMPLE
+    pwsh -NoProfile -File scripts/check.ps1 -Lane Release -Advisory -Json qa-artifacts/qa-advisory.json
 #>
 [CmdletBinding()]
 param(
@@ -66,7 +76,8 @@ param(
     [string]$Json,
     [switch]$KeepArtifacts,
     [switch]$FailFast,
-    [switch]$NoNetwork
+    [switch]$NoNetwork,
+    [switch]$Advisory
 )
 
 Set-StrictMode -Version 1.0
@@ -75,6 +86,11 @@ $ErrorActionPreference = 'Stop'
 # --- Aufruf-Validierung (Exit 3) --------------------------------------------
 # powershell.exe -File uebergibt Arrays als einen String: Kommas selbst splitten.
 if ($Gate) { $Gate = @($Gate | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' }) }
+
+if ($Advisory -and $Gate) {
+    Write-Host 'check.ps1: -Advisory und -Gate schliessen sich aus (-Advisory waehlt selbst aus der Registry)' -ForegroundColor Red
+    exit 3
+}
 
 $validLanes = @('Fast', 'Integration', 'Release')
 if ($validLanes -notcontains $Lane) {
@@ -184,12 +200,22 @@ if ($Gate) {
     }
     $selected = @($gates | Where-Object { $Gate -contains $_.Name })
 }
+if ($Advisory) {
+    # Derived from the registry flag, never from a list in the caller (ADR-0031).
+    $selected = @($selected | Where-Object { $_.Advisory })
+    if ($selected.Count -eq 0) {
+        # Zero-Match must never run green: a lane without advisory gates is a wrong call.
+        Write-Host ("check.ps1: Lane '{0}' hat keine Advisory-Gates" -f $Lane) -ForegroundColor Red
+        exit 3
+    }
+}
 
 if ($List) {
     Write-Host ("Lane {0}: {1} Gate(s)" -f $Lane, $selected.Count)
     foreach ($g in $selected) {
         $net = ''
         if ($g.Network) { $net = ' [netz]' }
+        if ($g.Advisory) { $net += ' [advisory]' }
         Write-Host ('  {0,-22} {1,-13} lanes={2}{3}' -f $g.Name, $g.Kind, ($g.Lanes -join ','), $net)
     }
     exit 0

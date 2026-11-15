@@ -123,3 +123,23 @@ existiert im Runner erst, wenn es echt prüft.
   schlägt ohne funktionierendes Git hart fehl statt leer grün zu laufen.
 - Sessions-Hooks bleiben die leise Frühwarnung; der Runner ist die beweisende
   Instanz. Beide rufen dieselben Skripte mit denselben Diagnose-IDs.
+
+## Amendment 2026-11-15: ein Lauf je Gate und Ereignis in CI (QL3 A5)
+
+Die Integration-Lane enthält alle Fast-Gates. CI fuhr sie bei jedem Push auf
+`main` deshalb doppelt (Job `fast-lane` und `integration-lane`), und nightly
+lief die volle Integration-Lane auch auf unverändertem Stand. Nutzerwort
+11.11.2026 (A1 bis A5).
+
+- Push auf `main`: Integration-Lane und Windows PowerShell 5.1. Pull Request:
+  Fast-Lane. Manuell: alle Jobs. Der CSP-`--range`-Schritt läuft bei Push nach
+  der Integration-Lane.
+- Nightly: nur die Advisory-Gates, deren Ergebnis sich ohne Commit ändert, weil
+  sie externe Advisory- oder CVE-Daten lesen. Das Registry-Flag `Advisory` von
+  `Add-Gate` markiert sie, `check.ps1 -Advisory` wählt sie je Lane aus
+  (`-Lane Release -Advisory`). Der Workflow nennt kein Gate; mit `-Gate`
+  zusammen oder auf einer Lane ohne Advisory-Gate ist der Aufruf ungültig
+  (Exit 3).
+- Die Angabe „Nightly“ bei der Integration-Lane oben und in ADR-0015 und
+  ADR-0028 gilt für CI damit nicht mehr; lokal und für Release-Kandidaten
+  bleibt die Lane unverändert.
