@@ -648,10 +648,23 @@ $cases = @(
         if ($r -and (@($r.Output) -join ' ') -match '\[doc-fragments\.no-git\]') { return @{ Status = 'infra'; Detail = 'Repo ohne volle Git-Historie' } }
         Assert-Guard $r @(0)
     } }
+    # Fixture-Kontrolle plus Fortschrittsvertrag zur Laufzeit (QL4, B4: vorher
+    # der Pester-Fall "is green on the fragment layout"): jede der vier Einheiten
+    # meldet RUN und pass, und --quiet schreibt bei Gruen nichts.
     @{ Name = 'doc-fragments.fixture-control'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(0)
+        $guard = Join-Path $scriptDir 'check-doc-fragments.sh'
+        $units = '(?s)' + ((@('changelog-head', 'changelog-since-release', 'register-archive', 'fragments') | ForEach-Object {
+            '(?=.*\[\d/4\] RUN doc-fragments ' + $_ + '\b)(?=.*\[\d/4\] pass doc-fragments ' + $_ + '\b)'
+        }) -join '')
+        $verdict = Assert-Guard (Invoke-GuardShell $guard @('--ci') $fx) @(0) $units
+        if ($verdict.Status -ne 'proven') { return $verdict }
+        $quiet = Invoke-GuardShell $guard @('--quiet') $fx
+        $verdict = Assert-Guard $quiet @(0)
+        if ($verdict.Status -ne 'proven') { return $verdict }
+        if ((@($quiet.Output) -join '').Trim() -ne '') { return @{ Status = 'unproven'; Detail = '--quiet schreibt bei Gruen: ' + (@($quiet.Output) -join ' ') } }
+        return $verdict
     } }
     # Ein Eintrag direkt unter der obersten Release-Ueberschrift, committet: das
     # alte Verfahren mit der Ueberschrift des letzten Releases statt "Noch in
@@ -671,9 +684,11 @@ $cases = @(
     } }
     # unreleased-section, fragment-format und no-git beweist
     # tests/powershell/VirtuSphere.DocFragments.Tests.ps1 gegen dasselbe Skript
-    # mit derselben Diagnose-ID (R4, C2: je Regel abgeschaltet, Pester-Fall rot).
-    # Hier bleiben gruen, Fixture-Kontrolle, je eine Mutation der beiden Haelften
-    # (CHANGELOG und Archivregister) auf den echten Quellen und Zero-Match.
+    # mit derselben Diagnose-ID (R4, C2: je Regel abgeschaltet, Pester-Fall rot),
+    # ebenso preamble-entry und "entfernte Archivzeile erlaubt" (QL4: hier ohne Fall).
+    # Hier bleiben gruen, Fixture-Kontrolle mit Fortschritt und --quiet, je eine
+    # Mutation der beiden Haelften (CHANGELOG und Archivregister) auf den echten
+    # Quellen und Zero-Match; deren Pester-Zwillinge entfielen mit QL4 (B4).
     @{ Name = 'doc-fragments.archive-entry'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
