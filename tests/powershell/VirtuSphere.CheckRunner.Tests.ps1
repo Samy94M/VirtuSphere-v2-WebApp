@@ -73,6 +73,25 @@ Describe 'check.ps1 golden surface' {
         }
     }
 
+    # QL3 A5: the nightly CI job runs only the gates whose result can change
+    # without a commit. The selection comes from the registry flag; the
+    # workflow names no gate.
+    It 'selects the advisory gates of a lane from the registry flag and refuses -Gate next to it' {
+        foreach ($lane in @('Fast', 'Release')) {
+            $result = Invoke-CheckRunnerCase @('-Lane', $lane, '-Advisory', '-List')
+            $result.ExitCode | Should -Be 0
+            @($result.Output | ForEach-Object { if ($_ -match '^  (\S+)\s+') { $Matches[1] } }) | Should -Be @($script:Golden.advisory.$lane)
+            @($result.Output | Where-Object { $_ -match '^  \S+' -and $_ -notmatch '\[advisory\]' }) | Should -BeNullOrEmpty
+        }
+        $full = Invoke-CheckRunnerCase @('-Lane', 'Release', '-List')
+        @($full.Output | Where-Object { $_ -match '\[advisory\]' } | ForEach-Object { if ($_ -match '^  (\S+)\s+') { $Matches[1] } }) |
+            Should -Be @($script:Golden.advisory.Release)
+
+        $both = Invoke-CheckRunnerCase @('-Lane', 'Release', '-Advisory', '-Gate', 'npm-audit', '-List')
+        $both.ExitCode | Should -Be 3
+        ($both.Output -join "`n") | Should -Be $script:Golden.invalidAdvisoryGate
+    }
+
     It 'makes a catalog mutation observably fail the golden comparison' {
         $mutant = @($script:Golden.lanes.Fast | Select-Object -Skip 1)
         (Compare-Object -ReferenceObject @($script:Golden.lanes.Fast) -DifferenceObject $mutant) | Should -Not -BeNullOrEmpty
@@ -89,7 +108,9 @@ Describe 'gate registry mirrors in the QA documents' {
         $listing = Invoke-CheckRunnerCase @('-Lane', 'Release', '-List')
         if ($listing.ExitCode -ne 0) { throw 'runner list failed for Release' }
         $script:RegistryGates = @($listing.Output | ForEach-Object {
-                if ($_ -match '^  (\S+)\s+\S+\s+lanes=\S+(\s+\[netz\])?') { [pscustomobject]@{ Name = $Matches[1]; Network = [bool]$Matches[2] } }
+                if ($_ -match '^  (\S+)\s+\S+\s+lanes=\S+(\s+\[netz\])?(\s+\[advisory\])?') {
+                    [pscustomobject]@{ Name = $Matches[1]; Network = [bool]$Matches[2]; Advisory = [bool]$Matches[3] }
+                }
             })
         $script:QualityGatesDoc = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'docs') 'QUALITY-GATES.md') -Raw
         $script:QaDoc = Get-Content -LiteralPath (Join-Path (Join-Path $script:RepoRoot 'docs') 'QA.md') -Raw
@@ -104,6 +125,21 @@ Describe 'gate registry mirrors in the QA documents' {
             if ($sentence.Count -ne 1) { return @('<-NoNetwork sentence not found exactly once>') }
             return @($Gates | Where-Object { $_.Network -and ($sentence[0] -notmatch ('`' + [regex]::Escape($_.Name) + '`')) } | ForEach-Object { $_.Name })
         }
+        function Get-AdvisoryGatesNotNamed {
+            param($Gates, [string]$Document)
+            $sentence = @($Document -split "`n" | Where-Object { $_ -match '`-Advisory` selects' })
+            if ($sentence.Count -ne 1) { return @('<-Advisory sentence not found exactly once>') }
+            return @($Gates | Where-Object { $_.Advisory -and ($sentence[0] -notmatch ('`' + [regex]::Escape($_.Name) + '`')) } | ForEach-Object { $_.Name })
+        }
+    }
+
+    It 'names every advisory gate in the -Advisory sentence of docs/QA.md (QL3 A5)' {
+        @($script:RegistryGates | Where-Object { $_.Advisory }).Count | Should -BeGreaterThan 0
+        Get-AdvisoryGatesNotNamed $script:RegistryGates $script:QaDoc | Should -BeNullOrEmpty
+        $gate = @($script:RegistryGates | Where-Object { $_.Name -eq 'image-cve' })
+        $withoutName = [regex]::Replace($script:QaDoc, '(?m)^(.*`-Advisory` selects.*?)`image-cve`', '$1`removed`')
+        $withoutName | Should -Not -Be $script:QaDoc
+        Get-AdvisoryGatesNotNamed $gate $withoutName | Should -Be @('image-cve')
     }
 
     It 'derives a non-empty registry with network gates' {
@@ -535,7 +571,7 @@ Describe 'QA stack teardown carries the tools profile (BK-N5)' {
         function Invoke-QaTeardownCase {
             param([bool]$KeepArtifacts)
             # Synthetic root: only the identity values matter, no Docker is touched.
-            $repoRoot = 'C:/synthetic/qa-root'
+            $repoRoot = (Join-Path $TestDrive 'synthetic/qa-root')
             $identity = Get-QaStackIdentity $repoRoot
             $qaProject = $identity.Project
             $qaEnvFile = $identity.EnvFile

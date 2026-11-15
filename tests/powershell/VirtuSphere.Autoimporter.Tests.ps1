@@ -979,6 +979,12 @@ Describe 'AV2 Contentidentitaet, Uebernahme und Entscheidung (Common)' {
                 ApplicationModelName = 'ScopeId_A/Application_A'; ApplicationPackageId = 'XYZ00001'; BaselineContentId = 'ContentA'
             }
             $script:RegistryFixture = @{ ContentRequests = $valid; ContentTracking = [pscustomobject]@{ ApplicationName = 'Agent-1'; State = 'complete'; Manifest = ('F' * 64) } }
+            if (-not (Get-PSDrive -Name HKLM -ErrorAction SilentlyContinue)) {
+                # pwsh on Linux has no registry drive, so Join-Path on HKLM: throws
+                # before the fixture reader runs. Windows keeps the real key builders.
+                function Get-VsPackageContentRequestKey { param($ApplicationName) "HKLM:\SOFTWARE\VirtuSphere\ContentRequests\$ApplicationName" }
+                function Get-VsPackageContentTrackingKey { param($ApplicationName) "HKLM:\SOFTWARE\VirtuSphere\ContentTracking\$ApplicationName" }
+            }
             function Read-VsRegistryKeyProperties {
                 param($Key)
                 if ($Key -match '\\ContentRequests\\') { return $script:RegistryFixture.ContentRequests }
@@ -1275,6 +1281,14 @@ Describe 'Get-VsFilesManifestStamp (Inhalt statt mtime)' {
     }
 }
 
+# Der Cache merkt eine Datei nur mit lesbarer NTFS-ChangeTime (FILE_BASIC_INFO
+# ueber kernel32). Unter pwsh auf Linux liefert Get-VsFileChangeTicks laut
+# Vertrag 0, der Cache bleibt aus; die Faelle, die einen gefuellten Cache
+# voraussetzen, laufen deshalb nur unter Windows (5.1-Job bei jedem Push, lokal).
+# Nutzerwort 15.11.2026 (QL3 A5). Der Fall "merkt nichts, wenn die ChangeTime
+# nicht lesbar ist" laeuft ueberall.
+$NtfsChangeTimeHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+
 Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
     # Der Autoimporter bildet den Stamp jede Minute. Ohne Cache las er dafuer
     # jedesmal jeden Installer ganz (am Standort 20 Minuten je Lauf). Der Cache
@@ -1336,7 +1350,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         Set-OldTime $script:Small
     }
 
-    It 'hasht im Folgelauf keine unveraenderte Datei und liefert denselben Stamp wie ohne Cache' {
+    It 'hasht im Folgelauf keine unveraenderte Datei und liefert denselben Stamp wie ohne Cache' -Skip:(-not $NtfsChangeTimeHost) {
         $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot) -Body {
             param($root)
             $cold = Get-VsFilesManifestStamp -Path $root
@@ -1351,7 +1365,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         $result.Cold | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
     }
 
-    It 'nutzt die Eintraege des Gesamtstamps auch fuer die Paketstamps des Aenderungsscans' {
+    It 'nutzt die Eintraege des Gesamtstamps auch fuer die Paketstamps des Aenderungsscans' -Skip:(-not $NtfsChangeTimeHost) {
         # Der Scan bildet nach dem Gesamtstamp je Paket einen eigenen Stamp
         # (Content-Manifest); bisher las das jede Datei ein zweites Mal.
         $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:PkgA) -Body {
@@ -1365,7 +1379,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         $result.Stamp | Should -Be (Get-ReferenceStamp -Root $script:PkgA)
     }
 
-    It 'erkennt neuen Inhalt bei gleicher Laenge und neuem Zeitstempel' {
+    It 'erkennt neuen Inhalt bei gleicher Laenge und neuem Zeitstempel' -Skip:(-not $NtfsChangeTimeHost) {
         $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
             param($root, $big)
             $before = Get-VsFilesManifestStamp -Path $root
@@ -1393,7 +1407,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         $result.After | Should -Be (Get-ReferenceStamp -Root $script:CacheRoot)
     }
 
-    It 'erkennt neue und entfernte Dateien und vergisst den Eintrag einer entfernten Datei' {
+    It 'erkennt neue und entfernte Dateien und vergisst den Eintrag einer entfernten Datei' -Skip:(-not $NtfsChangeTimeHost) {
         $extra = Join-Path $script:PkgB 'neu.txt'
         $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $extra, $script:Small) -Body {
             param($root, $extra, $small)
@@ -1450,7 +1464,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         $result | Should -Be @('PkgA/powershell/setup.bin', 'PkgB/config.json')
     }
 
-    It 'belegt die ChangeTime auf NTFS: Inhalt und SetFileTime schreiben sie fort, Lesen und Sperren nicht' {
+    It 'belegt die ChangeTime auf NTFS: Inhalt und SetFileTime schreiben sie fort, Lesen und Sperren nicht' -Skip:(-not $NtfsChangeTimeHost) {
         # Grundlage des Schluessels, gemessen statt angenommen.
         $file = Join-Path $script:PkgB 'ctime.bin'
         [IO.File]::WriteAllText($file, 'AAAA')
@@ -1479,7 +1493,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         $result.C4 | Should -Be $result.C2
     }
 
-    It 'erkennt neuen Inhalt gleicher Laenge mit zurueckgesetzter LastWriteTime auch im warmen Cache' {
+    It 'erkennt neuen Inhalt gleicher Laenge mit zurueckgesetzter LastWriteTime auch im warmen Cache' -Skip:(-not $NtfsChangeTimeHost) {
         # Derselbe Fall wie "erkennt Payloadinhalt auch bei wiederhergestellter
         # mtime", aber mit gemerktem Eintrag: nur die ChangeTime verraet ihn.
         $result = Invoke-StampCacheCase -Arguments @($script:CacheRoot, $script:Big) -Body {
@@ -1577,7 +1591,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         $result | Should -Be 'source_changing'
     }
 
-    It 'hasht einen Eintrag nach Ablauf der Hoechstdauer voll neu' {
+    It 'hasht einen Eintrag nach Ablauf der Hoechstdauer voll neu' -Skip:(-not $NtfsChangeTimeHost) {
         # Letzte Grenze gegen einen Inhaltswechsel, den weder Laenge noch beide
         # Zeitstempel zeigen (ChangeTime gezielt gesetzt): spaetestens nach
         # Ablauf wird die Datei wieder gelesen.
@@ -1606,7 +1620,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         $result.Lifetime | Should -BeLessOrEqual $result.MaxAge
     }
 
-    It 'verteilt den Ablauf der Eintraege, damit kein einzelner Lauf alles neu hasht' {
+    It 'verteilt den Ablauf der Eintraege, damit kein einzelner Lauf alles neu hasht' -Skip:(-not $NtfsChangeTimeHost) {
         # Verfielen alle Eintraege gleichzeitig, dauerte dieser eine Lauf so lange
         # wie frueher jeder und laege hinter der Meldefrist des Portals, die sich
         # nach dem kurzen letzten Lauf richtet. Bei gleichverteiltem Ablauf in
@@ -1632,7 +1646,7 @@ Describe 'Get-VsFilesManifestStamp: Hash-Cache je Datei (AV-F13, AL1)' {
         ($result.Lifetimes | Measure-Object -Maximum).Maximum | Should -BeLessOrEqual $result.MaxAge
     }
 
-    It 'nutzt den Cache auch fuer den Vorlagenbaum und erkennt dort Aenderungen' {
+    It 'nutzt den Cache auch fuer den Vorlagenbaum und erkennt dort Aenderungen' -Skip:(-not $NtfsChangeTimeHost) {
         $template = Join-Path $TestDrive ('tpl-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force -Path (Join-Path $template 'reporting') | Out-Null
         $wrapper = Join-Path $template 'install.ps1'

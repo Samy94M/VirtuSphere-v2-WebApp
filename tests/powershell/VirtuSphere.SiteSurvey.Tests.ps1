@@ -16,6 +16,14 @@ BeforeAll {
     function Get-CMDeploymentTypeSupersedence { param($InputObject, $ErrorAction) }
     function Get-CMDistributionPointGroup { param($ErrorAction) }
     function Get-SmbShare { param($ErrorAction) }
+    # pwsh on Linux has no CIM cmdlets, and Pester can only mock a command that
+    # exists. Windows keeps the real cmdlets, so their parameter binding stays tested there.
+    if (-not (Get-Command Get-CimClass -ErrorAction SilentlyContinue)) {
+        function Get-CimClass { param($Namespace, $ClassName, $ComputerName, $ErrorAction) }
+    }
+    if (-not (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) {
+        function Get-CimInstance { param($Namespace, $ClassName, $Filter, $Property, $ComputerName, $InputObject, $ErrorAction) }
+    }
 
     $script:ModelA = 'ScopeId_11111111-1111-1111-1111-111111111111/Application_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 

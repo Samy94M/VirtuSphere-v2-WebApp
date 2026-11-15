@@ -158,7 +158,7 @@ function Register-ReleaseCheckGates {
         New-PassResult ('SPDX-SBOM fuer {0} Image(s) unter {1}' -f $found.Images.Count, $artifactDir) $written
     }
 
-    Add-Gate -Name 'image-cve' -Lanes @('Release') -Kind 'container' -Network $true -Body {
+    Add-Gate -Name 'image-cve' -Lanes @('Release') -Kind 'container' -Network $true -Advisory $true -Body {
         # Critical/High blockieren; Ausnahmen nur befristet ueber .trivyignore.yaml
         # (expired_at laesst eine abgelaufene Ausnahme automatisch wieder rot werden).
         if (-not (Test-Path (Join-Path $repoRoot '.trivyignore.yaml'))) {
@@ -214,7 +214,7 @@ function Register-ReleaseCheckGates {
         Format-ToolResult $r ('Offline-Bundle gebaut und offline verifiziert: ' + $bundleDir) 'Offline-Bundle fehlgeschlagen'
     }
 
-    Add-Gate -Name 'npm-audit' -Lanes @('Release') -Kind 'native' -Network $true -Body {
+    Add-Gate -Name 'npm-audit' -Lanes @('Release') -Kind 'native' -Network $true -Advisory $true -Body {
         # QA-Tooling-Abhaengigkeiten (Playwright/axe in tests/e2e): Advisory-Bericht
         # als Artefakt, blockiert ab high - das Pendant zu composer-audit.
         if (-not (Test-Command 'npm')) { return New-InfraResult 'npm nicht gefunden' }
@@ -229,7 +229,7 @@ function Register-ReleaseCheckGates {
         New-FailResult ('npm audit meldet Advisories ab high (Bericht: ' + $reportPath + ')') @($r.Output | Select-Object -First 40)
     }
 
-    Add-Gate -Name 'dependency-osv' -Lanes @('Release') -Kind 'native' -Network $true -Body {
+    Add-Gate -Name 'dependency-osv' -Lanes @('Release') -Kind 'native' -Network $true -Advisory $true -Body {
         # Zweite Advisory-Sicht ueber alle Locks (DG1): composer-audit fragt nur
         # Packagist, und Packagist wie OSV kannten phpseclib GHSA-w3p9-g4p2-h3rr
         # zwei Tage nach der Veroeffentlichung noch nicht; Python-Locks und das

@@ -12,6 +12,15 @@ BeforeAll {
     $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures\restore-root'
     . $script:CheckRuntime
     $script:ShExe = Find-Sh
+    # Git\bin\sh.exe is a launcher that puts /ucrt64/bin and /usr/bin in front
+    # of PATH. The harness's fake tools (uname for N1b) then lose, and the
+    # native ucrt64 openssl gets POSIX paths it cannot open (K19). The GitHub
+    # Windows runner finds that launcher first; the harness needs the MSYS sh
+    # itself, so PATH stays exactly as the harness sets it.
+    if ($script:ShExe -and $env:OS -eq 'Windows_NT' -and $script:ShExe -notmatch '[\\/]usr[\\/]bin[\\/]sh\.exe$') {
+        $msysSh = Join-Path (Split-Path (Split-Path $script:ShExe -Parent) -Parent) 'usr\bin\sh.exe'
+        if (Test-Path -LiteralPath $msysSh) { $script:ShExe = $msysSh }
+    }
     $script:TarExe = (Get-Command tar -ErrorAction SilentlyContinue).Source
     $script:EngineExe = (Get-Process -Id $PID).Path
 
