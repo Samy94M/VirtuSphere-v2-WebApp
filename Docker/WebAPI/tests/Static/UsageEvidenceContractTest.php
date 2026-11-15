@@ -98,20 +98,16 @@ final class UsageEvidenceContractTest extends TestCase
         );
     }
 
-    public function testTheSectionCatalogsHaveTheSameKeysInBothLocalesWithoutDashes(): void
+    /**
+     * The help renderers (lib/help/*.php) are outside the literal scan of
+     * LangCatalogTest, so the help paragraphs that teach the section are pinned
+     * here. DE/EN parity, placeholders and sentence dashes of every catalog value,
+     * the section catalog included, are owned by scripts/lang-audit.php (gate
+     * lang-parity, QL4); the section keys are static __t() literals of
+     * lib/usage_evidence_view.php that LangCatalogTest already resolves.
+     */
+    public function testTheHelpTeachesTheSection(): void
     {
-        $de = require dirname(__DIR__, 2) . '/lang/de/usage_evidence.php';
-        $en = require dirname(__DIR__, 2) . '/lang/en/usage_evidence.php';
-        self::assertSame(array_keys($de), array_keys($en), 'DE and EN keys must match in order');
-
-        $view = $this->source('lib/usage_evidence_view.php');
-        preg_match_all("/__t\\('usage_evidence\\.([a-z_]+)'/", $view, $matches);
-        self::assertNotEmpty($matches[1]);
-        foreach (array_unique($matches[1]) as $key) {
-            self::assertArrayHasKey($key, $de, 'missing DE key ' . $key);
-            self::assertArrayHasKey($key, $en, 'missing EN key ' . $key);
-        }
-
         $helpKeys = [
             'help_packages' => ['packages_usage', 'packages_os_usage'],
             'help_system_status' => ['vlans_usage'],
@@ -119,17 +115,9 @@ final class UsageEvidenceContractTest extends TestCase
         ];
         foreach ($helpKeys as $catalog => $keys) {
             $deHelp = require dirname(__DIR__, 2) . '/lang/de/' . $catalog . '.php';
-            $enHelp = require dirname(__DIR__, 2) . '/lang/en/' . $catalog . '.php';
             foreach ($keys as $key) {
                 self::assertArrayHasKey($key, $deHelp, $catalog . '.' . $key);
-                self::assertArrayHasKey($key, $enHelp, $catalog . '.' . $key);
-                self::assertNoSentenceDash($deHelp[$key]);
-                self::assertNoSentenceDash($enHelp[$key]);
             }
-        }
-
-        foreach (array_merge($de, $en) as $text) {
-            self::assertNoSentenceDash($text);
         }
     }
 
@@ -140,12 +128,6 @@ final class UsageEvidenceContractTest extends TestCase
         self::assertStringContainsString('tr.row-usage', $css);
         self::assertStringContainsString('.usage-evidence', $css);
         self::assertStringContainsString('.usage-group', $css);
-    }
-
-    private static function assertNoSentenceDash(string $text): void
-    {
-        self::assertStringNotContainsString("\u{2014}", $text, 'em dash in: ' . $text);
-        self::assertStringNotContainsString("\u{2013}", $text, 'en dash in: ' . $text);
     }
 
     private static function assertNoFieldMarker(string $marker, string $literals, string $message): void

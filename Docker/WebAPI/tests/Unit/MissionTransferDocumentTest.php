@@ -351,11 +351,13 @@ final class MissionTransferDocumentTest extends TestCase
     }
 
     /**
-     * Every message this module can produce exists in both locales with the same
-     * placeholders. The keys are listed here because they are produced from
-     * literals in the module and a grep for them is exactly what a rename breaks.
+     * Every message this module can produce exists in the catalog. The keys are
+     * listed here because they are produced from literals in the module through
+     * validator_text(), which the __t() literal scan of LangCatalogTest does not
+     * see, and a grep for them is exactly what a rename breaks. DE/EN parity and
+     * placeholders are owned by scripts/lang-audit.php (gate lang-parity, QL4).
      */
-    public function testEveryShapeMessageExistsInBothLocalesWithEqualPlaceholders(): void
+    public function testEveryShapeMessageExistsInTheCatalog(): void
     {
         $root = dirname(__DIR__, 2);
         $keys = [
@@ -366,16 +368,9 @@ final class MissionTransferDocumentTest extends TestCase
             'mission_import_package_name_required',
         ];
         $de = require $root . '/lang/de/validate.php';
-        $en = require $root . '/lang/en/validate.php';
 
         foreach ($keys as $key) {
             self::assertArrayHasKey($key, $de, 'validate.' . $key . ' is missing in the German catalog');
-            self::assertArrayHasKey($key, $en, 'validate.' . $key . ' is missing in the English catalog');
-            preg_match_all('/:[a-z_]+/', (string) $de[$key], $dePlaceholders);
-            preg_match_all('/:[a-z_]+/', (string) $en[$key], $enPlaceholders);
-            sort($dePlaceholders[0]);
-            sort($enPlaceholders[0]);
-            self::assertSame($dePlaceholders[0], $enPlaceholders[0], 'placeholders differ for validate.' . $key);
         }
 
         // A message actually rendered by the module, so a key that exists but is
