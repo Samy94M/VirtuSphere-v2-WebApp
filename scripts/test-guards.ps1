@@ -984,6 +984,26 @@ function zz_guard_historical(mysqli $db): void
             "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED,"
         Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(0)
     } }
+    # QL4 (B1): the two remaining halves of the former PHPUnit method on
+    # historical events. A list entry the registry does not define is reported,
+    # and an emptied list exempts nothing, so the real historical events turn
+    # unused-event instead of the guard going green on nothing.
+    @{ Name = 'audit-contract.historical-unregistered'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [' `
+            "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_NEVER_DEFINED,"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unknown-event\] VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL lists VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_NEVER_DEFINED'
+    } }
+    @{ Name = 'audit-contract.historical-list-emptied'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        $definitions = Join-Path $fx 'Docker/WebAPI/lib/audit_event_definitions.php'
+        $content = [System.IO.File]::ReadAllText($definitions)
+        $emptied = [regex]::Replace($content, '(?s)const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = \[.*?\];', 'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [];')
+        if ($emptied -eq $content) { throw 'Anker VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL nicht gefunden' }
+        [System.IO.File]::WriteAllText($definitions, $emptied, (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unused-event\] VIRTUSPHERE_AUDIT_EVENT_'
+    } }
     @{ Name = 'audit-contract.zero-match-registry'; Body = {
         # Eine leere Registry darf nie als "alle Producer sind sauber" gelten.
         $fx = New-Fixture $auditFixtureFiles

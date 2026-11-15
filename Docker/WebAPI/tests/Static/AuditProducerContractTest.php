@@ -13,131 +13,31 @@ require_once dirname(__DIR__, 2) . '/lib/audit_registry.php';
  *
  * `scripts/check-audit-contract.php` (gate `audit-contract`, with its harness
  * fixtures) owns the text rules alone: dead-sink, token-sink, unredacted-sink and
- * forbidden-field. W3A (R5) removed their copies here after a mutation probe
- * showed the gate fails on each mutation by itself (`docs/register/2026-11-08-W3A.md`).
- * What stays here says something the gate does not: the registry walk, the owner
- * still holding the one INSERT, the throttle, export and filter shapes.
+ * forbidden-field, and since QL4 (B1) also registry-bypass, the registered-event
+ * walk in both directions and the historical events. W3A (R5) and QL4 removed
+ * their copies here after a mutation probe showed the gate fails on each
+ * mutation by itself (`docs/register/2026-11-08-W3A.md`,
+ * `docs/register/2026-11-15-QL4.md`). What stays here says something the gate
+ * does not: the owner still holding the one INSERT, the throttled events'
+ * context fields, the throttle, export and filter shapes.
  */
 final class AuditProducerContractTest extends TestCase
 {
     /**
-     * The audit table has exactly one writer.
+     * The owner still holds the one INSERT into the audit table.
      *
-     * Not "should have": a second INSERT path would produce rows that no
-     * registry validated, and every reader here (the logs page, the CSV export,
-     * the machine-denial count, the auth flood check) would silently include
-     * them without being able to say what they mean.
+     * That nobody ELSE writes into deploy_logs, that every producer names a
+     * registered event, that every registered event has a producer and that a
+     * historical event is never written again is `scripts/check-audit-contract.php`
+     * (registry-bypass, free-producer/unknown-event, unused-event,
+     * historical-produced, with harness fixtures). QL4 (B1) removed the copies of
+     * those scans here after a mutation probe on the real tree made the gate fail
+     * on each (`docs/register/2026-11-15-QL4.md`). The gate does not ask whether
+     * the owner itself still writes; this does.
      */
-    public function testOnlyTheRepositoryWritesIntoDeployLogs(): void
+    public function testTheRepositoryOwnerHoldsTheAuditInsert(): void
     {
-        $writers = [];
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            if (preg_match('/(INSERT\s+INTO|REPLACE\s+INTO)\s+deploy_logs/i', $source) === 1) {
-                $writers[] = $relative;
-            }
-        }
-
-        self::assertSame(['lib/repo/log.php'], $writers, 'deploy_logs gained a second writer');
-    }
-
-    /**
-     * Every producer passes a registered event constant. A free category plus a
-     * sentence is what 10C removed, and a single reintroduced call would make
-     * the structured columns optional again.
-     */
-    public function testEveryProducerNamesARegisteredEvent(): void
-    {
-        $registered = array_flip($this->registeredConstants());
-        $seen = 0;
-        $free = [];
-
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            if ($relative === 'lib/repo/log.php') {
-                continue;
-            }
-            preg_match_all(
-                '/(?<!function )\b(audit_event|audit_event_required|audit|machine_api_audit_warning)\s*\(\s*([^,()]{1,80}),\s*([A-Za-z_$][A-Za-z0-9_$]{0,80})/s',
-                $this->withoutComments($source),
-                $calls,
-                PREG_SET_ORDER
-            );
-            foreach ($calls as $call) {
-                $second = trim($call[3]);
-                if (str_starts_with($second, '$')) {
-                    // A pass-through inside a helper that already validated.
-                    continue;
-                }
-                $seen++;
-                if (!isset($registered[$second])) {
-                    $free[] = $relative . ': ' . $call[1] . '(' . $second . ')';
-                }
-            }
-        }
-
-        self::assertGreaterThan(50, $seen, 'the producer scan matched almost nothing; it cannot be trusted');
-        self::assertSame([], $free, 'audit producers outside the registry');
-    }
-
-    /**
-     * Every registered event has at least one producer. A code nothing writes
-     * is a value the vocabulary offers, a filter lists and no row ever carries.
-     */
-    public function testEveryRegisteredEventHasAProducer(): void
-    {
-        $used = [];
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            if ($relative === 'lib/audit_event_definitions.php') {
-                continue;
-            }
-            preg_match_all('/\bVIRTUSPHERE_AUDIT_EVENT_[A-Z0-9_]+/', $this->withoutComments($source), $matches);
-            foreach ($matches[0] as $constant) {
-                $used[$constant] = true;
-            }
-        }
-
-        $orphans = [];
-        foreach ($this->registeredConstants() as $constant) {
-            // The definitions file names every constant by construction.
-            if (!isset($used[$constant])) {
-                $orphans[] = $constant;
-            }
-        }
-
-        self::assertSame([], $orphans);
-    }
-
-    /**
-     * A historical event keeps its registration, label and presenter line so
-     * that rows written before its producer was removed stay readable and
-     * filterable (WM-E2a: "adopt identity"). It must stay registered, and no
-     * audit call may write it again: that would be the removed action back.
-     */
-    public function testHistoricalEventsStayReadableAndAreNeverWrittenAgain(): void
-    {
-        $values = $this->registeredConstantValues();
-        $historical = [];
-        foreach (VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL as $event) {
-            $constant = array_search($event, $values, true);
-            self::assertIsString($constant, $event . ' is listed as historical but not registered; old rows would lose their label');
-            $historical[$constant] = true;
-        }
-        self::assertNotSame([], $historical, 'the historical list is empty; the guard would prove nothing');
-
-        $written = [];
-        foreach ($this->firstPartyFiles() as $relative => $source) {
-            preg_match_all(
-                '/(?<!function )\b(?:audit_event|audit_event_required|audit|machine_api_audit_warning)\s*\(\s*[^,()]{1,80},\s*(VIRTUSPHERE_AUDIT_EVENT_[A-Z0-9_]+)/s',
-                $this->withoutComments($source),
-                $calls
-            );
-            foreach ($calls[1] as $constant) {
-                if (isset($historical[$constant])) {
-                    $written[] = $relative . ': ' . $constant;
-                }
-            }
-        }
-
-        self::assertSame([], $written, 'a historical audit event is written again');
+        self::assertMatchesRegularExpression('/INSERT\s+INTO\s+deploy_logs\b/i', $this->withoutComments($this->source('lib/repo/log.php')));
     }
 
     /**
@@ -412,30 +312,6 @@ final class AuditProducerContractTest extends TestCase
         self::assertNotEmpty($files, 'the first-party file scan matched nothing');
 
         return $files;
-    }
-
-    /** @return list<string> */
-    private function registeredConstants(): array
-    {
-        preg_match_all(
-            "/^const (VIRTUSPHERE_AUDIT_EVENT_[A-Z0-9_]+) = '/m",
-            $this->source('lib/audit_event_definitions.php'),
-            $matches
-        );
-        self::assertNotEmpty($matches[1], 'the event-constant scan matched nothing');
-
-        return $matches[1];
-    }
-
-    /** @return array<string,string> constant name => event code */
-    private function registeredConstantValues(): array
-    {
-        $values = [];
-        foreach ($this->registeredConstants() as $constant) {
-            $values[$constant] = (string) constant($constant);
-        }
-
-        return $values;
     }
 
     private function source(string $relative): string
