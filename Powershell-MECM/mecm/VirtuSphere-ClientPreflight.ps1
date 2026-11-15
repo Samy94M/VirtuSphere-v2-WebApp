@@ -119,9 +119,11 @@ function Get-VsFileSystemRoot {
 
 # A UNC content path joined the way MECM stores it, with a backslash. Join-Path
 # would resolve \\server\share as a drive under pwsh on Linux (Linux Pester
-# lane) and fail there; on Windows both give the same string.
+# lane) and fail there; on Windows both give the same string. Any other path
+# (a local folder, the tests' TestDrive) keeps Join-Path.
 function Join-VsUncPath {
     param([string]$Base, [string]$Child)
+    if (-not $Base.StartsWith('\\')) { return (Join-Path $Base $Child) }
     return ($Base.TrimEnd('\', '/') + '\' + $Child.TrimStart('\', '/'))
 }
 
