@@ -648,10 +648,23 @@ $cases = @(
         if ($r -and (@($r.Output) -join ' ') -match '\[doc-fragments\.no-git\]') { return @{ Status = 'infra'; Detail = 'Repo ohne volle Git-Historie' } }
         Assert-Guard $r @(0)
     } }
+    # Fixture-Kontrolle plus Fortschrittsvertrag zur Laufzeit (QL4, B4: vorher
+    # der Pester-Fall "is green on the fragment layout"): jede der vier Einheiten
+    # meldet RUN und pass, und --quiet schreibt bei Gruen nichts.
     @{ Name = 'doc-fragments.fixture-control'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
-        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-fragments.sh') @('--ci') $fx) @(0)
+        $guard = Join-Path $scriptDir 'check-doc-fragments.sh'
+        $units = '(?s)' + ((@('changelog-head', 'changelog-since-release', 'register-archive', 'fragments') | ForEach-Object {
+            '(?=.*\[\d/4\] RUN doc-fragments ' + $_ + '\b)(?=.*\[\d/4\] pass doc-fragments ' + $_ + '\b)'
+        }) -join '')
+        $verdict = Assert-Guard (Invoke-GuardShell $guard @('--ci') $fx) @(0) $units
+        if ($verdict.Status -ne 'proven') { return $verdict }
+        $quiet = Invoke-GuardShell $guard @('--quiet') $fx
+        $verdict = Assert-Guard $quiet @(0)
+        if ($verdict.Status -ne 'proven') { return $verdict }
+        if ((@($quiet.Output) -join '').Trim() -ne '') { return @{ Status = 'unproven'; Detail = '--quiet schreibt bei Gruen: ' + (@($quiet.Output) -join ' ') } }
+        return $verdict
     } }
     # Ein Eintrag direkt unter der obersten Release-Ueberschrift, committet: das
     # alte Verfahren mit der Ueberschrift des letzten Releases statt "Noch in
@@ -671,9 +684,11 @@ $cases = @(
     } }
     # unreleased-section, fragment-format und no-git beweist
     # tests/powershell/VirtuSphere.DocFragments.Tests.ps1 gegen dasselbe Skript
-    # mit derselben Diagnose-ID (R4, C2: je Regel abgeschaltet, Pester-Fall rot).
-    # Hier bleiben gruen, Fixture-Kontrolle, je eine Mutation der beiden Haelften
-    # (CHANGELOG und Archivregister) auf den echten Quellen und Zero-Match.
+    # mit derselben Diagnose-ID (R4, C2: je Regel abgeschaltet, Pester-Fall rot),
+    # ebenso preamble-entry und "entfernte Archivzeile erlaubt" (QL4: hier ohne Fall).
+    # Hier bleiben gruen, Fixture-Kontrolle mit Fortschritt und --quiet, je eine
+    # Mutation der beiden Haelften (CHANGELOG und Archivregister) auf den echten
+    # Quellen und Zero-Match; deren Pester-Zwillinge entfielen mit QL4 (B4).
     @{ Name = 'doc-fragments.archive-entry'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
@@ -742,6 +757,58 @@ $cases = @(
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_en_open' => 'Reiter Probe offen',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_en_open' => 'Tab `"Probe open',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_en_open en: straight quote " is never closed'
+    } }
+    # i18n R8: no sentence dash in either locale (same ASCII-only fixture technique).
+    @{ Name = 'lang-audit.sentence-dash'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_dash' => `"Probe \u{2014} offen`",`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_dash' => 'Probe open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.sentence-dash\] deploy\.zz_guard_dash de: em dash U\+2014'
+    } }
+    @{ Name = 'lang-audit.sentence-dash-en-dash'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_endash' => 'Probe offen',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_endash' => `"Probe \u{2013} open`",`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.sentence-dash\] deploy\.zz_guard_endash en: en dash U\+2013 between words'
+    } }
+    # Gegenprobe: digit range, a literal in <code>, the bare empty-cell placeholder.
+    @{ Name = 'lang-audit.sentence-dash-allowed'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_range' => `"Port 1\u{2013}5, <code>a \u{2014} b</code>`",`n    'zz_guard_cell' => `"\u{2014}`",`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_range' => `"Port 1\u{2013}5, <code>a \u{2013} b</code>`",`n    'zz_guard_cell' => `"\u{2014}`",`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(0)
+    } }
+    # i18n R14: replacement spellings in DE, as a whole word and as a stem inside a compound.
+    @{ Name = 'lang-audit.umlaut-spelling'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_umlaut' => 'Bitte fuer die Probe',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_umlaut' => 'Please probe',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.umlaut-spelling\] deploy\.zz_guard_umlaut de: replacement spelling "fuer"'
+    } }
+    @{ Name = 'lang-audit.umlaut-spelling-stem'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_stem' => 'Die Dateigroesse fehlt',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_stem' => 'The file size is missing',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.umlaut-spelling\] deploy\.zz_guard_stem de: replacement spelling "groess"'
+    } }
+    @{ Name = 'lang-audit.umlaut-word-start'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_start' => 'Nichts bleibt uebrig',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_start' => 'Nothing is left',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.umlaut-spelling\] deploy\.zz_guard_start de: replacement spelling "uebrig"'
+    } }
+    # Gegenprobe: real words that contain ae/oe/ue, loan words, an acronym and a code literal stay clean.
+    @{ Name = 'lang-audit.umlaut-clean'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_clean' => 'Aktuell neue Quelle in der Queue, Steuerung erneut, Feuer, Poet, Israel, UEFI, <code>Get-Ueberblick</code>',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_clean' => 'Current new source in the queue',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(0)
+    } }
+    # Zero match: a locale without a single value would leave every rule vacuously green.
+    @{ Name = 'lang-audit.zero-match'; Body = {
+        $fx = New-Fixture @('Docker/WebAPI/lang')
+        Get-ChildItem -Path (Join-Path $fx 'Docker/WebAPI/lang/de') -Filter '*.php' | Remove-Item -Force
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.zero-match\] de: no catalog value'
     } }
 
     @{ Name = 'bounds-sync.green'; Body = {
@@ -931,6 +998,26 @@ function zz_guard_historical(mysqli $db): void
             'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [' `
             "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_RETIRED,"
         Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(0)
+    } }
+    # QL4 (B1): the two remaining halves of the former PHPUnit method on
+    # historical events. A list entry the registry does not define is reported,
+    # and an emptied list exempts nothing, so the real historical events turn
+    # unused-event instead of the guard going green on nothing.
+    @{ Name = 'audit-contract.historical-unregistered'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/audit_event_definitions.php' `
+            'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [' `
+            "const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [`n    VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_NEVER_DEFINED,"
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unknown-event\] VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL lists VIRTUSPHERE_AUDIT_EVENT_ZZ_GUARD_NEVER_DEFINED'
+    } }
+    @{ Name = 'audit-contract.historical-list-emptied'; Body = {
+        $fx = New-Fixture $auditFixtureFiles
+        $definitions = Join-Path $fx 'Docker/WebAPI/lib/audit_event_definitions.php'
+        $content = [System.IO.File]::ReadAllText($definitions)
+        $emptied = [regex]::Replace($content, '(?s)const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = \[.*?\];', 'const VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL = [];')
+        if ($emptied -eq $content) { throw 'Anker VIRTUSPHERE_AUDIT_EVENTS_HISTORICAL nicht gefunden' }
+        [System.IO.File]::WriteAllText($definitions, $emptied, (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Guard (Invoke-GuardPhp 'check-audit-contract.php' @('--ci') $fx) @(1) '\[audit-contract\.unused-event\] VIRTUSPHERE_AUDIT_EVENT_'
     } }
     @{ Name = 'audit-contract.zero-match-registry'; Body = {
         # Eine leere Registry darf nie als "alle Producer sind sauber" gelten.

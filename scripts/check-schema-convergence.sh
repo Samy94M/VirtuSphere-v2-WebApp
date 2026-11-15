@@ -115,7 +115,13 @@ assert_sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 
 
 # Re-run the data migration itself, not just the tracking guard, to prove that
 # its NOT EXISTS write cannot duplicate a previously materialized interface.
-myql "$B" -e "DELETE FROM deploy_migrations WHERE name = '0020_materialize_default_interfaces';"
+# Exactly one tracking row must go: under a renamed 0020 the DELETE would hit
+# nothing, the re-run would be a no-op and the probe green for nothing (QL4).
+removed_tracking="$(myql -N -B "$B" -e "DELETE FROM deploy_migrations WHERE name = '0020_materialize_default_interfaces'; SELECT ROW_COUNT();")"
+[ "$removed_tracking" = "1" ] || {
+  echo "BLOCK: [schema-convergence.assert] the 0020 re-run probe removed '$removed_tracking' tracking row(s) instead of 1; is migration 0020 still named 0020_materialize_default_interfaces?" >&2
+  exit 1
+}
 docker exec -e DB_NAME="$B" -e DB_USER=root -e DB_PASS="$MYSQL_ROOT_PASSWORD" "$PHP_CONTAINER" \
   php /var/www/html/lib/migrate.php >/dev/null
 assert_sql "SELECT COUNT(*) FROM deploy_interfaces i INNER JOIN deploy_vms v ON v.id = i.vm_id WHERE v.vm_name = 'vm-materialize'" "1" "migration 0020 is not idempotent"

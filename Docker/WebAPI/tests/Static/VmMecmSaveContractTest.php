@@ -106,14 +106,7 @@ final class VmMecmSaveContractTest extends TestCase
         self::assertStringNotContainsString('VIRTUSPHERE_VM_MECM_SAVE', $constants, 'constants.php must not grow for this feature');
     }
 
-    public function testTheNewKeysExistInBothLocales(): void
-    {
-        $keys = ['flash_mecm_queued', 'flash_mecm_added', 'flash_mecm_removed', 'flash_mecm_portal_only', 'mecm_os_hint', 'mecm_os_unknown', 'mecm_transfer_confirm', 'save_portal_only', 'save_and_transfer'];
-        foreach (['de', 'en'] as $locale) {
-            $catalog = self::source('lang/' . $locale . '/vm_edit.php');
-            foreach ($keys as $key) {
-                self::assertMatchesRegularExpression("/'" . $key . "' => '/", $catalog, $locale . ' vm_edit.' . $key);
-            }
-        }
-    }
+    // The catalog keys of this feature are static __t() literals in lib/, which
+    // LangCatalogTest resolves against the German catalog; DE/EN parity is
+    // scripts/lang-audit.php (gate lang-parity). QL4 removed the per-key pin.
 }

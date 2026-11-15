@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 /**
- * Audits the VirtuSphere portal language catalog for DE/EN key parity and
+ * Audits the VirtuSphere portal language catalog for DE/EN key parity,
  * placeholder parity (a `:placeholder` missing in one locale silently drops
- * the interpolated value there, .claude/rules/i18n.md).
+ * the interpolated value there, .claude/rules/i18n.md), the quote form (i18n
+ * R11/R12), the sentence dash (R8) and German replacement spellings (R14).
  *
  * CLI contract:
  *   php scripts/lang-audit.php          Full report, exit 1 on findings.
@@ -212,11 +213,96 @@ foreach ($quoteChecks as $locale => $check) {
     }
 }
 
-$failed = $fileErrors !== [] || $gaps !== [] || $placeholderDrifts !== [] || $quoteMixes !== [];
+/**
+ * Sentence dash (i18n R8): portal prose in DE and EN uses a
+ * colon, semicolon, comma or a new sentence instead of a dash. U+2014 is a
+ * finding anywhere, U+2013 everywhere except directly between two digits (a
+ * range such as 1-5 written with U+2013). A value that is only the dash is an empty-cell
+ * placeholder, not punctuation. Same literal exemption as the quote checks.
+ *
+ * @var array<int, array{key: string, detail: string}> $sentenceDashes
+ */
+$sentenceDashes = [];
+$withoutLiterals = static fn (string $text): string => (string) preg_replace('~<code\b[^>]*>.*?</code>|<pre\b[^>]*>.*?</pre>~su', '', $text);
+$dashProblemOf = static function (string $text) use ($withoutLiterals): ?string {
+    if (in_array(trim($text), ["\u{2014}", "\u{2013}"], true)) {
+        return null;
+    }
+    $text = $withoutLiterals($text);
+    if (str_contains($text, "\u{2014}")) {
+        return 'em dash U+2014 as sentence punctuation';
+    }
+    if (preg_match('/(?<!\d)\x{2013}|\x{2013}(?!\d)/u', $text) === 1) {
+        return 'en dash U+2013 between words (allowed only in a digit range)';
+    }
+
+    return null;
+};
+foreach ($locales as $locale) {
+    foreach ($catalog[$locale] ?? [] as $module => $entries) {
+        foreach ($entries as $key => $text) {
+            $problem = $dashProblemOf($text);
+            if ($problem !== null) {
+                $sentenceDashes[] = ['key' => $module . '.' . $key, 'detail' => $locale . ': ' . $problem];
+            }
+        }
+    }
+}
+
+/**
+ * Real umlauts in DE (i18n R14): a German value writes real umlauts. The list holds
+ * stems of typical replacement spellings; each matches anywhere in a word,
+ * case-insensitive, except `fuer`, which matches only as a whole word. Every
+ * stem is chosen so that no real word contains it (aktuell, neue, Quelle,
+ * Queue, Steuer, erneut stay clean; the harness case lang-audit.umlaut-clean
+ * proves it). A word that starts with `ue` or `Ue` before a lower-case letter
+ * is a finding as well (uebrig, Uebersicht): no German or English word starts
+ * that way, and the case-sensitive form leaves an acronym such as UEFI alone.
+ * Literals in <code>/<pre> are exempt.
+ */
+$umlautStems = [
+    'ueber', 'koenn', 'muess', 'waehl', 'loesch', 'groess', 'schluessel', 'haeufig', 'spaeter',
+    'aender', 'pruef', 'oeffn', 'zurueck', 'moeglich', 'naechst', 'wuerd', 'fuehr', 'gueltig',
+    'verfueg', 'benoetig', 'erklaer', 'waehrend', 'hinzufueg', 'eintraeg', 'geraet', 'schliess',
+];
+$umlautPattern = '/\bfuer\b|(?-i:(?<!\p{L})[Uu]e\p{Ll}+)|' . implode('|', array_map(static fn (string $stem): string => preg_quote($stem, '/'), $umlautStems)) . '/iu';
+/** @var array<int, array{key: string, detail: string}> $umlautSpellings */
+$umlautSpellings = [];
+foreach ($catalog['de'] ?? [] as $module => $entries) {
+    foreach ($entries as $key => $text) {
+        if (preg_match($umlautPattern, $withoutLiterals($text), $match) === 1) {
+            $umlautSpellings[] = ['key' => $module . '.' . $key, 'detail' => 'de: replacement spelling "' . $match[0] . '", write the real umlaut or sharp s'];
+        }
+    }
+}
+
+/**
+ * Zero match: an empty catalog is never proof of a clean one. Every rule above
+ * walks the values of both locales; with no value in one of them, each would be
+ * vacuously green.
+ *
+ * @var list<string> $zeroMatches
+ */
+$zeroMatches = [];
+foreach ($locales as $locale) {
+    $values = 0;
+    foreach ($catalog[$locale] ?? [] as $entries) {
+        $values += count($entries);
+    }
+    if ($values === 0) {
+        $zeroMatches[] = $locale . ': no catalog value under ' . $base . DIRECTORY_SEPARATOR . $locale . '; the scan would be vacuously green.';
+    }
+}
+
+$failed = $fileErrors !== [] || $gaps !== [] || $placeholderDrifts !== [] || $quoteMixes !== []
+    || $sentenceDashes !== [] || $umlautSpellings !== [] || $zeroMatches !== [];
+$summary = count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . ' placeholder drift(s), '
+    . count($quoteMixes) . ' quote mix(es), ' . count($sentenceDashes) . ' sentence dash(es), ' . count($umlautSpellings) . ' umlaut spelling(s), '
+    . count($zeroMatches) . ' zero match(es).';
 
 if ($mode === 'quiet') {
     if ($failed) {
-        fwrite(STDERR, 'Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . ' placeholder drift(s), ' . count($quoteMixes) . " quote mix(es).\n");
+        fwrite(STDERR, 'Lang-Audit: ' . $summary . "\n");
         exit(1);
     }
     exit(0);
@@ -224,7 +310,10 @@ if ($mode === 'quiet') {
 
 if ($mode === 'ci') {
     if ($failed) {
-        fwrite(STDERR, '::error::Lang-Audit: ' . count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . ' placeholder drift(s), ' . count($quoteMixes) . " quote mix(es).\n");
+        fwrite(STDERR, '::error::Lang-Audit: ' . $summary . "\n");
+        foreach ($zeroMatches as $zero) {
+            fwrite(STDERR, "  - [lang-audit.zero-match] {$zero}\n");
+        }
         foreach ($fileErrors as $error) {
             fwrite(STDERR, "  - [lang-audit.file-error] {$error}\n");
         }
@@ -237,10 +326,16 @@ if ($mode === 'ci') {
         foreach ($quoteMixes as $mix) {
             fwrite(STDERR, '  - [lang-audit.quote-mix] ' . $mix['key'] . ' ' . $mix['detail'] . "\n");
         }
+        foreach ($sentenceDashes as $dash) {
+            fwrite(STDERR, '  - [lang-audit.sentence-dash] ' . $dash['key'] . ' ' . $dash['detail'] . "\n");
+        }
+        foreach ($umlautSpellings as $spelling) {
+            fwrite(STDERR, '  - [lang-audit.umlaut-spelling] ' . $spelling['key'] . ' ' . $spelling['detail'] . "\n");
+        }
         exit(1);
     }
 
-    fwrite(STDOUT, 'OK: Lang-Audit - DE/EN catalog parity clean (' . count($modules) . " module(s)).\n");
+    fwrite(STDOUT, 'OK: Lang-Audit - DE/EN catalog clean: parity, placeholders, quotes, dashes, umlauts (' . count($modules) . " module(s)).\n");
     exit(0);
 }
 
@@ -263,6 +358,18 @@ foreach ($placeholderDrifts as $drift) {
 echo 'Quote mixes (de, en): ' . count($quoteMixes) . "\n";
 foreach ($quoteMixes as $mix) {
     echo 'QUOTE [lang-audit.quote-mix] ' . $mix['key'] . ' ' . $mix['detail'] . "\n";
+}
+echo 'Sentence dashes (de, en): ' . count($sentenceDashes) . "\n";
+foreach ($sentenceDashes as $dash) {
+    echo 'DASH [lang-audit.sentence-dash] ' . $dash['key'] . ' ' . $dash['detail'] . "\n";
+}
+echo 'Umlaut spellings (de): ' . count($umlautSpellings) . "\n";
+foreach ($umlautSpellings as $spelling) {
+    echo 'UMLAUT [lang-audit.umlaut-spelling] ' . $spelling['key'] . ' ' . $spelling['detail'] . "\n";
+}
+echo 'Zero matches: ' . count($zeroMatches) . "\n";
+foreach ($zeroMatches as $zero) {
+    echo 'ZERO [lang-audit.zero-match] ' . $zero . "\n";
 }
 
 exit($failed ? 1 : 0);

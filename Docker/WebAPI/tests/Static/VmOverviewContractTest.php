@@ -16,12 +16,14 @@ require_once dirname(__DIR__, 2) . '/lib/repo/vms_modules.php';
  */
 final class VmOverviewContractTest extends TestCase
 {
-    private const NEW_KEYS = [
-        'vm_overview' => ['title_all', 'title_mecm_pending', 'intro_all', 'intro_mecm_pending', 'filter_label',
-            'filter_all', 'filter_mecm_pending', 'template_badge', 'open_vm', 'hits', 'count_changed',
-            'empty_all', 'empty_mecm_pending', 'back_dashboard', 'pagination_label', 'previous', 'next', 'page_info'],
-        'help_overview' => ['dashboard_counts_heading', 'dashboard_counts_p1'],
-    ];
+    /**
+     * The help renderer (lib/help/overview.php) is outside the literal scan of
+     * LangCatalogTest, so its keys are pinned here. DE/EN parity, placeholders,
+     * sentence dashes and umlaut spellings of every catalog value are owned by
+     * scripts/lang-audit.php (gate lang-parity, QL4); the vm_overview keys are
+     * static __t() literals that LangCatalogTest already resolves.
+     */
+    private const HELP_KEYS = ['dashboard_counts_heading', 'dashboard_counts_p1'];
 
     public function testBothDashboardTilesOpenTheListWithTheirFilterAndCaptureTime(): void
     {
@@ -116,51 +118,17 @@ final class VmOverviewContractTest extends TestCase
         self::assertStringContainsString("require_once __DIR__ . '/vms_overview.php';", $this->source('lib/repo/vms.php'));
     }
 
-    public function testTheNewCatalogKeysExistInBothLocalesWithTheSamePlaceholders(): void
+    public function testTheHelpKeysExist(): void
     {
-        foreach (array_keys(self::NEW_KEYS) as $module) {
-            $de = $this->catalog('de', $module);
-            $en = $this->catalog('en', $module);
-            foreach (self::NEW_KEYS[$module] as $key) {
-                self::assertArrayHasKey($key, $de, "de/{$module}.php misses {$key}");
-                self::assertArrayHasKey($key, $en, "en/{$module}.php misses {$key}");
-                self::assertSame(
-                    $this->placeholders($de[$key]),
-                    $this->placeholders($en[$key]),
-                    "{$module}.{$key} placeholders differ between DE and EN"
-                );
-            }
-        }
-
-        // The module catalogs stay in parity as a whole, not only for the new keys.
-        self::assertSame(
-            array_keys($this->catalog('de', 'vm_overview')),
-            array_keys($this->catalog('en', 'vm_overview'))
-        );
-    }
-
-    public function testTheNewPortalTextHasNoDashAsSentencePunctuation(): void
-    {
-        $dash = ["\u{2014}", "\u{2013}"];
-        foreach (['de', 'en'] as $locale) {
-            foreach (array_keys(self::NEW_KEYS) as $module) {
-                foreach ($this->catalog($locale, $module) as $key => $value) {
-                    if (!in_array($key, self::NEW_KEYS[$module], true)) {
-                        continue;
-                    }
-                    foreach ($dash as $char) {
-                        self::assertStringNotContainsString($char, $value, "{$locale}/{$module}.{$key} uses a dash as sentence punctuation");
-                    }
-                }
-            }
+        $help = $this->catalog('de', 'help_overview');
+        foreach (self::HELP_KEYS as $key) {
+            self::assertArrayHasKey($key, $help, "de/help_overview.php misses {$key}");
         }
     }
 
-    public function testTheGermanTextUsesRealUmlautsAndFormalAddress(): void
+    public function testTheGermanTextKeepsItsWordingAndFormalAddress(): void
     {
         $de = $this->catalog('de', 'vm_overview');
-        self::assertStringContainsString('ü', $de['intro_mecm_pending']);
-        self::assertStringNotContainsString(' ue', $de['empty_mecm_pending']);
         self::assertStringContainsString('Zurzeit wartet keine VM', $de['empty_mecm_pending']);
 
         $help = $this->catalog('de', 'help_overview')['dashboard_counts_p1'];
@@ -190,15 +158,5 @@ final class VmOverviewContractTest extends TestCase
         self::assertIsArray($catalog);
 
         return $catalog;
-    }
-
-    /** @return list<string> */
-    private function placeholders(string $text): array
-    {
-        preg_match_all('/:[a-z_]+/', $text, $matches);
-        $found = array_values(array_unique($matches[0]));
-        sort($found);
-
-        return $found;
     }
 }

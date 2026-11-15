@@ -83,15 +83,15 @@ final class EditConflictContractTest extends TestCase
         self::assertStringContainsString("submitter.matches('button[data-busy-label]') ? submitter : null", $core);
     }
 
-    public function testTheTextsExistInBothLocalesWithoutDashes(): void
+    /**
+     * The German wording the decision fixed. DE/EN parity and the sentence dash
+     * of every catalog value are owned by scripts/lang-audit.php (gate
+     * lang-parity, QL4).
+     */
+    public function testTheGermanTextsKeepTheirWording(): void
     {
         $de = require dirname(__DIR__, 2) . '/lang/de/edit_conflict.php';
-        $en = require dirname(__DIR__, 2) . '/lang/en/edit_conflict.php';
 
-        self::assertSame(array_keys($de), array_keys($en));
-        foreach (array_merge(array_values($de), array_values($en)) as $text) {
-            self::assertStringNotContainsString('—', $text);
-        }
         self::assertSame('Mit meinen Eingaben weiterarbeiten', $de['continue']);
         self::assertSame('Ihre Eingabe', $de['th_mine']);
         self::assertSame('Jetzt gespeichert', $de['th_current']);

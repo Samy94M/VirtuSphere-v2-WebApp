@@ -170,7 +170,7 @@ function Register-FastCheckGates {
     Add-Gate -Name 'lang-parity' -Lanes $allLanes -Kind 'native' -Body {
         $r = Invoke-CheckPhp 'lang-audit.php' @('--ci')
         if ($null -eq $r) { return New-InfraResult 'weder Host-PHP noch Projekt-Image verfuegbar' }
-        Format-ToolResult $r 'DE/EN-Paritaet und Placeholder synchron' 'Lang-Audit meldet Paritaets-/Placeholder-Luecken'
+        Format-ToolResult $r 'DE/EN-Paritaet, Placeholder, Anfuehrungszeichen, Strich und Umlaute sauber' 'Lang-Audit meldet Befunde im Sprachkatalog'
     }
 
     Add-Gate -Name 'enum-sync' -Lanes $allLanes -Kind 'native' -Body {

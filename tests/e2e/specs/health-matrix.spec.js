@@ -1,19 +1,50 @@
-// TESTPLAN 3.1: basic health of every portal page. For each page and theme the
-// test proves it loads with the right access outcome, carries no PHP
-// error/notice, raises no console error or CSP violation, reaches no host but
-// 127.0.0.1 (the air-gap proof), and shows no missing-translation marker or raw
-// `module.key`. Runs under both the admin and the user storageState.
+// TESTPLAN 3.1 and 3.6 in one pass per page, role and theme (QL4, B5: one
+// goto, one seed; until then accessibility.spec.js loaded the same pages a
+// second time).
+//
+// 3.1, basic health of every portal page: for each page and theme the test
+// proves it loads with the right access outcome, carries no PHP error/notice,
+// raises no console error or CSP violation, reaches no host but 127.0.0.1 (the
+// air-gap proof), and shows no missing-translation marker or raw `module.key`.
+// Runs under both the admin and the user storageState.
+//
+// 3.6, automated accessibility scan (axe-core, WCAG 2.1/2.2 A + AA) over every
+// page in both themes, under the admin storageState only: admin sees every
+// page, and axe has nothing to say about a 403. Automation only catches a part
+// of what matters, but the part it catches is the part that is cheap to
+// regress: a control without an accessible name, a contrast pair that fails at
+// AA, a form field with no label, a broken heading or landmark structure. A
+// violation is reported with the rule id, the impact and the offending
+// selectors, so a failure names what to fix rather than just that something is
+// wrong. The scan runs as its own step after every health assertion, because
+// it opens every <details> first and the health checks read the page as loaded.
 
 const fs = require('node:fs');
 const path = require('node:path');
+const AxeBuilder = require('@axe-core/playwright').default;
 const { test, expect } = require('../lib/test');
 const { PORTAL_PAGES, pageUrl, pageLabel } = require('../lib/pages');
 const { ROLES } = require('../lib/auth');
 const { seedMatrixFixtures, cleanupMatrixFixtures } = require('../lib/matrix-seed');
+const { formReferenceProblems } = require('../lib/form-accessibility');
 const { ERROR_PAGE_SELECTOR } = require('../lib/error-page');
 
 const THEMES = ['light', 'dark'];
 const MARK = 'e2ehealth';
+
+// The rule sets the portal commits to. Best-practice rules are deliberately out:
+// they encode opinions (e.g. one <main> per page) rather than the AA bar.
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+const AXE_ROLE = 'admin';
+
+function describeViolations(violations) {
+  return violations
+    .map((v) => {
+      const where = v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join('\n      ');
+      return `  [${v.impact}] ${v.id}: ${v.help}\n      ${where}`;
+    })
+    .join('\n');
+}
 
 // Signals that mean PHP rendered an error into the HTML instead of a page.
 const PHP_ERROR_MARKERS = [
@@ -178,6 +209,42 @@ for (const [roleName, role] of Object.entries(ROLES)) {
             return hits;
           }, WHOLE_KEY.source);
           expect(rawKeyLeaves, `untranslated i18n keys on ${pageLabel(pageDef)}`).toEqual([]);
+
+          if (roleName !== AXE_ROLE) {
+            return;
+          }
+
+          await test.step(`a11y: ${pageLabel(pageDef)} (${theme})`, async () => {
+            // The error-page check above already ran on this very page: a page
+            // that ended in the portal error renderer would be scanned as the
+            // error page (or as half a page with it appended) and could pass,
+            // because axe finds little to fault on a heading and a paragraph (C5).
+
+            // A closed <details> is not in the accessibility tree, so axe skips its
+            // content entirely: legends, technical-detail blocks and repair forms were
+            // never scanned even though a keyboard user reaches all of them with one
+            // Enter. Everything the page can show is opened before the scan, which is
+            // strictly more coverage than the collapsed state (a hidden subtree can
+            // only lose findings, never gain them).
+            await page.evaluate(() => {
+              document.querySelectorAll('details').forEach((element) => {
+                element.open = true;
+              });
+            });
+
+            const formProblems = await formReferenceProblems(page);
+            expect(
+              formProblems,
+              `form accessibility references on ${pageLabel(pageDef)} (${theme})\n${formProblems.join('\n')}`
+            ).toEqual([]);
+
+            const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
+
+            expect(
+              results.violations,
+              `accessibility violations on ${pageLabel(pageDef)} (${theme}):\n${describeViolations(results.violations)}`
+            ).toEqual([]);
+          });
         });
       }
     }

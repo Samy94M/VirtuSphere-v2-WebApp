@@ -123,23 +123,13 @@ BeforeAll {
     }
 }
 
+# QL4 (B4): the guard-harness proves through scripts/check.ps1's script the
+# green fixture with the progress contract and --quiet (doc-fragments.fixture-
+# control), a new line in the archive (doc-fragments.archive-entry) and the
+# missing archive (doc-fragments.zero-match). The Pester cases for those three
+# were removed after a mutation of each rule turned the harness case red
+# (docs/register/2026-11-15-QL4.md). What stays here has no harness side.
 Describe 'check-doc-fragments.sh' {
-    It 'is green on the fragment layout and reports every unit before and after' {
-        $repo = New-FragmentRepo
-        Set-RepoFile $repo 'docs/changelog.d/B1.md' "- **Fragments (B1, 05.11.2026).** Text.`n  continued line.`n"
-        Set-RepoFile $repo 'docs/register/2026-11-05-B1.md' "# B1 (05.11.2026): Fragments`n`n- done`n"
-        Save-Commit $repo 'B1'
-        $r = Invoke-Guard $repo
-        $r.ExitCode | Should -Be 0 -Because $r.Output
-        foreach ($unit in @('changelog-head', 'changelog-since-release', 'register-archive', 'fragments')) {
-            $r.Output | Should -Match ('\[\d/4\] RUN doc-fragments ' + $unit)
-            $r.Output | Should -Match ('\[\d/4\] pass doc-fragments ' + $unit)
-        }
-        $quiet = Invoke-Guard $repo @('--quiet')
-        $quiet.ExitCode | Should -Be 0
-        $quiet.Output.Trim() | Should -BeNullOrEmpty
-    }
-
     It 'rejects a restored "Noch in keinem Release" section with an entry' {
         $repo = New-FragmentRepo
         Set-RepoFile $repo 'docs/CHANGELOG.md' ($script:Preamble + "## Noch in keinem Release`n`n- **New (X1, 06.11.2026).** Text.`n`n" + $script:Released)
@@ -204,15 +194,7 @@ Describe 'check-doc-fragments.sh' {
         $r.Output | Should -Match 'docs/changelog\.d/X1\.md'
     }
 
-    It 'rejects a new line in the archive register and allows a removed one' {
-        $repo = New-FragmentRepo
-        Set-RepoFile $repo 'docs/audits/register.md' ($script:Register + "`n### Wave X1`n`n- new entry`n")
-        Save-Commit $repo 'X1 writes into the archive'
-        $r = Invoke-Guard $repo
-        $r.ExitCode | Should -Be 1
-        $r.Output | Should -Match '\[doc-fragments\.archive-entry\]'
-        $r.Output | Should -Match 'Wave X1'
-
+    It 'allows a removed line in the archive register' {
         $clean = New-FragmentRepo
         Set-RepoFile $clean 'docs/audits/register.md' $script:Register.Replace("- old entry`n", '')
         Save-Commit $clean 'Remove a line'
@@ -233,26 +215,6 @@ Describe 'check-doc-fragments.sh' {
         $r = Invoke-Guard $gone
         $r.ExitCode | Should -Be 1
         $r.Output | Should -Match '\[doc-fragments\.archive-removed\]'
-    }
-
-    It 'is red, not green, when no archive register exists (zero match)' {
-        # A deleted archive is still known from history (case above); this
-        # repository never had one.
-        $never = Join-Path $script:Work 'never'
-        New-Item -ItemType Directory -Path $never -Force | Out-Null
-        Assert-Git $never @('init', '-q') | Out-Null
-        foreach ($setting in @(@('user.name', 'B1 Test'), @('user.email', 'b1@example.test'), @('core.autocrlf', 'false'), @('commit.gpgsign', 'false'))) {
-            Assert-Git $never (@('config') + $setting) | Out-Null
-        }
-        Set-RepoFile $never 'Docker/WebAPI/lib/VERSION' "2026.11.5`n"
-        Set-RepoFile $never 'docs/CHANGELOG.md' ($script:Preamble + $script:Released)
-        Set-RepoFile $never 'docs/audits/register.md' "# Register`n`n- entry`n"
-        Set-RepoFile $never 'docs/changelog.d/README.md' "# Fragments`n"
-        Set-RepoFile $never 'docs/register/README.md' "# Register`n"
-        Save-Commit $never 'Release'
-        $r = Invoke-Guard $never
-        $r.ExitCode | Should -Be 1
-        $r.Output | Should -Match '\[doc-fragments\.no-archive\]'
     }
 
     It 'rejects badly named and badly formed fragments' {

@@ -4,36 +4,41 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Migrations 0019/0020 (ADR-0030).
+ *
+ * What they DO is proven elsewhere since QL4 (B2): the status ENUM in every
+ * mirror, the constant included, by scripts/check-enum-sync.sh (gate enum-sync);
+ * result_json as JSON, the default interface 0020 materializes, no guess for an
+ * empty WDS VLAN or a template, no change to an existing interface, its
+ * idempotent re-run and its report line by scripts/check-schema-convergence.sh
+ * which runs both migrations against real MySQL. A renamed 0020 now also fails
+ * there, because its re-run must remove exactly one tracking row.
+ *
+ * What stays are the two things no gate notices (mutation probe in
+ * docs/register/2026-11-15-QL4.md). The tracking name of 0019: a rename changes
+ * no schema and no row, so every check stays green, and the next upgrade would
+ * run 0019 again on every installation under its new name. And the NOT EXISTS
+ * guard of the 0020 INSERT: the plan already leaves out a VM that has an
+ * interface, so the convergence run stays green without it; the guard is what
+ * keeps a VM that gains an interface between plan and insert from getting a
+ * second one.
+ */
 final class MigrationPartialResultsContractTest extends TestCase
 {
-    public function testPartialResultMigrationMirrorsTheStatusSsot(): void
+    public function testTheTrackingNameOfMigration0019StaysAsShipped(): void
     {
-        $constants = $this->webApiSource('lib/deploy_constants.php');
-        $migration = $this->webApiSource('lib/migrate.php');
-        // The CURRENT mirror set (in-place mirror rule, check-enum-sync):
-        // 'cancelling' arrived with 0031, 'outcome_unknown' with 0065.
-        $enum = "ENUM('queued','running','cancelling','succeeded','failed','cancelled','partial','outcome_unknown')";
-
-        self::assertStringContainsString("VIRTUSPHERE_DEPLOY_STATUS_PARTIAL = 'partial'", $constants);
-        self::assertStringContainsString($enum, $migration);
-        self::assertStringContainsString("'0019_deploy_partial_results'", $migration);
-        self::assertStringContainsString("'result_json', 'JSON NULL AFTER payload_json'", $migration);
+        self::assertStringContainsString("'0019_deploy_partial_results' => function", $this->migration());
     }
 
-    public function testDefaultInterfaceMigrationNeverGuessesOrDuplicates(): void
+    public function testTheDefaultInterfaceInsertKeepsItsOwnDuplicateGuard(): void
     {
-        $migration = $this->webApiSource('lib/migrate.php');
-
-        self::assertStringContainsString("'0020_materialize_default_interfaces'", $migration);
-        self::assertStringContainsString('mission_name_is_template', $migration);
-        self::assertStringContainsString("=== '' ? 'skipped' : 'materialize'", $migration);
-        self::assertStringContainsString('WHERE NOT EXISTS (SELECT 1 FROM deploy_interfaces WHERE vm_id = ?)', $migration);
-        self::assertStringContainsString('because wds_vlan is empty', $migration);
+        self::assertStringContainsString('WHERE NOT EXISTS (SELECT 1 FROM deploy_interfaces WHERE vm_id = ?)', $this->migration());
     }
 
-    private function webApiSource(string $relativePath): string
+    private function migration(): string
     {
-        $path = dirname(__DIR__, 2) . '/' . $relativePath;
+        $path = dirname(__DIR__, 2) . '/lib/migrate.php';
         self::assertFileExists($path);
 
         return (string) file_get_contents($path);

@@ -68,9 +68,14 @@ test('every page sweep checks each page for the error page', () => {
     const source = fs.readFileSync(file, 'utf8');
     return /require\(\s*['"]\.\.\/lib\/pages['"]\s*\)/.test(source) && /\bof\s+PORTAL_PAGES\b/.test(source);
   });
-  // health-matrix and accessibility walk every page today; an empty
-  // derivation would make the next assertion pass vacuously.
-  assert.ok(sweeps.length >= 2, `expected the page sweeps under ${SPECS_DIR}, found ${sweeps.length}`);
+  // health-matrix walks every page today, its a11y step included (QL4 merged
+  // accessibility.spec.js into it, so the floor is one sweep, not two); an
+  // empty derivation would make the next assertion pass vacuously.
+  assert.ok(sweeps.length >= 1, `expected the page sweeps under ${SPECS_DIR}, found ${sweeps.length}`);
+  assert.ok(
+    sweeps.some((file) => path.basename(file) === 'health-matrix.spec.js'),
+    `the health matrix must be among the page sweeps under ${SPECS_DIR}`,
+  );
 
   const missing = sweeps.filter((file) => {
     const source = fs.readFileSync(file, 'utf8');

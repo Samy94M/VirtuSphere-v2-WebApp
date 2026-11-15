@@ -1,4 +1,4 @@
-// Fixtures for the pages of the health/a11y matrix that only render against a
+// Fixtures for the pages of the health matrix (and its a11y step) that only render against a
 // concrete object: the two editor pages, the deploy page *with* a mission and
 // the job log of one seeded job.
 //
