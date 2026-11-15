@@ -21,64 +21,89 @@ DOC_FRAGMENT_ID_RE='[A-Z][A-Z0-9]*(-[A-Z0-9]+)*'
 
 # doc_fragment_problem <changelog|register> <datei>
 # Schreibt eine Zeile mit dem ersten Formfehler nach stdout, sonst nichts.
+#
+# Ein awk-Aufruf je Datei (QL4): die fruehere Form startete je Fragment rund
+# zehn Prozesse (basename, grep, head, od, tr, sed), unter Git Bash etwa 0,45 s
+# je Datei und 12 der 16 s des Gates. Reihenfolge und Wortlaut der Befunde sind
+# unveraendert: Name, regulaere Datei, leer, BOM, dann die Form je Art. Die
+# Ausdruecke kommen ohne Intervall-Quantoren aus, damit auch mawk und BusyBox
+# awk sie lesen; LC_ALL=C laesst awk Bytes vergleichen (BOM). CR zaehlt wie
+# bisher nicht: jede Zeile wird ohne CR gelesen.
 doc_fragment_problem() {
   kind=$1
   file=$2
-  name=$(basename "$file")
+  name=${file##*/}
   case "$kind" in
-    changelog) name_re="^$DOC_FRAGMENT_ID_RE\\.md\$" ;;
-    register) name_re="^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])-$DOC_FRAGMENT_ID_RE\\.md\$" ;;
+    changelog | register) ;;
     *) echo "unbekannte Fragmentart '$kind'"; return 0 ;;
   esac
-  if ! printf '%s\n' "$name" | grep -qE "$name_re"; then
-    if [ "$kind" = changelog ]; then
-      echo "Dateiname '$name' passt nicht zu <PAKET>.md (Paketkennung in Grossbuchstaben, z. B. SEC2.md, RL1-D7.md)"
-    else
-      echo "Dateiname '$name' passt nicht zu JJJJ-MM-TT-<PAKET>.md (Startdatum des Pakets, z. B. 2026-11-05-B1.md)"
-    fi
-    return 0
+  # Keine regulaere Datei: awk liest dann nichts, der Name entscheidet aber
+  # weiter zuerst, welche Meldung kommt.
+  regular=0
+  input=/dev/null
+  if [ -f "$file" ]; then
+    regular=1
+    input=$file
   fi
-  if [ ! -f "$file" ]; then
-    echo "keine regulaere Datei"
-    return 0
-  fi
-  if [ ! -s "$file" ] || ! grep -q '[^[:space:]]' "$file"; then
-    echo "Fragment ist leer"
-    return 0
-  fi
-  # CRLF ist kein Befund: `* text=auto` checkt .md unter Windows mit CRLF aus,
-  # und Git speichert LF. Die Pruefung liest deshalb ohne CR, und das
-  # Zusammenfuehrskript schreibt die Eintraege ohne CR.
-  if [ "$(head -c 3 "$file" | od -An -tx1 | tr -d ' \n')" = efbbbf ]; then
-    echo "Fragment beginnt mit einer UTF-8-BOM"
-    return 0
-  fi
-  if [ "$kind" = changelog ]; then
-    first=$(tr -d '\r' < "$file" | grep -m 1 '[^[:space:]]')
-    case "$first" in
-      '- **'*) ;;
-      *) echo "erste Zeile ist kein Eintrag der Form '- **Titel.** Text'"; return 0 ;;
-    esac
-    # Ein Eintrag ist eine Zeile '- **...'; Fortsetzungszeilen sind eingerueckt.
-    # Ueberschriften, Absaetze und andere Listenformen gehoeren nicht hinein:
-    # das Skript setzt die Zeilen unveraendert unter die Release-Ueberschrift.
-    bad=$(tr -d '\r' < "$file" | grep -n '[^[:space:]]' | grep -vE '^[0-9]+:(- \*\*|  )' | head -n 1 || true)
-    if [ -n "$bad" ]; then
-      echo "Zeile ${bad%%:*} ist weder ein Eintrag '- **...' noch eine eingerueckte Fortsetzung"
-      return 0
-    fi
-  else
-    id=$(printf '%s\n' "$name" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//; s/\.md$//')
-    first=$(head -n 1 "$file" | tr -d '\r')
-    case "$first" in
-      "# $id" | "# $id "* | "# $id:"* | "# $id,"*) ;;
-      *) echo "erste Zeile muss die Ueberschrift '# $id ...' sein"; return 0 ;;
-    esac
-    if [ "$(grep -c '[^[:space:]]' "$file")" -lt 2 ]; then
-      echo "Registereintrag hat nur die Ueberschrift"
-      return 0
-    fi
-  fi
+  LC_ALL=C awk -v kind="$kind" -v name="$name" -v regular="$regular" -v id_re="$DOC_FRAGMENT_ID_RE" '
+    BEGIN {
+      if (kind == "changelog") {
+        name_re = "^" id_re "\\.md$"
+      } else {
+        name_re = "^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])-" id_re "\\.md$"
+      }
+      if (name !~ name_re) {
+        if (kind == "changelog") {
+          print "Dateiname '\''" name "'\'' passt nicht zu <PAKET>.md (Paketkennung in Grossbuchstaben, z. B. SEC2.md, RL1-D7.md)"
+        } else {
+          print "Dateiname '\''" name "'\'' passt nicht zu JJJJ-MM-TT-<PAKET>.md (Startdatum des Pakets, z. B. 2026-11-05-B1.md)"
+        }
+        done = 1
+        exit
+      }
+      if (!regular) {
+        print "keine regulaere Datei"
+        done = 1
+        exit
+      }
+      id = name
+      sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-/, "", id)
+      sub(/\.md$/, "", id)
+    }
+    NR == 1 { bom = (substr($0, 1, 3) == "\357\273\277") }
+    {
+      line = $0
+      gsub(/\r/, "", line)
+      if (NR == 1) first_line = line
+      if (line ~ /[^[:space:]]/) {
+        filled++
+        if (first_filled == "") first_filled = line
+        if (bad == "" && line !~ /^(- \*\*|  )/) bad = NR
+      }
+    }
+    END {
+      if (done) exit
+      if (filled == 0) { print "Fragment ist leer"; exit }
+      if (bom) { print "Fragment beginnt mit einer UTF-8-BOM"; exit }
+      if (kind == "changelog") {
+        if (substr(first_filled, 1, 4) != "- **") {
+          print "erste Zeile ist kein Eintrag der Form '\''- **Titel.** Text'\''"
+          exit
+        }
+        # Ein Eintrag ist eine Zeile "- **..."; Fortsetzungszeilen sind
+        # eingerueckt. Ueberschriften, Absaetze und andere Listenformen gehoeren
+        # nicht hinein: das Skript setzt die Zeilen unveraendert unter die
+        # Release-Ueberschrift.
+        if (bad != "") print "Zeile " bad " ist weder ein Eintrag '\''- **...'\'' noch eine eingerueckte Fortsetzung"
+        exit
+      }
+      if (first_line != "# " id && index(first_line, "# " id " ") != 1 && index(first_line, "# " id ":") != 1 && index(first_line, "# " id ",") != 1) {
+        print "erste Zeile muss die Ueberschrift '\''# " id " ...'\'' sein"
+        exit
+      }
+      if (filled < 2) print "Registereintrag hat nur die Ueberschrift"
+    }
+  ' "$input"
   return 0
 }
 
@@ -88,7 +113,7 @@ doc_fragment_list() {
   [ -d "$1" ] || return 0
   for entry in "$1"/* "$1"/.[!.]*; do
     [ -e "$entry" ] || continue
-    [ "$(basename "$entry")" = README.md ] && continue
+    [ "${entry##*/}" = README.md ] && continue
     printf '%s\n' "$entry"
   done | LC_ALL=C sort
 }
