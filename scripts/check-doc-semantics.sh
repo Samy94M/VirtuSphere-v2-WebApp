@@ -14,7 +14,8 @@
 #   4. Keine Lastmesswerte (ms/Requests/VUs) ausserhalb von tests/load/.
 #   5. PHPStan-Level-Nennungen == level aus phpstan.neon.dist.
 #   6. "MySQL x.y"-Nennungen == mysql-Image in docker-compose.yml.
-#   7. "Node NN"-Nennungen == node-version in ci.yml.
+#   7. "Node NN"-Nennungen == Hauptversion aus .node-version (VC1); ci.yml
+#      liest dieselbe Datei und nennt keine eigene node-version.
 #   8. Stillgelegte Backup-Pfade (Docker/scripts/backup|restore.sh) nur mit
 #      Stilllegungs-Marker in derselben Zeile.
 #   9. Aktive Doku und PowerShell verwenden nur die MECM-Terminologie.
@@ -152,15 +153,21 @@ else
   done
 fi
 
-# --- 7. Node-Version gegen ci.yml ------------------------------------------------
-node_ssot=$(sed -n "s/.*node-version:[[:space:]]*'\{0,1\}\([0-9][0-9]*\)'\{0,1\}.*/\1/p" .github/workflows/ci.yml 2>/dev/null | head -n 1)
+# --- 7. Node-Version gegen .node-version ----------------------------------------
+# Eine Wahrheitsquelle (VC1): .node-version traegt die Hauptversion, ci.yml liest
+# sie per node-version-file. Ein zweites Literal in ci.yml waere eine zweite
+# Meinung, die still auseinanderlaufen kann.
+node_ssot=$(sed -n 's/^[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' .node-version 2>/dev/null | head -n 1)
 if [ -z "$node_ssot" ]; then
-  fail no-ssot "Node-Version nicht aus .github/workflows/ci.yml lesbar; ohne SSoT kann keine Versionsnennung geprueft werden."
+  fail no-ssot "Node-Version nicht aus .node-version lesbar; ohne SSoT kann keine Versionsnennung geprueft werden."
 else
+  if grep -qE '^[[:space:]]*node-version:' .github/workflows/ci.yml 2>/dev/null; then
+    fail node-ssot-split ".github/workflows/ci.yml nennt eine eigene node-version; setup-node liest node-version-file: '.node-version'."
+  fi
   # shellcheck disable=SC2086
   for f in $([ -n "$active_docs" ] && grep -nHE '\bNode(\.js)? [0-9]+\b' $active_docs 2>/dev/null \
       | grep -vE "${doc_line}\bNode(\.js)? $node_ssot\b" | report_doc_hits); do
-    fail node-version "$f nennt eine andere Node-Version als ci.yml ($node_ssot)."
+    fail node-version "$f nennt eine andere Node-Version als .node-version ($node_ssot)."
   done
 fi
 

@@ -34,6 +34,12 @@ function Get-QaStackIdentity {
         # gepruefte Quellstand, aus dem der Stack und phpunit-full lesen (OV1).
         SourceVolume   = 'virtusphere-qa_qa-repo'
         PortalBase     = 'http://127.0.0.1:8031'
+        # Visual-Browser (VC1): der gepinnte Linux-Container, in dem allein die
+        # reviewten Sollbilder aufgenommen und geprueft werden. Nicht in
+        # Services: nur die Visual-Aufnahme startet ihn.
+        VisualBrowserService   = 'visual-browser'
+        VisualBrowserContainer = 'virtusphere-qa-visual-browser-1'
+        VisualBrowserEndpoint  = 'ws://127.0.0.1:8034/'
         Dir            = $qaDir
         EnvFile        = Join-Path $qaDir 'qa.env'
         ComposeOverride = Join-Path $qaDir 'docker-compose.qa.yml'

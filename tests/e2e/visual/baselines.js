@@ -71,9 +71,14 @@ function runnerIdentity(metadata) {
     platform: metadata.platform,
     arch: metadata.arch,
     osRelease: metadata.osRelease,
+    // VC1: the pinned image and the whole installed font set decide the pixels
+    // as much as the fonts the queries name.
+    container: metadata.container,
     browser: metadata.browser,
     playwrightVersion: metadata.playwrightVersion,
     fonts: metadata.fonts,
+    fontSet: metadata.fontSet,
+    renderedFonts: metadata.renderedFonts,
     locale: metadata.locale,
     timezoneId: metadata.timezoneId,
     viewports: metadata.viewports,

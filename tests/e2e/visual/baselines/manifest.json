@@ -1,12 +1,15 @@
 {
-  "schemaVersion": 2,
-  "updatedAt": "2026-11-14T13:17:53.220Z",
-  "reason": "SY3: Fazitzeilen, Zeiten relativ und absolut, Ursachentabelle, Verschluesselungszeile",
+  "schemaVersion": 3,
+  "updatedAt": "2026-11-16T10:06:13.017Z",
+  "reason": "VC1: ein Sollbildsatz im gepinnten Linux-Container (Playwright 1.61.1 noble, Liberation Sans) ersetzt den Windows-Satz",
   "runner": {
-    "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
-    "platform": "win32",
+    "runnerId": "virtusphere-visual-linux-x64-chromium-1228-noble",
+    "platform": "linux",
     "arch": "x64",
-    "osRelease": "10.0.26300",
+    "osRelease": "ubuntu-24.04",
+    "container": {
+      "image": "mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48"
+    },
     "browser": {
       "engine": "chromium",
       "revision": "1228",
@@ -15,16 +18,45 @@
     "playwrightVersion": "1.61.1",
     "fonts": [
       {
-        "file": "segoeui.ttf",
-        "sha256": "704eada12961a27fd271f7d3b09e2066520e758390c1776744eff430fee30f6e"
+        "query": "Arial:style=Regular",
+        "file": "LiberationSans-Regular.ttf",
+        "sha256": "4659bc0c58c5028dd488ec928d41d9265db43d9b669fc14ca8b0832daca7b144"
       },
       {
-        "file": "seguisb.ttf",
-        "sha256": "6c3fd894b19950b10c34bf64069ef821eaf2f58f959146306fee5b367472e501"
+        "query": "Arial:style=Bold",
+        "file": "LiberationSans-Bold.ttf",
+        "sha256": "3973aa5054fb467dd5627245d3dc82e37bf16fe075756156a570455871351582"
       },
       {
-        "file": "segoeuib.ttf",
-        "sha256": "b169e636719880976a97e94e3b1cb3dbe5f4a38eabc037bf9f2a9165154c3ad2"
+        "query": "monospace:style=Regular",
+        "file": "LiberationMono-Regular.ttf",
+        "sha256": "395fa5ab8d40c8eba390ced528744ea75a7f69aabf3e68b6f925ca0e39a27370"
+      }
+    ],
+    "fontSet": {
+      "count": 48,
+      "sha256": "771a7df8dcafcbfbc65a04383b6f69ed10cfc6bca063bbf900058ccaa6517c5e"
+    },
+    "renderedFonts": [
+      {
+        "weight": "regular",
+        "fonts": [
+          {
+            "familyName": "Liberation Sans",
+            "postScriptName": "LiberationSans",
+            "isCustomFont": false
+          }
+        ]
+      },
+      {
+        "weight": "bold",
+        "fonts": [
+          {
+            "familyName": "Liberation Sans",
+            "postScriptName": "LiberationSans-Bold",
+            "isCustomFont": false
+          }
+        ]
       }
     ],
     "locale": "de-DE",
@@ -149,23 +181,23 @@
     "maskColor": "#ff00ff"
   },
   "files": {
-    "dark/deploy-desktop.png": "670b6bb52f3b90aa78f50eb103cdfbc92384e3808f31c0adcd85a15d97236b0c",
-    "dark/deploy-mobile.png": "3e846ac0269d599e9cce6723f98b004d52e3b3556dbffbc2373693008ad932af",
-    "dark/deploy-wrap.png": "1ee2512fa9d5e4ad254dc124282bbfab670b3ff510d3976b718c938ceef774a6",
-    "dark/missions-desktop.png": "f701b746f49f44eec1b9462e1fd8f1c5abdfb8932b5e9dad859b5e88b5f0db02",
-    "dark/missions-mobile.png": "24ed4455c3cfdb419054fca3703ae8c56b8116bebcf3858cf3f81acf799b288c",
-    "dark/missions-wrap.png": "b10e63f69f8e31348ccabbbac5f13ddede07e447d4c5cfdee3c1025d4dad0396",
-    "dark/system-status-desktop.png": "d13405eb50fd888ad38259e2684521fa52489d0d7fcaed083d8f8a10f0382ab7",
-    "dark/system-status-mobile.png": "67bc451f89fbd05832e2106704872a3e49893ba64f7490665fd2755610e76a06",
-    "dark/system-status-wrap.png": "7bbcc7eeac65d23f377a5e2376e588bf6ae09e48926aff9a0d81ecda361ea59d",
-    "light/deploy-desktop.png": "f441c95e1194980e095d51912aa487631915c43bdb3a4a81cb7be85de242b0e8",
-    "light/deploy-mobile.png": "96082ed88e5f276e7964471bbd5d5c53034e4ace7e1aacf92cae58a8627aa71a",
-    "light/deploy-wrap.png": "50928b0135310af26657efbeb4b48a987a496d0dd51676611473cc8df50afe4c",
-    "light/missions-desktop.png": "22c18e756e1f4d8ec6a1cf9530cfd8c246613796a079b847deeceeff518c6d14",
-    "light/missions-mobile.png": "84c89ca07e241cd4552d70862ee480b1b3820d903724d8dd5d40b862ef2fb719",
-    "light/missions-wrap.png": "6af5cc94d5ee17257da81c975d55d386504b26b3924d543cb5ad898716ee5a4d",
-    "light/system-status-desktop.png": "d0e23a0ddb58210dc1a164b978880d817e8c37c2c4c9b0ff4ea606f99deab2d8",
-    "light/system-status-mobile.png": "c443e82c4f3319859597d9c4b429ce60a3329ca6ee5192769682b75551ba6e0d",
-    "light/system-status-wrap.png": "f3b40c91b4501d7adb252128a6ae2f5d3e82ef63e29fe6a4e55ff3f12862bdfd"
+    "dark/deploy-desktop.png": "74dcd006c48a199c846f5274be7e783df76754faa2dc1ac9230881fc154083d5",
+    "dark/deploy-mobile.png": "093aee7f5c56634e155f9ea93256d6bebfc16f03204182de73a3c9656b6c5fe9",
+    "dark/deploy-wrap.png": "357c49518185c9a29705627bd610207a3079875a7299f7f4d2aa19f10df39121",
+    "dark/missions-desktop.png": "2c2cced89c898e5023d96ed797f5b6a6288c1c12d9ff55ebdad59d530b13d631",
+    "dark/missions-mobile.png": "424baf9c3c9358c6e484edf1e18eb6dca4316b40a20c7aff846992170c19e303",
+    "dark/missions-wrap.png": "1c266e2f51b7345cde9ea6b5c2bd9126d2d214cd9443a4bb4d1fc5f05b5a68ea",
+    "dark/system-status-desktop.png": "fb43d584340f17c20afe0bf19657dbb0354492daf40615368172acd0369a27ee",
+    "dark/system-status-mobile.png": "866a565dfd1fe68c4afb77181332a23718235854fd4f139680821f32e8c6f493",
+    "dark/system-status-wrap.png": "1b05942d2c3b731207681c5cb2a6bf07bdcac62f232357d1736bd295eb4eb098",
+    "light/deploy-desktop.png": "e365b321fce37e612d44924d073b474cb5e6b4e503ce8b9396a59a9dc36e05c2",
+    "light/deploy-mobile.png": "7604edf71b8e473e924875f5edc69b6c7cd174037390233b51948afee6523e6c",
+    "light/deploy-wrap.png": "cec8db1a9060acbba6453c8247428e67357a8420a1fc061cfb20092ae5ca3e19",
+    "light/missions-desktop.png": "fca9e4c59eb48c9349271128e0d545b8ef55e85328b2ee5217c9ae68fa223f1e",
+    "light/missions-mobile.png": "f784239408bf066638cd6da60e651b2ed1a578ae633ddf1a6f7fc7d080b9a326",
+    "light/missions-wrap.png": "24c23b4e31ac77ec4aab4e9cd206830ea1f3ca145f6e0b114670b82edc3b8fc1",
+    "light/system-status-desktop.png": "1db0b4cbec4836c3f35556c138bf39388cfa05ea74cc85206282af49affabeb9",
+    "light/system-status-mobile.png": "11d9d986fe5fbfb62116cebbf871fc98750dc0d00627e799d016c18d59964606",
+    "light/system-status-wrap.png": "157be8ad50b154d9ab0218895e1b6e1df1577b255ae7df75a4ddacee2196be6f"
   }
 }
