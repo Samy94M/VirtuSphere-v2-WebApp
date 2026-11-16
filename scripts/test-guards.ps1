@@ -357,6 +357,8 @@ $docSemFixtureFiles = @(
     'docs/DEPLOYMENT.md', 'docs/INSTALLATION-ANLEITUNG.md',
     'docs/operations', 'docs/security',
     'Docker/WebAPI/phpstan.neon.dist', 'docker-compose.yml', '.github/workflows/ci.yml',
+    # SSoT der Node-Regel (VC1): ohne sie meldet Regel 7 no-ssot.
+    '.node-version',
     # SSoT der const-mirror-Regel: ohne sie meldet jede "aktuell N"-Nennung im
     # Doku-Scope "nicht auffindbar", und jeder andere Fall waere aus dem
     # falschen Grund rot statt aus seiner eigenen Mutation.
@@ -514,6 +516,19 @@ $cases = @(
         $fx = New-Fixture $docSemFixtureFiles
         Edit-Fixture $fx 'docs/QA.md' 'PHPStan (level 5' 'PHPStan (level 4'
         Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.phpstan-level\]'
+    } }
+    # VC1: .node-version ist die eine Wahrheitsquelle der Node-Hauptversion. Ein
+    # anderer Wert dort macht jede Doku-Nennung rot; ein eigenes Literal in
+    # ci.yml ist eine zweite Meinung und wird abgelehnt, auch bei gleichem Wert.
+    @{ Name = 'doc-semantics.node-version'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx '.node-version' '26' '24'
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.node-version\]'
+    } }
+    @{ Name = 'doc-semantics.node-ssot-split'; Body = {
+        $fx = New-Fixture $docSemFixtureFiles
+        Edit-Fixture $fx '.github/workflows/ci.yml' "node-version-file: '.node-version'" "node-version: '26'"
+        Assert-Guard (Invoke-GuardShell (Join-Path $scriptDir 'check-doc-semantics.sh') @('--ci') $fx) @(1) '\[doc-semantics\.node-ssot-split\]'
     } }
     @{ Name = 'doc-semantics.const-mirror'; Body = {
         # Zweite Nennung derselben Zeile: sie faellt nur auf, wenn die Regel jede
@@ -1467,7 +1482,7 @@ function New-ComposeFixture {
     $fx = New-Fixture @('docker-compose.yml', '.env.example',
         'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
         'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
-        'Docker/qa-ansible/Dockerfile', 'Docker/nginx/default.conf')
+        'Docker/qa-ansible/Dockerfile', 'Docker/qa/visual-browser/Dockerfile', 'Docker/nginx/default.conf')
     Copy-Item -Force -Path (Join-Path $fx '.env.example') -Destination (Join-Path $fx '.env')
     return $fx
 }
@@ -1622,6 +1637,14 @@ $cases += @(
         # bis zum ersten Leerzeichen und baut nie, der Rest darf Muell sein.
         Edit-Fixture $fx 'Docker/php/Dockerfile' 'FROM php:8.4-fpm@sha256:' 'FROM php:8.4-fpm sha256:'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\]' -InfraOnExit2
+    } }
+    # VC1: ein Visual-Browser ohne Digest waere ein wandernder Fontsatz und
+    # Chromium; die Sollbilder beschrieben dann keinen festen Browser mehr.
+    @{ Name = 'compose-hardening.visual-browser-digest-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'Docker/qa/visual-browser/Dockerfile' 'FROM mcr.microsoft.com/playwright:v1.61.1-noble@sha256:' 'FROM mcr.microsoft.com/playwright:v1.61.1-noble sha256:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\] Docker/qa/visual-browser/Dockerfile' -InfraOnExit2
     } }
     @{ Name = 'compose-hardening.zero-match'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }

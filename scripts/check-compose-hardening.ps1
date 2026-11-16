@@ -504,7 +504,9 @@ if ($findings.Count -eq 0) {
 $dockerfiles = @(
     'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
     'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
-    'Docker/qa-ansible/Dockerfile'
+    'Docker/qa-ansible/Dockerfile',
+    # VC1: der Visual-Browser; sein Digest bestimmt Chromium und Fontsatz der Sollbilder.
+    'Docker/qa/visual-browser/Dockerfile'
 )
 $digestRe = '@sha256:[0-9a-f]{64}'
 foreach ($rel in $dockerfiles) {

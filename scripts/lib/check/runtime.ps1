@@ -27,6 +27,29 @@ function Invoke-QaCompose {
         '--project-directory', $repoRoot) + $Arguments)
 }
 
+# Visual-Browser (VC1): der per Digest gepinnte Linux-Container, in dem allein
+# Sollbilder aufgenommen und geprueft werden. Gemeinsam fuer den pruefenden
+# Harness (e2e-portal) und den einzigen Writer, damit beide denselben Browser
+# treffen. --build ist bei unveraenderten Eingaben (Dockerfile, package-lock)
+# ein Cachetreffer; --wait wartet auf den Healthcheck des Servers.
+function Start-QaVisualBrowser {
+    $up = Invoke-QaCompose @('up', '-d', '--build', '--wait', $qaIdentity.VisualBrowserService)
+    if ($up.StartFailed) { return New-InfraResult (Get-ToolStartFailureDetail $up) $up.Output }
+    if ($up.ExitCode -ne 0) {
+        return New-InfraResult ('Visual-Browser-Container {0} startet nicht' -f $qaIdentity.VisualBrowserContainer) $up.Output
+    }
+    return $null
+}
+
+# Die Umgebungswerte, mit denen Harness und Writer den Visual-Browser finden;
+# lib/visual-seed.js verlangt genau diese Werte (Isolation, A24).
+function Get-QaVisualBrowserEnv {
+    return @{
+        VIRTUSPHERE_VISUAL_BROWSER_CONTAINER = $qaIdentity.VisualBrowserContainer
+        VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT  = $qaIdentity.VisualBrowserEndpoint
+    }
+}
+
 # Einen Wert aus qa.env lesen (die Datei ist eingecheckt und enthaelt nur
 # QA-Wegwerf-Werte, keine Geheimnisse).
 function Get-QaEnvValue {

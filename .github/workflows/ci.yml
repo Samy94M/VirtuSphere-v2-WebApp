@@ -58,7 +58,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: '20'
+          node-version-file: '.node-version'
 
       # compose-config interpoliert env_file/Variablen; CI hat kein echtes .env.
       - name: .env fuer das Compose-Gate stellen
@@ -149,7 +149,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: '20'
+          node-version-file: '.node-version'
 
       # Die Basis-Compose referenziert .env; der QA-Stack ueberschreibt jede
       # relevante Variable aus Docker/qa/qa.env.
@@ -292,7 +292,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: '20'
+          node-version-file: '.node-version'
 
       # compose config (Runtime-Image-Liste) interpoliert .env.
       - name: .env fuer Compose stellen

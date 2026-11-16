@@ -6,6 +6,13 @@ const playwright = require('playwright-core');
 
 const SUPPORTED_ENGINES = Object.freeze(['chromium', 'firefox', 'webkit']);
 
+// The revision is part of the install directory Playwright chose, on the host
+// and in the visual browser container alike (VC1); one parser for both paths.
+function revisionFromExecutablePath(executablePath) {
+  const match = String(executablePath || '').match(/[\\/](?:chromium|firefox|webkit)(?:_headless_shell)?-(\d+)[\\/]/);
+  return match ? match[1] : null;
+}
+
 function resolveBrowser(engine, options = {}) {
   if (!SUPPORTED_ENGINES.includes(engine)) {
     throw new Error(`unsupported Playwright engine: ${engine}`);
@@ -16,14 +23,12 @@ function resolveBrowser(engine, options = {}) {
   const browserTypes = options.browserTypes || playwright;
   const explicit = engine === 'chromium' ? env.PLAYWRIGHT_CHROMIUM : '';
   const executablePath = path.resolve(explicit || browserTypes[engine].executablePath());
-  const revisionMatch = executablePath.match(/[\\/](?:chromium|firefox|webkit)(?:_headless_shell)?-(\d+)[\\/]/);
-
   return Object.freeze({
     engine,
     executablePath,
     exists: exists(executablePath),
     source: explicit ? 'PLAYWRIGHT_CHROMIUM' : 'playwright-core',
-    revision: revisionMatch ? revisionMatch[1] : null,
+    revision: revisionFromExecutablePath(executablePath),
   });
 }
 
@@ -44,4 +49,4 @@ if (require.main === module) {
   process.exitCode = main(process.argv.slice(2));
 }
 
-module.exports = { SUPPORTED_ENGINES, resolveBrowser, main };
+module.exports = { SUPPORTED_ENGINES, resolveBrowser, revisionFromExecutablePath, main };

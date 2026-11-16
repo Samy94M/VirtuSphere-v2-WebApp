@@ -17,6 +17,7 @@
 // functions the successful admin flow itself would have called), exactly
 // like DirectoryLdapFixtureFailoverTest.php's PHPUnit-level fixture setup.
 
+const net = require('node:net');
 const tls = require('node:tls');
 const { test, expect } = require('../lib/test');
 const { ROLES } = require('../lib/auth');
@@ -468,8 +469,11 @@ echo 'OK';
   function servedFingerprint() {
     return new Promise((resolve) => {
       const url = new URL(httpsBaseUrl);
+      // SNI carries host names only (RFC 6066). Node 20 and 24 warned about an IP
+      // here (DEP0123); Node 26 throws, and the QA stack is reached by IP.
+      const sni = net.isIP(url.hostname) ? {} : { servername: url.hostname };
       const socket = tls.connect(
-        { host: url.hostname, port: Number(url.port), servername: url.hostname, rejectUnauthorized: false, timeout: 3000 },
+        { host: url.hostname, port: Number(url.port), ...sni, rejectUnauthorized: false, timeout: 3000 },
         () => {
           const peer = socket.getPeerCertificate();
           socket.end();

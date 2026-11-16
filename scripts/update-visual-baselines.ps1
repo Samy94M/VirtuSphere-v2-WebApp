@@ -102,6 +102,16 @@ $updateEnv = @{
     VIRTUSPHERE_VISUAL_BASELINE_UPDATE = '1'
     DB_NAME                            = (Get-QaEnvValue 'DB_NAME')
 }
+# VC1: derselbe gepinnte Linux-Browser wie im pruefenden Harness; ein Sollbild
+# aus einem anderen Browser waere eines, das kein Gate reproduzieren kann.
+$browserEnv = Get-QaVisualBrowserEnv
+foreach ($key in $browserEnv.Keys) { $updateEnv[$key] = $browserEnv[$key] }
+$browser = Start-QaVisualBrowser
+if ($null -ne $browser) {
+    foreach ($line in @($browser.output)) { if ($line) { Write-Host $line } }
+    Write-Host ('update-visual-baselines: ' + $browser.detail) -ForegroundColor Red
+    exit 2
+}
 foreach ($key in $updateEnv.Keys) {
     $previous[$key] = [Environment]::GetEnvironmentVariable($key)
     [Environment]::SetEnvironmentVariable($key, [string]$updateEnv[$key])

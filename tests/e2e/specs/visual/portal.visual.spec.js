@@ -11,6 +11,10 @@ const theme = process.env.VIRTUSPHERE_VISUAL_THEME;
 const outputDir = process.env.VIRTUSPHERE_VISUAL_OUTPUT_DIR;
 if (!contract.themes.includes(theme)) throw new Error(`invalid visual theme: ${theme}`);
 if (!outputDir) throw new Error('VIRTUSPHERE_VISUAL_OUTPUT_DIR is required');
+// VC1: a capture in a host browser is a picture of another machine.
+if (!process.env.VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT) {
+  throw new Error('infrastructure_error: visual capture runs only in the pinned visual browser container (VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT)');
+}
 
 test.describe.configure({ mode: 'serial' });
 test.use({ storageState: ROLES.admin.storageState });

@@ -18,6 +18,10 @@ const CHROMIUM = CHROMIUM_RESOLUTION.executablePath;
 // that this Chromium fails with ERR_CONNECTION_REFUSED (portal-screenshot-setup).
 const BASE_URL = process.env.VIRTUSPHERE_BASE_URL || 'http://127.0.0.1:8021/portal/';
 
+// The visual browser container (VC1). Without it the visual spec refuses to run;
+// the functional projects never read it.
+const VISUAL_BROWSER_ENDPOINT = process.env.VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT || '';
+
 // Chromium-engine launch options only: the resolved executable path and
 // --no-sandbox would break Firefox/WebKit if they sat in the global `use`,
 // and the msedge project must resolve through its channel, never a path.
@@ -95,7 +99,15 @@ module.exports = defineConfig({
         // The functional Chromium project keeps the normal compositor. Visual
         // QA uses the contract-pinned software path because GPU backdrop blur
         // can vary a colour channel by one between otherwise identical runs.
-        launchOptions: { ...CHROMIUM_LAUNCH, args: visualContract.launchArgs },
+        // VC1: the browser is the pinned Linux container's, never a host
+        // install, so no executablePath travels; the switches reach it in the
+        // launch-options header and metadata.js reads them back. The portal on
+        // the host's loopback is tunnelled through this client (exposeNetwork),
+        // so VIRTUSPHERE_BASE_URL stays the QA stack's address.
+        launchOptions: { args: visualContract.launchArgs },
+        ...(VISUAL_BROWSER_ENDPOINT
+          ? { connectOptions: { wsEndpoint: VISUAL_BROWSER_ENDPOINT, exposeNetwork: '<loopback>' } }
+          : {}),
         locale: visualContract.locale,
         timezoneId: visualContract.timezoneId,
         viewport: {

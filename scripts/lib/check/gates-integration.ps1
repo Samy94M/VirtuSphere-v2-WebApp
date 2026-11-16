@@ -114,6 +114,12 @@ function Invoke-VisualBaselines {
         VIRTUSPHERE_UPDATE_VISUAL_BASELINES = ''
         VIRTUSPHERE_VISUAL_BASELINE_UPDATE  = ''
     }
+    # VC1: Aufnahme und Vergleich nur im gepinnten Linux-Browser, lokal wie in
+    # der CI; ohne ihn misst der Harness nichts und endet als infrastructure_error.
+    $browserEnv = Get-QaVisualBrowserEnv
+    foreach ($key in $browserEnv.Keys) { $visualEnv[$key] = $browserEnv[$key] }
+    $browser = Start-QaVisualBrowser
+    if ($null -ne $browser) { return $browser }
     foreach ($key in $visualEnv.Keys) {
         $previous[$key] = [Environment]::GetEnvironmentVariable($key)
         [Environment]::SetEnvironmentVariable($key, [string]$visualEnv[$key])

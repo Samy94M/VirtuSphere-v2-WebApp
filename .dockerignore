@@ -1,7 +1,10 @@
-# Gilt nur fuer Builds mit Repo-Root-Kontext (Docker/qa-ansible/Dockerfile).
-# Die Anwendungs-Images bauen mit ./Docker/nginx bzw. ./Docker/php als Kontext
-# und sehen diese Datei nicht. Alles ausschliessen, nur die zwei Dateien
-# hereinlassen, die das QA-Image kopiert.
+# Gilt nur fuer Builds mit Repo-Root-Kontext (Docker/qa-ansible/Dockerfile,
+# Docker/qa/visual-browser/Dockerfile). Die Anwendungs-Images bauen mit
+# ./Docker/nginx bzw. ./Docker/php als Kontext und sehen diese Datei nicht.
+# Alles ausschliessen, nur die Dateien hereinlassen, die die QA-Images kopieren.
 *
 !Docker/qa-ansible/requirements.txt
 !Ansible/requirements.yml
+!Docker/qa/visual-browser/fonts.conf
+!tests/e2e/package.json
+!tests/e2e/package-lock.json
