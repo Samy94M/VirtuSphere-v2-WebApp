@@ -125,9 +125,10 @@ BeforeAll {
 
 # QL4 (B4): the guard-harness proves through scripts/check.ps1's script the
 # green fixture with the progress contract and --quiet (doc-fragments.fixture-
-# control), a new line in the archive (doc-fragments.archive-entry) and the
-# missing archive (doc-fragments.zero-match). The Pester cases for those three
-# were removed after a mutation of each rule turned the harness case red
+# control), a new line in the archive (doc-fragments.archive-entry), the
+# missing archive (doc-fragments.zero-match) and a new CHANGELOG entry under the
+# top release (doc-fragments.new-entry). The Pester cases for those four were
+# removed after a mutation of each rule turned the harness case red
 # (docs/register/2026-11-15-QL4.md). What stays here has no harness side.
 Describe 'check-doc-fragments.sh' {
     It 'rejects a restored "Noch in keinem Release" section with an entry' {
@@ -146,16 +147,6 @@ Describe 'check-doc-fragments.sh' {
         $r = Invoke-Guard $repo
         $r.ExitCode | Should -Be 1
         $r.Output | Should -Match '\[doc-fragments\.preamble-entry\]'
-    }
-
-    It 'rejects an entry added under the top release in a later commit' {
-        $repo = New-FragmentRepo
-        Set-RepoFile $repo 'docs/CHANGELOG.md' ($script:Preamble + $script:Released.Replace("- **Entry five", "- **Late (X1, 06.11.2026).** Text.`n- **Entry five"))
-        Save-Commit $repo 'Package X1 writes the old way'
-        $r = Invoke-Guard $repo
-        $r.ExitCode | Should -Be 1
-        $r.Output | Should -Match '\[doc-fragments\.new-entry\]'
-        $r.Output | Should -Match 'Late \(X1'
     }
 
     It 'allows an edit of an existing entry between releases' {
