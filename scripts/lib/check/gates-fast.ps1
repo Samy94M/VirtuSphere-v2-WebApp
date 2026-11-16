@@ -603,7 +603,7 @@ function Register-FastCheckGates {
     }
 
     Add-Gate -Name 'hadolint' -Lanes $allLanes -Kind 'container' -Body {
-        $files = Get-CheckFiles @('Dockerfile')
+        $files = Get-Dockerfiles
         if ($files.Count -eq 0) { return New-InfraResult 'keine Dockerfiles gefunden (Zero-Match)' }
         if (-not (Test-DockerImage $toolImages.hadolint)) {
             if ($NoNetwork) { return New-InfraResult ('Tool-Image {0} fehlt lokal (NoNetwork: kein Pull)' -f $toolImages.hadolint) }

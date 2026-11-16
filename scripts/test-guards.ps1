@@ -1478,11 +1478,19 @@ function Invoke-ComposeHardeningGuard {
         $env:VIRTUSPHERE_CHECK_ROOT = $prevRoot
     }
 }
+# LD1: die Dockerfiles aus derselben Ableitung wie die Pruefung, nicht gelistet;
+# einmal je Harnesslauf, weil Get-Dockerfiles den ganzen Baum durchlaeuft.
+$script:composeDockerfiles = $null
+function Get-ComposeFixtureDockerfiles {
+    if ($null -eq $script:composeDockerfiles) {
+        $found = @(Get-Dockerfiles)
+        if ($found.Count -eq 0) { throw 'Get-ComposeFixtureDockerfiles: Dockerfile-Ableitung leer' }
+        $script:composeDockerfiles = @(ConvertTo-RepoRelative $found)
+    }
+    return $script:composeDockerfiles
+}
 function New-ComposeFixture {
-    $fx = New-Fixture @('docker-compose.yml', '.env.example',
-        'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
-        'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
-        'Docker/qa-ansible/Dockerfile', 'Docker/qa/visual-browser/Dockerfile', 'Docker/nginx/default.conf')
+    $fx = New-Fixture (@('docker-compose.yml', '.env.example', 'Docker/nginx/default.conf') + @(Get-ComposeFixtureDockerfiles))
     Copy-Item -Force -Path (Join-Path $fx '.env.example') -Destination (Join-Path $fx '.env')
     return $fx
 }
@@ -1645,6 +1653,65 @@ $cases += @(
         $fx = New-ComposeFixture
         Edit-Fixture $fx 'Docker/qa/visual-browser/Dockerfile' 'FROM mcr.microsoft.com/playwright:v1.61.1-noble@sha256:' 'FROM mcr.microsoft.com/playwright:v1.61.1-noble sha256:'
         Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\] Docker/qa/visual-browser/Dockerfile' -InfraOnExit2
+    } }
+    # LD1: die Digest-Pruefung leitet ihre Dockerfiles ab. Der Originalbefund:
+    # das LDAP-Fixture war gepinnt, stand aber auf keiner Liste.
+    @{ Name = 'compose-hardening.ldap-fixture-digest-drift'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Edit-Fixture $fx 'Docker/ldap-fixture/Dockerfile' 'FROM debian:bookworm-slim@sha256:' 'FROM debian:bookworm-slim sha256:'
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\] Docker/ldap-fixture/Dockerfile' -InfraOnExit2
+    } }
+    # Ein neues Dockerfile, auch ausserhalb von Docker/ und in der Namensform
+    # <name>.Dockerfile, ist ohne Listeneintrag erfasst.
+    @{ Name = 'compose-hardening.new-dockerfile-unpinned'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Add-FixtureFile $fx 'tests/probe/Dockerfile' "FROM debian:bookworm-slim`n"
+        Add-FixtureFile $fx 'Docker/probe/qa.Dockerfile' "FROM alpine:3`n"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '(?s)(?=.*\[compose\.dockerfile-digest\] tests/probe/Dockerfile:1 FROM debian:bookworm-slim )(?=.*\[compose\.dockerfile-digest\] Docker/probe/qa\.Dockerfile:1 FROM alpine:3 )' -InfraOnExit2
+    } }
+    # Eine Image-Referenz ohne : und / ist kein Stage-Name, wenn keine Stage so heisst.
+    @{ Name = 'compose-hardening.copy-from-bare-image'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Add-FixtureFile $fx 'Docker/probe/Dockerfile' ("FROM debian:bookworm-slim@sha256:" + ('a' * 64) + "`nCOPY --chown=root:root --from=alpine /etc/hostname /tmp/h`n")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\] Docker/probe/Dockerfile:2 COPY --from=alpine ' -InfraOnExit2
+    } }
+    @{ Name = 'compose-hardening.run-mount-from-image'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        Add-FixtureFile $fx 'Docker/probe/Dockerfile' ("FROM debian:bookworm-slim@sha256:" + ('a' * 64) + "`nRUN --mount=type=bind,from=alpine:3,target=/m true`n")
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-digest\] Docker/probe/Dockerfile:2 RUN --mount from=alpine:3 ' -InfraOnExit2
+    } }
+    # Die begruendeten Ausnahmen (Stage-Name, Stage-Index, scratch, Flags vor der
+    # Referenz) bleiben gruen; sonst wuerde die Ableitung jeden Multi-Stage-Build
+    # rot melden und man loeste das mit einer Liste.
+    @{ Name = 'compose-hardening.dockerfile-stage-exceptions-green'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        $pin = '@sha256:' + ('a' * 64)
+        Add-FixtureFile $fx 'Docker/probe/Dockerfile' (@(
+            ('FROM --platform=linux/amd64 debian:bookworm-slim{0} AS base' -f $pin),
+            'from base as build',
+            'COPY --from=0 /etc/hostname /tmp/a',
+            ('RUN --mount=type=bind,from=base,target=/m --mount=type=cache,target=/c true'),
+            ('COPY --from=composer:2{0} /usr/bin/composer /usr/local/bin/composer' -f $pin),
+            'FROM scratch',
+            'COPY --from=build /etc/hostname /hostname'
+        ) -join "`n")
+        # Eine Ignore-Datei mit Dockerfile-Praefix ist kein Dockerfile.
+        Add-FixtureFile $fx 'Docker/probe/Dockerfile.dockerignore' "FROM debian:bookworm-slim`n"
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(0) -InfraOnExit2
+    } }
+    # Ein leerer Scan ist ein Befund, kein sauberes Repository.
+    @{ Name = 'compose-hardening.dockerfile-zero-match'; Body = {
+        if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
+        $fx = New-ComposeFixture
+        foreach ($rel in @(Get-ComposeFixtureDockerfiles)) {
+            Remove-Item -LiteralPath (Join-Path $fx $rel) -Force
+        }
+        Assert-Guard (Invoke-ComposeHardeningGuard $fx) @(1) '\[compose\.dockerfile-scan\] kein Dockerfile' -InfraOnExit2
     } }
     @{ Name = 'compose-hardening.zero-match'; Body = {
         if (-not $dockerAvailable) { return @{ Status = 'infra'; Detail = 'docker fehlt' } }
