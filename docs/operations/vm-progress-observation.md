@@ -9,10 +9,12 @@ werden.
 
 - MECM-pending wird nach mehr als `VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS`
   gelb markiert.
-- Eine OS-Installation erhält erst nach der bestätigten Aktion „PXE jetzt
-  beobachten“ eine Uhr und wird nach mehr als
-  `VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS` gelb markiert (beide in
-  `lib/constants.php`).
+- Eine OS-Installation erhält ihre Uhr von selbst, sobald die VM registriert
+  ist und ein Einschaltbeleg vorliegt (Abschnitt „Automatischer Start der
+  Beobachtung“), und wird nach mehr als
+  `VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS` gelb markiert (beide Grenzen in
+  `lib/constants.php`). Ohne Beleg bleibt die Aktion „Beobachtung von Hand
+  starten“ im VM-Editor.
 - Die Dashboard-Kachel „VM-Prüfung fällig“ zählt überfällige VMs je Grund und
   öffnet die VM-Übersicht mit dem passenden Filter.
 - Keine Warnung setzt eine VM fehl, löscht sie oder startet eine externe Aktion.
@@ -22,7 +24,62 @@ werden.
   derselben Phase entfernt den Hinweis. Fehlermeldungen anderer Phasen bleiben
   bestehen.
 - Bestehende MECM-pending-Zeilen beginnen beim Migrationslauf frisch. Bestehende
-  OS-Installationen bleiben ohne Uhr, bis PXE tatsächlich ausgelöst wurde.
+  OS-Installationen bleiben ohne Uhr, bis ein Einschaltbeleg eintrifft oder der
+  Bediener die Beobachtung von Hand startet.
+
+## Automatischer Start der Beobachtung
+
+Seit ADR-0038 Nachtrag 2 (16.11.2026) startet das Portal die Uhr der
+OS-Installation ohne Klick. Die Uhr bedeutet „registriert und eingeschaltet
+seit“. Sie belegt keinen PXE-Start: MECM und die Task Sequence liefern dafür
+kein Signal, und die Maschinen-API ist unverändert.
+
+Die Uhr startet, wenn die VM `os_installing` und `registered` ist, noch keine
+Uhr hat und einer der beiden Belege vorliegt:
+
+| Beleg | Bedingung | Anzeige im VM-Editor |
+|---|---|---|
+| Portalstart | Der jüngste Auftrag der VM hat seinen Startschritt beendet: `succeeded` mit Startschritt („Vollständige Kette“, „VMs starten“) oder gescheitert erst im Autostart-Schritt danach | „Vom Portal gestartet: Ein Auftrag hat die VM eingeschaltet.“ |
+| Inventar | Ein frisches, beantwortetes ESXi-Inventar des gebundenen Zugangs zeigt die VM eingeschaltet | „Vom Portal gestartet: Das ESXi-Inventar zeigt die VM eingeschaltet.“ |
+
+Kein Beleg sind: ein gescheiterter Startschritt (für keine VM des Auftrags),
+Aufträge mit `partial`, `cancelled` oder `outcome_unknown`, Protokollzeilen, ein
+veraltetes oder unbeantwortetes Inventar und eine VM ohne ESXi-Bindung. Ein
+Inventar zählt nur, wenn es nach dem Ende des jüngsten Auftrags der VM gelesen
+wurde: Ein Auftrag schaltet seine VMs ein und wieder aus (Powercycle), ein
+älterer Stand sagt deshalb nichts mehr, und solange der Auftrag läuft, zählt
+kein Inventar. Zeigt ein solches jüngeres Inventar die VM ausgeschaltet oder
+nicht mehr auf dem Host, zählt auch der Portalstart nicht.
+
+Drei Stellen fragen dieselbe Regel (`virtusphere_vm_power_evidence()`): die
+MECM-Registrierung (`mecm_updateid.php`), das Ende eines Auftrags mit
+Startschritt und jeder übernommene Inventarabruf, dessen VM-Liste beantwortet
+wurde. Ein Auftrag mit Startschritt reiht danach selbst einen Inventarabruf für
+seinen Zugang ein, auch wenn der Startschritt gescheitert ist; ein nach einem
+Anmeldefehler pausierter Zugang wird nicht abgefragt. Eine von Hand im
+vSphere-Client gestartete VM erhält ihre Uhr deshalb erst mit dem nächsten
+Inventarabruf (Zeitplan, „Alle aktualisieren“ oder Einzelabruf im Systemstatus).
+
+Der automatische Start setzt nur eine leere Uhr. Er startet nie neu, ändert
+weder `updated_at` noch Lebenszyklus oder MECM-Zustand und schreibt einen
+Eintrag in die Statushistorie, der die Quelle nennt.
+
+### Nach „MECM-ID zurücksetzen“
+
+Ein Beleg zählt nur für die laufende Runde. Ein Start aus der Zeit vor dem
+Zurücksetzen der MECM-ID beweist nicht, dass die VM danach eingeschaltet wurde.
+Das Portal vergleicht deshalb den Zeitpunkt des Belegs mit dem Beginn des
+Wartens auf MECM (`mecm_pending_since`) und lehnt ältere Belege ab. Diese
+Grenze kann einen echten Beleg ablehnen, aber nie einen falschen annehmen:
+
+- Wurde die VM nach dem Zurücksetzen nicht erneut über das Portal gestartet,
+  bleibt nach der Registrierung der Befund „Einschaltbeleg fehlt“ stehen, bis
+  ein Inventarabruf die VM eingeschaltet zeigt.
+- Ist die VM schon wieder registriert, zählt nur noch ein Beleg, der in diesem
+  Moment entsteht: ein Auftrag, der jetzt endet, oder ein Inventar, das jetzt
+  übernommen wird.
+
+In beiden Fällen hilft ein Inventarabruf oder „Beobachtung von Hand starten“.
 
 ## Rollout-Reihenfolge
 
@@ -40,8 +97,8 @@ werden.
    Resultate mit Datum, Commit und Bediener ins Rollout-Protokoll übernehmen.
 6. Portal-Smoke: Dashboard mit der Kachel „VM-Prüfung fällig“, Missionsliste mit
    der Spalte „Prüfung fällig“, VM-Liste und eine
-   `os_installing`-VM im Editor öffnen. Eine echte PXE-Beobachtung nur starten,
-   wenn PXE für genau diese VM ausgelöst wurde.
+   `os_installing`-VM im Editor öffnen. Die Beobachtung nur von Hand starten,
+   wenn genau diese VM eingeschaltet ist und der Beleg ausbleibt.
 
 ## SQL-Verifikation
 

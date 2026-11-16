@@ -84,15 +84,15 @@ test('VM editor status: the phase, the findings, the technical block and the tim
     'the phase is the header badge'
   ).toHaveText(/Handed to MECM|An MECM übergeben/);
 
-  // Findings: the previous MECM device and the missing PXE evidence, each linked to where it is resolved.
+  // Findings: the previous MECM device and the missing power-on evidence, each linked to where it is resolved.
   const findings = page.locator('.vm-finding-list');
   await expect(
     findings.locator('a[href*="system_status.php#mecm"]', { hasText: /old MECM device|Altes MECM-Gerät/i }),
     'the old MECM device links to the MECM status'
   ).toHaveCount(1);
   await expect(
-    findings.locator('a[href="#vm-progress-watch"]', { hasText: /PXE evidence missing|PXE-Beleg fehlt/ }),
-    'the missing PXE evidence links to the observation on this page'
+    findings.locator('a[href="#vm-progress-watch"]', { hasText: /Power-on evidence missing|Einschaltbeleg fehlt/ }),
+    'the missing power-on evidence links to the observation on this page'
   ).toHaveCount(1);
   await expect(page.locator('#vm-progress-watch'), 'the observation link lands on its section').toHaveCount(1);
 

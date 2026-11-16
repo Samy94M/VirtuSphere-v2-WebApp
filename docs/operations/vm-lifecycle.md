@@ -30,6 +30,8 @@ flowchart TD
 
 Die Regeln 4 bis 6 sind dieselben Prädikate, aus denen die Maschinen-API den Stufenwert berechnet (`virtusphere_legacy_status_from_states()`). Die Sortierung nach Phase rechnet dieselbe Regel in SQL (`virtusphere_vm_phase_sql()`).
 
+In Phase 5 läuft die Beobachtung der OS-Installation. Ihre Uhr ist kein Zustand und verschiebt keine Phase: Sie startet von selbst, sobald die VM registriert ist und ein Einschaltbeleg vorliegt (ein Auftrag hat den Startschritt beendet, oder ein frisches ESXi-Inventar zeigt die VM eingeschaltet). Ohne Beleg zeigt die VM den Befund „Einschaltbeleg fehlt“. Regel, Auslöser und der Fall nach „MECM-ID zurücksetzen“ stehen in [VM-Fortschrittsbeobachtung](vm-progress-observation.md#automatischer-start-der-beobachtung).
+
 ## Lebenszyklus
 
 Der Lebenszyklus wird nur vorwärts überschrieben, wenn ein Rückruf kommt: Device-Sync und Client-Ready-ACK lassen einen späteren Zustand stehen (`repo_set_vm_state_forward()`). Der Worker markiert eine VM beim Start eines Auftrags aus jedem Zustand außer `deploying`; eine VM mit ResourceID bleibt in einem Modus mit MAC-Ergebnis unmarkiert (`virtusphere_vm_is_mecm_bound()`). Was ein Auftrag angefasst hat, hält das Journal je Auftrag und VM fest (`deploy_job_vm_states`): Endet der Auftrag erfolgreich ohne MAC-Ergebnis oder wird er abgebrochen, stellt der Worker den Vorzustand wieder her; scheitert er, setzt er den Lebenszyklus auf „Fehlgeschlagen“ und die MECM-Achse auf `deploy_failed`, auch bei einer VM, die er nicht markiert hat. Der Konvergenzlauf des Wartungsdienstes wendet dieselbe Regel auf eine VM an, die nach dem Ende ihres Auftrags noch `deploying` steht. `initializing` hat keinen Schreiber; der Wert bleibt im Katalog, damit ein alter Datensatz einen Namen hat.

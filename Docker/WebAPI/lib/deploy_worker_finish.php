@@ -13,6 +13,7 @@ require_once __DIR__ . '/repo/deploy_create_results.php';
 require_once __DIR__ . '/deploy_worker_runtime.php';
 require_once __DIR__ . '/deploy_worker_vm_state.php';
 require_once __DIR__ . '/deploy_worker_outcome_audit.php';
+require_once __DIR__ . '/deploy_worker_install_watch.php';
 
 /**
  * How a job ends: the success conclusion including its per-VM verdict, the
@@ -92,6 +93,7 @@ function deploy_worker_conclude_sequence(mysqli $db, array $job, string $workerI
         // A caught audit deadlock must never roll back the domain transaction.
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $summary);
         deploy_worker_refresh_inventory_after_deploy($db, $job);
+        deploy_worker_after_start_step($db, $job);
     }
 }
 
@@ -266,6 +268,7 @@ function deploy_worker_handle_failure(
         // The unknown outcome names its closed reason code, like the reaper's row.
         deploy_worker_audit_outcome($db, $job, $terminalStatus, $terminalStatus === VIRTUSPHERE_DEPLOY_STATUS_OUTCOME_UNKNOWN ? $reasonCode : $message);
         deploy_worker_refresh_inventory_after_deploy($db, $job);
+        deploy_worker_after_start_step($db, $job);
     }
 }
 

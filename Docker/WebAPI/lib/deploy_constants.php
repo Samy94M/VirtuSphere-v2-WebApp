@@ -195,9 +195,9 @@ const VIRTUSPHERE_DEPLOY_STAGGER_MAX = 120;
 const VIRTUSPHERE_DEPLOY_STAGGER_MODES = ['full', 'powercycle', 'start'];
 
 // Deploy modes that create VMs and thus change ESXi resource usage (datastore
-// allocation, portgroups in use). A successful job in one of these triggers an
-// inventory refresh for its ESXi credential (ADR-0023, E3.4b). Power-cycle,
-// start and export do not create resources and are excluded.
+// allocation, portgroups in use); a job in one of these triggers an inventory
+// refresh for its credential (ADR-0023, E3.4b). The pull after a start step is
+// not in this list: deploy_worker_after_start_step() derives it (ADR-0038 A2).
 const VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES = ['create', VIRTUSPHERE_DEPLOY_MODE_FULL];
 
 // ESXi inventory (ADR-0023): a system deploy mode that is never shown in the UI

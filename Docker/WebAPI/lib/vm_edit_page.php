@@ -187,6 +187,16 @@ $progressWatchSince = $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDIN
     ? (string) ($vm['mecm_pending_since'] ?? '')
     : (string) ($vm['os_install_watch_started_at'] ?? '');
 $showProgressWatch = $progressAttention !== null || $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING;
+// Who set the running OS-install clock (ADR-0038 amendment 2), read from the
+// status history; '' when it no longer says so. Exhaustive over the closed set.
+$progressWatchSourceText = match ($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING
+    ? virtusphere_vm_install_watch_source($statusEvents, $progressWatchSince)
+    : null) {
+    VIRTUSPHERE_VM_POWER_EVIDENCE_PORTAL_START => __t('vm_edit.progress_source_portal_start'),
+    VIRTUSPHERE_VM_POWER_EVIDENCE_INVENTORY => __t('vm_edit.progress_source_inventory'),
+    VIRTUSPHERE_VM_WATCH_SOURCE_OPERATOR => __t('vm_edit.progress_source_operator'),
+    null => '',
+};
 // One title per page, rendered by layout_header() into both the browser tab and
 // the visible heading. An edit names the VM it is about: the mission's VM list
 // and every editor opened from it used to carry the same three words, so a row

@@ -91,9 +91,6 @@ const VIRTUSPHERE_VM_FINDING_LINK_SYSTEM_STATUS_ESXI = 'system_status_esxi';
 const VIRTUSPHERE_VM_FINDING_LINK_VM_EDITOR = 'vm_editor';
 const VIRTUSPHERE_VM_FINDING_LINK_PACKAGE_RUN = 'package_run';
 
-/** The inventory power state that contradicts an installing or reporting VM. */
-const VIRTUSPHERE_VM_INVENTORY_POWERED_OFF = 'poweredOff';
-
 /**
  * The phase of one VM; the first rule that matches wins (plan section 3).
  *

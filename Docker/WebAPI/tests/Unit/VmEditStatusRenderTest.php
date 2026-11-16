@@ -209,7 +209,7 @@ final class VmEditStatusRenderTest extends TestCase
         $visible = self::visible($html);
 
         self::assertStringContainsString('Handed to MECM', $visible);
-        self::assertStringContainsString('PXE evidence missing', $visible);
+        self::assertStringContainsString('Power-on evidence missing', $visible);
         self::assertStringContainsString('Delete the old MECM device', $visible);
         self::assertStringContainsString('Technical', $visible);
         self::assertStringNotContainsString('vm_edit.', $visible, 'an untranslated key is shown');

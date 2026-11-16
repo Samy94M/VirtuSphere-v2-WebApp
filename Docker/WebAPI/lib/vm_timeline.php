@@ -46,6 +46,10 @@ const VIRTUSPHERE_VM_STATUS_NOTES = [
     'ansible mac import' => 'ansible_mac_import',
     'MECM pending observation restarted' => 'mecm_pending_watch_restarted',
     'OS installation observation restarted' => 'os_install_watch_restarted',
+    // The automatic start (ADR-0038 amendment 2); the writers use the
+    // VIRTUSPHERE_VM_WATCH_NOTE_* constants of lib/vm_progress.php.
+    'OS installation observation started after a portal start' => 'os_install_watch_portal_start',
+    'OS installation observation started after a powered-on inventory reading' => 'os_install_watch_inventory',
     'queued for MECM assignment transfer from portal' => 'mecm_transfer_queued',
     'convergence sweep: restore completed job bracket' => 'sweep_restore',
     'convergence sweep: apply recorded job/VM outcome' => 'sweep_apply',

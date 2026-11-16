@@ -74,54 +74,6 @@ function repo_delete_vm_by_id(mysqli $db, int $missionId, int $vmId): bool
     });
 }
 
-
-/**
- * Explicitly starts or restarts the observation clock that is valid for the
- * VM's current progress state. The clock is operational metadata: updated_at
- * and all lifecycle/MECM fields deliberately remain untouched.
- */
-function repo_restart_vm_progress_watch(mysqli $db, int $missionId, int $vmId, ?int $userId = null): string
-{
-    if ($missionId <= 0 || $vmId <= 0) {
-        throw new InvalidArgumentException('Mission and VM are required.');
-    }
-
-    return repo_transaction($db, static function () use ($db, $missionId, $vmId, $userId): string {
-        $current = repo_fetch_one(
-            $db,
-            'SELECT lifecycle_state, mecm_sync_state, vm_status FROM deploy_vms WHERE id = ? AND mission_id = ? FOR UPDATE',
-            'ii',
-            [$vmId, $missionId]
-        );
-        if ($current === null) {
-            throw new RuntimeException('VM not found.');
-        }
-
-        $kind = virtusphere_vm_progress_watch_kind($current);
-        if ($kind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING) {
-            repo_execute($db, 'UPDATE deploy_vms SET mecm_pending_since = NOW(), updated_at = updated_at WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
-            $note = 'MECM pending observation restarted';
-        } elseif ($kind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING) {
-            repo_execute($db, 'UPDATE deploy_vms SET os_install_watch_started_at = NOW(), updated_at = updated_at WHERE id = ? AND mission_id = ?', 'ii', [$vmId, $missionId]);
-            $note = 'OS installation observation restarted';
-        } else {
-            throw new RuntimeException('The VM is not in an observable progress state.');
-        }
-
-        repo_record_vm_status_event(
-            $db,
-            $vmId,
-            (string) $current['lifecycle_state'],
-            (string) $current['mecm_sync_state'],
-            (string) $current['vm_status'],
-            $note,
-            $userId
-        );
-
-        return $kind;
-    });
-}
-
 /**
  * The overdue predicate of virtusphere_vm_progress_attention() in SQL, shared
  * by both mission counts so they cannot drift apart: either half of

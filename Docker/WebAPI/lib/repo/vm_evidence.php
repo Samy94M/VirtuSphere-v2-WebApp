@@ -122,7 +122,7 @@ function repo_vm_evidence_jobs(mysqli $db, array $vmIds): array
     }
     [$placeholders, $types] = repo_vm_evidence_in_list($vmIds);
     $stmt = $db->prepare(
-        'SELECT s.vm_id, j.id, j.status, j.payload_json, j.started_at, j.created_at, j.updated_at'
+        'SELECT s.vm_id, s.captured_at, j.id, j.status, j.failed_step, j.payload_json, j.started_at, j.created_at, j.updated_at'
         . ' FROM deploy_job_vm_states s'
         . ' INNER JOIN (SELECT vm_id, MAX(id) AS max_id FROM deploy_job_vm_states WHERE vm_id IN (' . $placeholders . ') GROUP BY vm_id) latest ON latest.max_id = s.id'
         . ' INNER JOIN deploy_jobs j ON j.id = s.job_id'
@@ -140,6 +140,11 @@ function repo_vm_evidence_jobs(mysqli $db, array $vmIds): array
             'started_at' => $row['started_at'] ?? null,
             'created_at' => $row['created_at'] ?? null,
             'updated_at' => $row['updated_at'] ?? null,
+            // The start-step proof of virtusphere_vm_job_completed_start_step():
+            // the failed step, the resume flag and the immutable claim time (K15).
+            'failed_step' => $row['failed_step'] ?? null,
+            'then_autostart' => is_array($payload) && !empty($payload['then_autostart']),
+            'captured_at' => $row['captured_at'] ?? null,
         ];
     }
 
