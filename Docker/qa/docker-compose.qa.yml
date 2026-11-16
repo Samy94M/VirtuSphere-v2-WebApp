@@ -384,6 +384,40 @@ services:
       start_period: 5s
     restart: "no"
 
+  # Visual-Browser (VC1): Playwright run-server im per Digest gepinnten Linux-
+  # Image (Docker/qa/visual-browser/Dockerfile). Nicht in Services von
+  # qa-identity.ps1: nur die Visual-Aufnahme (Gate e2e-portal und
+  # scripts/update-visual-baselines.ps1) startet ihn, `down -v` raeumt ihn mit
+  # ab. Kein Mount und kein QA-Netz: der Browser erreicht das Portal ueber den
+  # Client (exposeNetwork), nie ueber ein Netz mit mysql. Der Port liegt nur auf
+  # Loopback; die Adresse steht in qa-identity.ps1 (VisualBrowserEndpoint).
+  visual-browser:
+    build:
+      context: .
+      dockerfile: Docker/qa/visual-browser/Dockerfile
+    init: true
+    # Chromium braucht mehr als die 64 MB Standard-/dev/shm; die Playwright-Doku
+    # nennt dafuer --ipc=host, das hier bewusst nicht den Host-IPC teilt.
+    shm_size: "1gb"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/pwuser:size=64m,uid=1001,gid=1001,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 2g
+    ports:
+      - "127.0.0.1:8034:3000"
+    networks:
+      - visual
+    restart: "no"
+
+networks:
+  visual:
+
 volumes:
   qa-repo:
   qa-mysql-data:

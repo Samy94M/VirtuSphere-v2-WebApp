@@ -1,9 +1,12 @@
 {
-  "schemaVersion": 2,
-  "runnerId": "virtusphere-visual-win32-x64-chromium-1228",
-  "platform": "win32",
+  "schemaVersion": 3,
+  "runnerId": "virtusphere-visual-linux-x64-chromium-1228-noble",
+  "platform": "linux",
   "arch": "x64",
-  "osRelease": "10.0.26300",
+  "osRelease": "ubuntu-24.04",
+  "container": {
+    "image": "mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48"
+  },
   "browser": {
     "engine": "chromium",
     "revision": "1228",
@@ -12,43 +15,138 @@
   "playwrightVersion": "1.61.1",
   "fonts": [
     {
-      "file": "segoeui.ttf",
-      "sha256": "704eada12961a27fd271f7d3b09e2066520e758390c1776744eff430fee30f6e"
+      "query": "Arial:style=Regular",
+      "file": "LiberationSans-Regular.ttf",
+      "sha256": "4659bc0c58c5028dd488ec928d41d9265db43d9b669fc14ca8b0832daca7b144"
     },
     {
-      "file": "seguisb.ttf",
-      "sha256": "6c3fd894b19950b10c34bf64069ef821eaf2f58f959146306fee5b367472e501"
+      "query": "Arial:style=Bold",
+      "file": "LiberationSans-Bold.ttf",
+      "sha256": "3973aa5054fb467dd5627245d3dc82e37bf16fe075756156a570455871351582"
     },
     {
-      "file": "segoeuib.ttf",
-      "sha256": "b169e636719880976a97e94e3b1cb3dbe5f4a38eabc037bf9f2a9165154c3ad2"
+      "query": "monospace:style=Regular",
+      "file": "LiberationMono-Regular.ttf",
+      "sha256": "395fa5ab8d40c8eba390ced528744ea75a7f69aabf3e68b6f925ca0e39a27370"
+    }
+  ],
+  "fontSet": {
+    "count": 48,
+    "sha256": "771a7df8dcafcbfbc65a04383b6f69ed10cfc6bca063bbf900058ccaa6517c5e"
+  },
+  "renderedFonts": [
+    {
+      "weight": "regular",
+      "fonts": [
+        {
+          "familyName": "Liberation Sans",
+          "postScriptName": "LiberationSans",
+          "isCustomFont": false
+        }
+      ]
+    },
+    {
+      "weight": "bold",
+      "fonts": [
+        {
+          "familyName": "Liberation Sans",
+          "postScriptName": "LiberationSans-Bold",
+          "isCustomFont": false
+        }
+      ]
     }
   ],
   "locale": "de-DE",
   "timezoneId": "Europe/Berlin",
   "viewports": [
-    { "name": "desktop", "width": 1440, "height": 1000 },
-    { "name": "wrap", "width": 860, "height": 1000 },
-    { "name": "mobile", "width": 390, "height": 844 }
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "wrap",
+      "width": 860,
+      "height": 1000
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
   ],
   "pages": [
-    { "name": "missions", "url": "missions.php" },
-    { "name": "deploy", "url": "deploy.php?mission_id=:missionId" },
+    {
+      "name": "missions",
+      "url": "missions.php"
+    },
+    {
+      "name": "deploy",
+      "url": "deploy.php?mission_id=:missionId"
+    },
     {
       "name": "system-status",
       "url": "system_status.php",
       "captureSelector": ".status-overview",
       "fixture": {
         "overviewBadges": [
-          { "href": "system_status.php#deploy-service", "className": "badge badge-danger", "icon": "critical", "text": "Manuelle Klärung nötig" },
-          { "href": "system_status.php#mecm", "signal": 1, "className": "badge badge-success", "icon": "ok", "text": "OK" },
-          { "href": "system_status.php#mecm", "signal": 2, "className": "badge badge-danger", "icon": "critical", "text": "Kritisch" },
-          { "href": "system_status.php#ansible", "className": "badge badge-neutral", "icon": "no-data", "text": "Keine Daten" },
-          { "href": "system_status.php#esxi", "className": "badge badge-warning", "icon": "warning", "text": "Warnung" },
-          { "href": "system_status.php#deviations", "className": "badge badge-warning", "icon": "warning", "text": "12 Abweichungen" },
-          { "href": "system_status.php#host-backup", "className": "badge badge-danger", "icon": "critical", "text": "Kritisch" },
-          { "href": "system_status.php#internal-services", "className": "badge badge-success", "icon": "current", "text": "Aktuell" },
-          { "href": "system_status.php#directory-status", "className": "badge badge-warning", "icon": "limited", "text": "Eingeschränkt", "optional": true }
+          {
+            "href": "system_status.php#deploy-service",
+            "className": "badge badge-danger",
+            "icon": "critical",
+            "text": "Manuelle Klärung nötig"
+          },
+          {
+            "href": "system_status.php#mecm",
+            "signal": 1,
+            "className": "badge badge-success",
+            "icon": "ok",
+            "text": "OK"
+          },
+          {
+            "href": "system_status.php#mecm",
+            "signal": 2,
+            "className": "badge badge-danger",
+            "icon": "critical",
+            "text": "Kritisch"
+          },
+          {
+            "href": "system_status.php#ansible",
+            "className": "badge badge-neutral",
+            "icon": "no-data",
+            "text": "Keine Daten"
+          },
+          {
+            "href": "system_status.php#esxi",
+            "className": "badge badge-warning",
+            "icon": "warning",
+            "text": "Warnung"
+          },
+          {
+            "href": "system_status.php#deviations",
+            "className": "badge badge-warning",
+            "icon": "warning",
+            "text": "12 Abweichungen"
+          },
+          {
+            "href": "system_status.php#host-backup",
+            "className": "badge badge-danger",
+            "icon": "critical",
+            "text": "Kritisch"
+          },
+          {
+            "href": "system_status.php#internal-services",
+            "className": "badge badge-success",
+            "icon": "current",
+            "text": "Aktuell"
+          },
+          {
+            "href": "system_status.php#directory-status",
+            "className": "badge badge-warning",
+            "icon": "limited",
+            "text": "Eingeschränkt",
+            "optional": true
+          }
         ]
       }
     }
@@ -69,7 +167,10 @@
   "screenshotScale": "css",
   "clock": "2026-08-27T08:15:00.000Z",
   "randomSeed": 110011,
-  "themes": ["light", "dark"],
+  "themes": [
+    "light",
+    "dark"
+  ],
   "reducedMotion": "reduce",
   "animations": "disabled",
   "caret": "hide",

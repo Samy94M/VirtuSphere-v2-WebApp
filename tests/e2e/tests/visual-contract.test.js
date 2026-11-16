@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { resolveBrowser } = require('../lib/browser-resolver');
+const { resolveBrowser, revisionFromExecutablePath } = require('../lib/browser-resolver');
 const { assertVisualQaIsolation } = require('../lib/visual-seed');
-const { compareMetadata, platformRelease } = require('../visual/metadata');
+const { BASE_IMAGE_LABEL, buildActual, compareMetadata, platformRelease, validateMetadata } = require('../visual/metadata');
 const { comparePngs, refuseUpdateRequest, requireCleanCaptureScope, requireMatchingMetadata, requireUsableBaselines, validateHarnessEnvironment, UPDATE_ENV_NAMES } = require('../visual/harness');
 const { expectedBaselineFiles, expectedRunFiles, runnerIdentity, verifyBaselineSet, writeDiffImage } = require('../visual/baselines');
 const { MINIMUM_REASON_LENGTH, parseReason, requireExplicitAllowance, requireMatchingRunner } = require('../visual/update-baselines');
@@ -20,7 +20,12 @@ const isolatedEnv = {
   VIRTUSPHERE_PHP_CONTAINER: 'virtusphere-qa-php-1',
   VIRTUSPHERE_MYSQL_CONTAINER: 'virtusphere-qa-mysql-1',
   DB_NAME: 'deploymentcenter',
+  VIRTUSPHERE_VISUAL_BROWSER_CONTAINER: 'virtusphere-qa-visual-browser-1',
+  VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT: 'ws://127.0.0.1:8034/',
 };
+
+const REPO = path.join(__dirname, '..', '..', '..');
+const read = (relative) => fs.readFileSync(path.join(REPO, relative), 'utf8').replace(/\r\n/g, '\n');
 
 test('browser resolver honors only an existing explicit Chromium override', () => {
   const result = resolveBrowser('chromium', {
@@ -122,7 +127,9 @@ test('visual runner pins the deterministic software compositor arguments', () =>
     '--disable-partial-raster',
   ]);
   const config = fs.readFileSync(path.join(__dirname, '..', 'playwright.config.js'), 'utf8');
-  assert.match(config, /launchOptions: \{ \.\.\.CHROMIUM_LAUNCH, args: visualContract\.launchArgs \}/);
+  // VC1: no host executable path travels to the container browser.
+  assert.match(config, /launchOptions: \{ args: visualContract\.launchArgs \}/);
+  assert.match(config, /connectOptions: \{ wsEndpoint: VISUAL_BROWSER_ENDPOINT, exposeNetwork: '<loopback>' \}/);
 });
 
 test('pixel comparison decodes PNG pixels and rejects one changed channel', () => {
@@ -250,7 +257,7 @@ test('the runner identity a baseline is bound to excludes review prose', () => {
   const identity = runnerIdentity(contract);
   assert.equal('reason' in identity, false);
   assert.equal('updatedAt' in identity, false);
-  for (const key of ['runnerId', 'browser', 'fonts', 'viewports', 'launchArgs', 'masks', 'pages']) {
+  for (const key of ['runnerId', 'container', 'browser', 'fonts', 'fontSet', 'renderedFonts', 'viewports', 'launchArgs', 'masks', 'pages']) {
     assert.ok(key in identity, `${key} decides how a pixel is rasterised and belongs to the identity`);
   }
 });
@@ -295,4 +302,183 @@ test('a diff image names the changed pixels and their bounding box', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- VC1: ein Sollbildsatz im gepinnten Linux-Container -----------------------
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+
+// What a container that matches the contract would report, so each case below
+// changes exactly one measured value.
+function measuredFromContract(overrides = {}) {
+  const [osId, ...osVersion] = contract.osRelease.split('-');
+  const container = {
+    platform: contract.platform,
+    arch: contract.arch,
+    osReleaseText: `ID=${osId}\nVERSION_ID="${osVersion.join('-')}"\n`,
+    playwrightVersion: contract.playwrightVersion,
+    chromiumExecutable: `/ms-playwright/chromium-${contract.browser.revision}/chrome-linux/chrome`,
+    chromiumExists: true,
+    fonts: contract.fonts.map((font) => ({ ...font })),
+    fontSet: { ...contract.fontSet },
+    image: contract.container.image,
+    ...(overrides.container || {}),
+  };
+  const browser = {
+    version: contract.browser.version,
+    commandLine: ['/ms-playwright/chrome', '--remote-debugging-pipe', ...contract.launchArgs],
+    renderedFonts: JSON.parse(JSON.stringify(contract.renderedFonts)),
+    ...(overrides.browser || {}),
+  };
+  return buildActual(contract, {
+    container: { value: container },
+    browser: { value: browser },
+    clientVersion: overrides.clientVersion || contract.playwrightVersion,
+  });
+}
+
+const mismatchesOf = (measured) => [...measured.errors, ...compareMetadata(contract, measured.actual)];
+
+test('the contract describes the pinned Linux container, not a host', () => {
+  assert.equal(contract.platform, 'linux');
+  assert.match(contract.osRelease, /^ubuntu-\d+\.\d+$/);
+  assert.match(contract.container.image, /^mcr\.microsoft\.com\/playwright:v\d+\.\d+\.\d+-noble@sha256:[0-9a-f]{64}$/);
+  // A host-file font entry (the old Windows contract) would hash the host again.
+  for (const font of contract.fonts) {
+    assert.equal(typeof font.query, 'string', 'every contract font is a fontconfig query measured in the container');
+    assert.match(font.sha256, /^[0-9a-f]{64}$/);
+  }
+  assert.ok(Number.isInteger(contract.fontSet.count) && contract.fontSet.count > 0);
+  assert.match(contract.fontSet.sha256, /^[0-9a-f]{64}$/);
+  // The face Chromium really renders the portal body with, regular and bold;
+  // never a web font (the portal ships none, ADR air gap).
+  assert.deepEqual(contract.renderedFonts.map((entry) => entry.weight), ['regular', 'bold']);
+  for (const entry of contract.renderedFonts) {
+    assert.ok(entry.fonts.length > 0);
+    for (const font of entry.fonts) assert.equal(font.isCustomFont, false);
+  }
+});
+
+test('the rendered-font probe asks with the portal body stack', () => {
+  const { portalFontStack } = require('../visual/metadata');
+  assert.match(portalFontStack(), /^system-ui, /);
+  assert.throws(() => portalFontStack('body { color: red; }'), /portal body font stack not found/);
+});
+
+test('image tag, lockfile Playwright and the Dockerfile name one build', () => {
+  const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package-lock.json'), 'utf8'));
+  const locked = lock.packages['node_modules/playwright-core'].version;
+  assert.equal(contract.playwrightVersion, locked);
+  assert.equal(contract.container.image.match(/:v(\d+\.\d+\.\d+)-/)[1], locked, 'the image must carry the lockfile Playwright');
+  const dockerfile = read('Docker/qa/visual-browser/Dockerfile');
+  assert.match(dockerfile, new RegExp(`^FROM ${escapeRegExp(contract.container.image)}$`, 'm'));
+  assert.match(dockerfile, new RegExp(`^LABEL ${escapeRegExp(BASE_IMAGE_LABEL)}="${escapeRegExp(contract.container.image)}"$`, 'm'));
+  // The probe requires the server's playwright-core from the image WORKDIR.
+  assert.match(dockerfile, /^WORKDIR \/opt\/visual$/m);
+  const probe = fs.readFileSync(path.join(__dirname, '..', 'visual', 'container-probe.js'), 'utf8');
+  assert.match(probe, /'\/opt\/visual\/node_modules\/playwright-core'/);
+});
+
+test('the visual browser service has no mount, no QA network and only a loopback port', () => {
+  const compose = read('Docker/qa/docker-compose.qa.yml');
+  const start = compose.indexOf('\n  visual-browser:\n');
+  assert.ok(start > 0, 'visual-browser service missing');
+  const rest = compose.slice(start + 1);
+  const block = rest.slice(0, rest.search(/\n(?=\S)/));
+  assert.doesNotMatch(block, /^\s+volumes:/m);
+  assert.match(block, /^    ports:\n      - "127\.0\.0\.1:8034:3000"$/m);
+  assert.match(block, /^    networks:\n      - visual$/m);
+  assert.match(block, /^    cap_drop:\n      - ALL$/m);
+  // The identity the runner starts and the identity the seed accepts are one.
+  const identity = read('scripts/lib/check/qa-identity.ps1');
+  assert.match(identity, new RegExp(`VisualBrowserContainer = '${escapeRegExp(isolatedEnv.VIRTUSPHERE_VISUAL_BROWSER_CONTAINER)}'`));
+  assert.match(identity, new RegExp(`VisualBrowserEndpoint  = '${escapeRegExp(isolatedEnv.VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT)}'`));
+  assert.match(identity, /VisualBrowserService   = 'visual-browser'/);
+});
+
+test('a container that matches the contract measures no mismatch', () => {
+  assert.deepEqual(mismatchesOf(measuredFromContract()), []);
+  assert.equal(revisionFromExecutablePath('/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell'), '1228');
+});
+
+test('every measured runner difference is a mismatch, never a guess', () => {
+  const cases = [
+    [{ container: { image: contract.container.image.replace(/sha256:[0-9a-f]{4}/, 'sha256:zzzz') } }, /container\.image/],
+    [{ container: { osReleaseText: 'ID=ubuntu\nVERSION_ID="26.04"\n' } }, /osRelease/],
+    [{ container: { platform: 'win32' } }, /platform/],
+    [{ container: { fontSet: { ...contract.fontSet, sha256: '0'.repeat(64) } } }, /fontSet\.sha256/],
+    [{ container: { fonts: contract.fonts.map((font, i) => (i === 0 ? { ...font, sha256: '0'.repeat(64) } : font)) } }, /fonts\[0\]\.sha256/],
+    [{ container: { chromiumExecutable: '/ms-playwright/chromium-1300/chrome-linux/chrome' } }, /browser\.revision/],
+    [{ container: { chromiumExists: false } }, /container Chromium missing/],
+    [{ browser: { version: `${contract.browser.version}-other` } }, /browser\.version/],
+    [{ browser: { renderedFonts: [{ weight: 'regular', fonts: [{ familyName: 'WenQuanYi Zen Hei', postScriptName: 'WenQuanYiZenHei', isCustomFont: false }] }, contract.renderedFonts[1]] } }, /renderedFonts\[0\]\.fonts\[0\]\.familyName/],
+    [{ clientVersion: '1.99.0' }, /playwrightVersion: expected .*client 1\.99\.0/],
+  ];
+  for (const [overrides, expected] of cases) {
+    const found = mismatchesOf(measuredFromContract(overrides));
+    assert.ok(found.some((line) => expected.test(line)), `${expected} expected in ${JSON.stringify(found)}`);
+  }
+});
+
+test('the started switches come from the one browser main process in the container', () => {
+  const { readBrowserProcessArgs } = require('../visual/metadata');
+  const main = ['/ms-playwright/chrome', '--remote-debugging-pipe', '--disable-gpu'];
+  const renderer = ['/ms-playwright/chrome', '--type=renderer', '--remote-debugging-pipe'];
+  const server = ['node', 'cli.js', 'run-server'];
+  const fake = (processes) => (exe, args) => {
+    assert.deepEqual(args.slice(0, 2), ['exec', 'virtusphere-qa-visual-browser-1']);
+    return JSON.stringify(processes);
+  };
+  assert.deepEqual(readBrowserProcessArgs('virtusphere-qa-visual-browser-1', fake([server, main, renderer])), main);
+  assert.throws(() => readBrowserProcessArgs('virtusphere-qa-visual-browser-1', fake([server])), /found 0/);
+  assert.throws(() => readBrowserProcessArgs('virtusphere-qa-visual-browser-1', fake([main, main])), /found 2/);
+});
+
+test('a browser started without a contract switch is refused by name', () => {
+  const commandLine = ['/ms-playwright/chrome', ...contract.launchArgs.filter((arg) => arg !== '--disable-partial-raster')];
+  const found = mismatchesOf(measuredFromContract({ browser: { commandLine } }));
+  assert.ok(found.some((line) => /without contract switches: --disable-partial-raster/.test(line)), JSON.stringify(found));
+});
+
+test('a run outside the container measures nothing and is refused', async () => {
+  const outside = await validateMetadata(contract, {}, {
+    probeContainer: () => { throw new Error('must not be reached'); },
+    probeBrowser: async () => { throw new Error('must not be reached'); },
+  });
+  assert.equal(outside.ok, false);
+  assert.match(outside.mismatches[0], /VIRTUSPHERE_VISUAL_BROWSER_CONTAINER and VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT are required/);
+  assert.throws(() => requireMatchingMetadata(outside), /^Error: infrastructure_error: visual runner metadata mismatch/);
+  assert.throws(() => requireMatchingRunner(outside), /refusing to overwrite reviewed baselines/);
+
+  const stopped = await validateMetadata(contract, isolatedEnv, {
+    probeContainer: () => { throw new Error('Error response from daemon: No such container'); },
+    probeBrowser: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:8034'); },
+  });
+  assert.equal(stopped.ok, false);
+  assert.ok(stopped.mismatches.some((line) => /container not measurable: Error response from daemon/.test(line)));
+  assert.ok(stopped.mismatches.some((line) => /not reachable: connect ECONNREFUSED/.test(line)));
+});
+
+test('the visual seed and the spec refuse a host browser', () => {
+  assert.throws(
+    () => assertVisualQaIsolation({ ...isolatedEnv, VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT: 'ws://192.0.2.10:3000/' }),
+    /VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT must equal ws:\/\/127\.0\.0\.1:8034\//
+  );
+  assert.throws(
+    () => assertVisualQaIsolation({ ...isolatedEnv, VIRTUSPHERE_VISUAL_BROWSER_CONTAINER: '' }),
+    /VIRTUSPHERE_VISUAL_BROWSER_CONTAINER must equal/
+  );
+  const spec = fs.readFileSync(path.join(__dirname, '..', 'specs', 'visual', 'portal.visual.spec.js'), 'utf8');
+  assert.match(spec, /if \(!process\.env\.VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT\) \{\r?\n\s+throw new Error\('infrastructure_error: /);
+});
+
+test('harness and writer start the same container before they measure', () => {
+  const gate = read('scripts/lib/check/gates-integration.ps1');
+  const writer = read('scripts/update-visual-baselines.ps1');
+  for (const source of [gate, writer]) {
+    assert.match(source, /\$browserEnv = Get-QaVisualBrowserEnv/);
+    assert.match(source, /\$browser = Start-QaVisualBrowser/);
+  }
+  const runtime = read('scripts/lib/check/runtime.ps1');
+  assert.match(runtime, /Invoke-QaCompose @\('up', '-d', '--build', '--wait', \$qaIdentity\.VisualBrowserService\)/);
 });

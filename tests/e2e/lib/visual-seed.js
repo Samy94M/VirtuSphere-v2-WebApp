@@ -12,6 +12,10 @@ function assertVisualQaIsolation(env = process.env) {
     VIRTUSPHERE_PHP_CONTAINER: 'virtusphere-qa-php-1',
     VIRTUSPHERE_MYSQL_CONTAINER: 'virtusphere-qa-mysql-1',
     DB_NAME: 'deploymentcenter',
+    // VC1: the images come only from the pinned visual browser container of the
+    // same QA project (scripts/lib/check/qa-identity.ps1).
+    VIRTUSPHERE_VISUAL_BROWSER_CONTAINER: 'virtusphere-qa-visual-browser-1',
+    VIRTUSPHERE_VISUAL_BROWSER_ENDPOINT: 'ws://127.0.0.1:8034/',
   };
   for (const [name, value] of Object.entries(expected)) {
     if (env[name] !== value) throw new Error(`visual seed isolation refused: ${name} must equal ${value}`);

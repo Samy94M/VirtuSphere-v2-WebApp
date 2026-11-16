@@ -13,6 +13,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 ## A24 Visual screenshots run only through the visual Playwright project against the exact synthetic v
 
 - Visual screenshots run only through the `visual` Playwright project against the exact synthetic `virtusphere-qa` stack. Refuse shared/dev/production Compose labels, refuse active jobs, and restore only previously running QA workers in `finally`. Validate the committed runner/font metadata before images; a mismatch is `infrastructure_error` and never authorizes a baseline update. Real data must never appear in a screenshot.
+- The visual browser is only the digest-pinned Linux container `visual-browser` of the QA project (`Docker/qa/visual-browser/Dockerfile`, image tag equal to the lockfile Playwright), locally and in CI (VC1). It gets no source, no mount and no QA network; the host runs test runner, seed, comparison and writer and connects through `connectOptions` with `exposeNetwork`. Platform, release, Chromium, fonts, font-set digest, base image and the started switches are measured in that container (`tests/e2e/visual/metadata.js`), never on the host; without the container the run is `infrastructure_error`. Start it only through `Start-QaVisualBrowser` (`scripts/lib/check/runtime.ps1`).
 
 ## A25 The reviewed target PNGs under tests/e2e/visual/baselines/ are the pass criterion at zero toler
 
