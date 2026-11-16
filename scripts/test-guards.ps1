@@ -669,6 +669,8 @@ $cases = @(
     # Ein Eintrag direkt unter der obersten Release-Ueberschrift, committet: das
     # alte Verfahren mit der Ueberschrift des letzten Releases statt "Noch in
     # keinem Release". Der Anker ist die erste "## "-Zeile, kein Releasename.
+    # Einziger Beweis dieser Regel (QL4: der Pester-Zwilling "rejects an entry
+    # added under the top release" entfiel nach Mutation und Nutzerwort).
     @{ Name = 'doc-fragments.new-entry'; Body = {
         $fx = New-DocFragmentRepo
         if (-not $fx) { return @{ Status = 'infra'; Detail = 'git fehlt' } }
