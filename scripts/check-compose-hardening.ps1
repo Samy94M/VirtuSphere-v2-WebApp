@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Haertungs-Contract fuer docker-compose.yml und die First-Party-Dockerfiles
+    Haertungs-Contract fuer docker-compose.yml und alle Dockerfiles des Repos
     (AP8): jede Lockerung der bestehenden Container-Haertung bricht den Build.
 
 .DESCRIPTION
@@ -15,7 +15,8 @@
     Healthchecks, service_healthy-Startordnung, restart- und Logging-Policy, die
     Loopback-Bindung und das tools-Profil von phpMyAdmin, feste Tags und
     Build-Kontexte der lokal gehaerteten Runtime-Images sowie die Digest-Pins in
-    den FROM-/COPY---from-Zeilen der First-Party-Dockerfiles. Dazu die
+    den FROM-/COPY---from-/RUN---mount-from-Zeilen jedes Dockerfiles, das
+    der Scan unter dem Pruef-Root findet (abgeleitet, LD1). Dazu die
     Netztrennung (C-07): webserver nur an front, php an front und default,
     kein anderer Dienst an front, kein network_mode, keine unbekannten Netze,
     kein Subnetz in der Basisdatei, jeder LAN-veroeffentlichte Dienst nur an
@@ -500,41 +501,71 @@ if ($findings.Count -eq 0) {
     }
 }
 
-# --- First-Party-Dockerfiles: FROM/COPY --from per Digest ----------------------
-$dockerfiles = @(
-    'Docker/php/Dockerfile', 'Docker/nginx/Dockerfile',
-    'Docker/mysql/Dockerfile', 'Docker/phpmyadmin/Dockerfile',
-    'Docker/qa-ansible/Dockerfile',
-    # VC1: der Visual-Browser; sein Digest bestimmt Chromium und Fontsatz der Sollbilder.
-    'Docker/qa/visual-browser/Dockerfile'
-)
-$digestRe = '@sha256:[0-9a-f]{64}'
+# --- Dockerfiles: jede Image-Referenz per Digest -------------------------------
+# LD1: abgeleitet statt gelistet. Die Menge ist jedes Dockerfile unter dem
+# Pruef-Root, gefunden von derselben Funktion wie fuer hadolint (Get-Dockerfiles,
+# runtime.ps1; Ausgabebaeume und verschachtelte Arbeitsbaeume ausgenommen). Die
+# fruehere feste Liste kannte Docker/ldap-fixture/Dockerfile nicht, also haette
+# ein verlorener Pin dort nie rot gemeldet. Was nie auftreten darf, gilt fuer
+# jede Datei: eine Image-Referenz in FROM, COPY --from oder RUN --mount from=
+# ohne @sha256-Digest. Begruendete Ausnahmen, je Referenz entschieden:
+#   - eine vorher in derselben Datei benannte Stage (FROM x AS <stage>) oder ein
+#     Stage-Index (COPY --from=0): lokal gebaut, aus gepinnten Basen;
+#   - scratch: das reservierte leere Basisimage, es wird nichts geladen.
+# Interne Images ohne Registry (etwa ein lokal getaggtes virtusphere-*) sind
+# keine Ausnahme: sie wuerden aus irgendeiner Quelle geladen, die der Contract
+# nicht kennt. Ein leerer Scan oder ein Dockerfile ohne erkannte FROM-Zeile ist
+# ein Befund (Zero-Match), kein Gruen.
+$repoRoot = $root   # Get-CheckFiles liest den Pruef-Root aus $repoRoot
+$found = @(Get-Dockerfiles)
+$dockerfiles = @()
+# Erst zaehlen, dann umwandeln: ConvertTo-RepoRelative macht aus einer leeren
+# Eingabe einen Leerstring, der wie ein Treffer zaehlen wuerde.
+if ($found.Count -eq 0) {
+    Add-Finding 'dockerfile-scan' 'kein Dockerfile unter dem Pruef-Root gefunden (Zero-Match: ein leerer Scan ist kein sauberes Repository)'
+} else {
+    $dockerfiles = @(ConvertTo-RepoRelative $found)
+}
+$digestRe = '@sha256:[0-9a-f]{64}$'
 foreach ($rel in $dockerfiles) {
     $path = Join-Path $root $rel
-    if (-not (Test-Path $path)) {
-        Add-Finding 'dockerfile-digest' ($rel + ': Datei fehlt (Zero-Match-Schutz: der Contract kennt sie)')
-        continue
-    }
     $lineNo = 0
+    $fromCount = 0
     $knownStages = @()
     foreach ($line in [System.IO.File]::ReadAllLines($path)) {
         $lineNo++
-        if ($line -match '^\s*FROM\s+(\S+)(?:\s+AS\s+(\S+))?') {
-            $ref = $Matches[1]
-            $stageName = $Matches[2]
-            if (($knownStages -notcontains $ref) -and ($ref -notmatch $digestRe)) {
+        if ($line -match '^\s*FROM\s+(.+)$') {
+            $fromCount++
+            # Flags wie --platform=... stehen vor der Referenz.
+            $tokens = @(($Matches[1].Trim() -split '\s+') | Where-Object { $_ -notmatch '^--' })
+            $ref = if ($tokens.Count -gt 0) { $tokens[0] } else { '' }
+            $stageName = ''
+            if ($tokens.Count -ge 3 -and $tokens[1] -eq 'AS') { $stageName = $tokens[2] }
+            $isStage = ($knownStages -contains $ref) -or ($ref -eq 'scratch')
+            if (-not $isStage -and ($ref -notmatch $digestRe)) {
                 Add-Finding 'dockerfile-digest' ('{0}:{1} FROM {2} ohne @sha256-Digest' -f $rel, $lineNo, $ref)
             }
             if ($stageName) { $knownStages += $stageName }
         }
-        if ($line -match '^\s*COPY\s+--from=(\S+)') {
-            $ref = $Matches[1]
-            # Nur echte Image-Referenzen (mit : oder /) brauchen einen Digest;
-            # ein blanker Name/Index referenziert eine Build-Stage.
-            if (($ref -match '[:/]') -and ($ref -notmatch $digestRe)) {
-                Add-Finding 'dockerfile-digest' ('{0}:{1} COPY --from={2} ohne @sha256-Digest' -f $rel, $lineNo, $ref)
+        $refs = @()
+        if ($line -match '^\s*COPY\s+(?:--\S+\s+)*--from=(\S+)') { $refs += ,@('COPY --from', $Matches[1]) }
+        if ($line -match '^\s*RUN\s') {
+            foreach ($m in [regex]::Matches($line, '--mount=\S*?\bfrom=([^,\s]+)')) {
+                $refs += ,@('RUN --mount from', $m.Groups[1].Value)
             }
         }
+        foreach ($pair in $refs) {
+            $ref = $pair[1]
+            # Ein Stage-Name oder Stage-Index ist lokal gebaut; jede andere
+            # Referenz ist ein Image, auch ohne : oder / (COPY --from=alpine).
+            if (($knownStages -contains $ref) -or ($ref -match '^\d+$')) { continue }
+            if ($ref -notmatch $digestRe) {
+                Add-Finding 'dockerfile-digest' ('{0}:{1} {2}={3} ohne @sha256-Digest' -f $rel, $lineNo, $pair[0], $ref)
+            }
+        }
+    }
+    if ($fromCount -eq 0) {
+        Add-Finding 'dockerfile-scan' ('{0}: keine FROM-Zeile erkannt (Zero-Match: der Contract kann die Datei nicht pruefen)' -f $rel)
     }
 }
 
@@ -544,6 +575,6 @@ if ($findings.Count -gt 0) {
     exit 1
 }
 if (-not $Quiet) {
-    Write-Output ('check-compose-hardening: OK ({0} Services, {1} Dockerfiles gepinnt)' -f $expectedServices.Count, $dockerfiles.Count)
+    Write-Output ('check-compose-hardening: OK ({0} Services, {1} gefundene Dockerfiles gepinnt)' -f $expectedServices.Count, $dockerfiles.Count)
 }
 exit 0

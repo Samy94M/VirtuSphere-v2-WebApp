@@ -815,6 +815,16 @@ function Get-CheckFiles {
     return @($found | Sort-Object -Unique)
 }
 
+# LD1: die eine Ableitung der Dockerfile-Menge fuer hadolint und die Digest-Pruefung
+# in check-compose-hardening.ps1. Vorher pflegte die Digest-Pruefung eine eigene
+# Liste, und Docker/ldap-fixture/Dockerfile fehlte darauf. Benannt sind nur die
+# Namensformen, die docker build per -f oder Konvention liest; ein
+# Dockerfile.dockerignore ist eine Ignore-Datei, kein Dockerfile.
+function Get-Dockerfiles {
+    return @(Get-CheckFiles @('Dockerfile', 'Dockerfile.*', '*.Dockerfile', 'Containerfile', 'Containerfile.*') |
+        Where-Object { $_ -notlike '*.dockerignore' })
+}
+
 function ConvertTo-RepoRelative {
     param([string[]]$Paths)
     return @($Paths | ForEach-Object { (($_ -replace '\\', '/') -replace [regex]::Escape($repoRoot + '/'), '') })
