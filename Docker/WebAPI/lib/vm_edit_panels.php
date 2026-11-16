@@ -41,6 +41,7 @@ declare(strict_types=1);
 /** @var string|null $progressWatchKind */
 /** @var array{kind:string,since:string,age_seconds:int,threshold_seconds:int}|null $progressAttention */
 /** @var string $progressWatchSince */
+/** @var string $progressWatchSourceText */
 /** @var bool $showProgressWatch */
 /** @var array<string, string> $workContext */
 /** @var string $vmListUrl */
@@ -94,6 +95,7 @@ declare(strict_types=1);
                     'hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
                 ])); ?></p>
             <?php } ?>
+            <?php if ($progressWatchSourceText !== '') { ?><p data-progress-source><?php echo h($progressWatchSourceText); ?></p><?php } ?>
             <p class="muted"><?php echo h(__t('vm_edit.progress_no_auto_failure')); ?></p>
             <?php if ($canWrite) { ?>
                 <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_editor_action_url($missionId, $workContext)); ?>">

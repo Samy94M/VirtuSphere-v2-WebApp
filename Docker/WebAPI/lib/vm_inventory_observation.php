@@ -29,6 +29,13 @@ const VIRTUSPHERE_VM_INVENTORY_STATES = [
     VIRTUSPHERE_VM_INVENTORY_PRESENT,
 ];
 
+// The two power states a reading is acted on. Powered off contradicts an
+// installing or reporting VM (finding `powered_off`); powered on is the proof
+// that starts the OS-install clock (lib/vm_progress.php). Any other state, or
+// none, is neither.
+const VIRTUSPHERE_VM_INVENTORY_POWERED_OFF = 'poweredOff';
+const VIRTUSPHERE_VM_INVENTORY_POWERED_ON = 'poweredOn';
+
 /**
  * An unanswered pull is not stale, and an unbound VM is never looked up at all.
  *

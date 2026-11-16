@@ -18,6 +18,7 @@ require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/deploy_worker_stream.php';
 require_once __DIR__ . '/deploy_remote_secret_sweep.php';
 require_once __DIR__ . '/deploy_worker_cleanup.php';
+require_once __DIR__ . '/deploy_worker_install_watch.php';
 
 /**
  * The ESXi inventory processor: the mission-less system job (ADR-0023).
@@ -174,6 +175,9 @@ function deploy_worker_process_inventory_job(mysqli $db, array $job, string $wor
         $phase = VIRTUSPHERE_DEPLOY_PHASE_DB;
         $summary = repo_esxi_inventory_apply($channel->connection(), $credentialId, $parsed, $jobId);
         repo_esxi_inventory_record_success($channel->connection(), $credentialId, $parsed['capabilities'], $jobId);
+        // Trigger 3 of the automatic observation start (ADR-0038 amendment 2):
+        // the pull is committed, and its `vm` kind now carries the power state.
+        deploy_worker_after_vm_inventory($channel->connection(), $credentialId, $parsed, (string) ($job['locked_at'] ?? ''));
         if (credential_esxi_trust_mode($esxiCredential) === VIRTUSPHERE_ESXI_TRUST_STRICT) {
             repo_record_esxi_strict_test_success($channel->connection(), $credentialId);
         }

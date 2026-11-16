@@ -18,6 +18,9 @@ require_once __DIR__ . '/vm_identity.php';
 // Rollout hostname, revision fence and the global hostname claim (Etappe 14D).
 require_once __DIR__ . '/vm_rollout.php';
 require_once __DIR__ . '/vm_network.php';
+// The automatic observation start reads the newest journal job and the cached
+// `vm` inventory through the evidence reader the findings use.
+require_once __DIR__ . '/vm_evidence.php';
 
 const REPO_VM_COLUMNS = [
     'vm_name',
@@ -44,5 +47,6 @@ require_once __DIR__ . '/vms_validation.php';
 require_once __DIR__ . '/vms_persistence.php';
 require_once __DIR__ . '/vms_mecm_reset.php';
 require_once __DIR__ . '/vms_operations.php';
+require_once __DIR__ . '/vms_progress_watch.php';
 require_once __DIR__ . '/vms_overview.php';
 require_once __DIR__ . '/vms_legacy.php';

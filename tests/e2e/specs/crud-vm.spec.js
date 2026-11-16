@@ -83,6 +83,10 @@ $stmt->execute();
 $stmt = $db->prepare('DELETE FROM deploy_os WHERE os_name LIKE ?');
 $stmt->bind_param('s', $like);
 $stmt->execute();
+// The ESXi access of the automatic-observation test; its inventory rows leave with it.
+$stmt = $db->prepare('DELETE FROM deploy_credentials WHERE name LIKE ?');
+$stmt->bind_param('s', $like);
+$stmt->execute();
 echo 'CLEANED';
 `);
 }
@@ -235,6 +239,60 @@ echo 'SEEDED';
   expect(after.lifecycle_state, 'the lifecycle is display-only').toBe('os_installing');
   expect(after.mecm_sync_state, 'the MECM state is untouched').toBe('registered');
   expect(after.updated_at, 'observation is not a VM edit').toBe(before.updated_at);
+});
+
+// ADR-0038 amendment 2: a registered VM that a fresh inventory shows powered on
+// is observed without a click. The editor names the source of the clock, and the
+// button is the restart, not the first start.
+test('OS observation: an inventory that shows the VM powered on starts the clock, and the editor names the source', async ({ page }) => {
+  const seed = seedMission(PREFIX + 'auto-watch', 1);
+  const vmId = seed.vmIds[0];
+  const started = phpJson(`
+$db = db();
+$vmId = ${Number(vmId)};
+$uuid = 'e2e-auto-watch-uuid';
+repo_execute($db, "INSERT INTO deploy_credentials (type, name, host, port, username, secret_ciphertext) VALUES ('esxi', ?, 'esxi.example.com', 443, 'svc', 'x')", 's', ['${PREFIX}auto-watch-esxi-' . $vmId]);
+$credentialId = (int) $db->insert_id;
+repo_execute(
+    $db,
+    "UPDATE deploy_vms SET lifecycle_state = 'os_installing', mecm_sync_state = 'registered', os_install_watch_started_at = NULL, vm_instance_uuid = ?, vm_bound_credential_id = ?, vm_bound_esxi_host = 'esxi.example.com', updated_at = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ?",
+    'sii',
+    [$uuid, $credentialId, $vmId]
+);
+$freshAt = (string) repo_scalar($db, 'SELECT NOW()');
+repo_execute(
+    $db,
+    'INSERT INTO deploy_esxi_inventory_state (credential_id, kind_freshness_json, kind_observation_json) VALUES (?, ?, ?)',
+    'iss',
+    [$credentialId, json_encode(['vm' => $freshAt]), json_encode(['vm' => ['outcome' => 'answered']])]
+);
+repo_execute(
+    $db,
+    "INSERT INTO deploy_esxi_inventory (credential_id, kind, name, meta_json) VALUES (?, 'vm', 'E2EVM1', ?)",
+    'is',
+    [$credentialId, json_encode(['instance_uuid' => $uuid, 'power_state' => 'poweredOn'])]
+);
+// The trigger the worker calls after an applied inventory whose vm kind answered.
+echo 'JSON' . json_encode(['started' => repo_start_install_watches_after_inventory($db, $credentialId)]) . 'JSON';
+`, ['lib/repo/vms.php']);
+  expect(started.started, 'the applied inventory started one clock').toBe(1);
+  const row = vmRow(vmId);
+  expect(row.os_install_watch_started_at, 'the clock runs without a click').not.toBeNull();
+  expect(row.lifecycle_state, 'the lifecycle is untouched').toBe('os_installing');
+
+  await page.goto(`vm_edit.php?mission_id=${seed.missionId}&vm_id=${vmId}`);
+  const watch = page.locator('#vm-progress-watch');
+  await expect(watch.locator('[data-progress-source]'), 'the editor names the inventory as the source').toHaveText(
+    /ESXi inventory shows the VM powered on|ESXi-Inventar zeigt die VM eingeschaltet/
+  );
+  await expect(
+    watch.locator('form:has(input[name="action"][value="restart_progress_watch"]) button'),
+    'with a running clock the button restarts'
+  ).toHaveText(/Restart observation|Beobachtung neu starten/);
+  await expect(
+    page.locator('.vm-finding-list a[href="#vm-progress-watch"]', { hasText: /Power-on evidence missing|Einschaltbeleg fehlt/ }),
+    'the finding for missing evidence is gone'
+  ).toHaveCount(0);
 });
 
 // e2e-covers: vms.php:delete

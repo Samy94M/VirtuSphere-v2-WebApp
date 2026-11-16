@@ -167,6 +167,35 @@ final class StatusWriterContractTest extends TestCase
     }
 
     /**
+     * The automatic observation start (ADR-0038 amendment 2) is not a stage
+     * writer. It sets a display clock on evidence that a registered VM is
+     * switched on; the stage stays where its one writer in the map above put it.
+     * A clock module that began to write a state would make "the ResourceID
+     * feedback sets 4/5" a half truth, so both modules are pinned to none.
+     */
+    public function testTheObservationClockWritersWriteNoStage(): void
+    {
+        foreach (['lib/repo/vms_progress_watch.php', 'lib/deploy_worker_install_watch.php'] as $file) {
+            $source = $this->source($file);
+            self::assertNotSame('', $source, $file . ' is empty; the scan would prove nothing');
+
+            self::assertDoesNotMatchRegularExpression('/\brepo_set_vm_state[a-z_]*\s*\(/', $source, $file . ' calls a state writer');
+            self::assertDoesNotMatchRegularExpression('/\bVIRTUSPHERE_STATUS_[A-Z_]+\b/', $source, $file . ' names a stage');
+            // An assignment in a SET clause, not the same column in a WHERE.
+            self::assertDoesNotMatchRegularExpression(
+                '/\bSET\b(?:(?!\bWHERE\b)[^;\'])*\b(?:lifecycle_state|mecm_sync_state|vm_status)\s*=/',
+                $source,
+                $file . ' assigns lifecycle, MECM state or stage'
+            );
+        }
+        self::assertMatchesRegularExpression(
+            '/UPDATE deploy_vms SET os_install_watch_started_at = NOW\(\)/',
+            $this->source('lib/repo/vms_progress_watch.php'),
+            'the clock writer vanished from its module; the negative assertions above would then prove nothing'
+        );
+    }
+
+    /**
      * The stage order the monotonicity guard depends on. If a rank inverts, the
      * guard silently starts blocking real progress instead of fake regressions.
      */

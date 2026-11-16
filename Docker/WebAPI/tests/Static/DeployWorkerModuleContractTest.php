@@ -61,6 +61,11 @@ final class DeployWorkerModuleContractTest extends TestCase
         // a database and a new status cannot silently become "success".
         'deploy_worker_outcome_audit_result',
         'deploy_worker_refresh_inventory_after_deploy',
+        // VB1 (ADR-0038 amendment 2): the worker's two triggers of the automatic
+        // observation start, both after their job's own result is committed.
+        'deploy_worker_job_start_step',
+        'deploy_worker_after_start_step',
+        'deploy_worker_after_vm_inventory',
         'deploy_worker_mark_vms_deploying',
         'deploy_worker_restore_deploying_vms',
         'deploy_worker_mark_vms_failed',

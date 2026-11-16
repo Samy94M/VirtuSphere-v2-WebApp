@@ -34,6 +34,13 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_mission_reconcile_hostname_claims',
         'repo_reset_vm_mecm_id',
         'repo_restart_vm_progress_watch',
+        // VB1 (ADR-0038 amendment 2): the automatic observation start, its two
+        // batch triggers and their shared pre-selection.
+        'repo_start_vm_install_watch_on_evidence',
+        'repo_start_vm_install_watch_at_registration',
+        'repo_start_install_watches_after_job',
+        'repo_start_install_watches_after_inventory',
+        'repo_vm_install_watch_candidates',
         'repo_vm_progress_attention_count',
         'repo_vm_progress_attention_counts_by_mission',
         'repo_vm_count_in_real_missions',

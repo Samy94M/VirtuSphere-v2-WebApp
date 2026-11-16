@@ -12,6 +12,8 @@ require_once __DIR__ . '/lib/machine_api.php';
 require_once __DIR__ . '/lib/repo/status_events.php';
 require_once __DIR__ . '/lib/repo/mecm_provenance.php';
 require_once __DIR__ . '/lib/mecm_rollout_fence.php';
+// The automatic observation start (ADR-0038 amendment 2) is a VM-repo write.
+require_once __DIR__ . '/lib/repo/vms.php';
 
 // mecm_id is VARCHAR(255) (struktur.sql): a longer ResourceID cannot be stored (MA-03).
 const VIRTUSPHERE_MECM_RESOURCE_ID_MAX_CHARS = 255;
@@ -168,10 +170,14 @@ try {
     // thing that keeps the next hand-off fail-closed while the old device is
     // still sitting in MECM.
     $outcome = repo_transaction($connection, static function () use ($connection, $vmId, $mecmId, $reportedRevision, $reportedTransfer): array {
-        $vm = repo_fetch_one($connection, 'SELECT id, mecm_id, mecm_rollout_revision, mecm_previous_id, updated, mecm_transfer_generation FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$vmId]);
+        $vm = repo_fetch_one($connection, 'SELECT id, mecm_id, mecm_rollout_revision, mecm_previous_id, updated, mecm_transfer_generation, mecm_sync_state, mecm_pending_since FROM deploy_vms WHERE id = ? LIMIT 1 FOR UPDATE', 'i', [$vmId]);
         if ($vm === null) {
             return ['status' => 'unknown_vm', 'vm' => []];
         }
+        // Read BEFORE the state write: the registration clears mecm_pending_since,
+        // the only stored start of this rollout. A start or an inventory reading
+        // from before a MECM-ID reset is older than it and is no evidence.
+        $watchFence = virtusphere_vm_rollout_fence($vm);
 
         $storedRevision = $vm['mecm_rollout_revision'] === null ? null : (int) $vm['mecm_rollout_revision'];
         $storedBinding = $vm['mecm_id'] === null ? null : (string) $vm['mecm_id'];
@@ -222,6 +228,13 @@ try {
         // hand-off. Same transaction as the binding: a tombstone that outlived
         // its successful rebinding would refuse every future reset of this VM.
         repo_execute($connection, 'UPDATE deploy_vms SET mecm_previous_id = NULL, updated_at = updated_at WHERE id = ?', 'i', [$vmId]);
+
+        // Trigger 1 of the automatic observation start (ADR-0038 amendment 2):
+        // a VM the portal already started, or a fresh inventory shows switched
+        // on, gets its OS-install clock with the registration. Same transaction
+        // as the binding, and like everything in here it never answers. A clock
+        // that cannot be set is logged and does not cost the registration.
+        repo_start_vm_install_watch_at_registration($connection, $vmId, $watchFence);
 
         return ['status' => 'ok', 'vm' => $vm];
     });

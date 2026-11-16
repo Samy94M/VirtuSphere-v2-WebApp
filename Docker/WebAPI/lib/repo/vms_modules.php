@@ -18,6 +18,7 @@ const VIRTUSPHERE_VM_REPO_MODULES = [
     'lib/repo/vms_persistence.php',
     'lib/repo/vms_mecm_reset.php',
     'lib/repo/vms_operations.php',
+    'lib/repo/vms_progress_watch.php',
     'lib/repo/vms_overview.php',
     'lib/repo/vms_legacy.php',
 ];

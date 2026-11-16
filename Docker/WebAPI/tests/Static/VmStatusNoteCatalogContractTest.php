@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 require_once dirname(__DIR__, 2) . '/lib/vm_timeline.php';
+require_once dirname(__DIR__, 2) . '/lib/vm_progress.php';
 
 /**
  * Every status note a writer stores is in the catalog that turns it into words
@@ -98,6 +99,23 @@ final class VmStatusNoteCatalogContractTest extends TestCase
         }
         foreach (['started', 'failed'] as $suffix) {
             self::assertArrayHasKey($suffix, $found['jobs'], 'the scan found no worker note ending in "' . $suffix . '", so the catalog check would prove nothing');
+        }
+    }
+
+    /**
+     * The observation notes are constants, not literals: the writers of the
+     * OS-install clock and the reader of its source share them
+     * (VIRTUSPHERE_VM_WATCH_NOTES in lib/vm_progress.php), so the scan above
+     * cannot see them. They are checked by name, and the scan must not find a
+     * second, literal spelling next to the constant.
+     */
+    public function testEveryObservationNoteIsInTheCatalogAndWrittenOnlyThroughItsConstant(): void
+    {
+        self::assertNotSame([], VIRTUSPHERE_VM_WATCH_NOTES);
+        $found = $this->scan();
+        foreach (array_keys(VIRTUSPHERE_VM_WATCH_NOTES) as $note) {
+            self::assertArrayHasKey($note, VIRTUSPHERE_VM_STATUS_NOTES, 'the observation note "' . $note . '" has no wording in the catalog');
+            self::assertArrayNotHasKey($note, $found['notes'], 'the observation note "' . $note . '" is also written as a literal; the source reader matches the constant only');
         }
     }
 
