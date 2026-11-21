@@ -37,6 +37,37 @@ function vm_phase_cell(array $vm, string $phase): string
 }
 
 /**
+ * The MECM cell: the sync state and, beside it, whether a transfer is queued.
+ *
+ * @param array<string,mixed> $vm
+ */
+function vm_mecm_cell(array $vm): string
+{
+    return mecm_sync_badge((string) ($vm['mecm_sync_state'] ?? ''))
+        . ' <span class="muted">' . h(mecm_updated_display($vm['updated'] ?? 0)) . '</span>';
+}
+
+/**
+ * The three status cells of one VM row, by their live key (VB2). The VM list,
+ * the VM overview and the live poll (lib/vm_status_live.php) all take them from
+ * here, so a cell that follows without a reload is the cell the page rendered.
+ * No other file calls the three cell renderers (VmStatusLiveContractTest).
+ *
+ * @param array<string,mixed> $vm
+ * @param list<array<string,mixed>> $findings in severity order
+ * @param array<string,mixed> $workContext
+ * @return array{phase:string,finding:string,mecm:string}
+ */
+function vm_live_cells(array $vm, string $phase, array $findings, int $missionId, array $workContext): array
+{
+    return [
+        'phase' => vm_phase_cell($vm, $phase),
+        'finding' => vm_findings_cell($findings, $missionId, (int) ($vm['id'] ?? 0), $workContext),
+        'mecm' => vm_mecm_cell($vm),
+    ];
+}
+
+/**
  * The page a finding links to, resolved from its closed target. An unknown
  * target lands in the VM editor, which lists every finding of the VM.
  *

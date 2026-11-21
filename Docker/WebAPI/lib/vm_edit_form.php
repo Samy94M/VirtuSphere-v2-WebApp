@@ -13,6 +13,8 @@ require_once __DIR__ . '/validate.php';
 require_once __DIR__ . '/vm_edit_values.php';
 require_once __DIR__ . '/vm_edit_rows.php';
 require_once __DIR__ . '/vm_edit_status.php';
+// The editor's two live regions and the views behind them (VB2).
+require_once __DIR__ . '/vm_edit_live.php';
 require_once __DIR__ . '/vm_edit_names.php';
 require_once __DIR__ . '/vm_edit_ram.php';
 // QL-01/QL-03 B: the comparison after a POST that saved nothing.

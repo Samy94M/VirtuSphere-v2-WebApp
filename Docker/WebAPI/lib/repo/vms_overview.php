@@ -151,6 +151,45 @@ function repo_vm_overview_count(mysqli $db, string $filter): int
 }
 
 /**
+ * The stored rows of the given VMs with their mission name, for the live status
+ * poll (VB2, lib/vm_status_live_views.php). Every column of the VM row, so the
+ * phase, the findings and the cells read what the VM list and the overview read.
+ * An id without a row is simply absent. Only the mission is joined.
+ *
+ * @param list<int> $ids
+ * @return list<array<string,mixed>>
+ */
+function repo_vm_overview_rows_by_ids(mysqli $db, array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+    if ($ids === []) {
+        return [];
+    }
+    $stmt = $db->prepare(
+        'SELECT v.*, m.mission_name FROM deploy_vms v INNER JOIN deploy_missions m ON m.id = v.mission_id'
+        . ' WHERE v.id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+    );
+    $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
+    $stmt->execute();
+
+    return repo_fetch_all($stmt->get_result());
+}
+
+/**
+ * The ids of a mission's VMs: what the VM list of that mission shows.
+ *
+ * @return list<int>
+ */
+function repo_vm_overview_mission_vm_ids(mysqli $db, int $missionId): array
+{
+    $stmt = $db->prepare('SELECT id FROM deploy_vms WHERE mission_id = ?');
+    $stmt->bind_param('i', $missionId);
+    $stmt->execute();
+
+    return array_map(static fn (array $row): int => (int) $row['id'], repo_fetch_all($stmt->get_result()));
+}
+
+/**
  * Sort key => ORDER BY expressions. The first expression follows the requested
  * direction and the others ascend. Every list ends with the unique VM id, so a
  * LIMIT window cuts one global order. The order is the database collation, not

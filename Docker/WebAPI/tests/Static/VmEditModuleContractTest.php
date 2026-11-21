@@ -35,6 +35,12 @@ final class VmEditModuleContractTest extends TestCase
         'vm_edit_finding_href',
         'vm_edit_sync_cause_html',
         'vm_edit_inventory_text',
+        // VB2: the editor's two live regions and the views behind them (lib/vm_edit_live.php).
+        'vm_edit_status_view',
+        'vm_edit_progress_view',
+        'vm_edit_render_progress_panel',
+        'vm_edit_live_csrf_placeholder',
+        'vm_edit_live_regions',
         'vm_edit_identity_fields',
         'vm_edit_ram_from_post',
         'render_vm_ram_field',

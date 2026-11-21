@@ -45,6 +45,8 @@ layout_header(vm_overview_title($filter), $user, 'dashboard', 'overview', 'help-
             <span class="muted"><?php echo h(__t('vm_overview.hits', ['count' => $listing['total']])); ?></span>
         </div>
         <?php vm_overview_render_change_notice($snapshot, (int) $listing['total']); ?>
+        <?php // The poll reads the view this page rendered: filter, order and the clamped page. ?>
+        <?php if ($listing['rows'] !== []) { echo vm_live_line_html(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_OVERVIEW, vm_live_url(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_OVERVIEW, ['filter' => $filter, 'sort' => $sort, 'dir' => $dir, 'page' => (int) $listing['page']]), vm_overview_url($filter, ['sort' => $sort, 'dir' => $dir, 'page' => (int) $listing['page']])); } ?>
     </section>
 
     <section class="panel">

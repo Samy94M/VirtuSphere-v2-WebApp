@@ -49,6 +49,9 @@ final class VmRepoModuleContractTest extends TestCase
         'repo_vm_overview_count',
         'repo_vm_overview_sort_columns',
         'repo_vm_overview_page',
+        // VB2: the rows and the mission membership the live status poll reads.
+        'repo_vm_overview_rows_by_ids',
+        'repo_vm_overview_mission_vm_ids',
         // SP4: the dashboard's "check due" groups and the mission list's phase column.
         'repo_vm_overview_attention_counts',
         'repo_vm_progress_overdue_sql',

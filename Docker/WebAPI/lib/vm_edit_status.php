@@ -59,7 +59,7 @@ function vm_edit_render_status_panel(array $vm, string $phase, array $findings, 
     $code = static fn (mixed $raw): string => trim((string) $raw) === '' ? $notSet : '<code>' . h((string) $raw) . '</code>';
     $item = static fn (string $labelKey, string $valueHtml): string => '<div class="diagnostics-item"><dt>' . h(__t($labelKey)) . '</dt><dd>' . $valueHtml . '</dd></div>';
     ?>
-        <section class="panel">
+        <section class="panel" data-vm-live-region="status">
             <div class="vm-status-head">
                 <h2><?php echo h(__t('vm_edit.heading_status')); ?></h2>
                 <?php echo vm_phase_badge($phase); ?>

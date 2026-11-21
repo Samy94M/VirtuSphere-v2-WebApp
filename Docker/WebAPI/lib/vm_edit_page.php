@@ -42,25 +42,19 @@ $vmEditorUrl = $vmId > 0
     ? vm_edit_url($missionId, $vmId, null, $workContext)
     : portal_work_context_append_url('vm_edit.php?mission_id=' . $missionId, $workContext);
 
-$clientPhaseSummary = [];
 $clientEvents = [];
 $packageRuns = [];
 if ($vmId > 0 && !$isTemplate) {
-    $clientPhaseSummary = repo_client_phase_summary($connection, $vmId);
     $clientEvents = repo_client_events_for_vm($connection, $vmId, 20);
     $packageRuns = repo_package_runs_for_vm($connection, $vmId);
 }
-// The derived phase, findings and inventory reading of the stored VM (plan ST-2),
-// read before the POST merge so a rejected save cannot change what the page explains.
-$vmPhase = '';
-$vmFindings = [];
-$vmInventory = null;
+// The derived phase, findings, inventory reading and client phases of the stored
+// VM (plan ST-2), read before the POST merge so a rejected save cannot change what
+// the page explains. The live poll reads the same view (lib/vm_edit_live.php).
+$statusView = null;
 $timelineJobs = [];
 if ($vmId > 0 && !$isTemplate) {
-    $vmEvidence = repo_vm_evidence_for_vm(repo_vm_evidence($connection, [(array) $vm]), (array) $vm, false);
-    $vmPhase = virtusphere_vm_phase((array) $vm, $vmEvidence);
-    $vmFindings = virtusphere_vm_findings((array) $vm, $vmEvidence);
-    $vmInventory = is_array($vmEvidence['inventory'] ?? null) ? $vmEvidence['inventory'] : null;
+    $statusView = vm_edit_status_view($connection, (array) $vm);
     $timelineJobs = repo_vm_timeline_jobs($connection, $vmId);
 }
 
@@ -181,22 +175,18 @@ $vmLocationNotes = esxi_inventory_location_notes(
 );
 $interfaces = $vm['interfaces'] ?? vm_default_interfaces($mission);
 $disks = $vm['disks'] ?? vm_default_disks();
-$progressWatchKind = $vmId > 0 && !$isTemplate ? virtusphere_vm_progress_watch_kind((array) $vm) : null;
-$progressAttention = $vmId > 0 && !$isTemplate ? virtusphere_vm_progress_attention((array) $vm) : null;
-$progressWatchSince = $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING
-    ? (string) ($vm['mecm_pending_since'] ?? '')
-    : (string) ($vm['os_install_watch_started_at'] ?? '');
-$showProgressWatch = $progressAttention !== null || $progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING;
-// Who set the running OS-install clock (ADR-0038 amendment 2), read from the
-// status history; '' when it no longer says so. Exhaustive over the closed set.
-$progressWatchSourceText = match ($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING
-    ? virtusphere_vm_install_watch_source($statusEvents, $progressWatchSince)
-    : null) {
-    VIRTUSPHERE_VM_POWER_EVIDENCE_PORTAL_START => __t('vm_edit.progress_source_portal_start'),
-    VIRTUSPHERE_VM_POWER_EVIDENCE_INVENTORY => __t('vm_edit.progress_source_inventory'),
-    VIRTUSPHERE_VM_WATCH_SOURCE_OPERATOR => __t('vm_edit.progress_source_operator'),
-    null => '',
-};
+// "Check progress" and the status panel are the editor's live regions (VB2): the
+// page and the poll render them through vm_edit_live_regions(). Null for a new VM
+// and for a template, which show neither.
+$liveRegions = $statusView !== null
+    ? vm_edit_live_regions((array) $vm, $statusView, vm_edit_progress_view((array) $vm, $statusEvents), $missionId, $workContext, [
+        'can_write' => $canWrite,
+        'can_system_config' => can('system.config', $user),
+    ], csrf_field())
+    : null;
+$liveUrl = $liveRegions !== null
+    ? vm_live_url(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_EDITOR, ['mission_id' => $missionId, 'vm_id' => $vmId], $workContext)
+    : null;
 // One title per page, rendered by layout_header() into both the browser tab and
 // the visible heading. An edit names the VM it is about: the mission's VM list
 // and every editor opened from it used to carry the same three words, so a row

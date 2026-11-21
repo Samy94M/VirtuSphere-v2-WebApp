@@ -30,8 +30,12 @@ final class VmOverviewContractTest extends TestCase
         $dashboard = $this->source('portal/dashboard.php');
 
         self::assertStringContainsString('$kpiCountedAt = time();', $dashboard, 'one capture moment for both tiles');
-        self::assertStringContainsString('vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL, __t(\'dashboard.kpi_vms\'), $vmCount, $kpiCountedAt)', $dashboard);
-        self::assertStringContainsString('vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING, __t(\'dashboard.kpi_mecm_pending\'), $mecmPending, $kpiCountedAt, $mecmPending > 0)', $dashboard);
+        // Since VB2 the dashboard and the live poll render the VM tiles through
+        // one function; the two tile calls sit there, with the same arguments.
+        self::assertStringContainsString('vm_overview_live_tiles($vmCount, $mecmPending, $vmAttentionGroups, $kpiCountedAt)', $dashboard);
+        $tiles = $this->source('lib/vm_overview_page.php');
+        self::assertStringContainsString('vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL, __t(\'dashboard.kpi_vms\'), $vmCount, $countedAt)', $tiles);
+        self::assertStringContainsString('vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING, __t(\'dashboard.kpi_mecm_pending\'), $mecmPending, $countedAt, $mecmPending > 0)', $tiles);
         self::assertStringNotContainsString('vm_overview.php?', $dashboard, 'a hand-written tile link would skip the snapshot the list explains itself with');
         self::assertStringNotContainsString('<article class="card kpi"><span class="muted"><?php echo h(__t(\'dashboard.kpi_vms\'))', $dashboard, 'the VM tile is a link now');
     }
@@ -139,8 +143,9 @@ final class VmOverviewContractTest extends TestCase
     public function testTheMecmTileWarnsOnlyForAPositiveCount(): void
     {
         // Carried over from the old article: a zero stays neutral, a waiting VM is amber.
-        $dashboard = $this->source('portal/dashboard.php');
-        self::assertStringContainsString('$mecmPending > 0', $dashboard);
+        // The tile call moved into vm_overview_live_tiles() with VB2.
+        $tiles = $this->source('lib/vm_overview_page.php');
+        self::assertStringContainsString('$mecmPending, $countedAt, $mecmPending > 0)', $tiles);
     }
 
     private function source(string $relative): string
