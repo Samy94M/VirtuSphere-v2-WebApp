@@ -6,6 +6,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../vm_phase.php';
 require_once __DIR__ . '/../help_vm_path.php';
 require_once __DIR__ . '/../vm_timeline.php';
+require_once __DIR__ . '/../vm_status_live.php';
 ?>
     <div class="stack" id="panel-missions" role="tabpanel" aria-labelledby="tab-missions" tabindex="0" data-tab-panel>
         <section class="panel">
@@ -131,6 +132,9 @@ require_once __DIR__ . '/../vm_timeline.php';
                 <li><?php echo h(__t('help_missions.status_stuck_3', ['hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600)])); ?></li>
                 <li><?php echo h(__t('help_missions.status_stuck_4')); ?></li>
             </ul>
+            <?php // VB2: the interval is the constant the four pages poll with. ?>
+            <h3><?php echo h(__t('help_missions.status_live_heading')); ?></h3>
+            <p><?php echo h(__t('help_missions.status_live_p1', ['seconds' => VIRTUSPHERE_VM_STATUS_LIVE_INTERVAL_SECONDS])); ?></p>
         </section>
 
         <section class="panel">

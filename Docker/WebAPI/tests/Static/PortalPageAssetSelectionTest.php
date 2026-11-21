@@ -16,8 +16,12 @@ final class PortalPageAssetSelectionTest extends TestCase
         }
         $expected['mission_details.php'][] = 'assets/unsaved_changes.js';
         $expected['credentials.php'][] = 'assets/forms.js';
-        $expected['vm_edit.php'] = ['assets/core.js', 'assets/unsaved_changes.js', 'assets/forms.js', 'assets/vm-network.js', 'assets/vm-disk-label.js'];
+        $expected['vm_edit.php'] = ['assets/core.js', 'assets/unsaved_changes.js', 'assets/forms.js', 'assets/vm-network.js', 'assets/vm-disk-label.js', 'assets/vm_status_live.js'];
         $expected['vms.php'][] = 'assets/forms.js';
+        // VB2: the live VM status, on the four pages that render its line.
+        $expected['vms.php'][] = 'assets/vm_status_live.js';
+        $expected['vm_overview.php'][] = 'assets/vm_status_live.js';
+        $expected['dashboard.php'][] = 'assets/vm_status_live.js';
         $expected['deploy_log.php'][] = 'assets/deploy_log.js';
         $expected['deploy.php'] = [
             'assets/core.js',

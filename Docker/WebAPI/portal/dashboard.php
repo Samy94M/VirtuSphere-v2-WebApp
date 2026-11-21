@@ -92,9 +92,8 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
     <section class="grid kpi-grid" aria-label="<?php echo h(__t('dashboard.key_metrics')); ?>">
         <a class="card kpi" href="missions.php?type=missions"><span class="muted"><?php echo h(__t('dashboard.kpi_missions')); ?></span><span class="value"><?php echo h($missionCount); ?></span></a>
         <a class="card kpi" href="missions.php?type=templates"><span class="muted"><?php echo h(__t('dashboard.kpi_templates')); ?></span><span class="value"><?php echo h($templateCount); ?></span></a>
-        <?php vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL, __t('dashboard.kpi_vms'), $vmCount, $kpiCountedAt); ?>
-        <?php vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING, __t('dashboard.kpi_mecm_pending'), $mecmPending, $kpiCountedAt, $mecmPending > 0); ?>
-        <?php vm_overview_render_attention_tile($vmAttentionGroups, $kpiCountedAt); ?>
+        <?php // The VM tiles follow without a reload (VB2); the poll renders the same regions. ?>
+        <?php foreach (vm_overview_live_tiles($vmCount, $mecmPending, $vmAttentionGroups, $kpiCountedAt) as $vmTile) { echo $vmTile['html']; } ?>
         <?php if ($activeDeploys > 0) { ?>
             <a class="card kpi" href="deploy.php"><span class="muted"><?php echo h(__t('dashboard.kpi_active_deploys')); ?></span><span class="value value-info"><?php echo h($activeDeploys); ?></span></a>
         <?php } ?>
@@ -103,6 +102,7 @@ layout_header(__t('dashboard.title'), $user, 'dashboard', 'overview');
             <a class="card kpi" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><span class="muted"><?php echo h(__t('dashboard.kpi_hypervisor')); ?></span><span class="value"><?php echo esxi_state_badge((string) $hypervisorWorst); ?></span></a>
         <?php } ?>
     </section>
+    <?php echo vm_live_line_html(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_DASHBOARD, vm_live_url(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_DASHBOARD), 'dashboard.php', $kpiCountedAt); ?>
 
     <section class="panel">
         <div class="actions">

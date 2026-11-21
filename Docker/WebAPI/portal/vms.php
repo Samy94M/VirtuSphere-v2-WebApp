@@ -20,6 +20,7 @@ require_once __DIR__ . '/../lib/vms_page.php';
 require_once __DIR__ . '/../lib/vm_phase.php';
 require_once __DIR__ . '/../lib/repo/vm_evidence.php';
 require_once __DIR__ . '/../lib/vm_phase_cells.php';
+require_once __DIR__ . '/../lib/vm_status_live.php';
 
 /** @var mysqli $connection Provided by bootstrap.php. */
 
@@ -254,6 +255,8 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
             <?php if (can('vms.write', $user)) { ?><a class="button" href="<?php echo h(portal_work_context_append_url('vm_edit.php?mission_id=' . $missionId, $workContext)); ?>"><?php echo h(__t('vms.add_vm')); ?></a><?php } ?>
             <?php if ($rows !== []) { ?><a class="button button-secondary" href="<?php echo h($vmListUrl . '&export=csv'); ?>"><?php echo h(__t('common.export_csv')); ?></a><?php } ?>
         </div>
+        <?php // A template has no status that moves, so its list does not poll. ?>
+        <?php if (!$isTemplate && $rows !== []) { echo vm_live_line_html(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_MISSION, vm_live_url(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_MISSION, ['mission_id' => $missionId], $workContext), $vmListUrl); } ?>
     </section>
 
     <?php if ($canWrite && $rows !== []) { ?>
@@ -306,12 +309,15 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <td><?php echo h($vm['vm_os'] ?? ''); ?></td>
                         <td><?php echo h($vm['vm_cpu'] ?? ''); ?></td>
                         <td><?php echo h(vm_ram_format($vm['vm_ram'] ?? '')); ?></td>
-                        <td><?php echo vm_phase_cell($vm, (string) $vm['phase']); ?></td>
-                        <td><?php echo vm_findings_cell($vm['findings'], $missionId, (int) $vm['id'], $workContext); ?></td>
+                        <?php // The three status cells follow without a reload (VB2); the poll
+                              // renders them through the same vm_live_cells(). ?>
+                        <?php $statusCells = vm_live_cells($vm, (string) $vm['phase'], $vm['findings'], $missionId, $workContext); ?>
+                        <?php echo vm_live_td('phase', $statusCells['phase']); ?>
+                        <?php echo vm_live_td('finding', $statusCells['finding']); ?>
                         <?php if ($hasLocationOverride) { $override = $vmLocationOverride($vm); ?>
                             <td><?php echo $override !== '' ? h($override) : '&mdash;'; ?></td>
                         <?php } ?>
-                        <td><?php echo mecm_sync_badge((string) ($vm['mecm_sync_state'] ?? '')); ?> <span class="muted"><?php echo h(mecm_updated_display($vm['updated'] ?? 0)); ?></span></td>
+                        <?php echo vm_live_td('mecm', $statusCells['mecm']); ?>
                         <td><?php echo h((string) count($vm['interfaces'] ?? [])); ?></td>
                         <?php if ($hasNetworkIssues) { ?>
                             <td><?php

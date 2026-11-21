@@ -18,6 +18,7 @@ require_once __DIR__ . '/deploy_urls.php';
 require_once __DIR__ . '/vm_urls.php';
 require_once __DIR__ . '/vm_overview.php';
 require_once __DIR__ . '/vm_phase_cells.php';
+require_once __DIR__ . '/vm_status_live.php';
 
 /**
  * The name of a filter. A dashboard group, its filter and its list share it
@@ -93,7 +94,7 @@ function vm_overview_render_attention_tile(array $counts, int $countedAt): void
         return;
     }
     ?>
-    <div class="card kpi kpi-groups">
+    <div class="card kpi kpi-groups" data-vm-live-region="tile-attention">
         <span class="muted" id="kpi-vm-attention"><?php echo h(__t('dashboard.kpi_vm_attention')); ?></span>
         <ul class="kpi-group-list" aria-labelledby="kpi-vm-attention">
             <?php foreach ($groups as $filter => $count) { ?>
@@ -112,11 +113,50 @@ function vm_overview_render_tile(string $filter, string $label, int $count, int 
 {
     $href = vm_overview_url($filter, ['snapshot' => ['counted' => $countedAt, 'expected' => $count]]);
     ?>
-    <a class="card kpi" href="<?php echo h($href); ?>">
+    <a class="card kpi" href="<?php echo h($href); ?>" data-vm-live-region="tile-<?php echo h($filter); ?>">
         <span class="muted"><?php echo h($label); ?></span>
         <span class="value<?php echo $warning ? ' value-warning' : ''; ?>"><?php echo h((string) $count); ?></span>
     </a>
     <?php
+}
+
+/**
+ * The dashboard's VM tiles as live regions (VB2), in page order: VMs, waiting
+ * for MECM and the "check due" groups (absent without hits). The dashboard and
+ * the poll both render them here, the only caller of the two tile renderers
+ * (VmStatusLiveContractTest). A tile's signature is its numbers, not its markup:
+ * the link carries the moment of counting, which moves with every reading.
+ *
+ * @param array<string,int> $attentionCounts filter => count (repo_vm_overview_attention_counts())
+ * @return list<array{key:string,sig:string,html:string}>
+ */
+function vm_overview_live_tiles(int $vmCount, int $mecmPending, array $attentionCounts, int $countedAt): array
+{
+    $capture = static function (callable $render): string {
+        ob_start();
+        $render();
+
+        return (string) ob_get_clean();
+    };
+    $groups = array_filter($attentionCounts, static fn (int $count): bool => $count > 0);
+
+    return [
+        vm_live_region(
+            'tile-' . VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL,
+            $capture(static fn () => vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_ALL, __t('dashboard.kpi_vms'), $vmCount, $countedAt)),
+            'count:' . $vmCount
+        ),
+        vm_live_region(
+            'tile-' . VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING,
+            $capture(static fn () => vm_overview_render_tile(VIRTUSPHERE_VM_OVERVIEW_FILTER_MECM_PENDING, __t('dashboard.kpi_mecm_pending'), $mecmPending, $countedAt, $mecmPending > 0)),
+            'count:' . $mecmPending
+        ),
+        vm_live_region(
+            'tile-attention',
+            $capture(static fn () => vm_overview_render_attention_tile($attentionCounts, $countedAt)),
+            'groups:' . json_encode($groups, JSON_THROW_ON_ERROR)
+        ),
+    ];
 }
 
 function vm_overview_render_filter_nav(string $filter, string $sort, string $dir): void
@@ -204,9 +244,11 @@ function vm_overview_render_table(array $rows, string $filter, string $sort, str
                     </td>
                     <td><?php echo h((string) $row['vm_name']); ?></td>
                     <td><?php echo h((string) $row['vm_hostname']); ?></td>
-                    <td><?php echo vm_phase_cell($row, (string) $row['phase']); ?></td>
-                    <td><?php echo vm_findings_cell($row['findings'], $missionId, (int) $row['id'], vm_overview_editor_context($filter, $sort, $dir, $page)); ?></td>
-                    <td><?php echo mecm_sync_badge((string) $row['mecm_sync_state']); ?> <span class="muted"><?php echo h(mecm_updated_display($row['updated'] ?? 0)); ?></span></td>
+                    <?php // The three status cells follow without a reload (VB2). ?>
+                    <?php $statusCells = vm_live_cells($row, (string) $row['phase'], $row['findings'], $missionId, vm_overview_editor_context($filter, $sort, $dir, $page)); ?>
+                    <?php echo vm_live_td('phase', $statusCells['phase']); ?>
+                    <?php echo vm_live_td('finding', $statusCells['finding']); ?>
+                    <?php echo vm_live_td('mecm', $statusCells['mecm']); ?>
                     <td class="actions"><a class="button button-secondary" href="<?php echo h(vm_edit_url($missionId, (int) $row['id'], null, vm_overview_editor_context($filter, $sort, $dir, $page))); ?>"><?php echo h(__t('vm_overview.open_vm')); ?></a></td>
                 </tr>
             <?php } ?>

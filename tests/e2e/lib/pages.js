@@ -91,6 +91,8 @@ const NON_PAGE_ENDPOINTS = [
   'health.php',
   // JSON answer for the deploy form's live blocker check, not a page.
   'deploy_blockers.php',
+  // JSON answer for the live VM status of four pages (VB2), not a page.
+  'vm_status_live.php',
 ];
 
 // Full HTML pages the matrix does not scan yet, each with the reason. Every

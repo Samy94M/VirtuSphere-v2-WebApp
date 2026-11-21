@@ -15,10 +15,8 @@ declare(strict_types=1);
 /** @var string $error */
 /** @var array<string, string> $fieldErrors */
 /** @var array{mode:string, version:string, rows:list<array{label:string, submitted:string, current:string, rows:bool}>}|null $editConflict */
-/** @var array<string, array<string, mixed>|null> $clientPhaseSummary */
-/** @var string $vmPhase */
-/** @var list<array<string, mixed>> $vmFindings */
-/** @var array<string, mixed>|null $vmInventory */
+/** @var list<array{key:string,sig:string,html:string}>|null $liveRegions */
+/** @var string|null $liveUrl */
 /** @var array{entries:list<array<string,mixed>>,truncated:bool} $timeline */
 /** @var array<int, array<string, mixed>> $packageRuns */
 /** @var array<int, array<string, mixed>> $oses */
@@ -38,11 +36,6 @@ declare(strict_types=1);
 /** @var list<'host_choice'|'buckets'|'never_pulled'> $vmLocationNotes */
 /** @var array<int, array<string, mixed>> $interfaces */
 /** @var array<int, array<string, mixed>> $disks */
-/** @var string|null $progressWatchKind */
-/** @var array{kind:string,since:string,age_seconds:int,threshold_seconds:int}|null $progressAttention */
-/** @var string $progressWatchSince */
-/** @var string $progressWatchSourceText */
-/** @var bool $showProgressWatch */
 /** @var array<string, string> $workContext */
 /** @var string $vmListUrl */
 /** @var string $backUrl */
@@ -67,53 +60,11 @@ declare(strict_types=1);
             <?php } ?>
         </div>
         <p class="muted"><?php echo h(__t('vm_edit.context_mission', ['name' => (string) ($mission['mission_name'] ?? '')])); ?></p>
+        <?php if ($liveUrl !== null) { echo vm_live_line_html(VIRTUSPHERE_VM_STATUS_LIVE_VIEW_EDITOR, $liveUrl, $vmEditorUrl); } ?>
     </section>
 
-    <?php if ($showProgressWatch) { ?>
-        <section class="panel stack" id="vm-progress-watch" aria-labelledby="vm-progress-watch-heading">
-            <div class="actions">
-                <h2 id="vm-progress-watch-heading"><?php echo h(__t('vm_edit.progress_heading')); ?></h2>
-                <?php echo portal_badge($progressAttention !== null ? 'warning' : 'info', $progressAttention !== null
-                    ? __t('vm_edit.progress_overdue_badge')
-                    : __t('vm_edit.progress_observation_badge')); ?>
-            </div>
-            <?php if ($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_MECM_PENDING) { ?>
-                <p><?php echo h(__t('vm_edit.progress_pending_overdue', [
-                    'since' => portal_format_timestamp($progressWatchSince),
-                    'hours' => intdiv(VIRTUSPHERE_VM_MECM_PENDING_WARN_SECONDS, 3600),
-                ])); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_MECM)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></p>
-            <?php } elseif ($progressWatchSince === '') { ?>
-                <p><?php echo h(__t('vm_edit.progress_install_unwatched')); ?></p>
-            <?php } elseif ($progressAttention !== null) { ?>
-                <p><?php echo h(__t('vm_edit.progress_install_overdue', [
-                    'since' => portal_format_timestamp($progressWatchSince),
-                    'hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
-                ])); ?></p>
-            <?php } else { ?>
-                <p><?php echo h(__t('vm_edit.progress_install_watched', [
-                    'since' => portal_format_timestamp($progressWatchSince),
-                    'hours' => intdiv(VIRTUSPHERE_VM_OS_INSTALL_WARN_SECONDS, 3600),
-                ])); ?></p>
-            <?php } ?>
-            <?php if ($progressWatchSourceText !== '') { ?><p data-progress-source><?php echo h($progressWatchSourceText); ?></p><?php } ?>
-            <p class="muted"><?php echo h(__t('vm_edit.progress_no_auto_failure')); ?></p>
-            <?php if ($canWrite) { ?>
-                <form class="inline-form" method="post" action="<?php echo h(portal_work_context_vm_editor_action_url($missionId, $workContext)); ?>">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="action" value="restart_progress_watch">
-                    <input type="hidden" name="vm_id" value="<?php echo h((string) $vmId); ?>">
-                    <input type="hidden" name="return_to" value="editor">
-                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
-                        ? 'vm_edit.progress_confirm_start'
-                        : 'vm_edit.progress_confirm_restart')); ?>"><?php echo h(__t($progressWatchKind === VIRTUSPHERE_VM_PROGRESS_OS_INSTALLING && $progressWatchSince === ''
-                        ? 'vm_edit.progress_start_button'
-                        : 'vm_edit.progress_restart_button')); ?></button>
-                </form>
-            <?php } ?>
-        </section>
-    <?php } ?>
-
-    <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_status_panel($vm, $vmPhase, $vmFindings, $clientPhaseSummary, $vmInventory, $missionId, $workContext); } ?>
+    <?php // "Check progress" and the status panel: the live regions (lib/vm_edit_live.php). ?>
+    <?php foreach ($liveRegions ?? [] as $liveRegion) { echo $liveRegion['html']; } ?>
     <?php if ($vmId > 0 && !$isTemplate) { vm_edit_render_package_reports($packageRuns, $missionId, $vmId, $workContext); } ?>
 
     <?php if ($error !== '') { ?>

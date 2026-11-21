@@ -75,15 +75,25 @@ final class VmStatusRenderContractTest extends TestCase
             'the editor status panel was not found, so its allowed role is unverified'
         );
 
+        // Since VB2 both tables take their status cells from vm_live_cells(),
+        // which calls the shared phase cell for them (VmStatusLiveContractTest
+        // holds that it is the only caller).
         foreach (['portal/vms.php', 'lib/vm_overview_page.php'] as $relative) {
             $path = $this->root() . '/' . $relative;
             self::assertFileExists($path);
             self::assertStringContainsString(
-                'vm_phase_cell(',
+                'vm_live_cells(',
                 (string) file_get_contents($path),
-                $relative . ' must render its VM phase through the shared cell'
+                $relative . ' must render its VM phase through the shared cells'
             );
         }
+        $owners = $this->filesDefining($files, 'vm_live_cells');
+        self::assertCount(1, $owners);
+        self::assertStringContainsString(
+            'vm_phase_cell(',
+            (string) file_get_contents($owners[0]),
+            'the shared cells must render the phase through vm_phase_cell()'
+        );
     }
 
     private function rendersRawStatus(string $line): bool

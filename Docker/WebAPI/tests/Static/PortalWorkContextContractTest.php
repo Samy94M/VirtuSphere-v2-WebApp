@@ -61,6 +61,11 @@ final class PortalWorkContextContractTest extends TestCase
         self::assertStringContainsString('vm_overview_return_url($workContext, $savedVmId)', $edit, 'a save returns to the overview');
         self::assertStringContainsString('portal_work_context_vm_editor_action_url(', $panels, 'round trips through vms.php keep the origin');
         self::assertStringNotContainsString('portal_work_context_vm_list_url($missionId, $workContext)); ?>">', $panels);
+        // Since VB2 the "check progress" form is rendered by the editor's live module.
+        $live = file_get_contents($root . '/lib/vm_edit_live.php');
+        self::assertIsString($live);
+        self::assertStringContainsString('portal_work_context_vm_editor_action_url(', $live, 'the progress form keeps the origin as well');
+        self::assertStringNotContainsString('portal_work_context_vm_list_url($missionId, $workContext)); ?>">', $live);
         self::assertStringContainsString('portal_work_context_mission_scope($workContext)', $urls, 'mission details drop the overview origin');
     }
 

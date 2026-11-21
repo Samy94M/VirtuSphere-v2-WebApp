@@ -171,6 +171,8 @@ function layout_script_registry(): array
         'assets/deploy_storage.js' => ['deploy.php'],
         'assets/vm-network.js' => ['vm_edit.php'],
         'assets/vm-disk-label.js' => ['vm_edit.php'],
+        // The live VM status (VB2): the four pages that render its line.
+        'assets/vm_status_live.js' => ['dashboard.php', 'vm_edit.php', 'vm_overview.php', 'vms.php'],
     ];
 }
 

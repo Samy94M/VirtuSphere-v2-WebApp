@@ -90,7 +90,9 @@ final class VmProgressWatchContractTest extends TestCase
         self::assertStringContainsString('e2e-covers: vm_edit.php:restart_progress_watch', $e2e);
         self::assertStringContainsString('e2e-covers-cancel: vm_edit.php:restart_progress_watch', $e2e);
         // The automatic start has its own browser proof: the source line the editor shows.
-        self::assertStringContainsString('data-progress-source', $this->source('lib/vm_edit_panels.php'));
+        // Since VB2 the "check progress" block is a live region with its own renderer.
+        self::assertStringContainsString('data-progress-source', $this->source('lib/vm_edit_live.php'));
+        self::assertStringContainsString('vm_edit_live_regions(', $this->source('lib/vm_edit_page.php'));
         self::assertStringContainsString('[data-progress-source]', $e2e);
     }
 
