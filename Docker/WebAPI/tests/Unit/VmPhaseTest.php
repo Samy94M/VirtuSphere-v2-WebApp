@@ -15,6 +15,10 @@ require_once dirname(__DIR__, 2) . '/lib/vm_phase.php';
  * data provider walks every lifecycle x MECM x binding combination, so a state
  * added to a constant without a rule changes the walk instead of falling into a
  * silent default.
+ *
+ * VB4 adds the stored x/5 value to the walk: behind one of the worker's two
+ * marks (`deploying`, `failed`) it names the last evidence that arrived, and
+ * anywhere else it decides nothing.
  */
 final class VmPhaseTest extends TestCase
 {
@@ -31,24 +35,54 @@ final class VmPhaseTest extends TestCase
         foreach (VIRTUSPHERE_LIFECYCLE_STATES as $lifecycle) {
             foreach (VIRTUSPHERE_MECM_SYNC_STATES as $mecm) {
                 foreach ([false, true] as $bound) {
-                    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED) {
-                        $expected = VIRTUSPHERE_VM_PHASE_WINDOWS_REPORTS;
-                    } elseif ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecm === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
-                        $expected = VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM;
-                    } elseif ($lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecm === VIRTUSPHERE_MECM_SYNC_PENDING) {
-                        $expected = VIRTUSPHERE_VM_PHASE_MAC_KNOWN;
-                    } elseif ($bound) {
-                        $expected = VIRTUSPHERE_VM_PHASE_ON_ESXI;
-                    } elseif ($lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYING) {
-                        $expected = VIRTUSPHERE_VM_PHASE_IN_PROGRESS;
-                    } else {
-                        $expected = VIRTUSPHERE_VM_PHASE_CREATED;
-                    }
-
-                    yield $lifecycle . ' / ' . $mecm . ' / ' . ($bound ? 'bound' : 'unbound') => [$lifecycle, $mecm, $bound, $expected];
+                    yield $lifecycle . ' / ' . $mecm . ' / ' . ($bound ? 'bound' : 'unbound')
+                        => [$lifecycle, $mecm, $bound, self::ruleTable($lifecycle, $mecm, $bound, '')];
                 }
             }
         }
+    }
+
+    /**
+     * The same walk with every stored x/5 value, an unknown one and an empty one.
+     *
+     * @return iterable<string, array{0:string,1:string,2:bool,3:string,4:string}>
+     */
+    public static function stateCombinationsWithStoredStage(): iterable
+    {
+        foreach (VIRTUSPHERE_LIFECYCLE_STATES as $lifecycle) {
+            foreach (VIRTUSPHERE_MECM_SYNC_STATES as $mecm) {
+                foreach ([false, true] as $bound) {
+                    foreach ([...VIRTUSPHERE_VM_STATUS_COMPAT, '9/5 Unknown', ''] as $stage) {
+                        yield $lifecycle . ' / ' . $mecm . ' / ' . ($bound ? 'bound' : 'unbound') . ' / ' . ($stage === '' ? 'no stage' : $stage)
+                            => [$lifecycle, $mecm, $bound, $stage, self::ruleTable($lifecycle, $mecm, $bound, $stage)];
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The rule table, written out. $stage is the stored x/5 value; it is read
+     * only behind a worker mark, where the lifecycle says nothing about evidence.
+     */
+    private static function ruleTable(string $lifecycle, string $mecm, bool $bound, string $stage): string
+    {
+        $behindAMark = $lifecycle === VIRTUSPHERE_LIFECYCLE_FAILED || $lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYING;
+        $last = $behindAMark ? $stage : '';
+        if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED || $last === '5/5 OS Installed') {
+            return VIRTUSPHERE_VM_PHASE_WINDOWS_REPORTS;
+        }
+        if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecm === VIRTUSPHERE_MECM_SYNC_REGISTERED || $last === '4/5 OS Installing') {
+            return VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM;
+        }
+        if ($lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecm === VIRTUSPHERE_MECM_SYNC_PENDING || $last === '3/5 Deployed') {
+            return VIRTUSPHERE_VM_PHASE_MAC_KNOWN;
+        }
+        if ($bound) {
+            return VIRTUSPHERE_VM_PHASE_ON_ESXI;
+        }
+
+        return $lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYING ? VIRTUSPHERE_VM_PHASE_IN_PROGRESS : VIRTUSPHERE_VM_PHASE_CREATED;
     }
 
     /** @return iterable<string, array{0:string,1:?string}> */
@@ -147,6 +181,73 @@ final class VmPhaseTest extends TestCase
         );
     }
 
+    #[PHPUnit\Framework\Attributes\DataProvider('stateCombinationsWithStoredStage')]
+    public function testThePhaseFollowsTheRuleTableWithTheStoredStage(string $lifecycle, string $mecm, bool $bound, string $stage, string $expected): void
+    {
+        self::assertSame($expected, virtusphere_vm_phase(self::vm($lifecycle, $mecm, $bound) + ['vm_status' => $stage]));
+    }
+
+    /** @return iterable<string, array{0:string}> */
+    public static function workerMarks(): iterable
+    {
+        yield 'failed' => [VIRTUSPHERE_LIFECYCLE_FAILED];
+        yield 'deploying' => [VIRTUSPHERE_LIFECYCLE_DEPLOYING];
+    }
+
+    /**
+     * VB4: the worker writes `deploying` and `failed` without touching the
+     * stored x/5 value, so behind such a mark that value is the last evidence.
+     */
+    #[PHPUnit\Framework\Attributes\DataProvider('workerMarks')]
+    public function testAWorkerMarkKeepsThePhaseOfTheLastEvidence(string $mark): void
+    {
+        $mecm = $mark === VIRTUSPHERE_LIFECYCLE_FAILED ? VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED : VIRTUSPHERE_MECM_SYNC_NOT_READY;
+        $vm = static fn (string $stage, bool $bound = true): array => self::vm($mark, $mecm, $bound) + ['vm_status' => $stage];
+        $done = ['client_phases' => self::clientPhases(self::allFinished())];
+
+        self::assertSame(VIRTUSPHERE_VM_PHASE_CLIENT_DONE, virtusphere_vm_phase($vm(VIRTUSPHERE_STATUS_OS_INSTALLED), $done));
+        self::assertSame(VIRTUSPHERE_VM_PHASE_WINDOWS_REPORTS, virtusphere_vm_phase($vm(VIRTUSPHERE_STATUS_OS_INSTALLED)));
+        self::assertSame(VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM, virtusphere_vm_phase($vm(VIRTUSPHERE_STATUS_OS_INSTALLING), $done), 'client evidence alone does not lift the phase');
+        self::assertSame(VIRTUSPHERE_VM_PHASE_MAC_KNOWN, virtusphere_vm_phase($vm(VIRTUSPHERE_STATUS_DEPLOYED)));
+        self::assertSame(VIRTUSPHERE_VM_PHASE_MAC_KNOWN, virtusphere_vm_phase($vm(VIRTUSPHERE_STATUS_DEPLOYED, false)), 'the MAC import is evidence without a binding too');
+    }
+
+    #[PHPUnit\Framework\Attributes\DataProvider('workerMarks')]
+    public function testAWorkerMarkInventsNoEvidence(string $mark): void
+    {
+        $mecm = $mark === VIRTUSPHERE_LIFECYCLE_FAILED ? VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED : VIRTUSPHERE_MECM_SYNC_NOT_READY;
+        $unbound = $mark === VIRTUSPHERE_LIFECYCLE_DEPLOYING ? VIRTUSPHERE_VM_PHASE_IN_PROGRESS : VIRTUSPHERE_VM_PHASE_CREATED;
+
+        foreach ([VIRTUSPHERE_STATUS_REGISTERED, VIRTUSPHERE_STATUS_INITIALIZING, '9/5 Unknown', ''] as $stage) {
+            self::assertSame(VIRTUSPHERE_VM_PHASE_ON_ESXI, virtusphere_vm_phase(self::vm($mark, $mecm, true) + ['vm_status' => $stage]), $stage);
+            self::assertSame($unbound, virtusphere_vm_phase(self::vm($mark, $mecm, false) + ['vm_status' => $stage]), $stage);
+        }
+        // A row that was read without the column says nothing about evidence.
+        self::assertSame(VIRTUSPHERE_VM_PHASE_ON_ESXI, virtusphere_vm_phase(self::vm($mark, $mecm, true)));
+        self::assertSame($unbound, virtusphere_vm_phase(self::vm($mark, $mecm, false)));
+    }
+
+    public function testTheStoredStageDecidesNothingWithoutAWorkerMark(): void
+    {
+        // No writer stores this pair; the rule must still not read the x/5 value as an override.
+        $vm = self::vm(VIRTUSPHERE_LIFECYCLE_READY, VIRTUSPHERE_MECM_SYNC_NOT_READY, false) + ['vm_status' => VIRTUSPHERE_STATUS_OS_INSTALLED];
+        self::assertSame(VIRTUSPHERE_VM_PHASE_CREATED, virtusphere_vm_phase($vm, ['client_phases' => self::clientPhases(self::allFinished())]));
+
+        // A reset writes deployed, pending and 3/5 together: the new rollout shows itself.
+        $reset = self::vm(VIRTUSPHERE_LIFECYCLE_DEPLOYED, VIRTUSPHERE_MECM_SYNC_PENDING, true) + ['vm_status' => VIRTUSPHERE_STATUS_DEPLOYED];
+        self::assertSame(VIRTUSPHERE_VM_PHASE_MAC_KNOWN, virtusphere_vm_phase($reset, ['client_phases' => self::clientPhases(self::allFinished())]));
+    }
+
+    public function testAFailedJobAfterAResetShowsTheNewRolloutDespiteOldClientEvents(): void
+    {
+        $vm = self::vm(VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, true) + ['vm_status' => VIRTUSPHERE_STATUS_DEPLOYED];
+
+        self::assertSame(
+            VIRTUSPHERE_VM_PHASE_MAC_KNOWN,
+            virtusphere_vm_phase($vm, ['client_phases' => self::clientPhases(self::allFinished())])
+        );
+    }
+
     public function testAnInitializingVmIsCreated(): void
     {
         self::assertSame(
@@ -231,7 +332,31 @@ final class VmPhaseTest extends TestCase
         self::assertStringContainsString('v.vm_instance_uuid', $sql);
     }
 
-    public function testAnAliasIsTakenOneToOneAndEveryLiteralIsAStateToken(): void
+    public function testTheSqlTwinReadsTheStoredStageOnlyBehindTheTwoWorkerMarks(): void
+    {
+        $sql = virtusphere_vm_phase_sql('v');
+        // Compared as bytes: the database collation must not match what the PHP rule does not.
+        $behind = "v.lifecycle_state IN ('deploying', 'failed') AND CAST(v.vm_status AS BINARY) = ";
+
+        foreach ([VIRTUSPHERE_STATUS_OS_INSTALLED, VIRTUSPHERE_STATUS_OS_INSTALLING, VIRTUSPHERE_STATUS_DEPLOYED] as $stage) {
+            self::assertStringContainsString($behind . "'" . $stage . "'", $sql, $stage);
+        }
+        self::assertSame(
+            substr_count($sql, 'v.vm_status'),
+            substr_count($sql, $behind),
+            'the stored stage is never read without the mark in front of it'
+        );
+        foreach ([VIRTUSPHERE_STATUS_REGISTERED, VIRTUSPHERE_STATUS_INITIALIZING] as $stage) {
+            self::assertStringNotContainsString($stage, $sql, 'a stage below the MAC import is no evidence');
+        }
+    }
+
+    /**
+     * VB4 widened this guard on purpose: the twin now also names stored x/5
+     * values. A literal is a state token or one of those closed constants, so
+     * still nothing but a constant of the state machine enters the string.
+     */
+    public function testAnAliasIsTakenOneToOneAndEveryLiteralIsAStateTokenOrAStoredStage(): void
     {
         $sql = virtusphere_vm_phase_sql('x-1');
 
@@ -240,6 +365,9 @@ final class VmPhaseTest extends TestCase
         preg_match_all("/'([^']*)'/", $sql, $literals);
         self::assertNotEmpty($literals[1]);
         foreach ($literals[1] as $literal) {
+            if (in_array($literal, VIRTUSPHERE_VM_STATUS_COMPAT, true)) {
+                continue;
+            }
             // The empty literal of the binding predicate is allowed; anything else must be a token.
             self::assertMatchesRegularExpression('/\A[a-z_]*\z/', $literal);
         }

@@ -15,7 +15,8 @@ require_once dirname(__DIR__, 2) . '/lib/vm_phase.php';
  * The SQL twin virtusphere_vm_phase_sql() must rank every stored VM the way the
  * PHP rule does, and it must order a prepared query by the same ranks. The
  * fixture holds every lifecycle x MECM x binding combination the state machine
- * can store, plus two installed VMs whose client evidence decides rank 7 or 6.
+ * can store, each with every stored x/5 value (VB4: behind a worker mark that
+ * value is the last evidence), plus VMs whose client evidence decides rank 7 or 6.
  */
 final class VmPhaseSqlTwinTest extends TestCase
 {
@@ -64,6 +65,12 @@ final class VmPhaseSqlTwinTest extends TestCase
 
         ksort($reached);
         self::assertSame(range(1, 7), array_keys($reached), 'the fixture reaches every ranked phase');
+
+        // Written out, so the twin is not only compared with the rule it mirrors.
+        $byName = array_column($vms, 'id', 'vm_name');
+        foreach (['PHT902' => 7, 'PHT903' => 7, 'PHT904' => 5, 'PHT905' => 3] as $name => $rank) {
+            self::assertSame($rank, $ranks[(int) $byName[$name]], $name . ' behind a worker mark');
+        }
     }
 
     public function testTheTwinSortsAPreparedQueryFromTheHighestRankDown(): void
@@ -95,10 +102,13 @@ final class VmPhaseSqlTwinTest extends TestCase
         foreach (VIRTUSPHERE_LIFECYCLE_STATES as $lifecycle) {
             foreach (VIRTUSPHERE_MECM_SYNC_STATES as $mecm) {
                 foreach ([true, false] as $bound) {
-                    $index++;
-                    // An unbound VM stores NULL or the empty string; the twin and the PHP predicate both read both as unbound.
-                    $uuid = $bound ? sprintf('42422d12-0000-4000-8000-%012d', $index) : ($index % 2 === 0 ? null : '');
-                    $this->insertVm($index, $lifecycle, $mecm, $uuid);
+                    // The last two are no stored constants: an unknown stage and one that differs only in case.
+                    foreach ([...VIRTUSPHERE_VM_STATUS_COMPAT, '9/5 Unknown', '5/5 os installed'] as $stage) {
+                        $index++;
+                        // An unbound VM stores NULL or the empty string; the twin and the PHP predicate both read both as unbound.
+                        $uuid = $bound ? sprintf('42422d12-0000-4000-8000-%012d', $index) : ($index % 2 === 0 ? null : '');
+                        $this->insertVm($index, $lifecycle, $mecm, $uuid, $stage);
+                    }
                 }
             }
         }
@@ -120,16 +130,31 @@ final class VmPhaseSqlTwinTest extends TestCase
         $last = $phases[3];
         repo_record_client_event($this->db, $flaky, self::MAC, $last, VIRTUSPHERE_CLIENT_EVENT_FINISHED, null, '127.0.0.1');
         repo_record_client_event($this->db, $flaky, self::MAC, $last, VIRTUSPHERE_CLIENT_EVENT_FAILED, 'synthetic failure', '127.0.0.1');
+
+        // VB4: all four client phases finished behind a worker mark. The stored
+        // stage decides whether that is rank 7, or evidence that lifts nothing.
+        $marks = [
+            [902, VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, VIRTUSPHERE_STATUS_OS_INSTALLED],
+            [903, VIRTUSPHERE_LIFECYCLE_DEPLOYING, VIRTUSPHERE_MECM_SYNC_REGISTERED, VIRTUSPHERE_STATUS_OS_INSTALLED],
+            [904, VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, VIRTUSPHERE_STATUS_OS_INSTALLING],
+            [905, VIRTUSPHERE_LIFECYCLE_FAILED, VIRTUSPHERE_MECM_SYNC_DEPLOY_FAILED, VIRTUSPHERE_STATUS_REGISTERED],
+        ];
+        foreach ($marks as [$index, $lifecycle, $mecm, $stage]) {
+            $vm = $this->insertVm($index, $lifecycle, $mecm, 'uuid-mark-' . $index, $stage);
+            foreach (VIRTUSPHERE_CLIENT_PHASES as $phase) {
+                repo_record_client_event($this->db, $vm, self::MAC, $phase, VIRTUSPHERE_CLIENT_EVENT_FINISHED, null, '127.0.0.1');
+            }
+        }
     }
 
-    private function insertVm(int $index, string $lifecycle, string $mecm, ?string $uuid): int
+    private function insertVm(int $index, string $lifecycle, string $mecm, ?string $uuid, string $stage = VIRTUSPHERE_STATUS_REGISTERED): int
     {
         $name = sprintf('PHT%03d', $index);
         repo_execute(
             $this->db,
-            'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state, vm_instance_uuid) VALUES (?, ?, ?, ?, ?, ?)',
-            'isssss',
-            [$this->missionId, $name, $name, $lifecycle, $mecm, $uuid]
+            'INSERT INTO deploy_vms (mission_id, vm_name, vm_hostname, lifecycle_state, mecm_sync_state, vm_instance_uuid, vm_status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'issssss',
+            [$this->missionId, $name, $name, $lifecycle, $mecm, $uuid, $stage]
         );
 
         return (int) $this->db->insert_id;
