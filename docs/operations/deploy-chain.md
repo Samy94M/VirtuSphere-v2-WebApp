@@ -82,9 +82,10 @@ diese Grundlage ändert daher den unten beschriebenen Legacy-Produktpfad nicht.
 `lib/vm_network_contract.php` ist die pure SSoT für Interface-Issues,
 Fingerprint, WDS/PXE-Verdict und die aus der Playbookfolge abgeleitete
 Modusmatrix. `lib/repo/vm_network.php` materialisiert einen ausgewählten Scope
-in konstanter Queryzahl. Eine leere VM-Auswahl bedeutet weiterhin alle VMs der
-Mission; ein Retry prüft ausschließlich seinen neu berechneten tatsächlichen
-Scope.
+in konstanter Queryzahl. Eine leere VM-Auswahl ohne Formularmarker (interne
+Aufrufer) bedeutet alle VMs der Mission; im Formular sperrt eine ausdrücklich
+leere Auswahl. Ein Retry prüft ausschließlich seinen neu berechneten
+tatsächlichen Scope.
 
 | Befund | Create / Full / Powercycle / Export | Start / Autostart |
 |---|---|---|
@@ -226,7 +227,7 @@ Das SFTP-Gesamtbudget beginnt nach erfolgreicher Anmeldung und läuft auf einer 
 
 Jeder Playbook-Schritt eines Modus ist ein eigener entfernter Befehl. So gibt es zwischen den Playbooks eine Grenze, an der ein Abbruch greift; eine einzige `a && b`-Kette hätte keine. Vor jedem Schritt und nach jedem beendeten Schritt entscheidet derselbe Ownership-Helper in einer kurzen Transaktion anhand von `id`, `locked_by` und `status`, ob ein weiterer Schritt startet. Für den Operator gilt dadurch genau: Der gerade laufende Schritt kann seine Änderungen auf ESXi vollständig ausführen, danach startet kein weiterer.
 
-Der Abschluss selbst ist ein Compare-and-swap aus `running` mit eigenem Besitz. Gewinnt eine Abbruchanforderung das Rennen mit dem letzten Schritt, trifft dieser Swap null Zeilen; der Worker lädt die Zeile neu, bestätigt `cancelled` und hält im begrenzten Abschlussdetail fest, dass die Arbeit des laufenden Schritts ausgeführt wurde. Die bereits angenommene Anforderung bleibt die einzige Abbruchzeile im technischen Protokoll. Gewinnt der Abschluss, kann ein späterer Abbruch-POST den fertigen Auftrag nicht mehr verändern.
+Der Abschluss selbst läuft in einer Transaktion mit gesperrter Zeile und eigenem Besitz. Gewinnt eine Abbruchanforderung das Rennen mit dem letzten Schritt, sieht der Abschluss unter der Zeilensperre `cancelling` und bestätigt `cancelled` und hält im begrenzten Abschlussdetail fest, dass die Arbeit des laufenden Schritts ausgeführt wurde. Die bereits angenommene Anforderung bleibt die einzige Abbruchzeile im technischen Protokoll. Gewinnt der Abschluss, kann ein späterer Abbruch-POST den fertigen Auftrag nicht mehr verändern.
 
 Aufräumen auf dem Ansible-Host: Jeder Modusschritt aus `ansible_remote_steps()` trägt einen Trap auf HUP/INT/TERM (die Create-Steueraufrufe bewusst nicht: ihr Verzeichnis ist der einzige Beleg zu einer VM mit offenem Ausgang), der das Arbeitsverzeichnis samt `accounts.yml` entfernt, wenn seine entfernte Shell beendet wird (Verbindungsabbruch, Kill). Ein `EXIT`-Trap ist ausgeschlossen, weil er nach dem ersten Schritt zuschlagen würde. Nach einer beendeten Reihe löscht der Worker das Verzeichnis zusätzlich selbst; hat ein Schritt nicht zurückgemeldet (Abbruch mitten im Playbook, gestörter Transport), lässt er das Verzeichnis bewusst stehen und schreibt das ins Protokoll, statt unter einem laufenden Playbook zu löschen. Die Zugangsdatei `accounts.yml` entfernt der Worker dagegen bei jedem Jobende, auch in diesem Fall. Das ist zulässig, obwohl Ansible `vars_files` nicht einmal beim Start liest, sondern vor jedem Task neu: Fehlt die Datei, sind ihre Werte ab dem nächsten Task undefiniert, auch im `always`. Ein Playbook, dessen lesender SSH-Kanal weg ist, endet aber an seiner nächsten Ausgabe, der Worker löscht erst nach dem Ende seines eigenen Kanals, und nach ADR-0042 läuft nur ein Worker. Beides misst das Gate `ansible-vars-files-lifetime` im gepinnten QA-Image. Als gelöscht gilt die Datei nur bei Exit 0 und der Rückmeldung des Löschbefehls, die „entfernt“ oder „war nicht mehr vorhanden“ sagt. Scheitert das Entfernen (Host nicht erreichbar, Worker beendet, Datenbank nicht verfügbar), bleibt ein Merkeintrag mit dem Ziel der Datei (Host, Port, gepinnter Hostschlüssel): Der nächste Job mit demselben Ansible-Zugang entfernt die Datei nach dessen Host-Vorprüfung, aber nur, solange der Zugang noch auf dieses Ziel zeigt, und schreibt dazu eine Auditzeile „Zugangsdatei nachträglich bereinigt“ mit Host und Ergebnis. Zeigt der Zugang inzwischen auf einen anderen Host, bleibt der Eintrag ohne Auditzeile stehen und jeder Kontakt nennt ihn im Fehlerprotokoll des Workers. Das Portal verhindert diese Umstellung (ADR-0046): Ein Zugang mit offenen Einträgen lässt sich weder löschen noch auf ein anderes Ziel, einen anderen Port oder einen anderen Host-Schlüssel umstellen. Ein bestandener Zugangstest räumt Einträge seines Ziels ebenfalls auf. Offene Einträge meldet der Systemstatus, nach 24 Stunden und bei einem gelöschten oder umgestellten Zugang sofort. Ein Administrator kann ihre Entfernung mit Begründung bestätigen. Der Aufräum-Timer auf dem Host entfernt zusätzlich `accounts.yml`-Dateien, die älter als 24 Stunden sind und in Auftragsordnern des Ansible-Kontos liegen; er schließt aber selbst keinen Eintrag. Eine Statusabfrage einer Create-Einheit außerhalb des laufenden Jobs lädt die Datei erneut hoch, hält ihren Eintrag mit einer Frist vor dem Nachholen anderer Jobs geschützt und entfernt die Datei danach wieder; einen Aufrufer dafür gibt es in dieser Version noch nicht.
 
@@ -405,7 +406,7 @@ Der Missionsworker arbeitet die materialisierten Zeilen selbst ab, eine nach der
 
 Die nächste VM startet ausschließlich dann, wenn keine Zeile mehr `prepared`, `running` oder `uncertain` ist, und diese Antwort kommt aus den Zeilen, nicht aus dem Gedächtnis des Prozesses. Ein neu gestarteter Worker liest deshalb denselben Zustand. Eine unklare Einheit hält den Auftrag immer an; sie ist der einzige Zustand, in dem VirtuSphere den Ausgang auf ESXi nicht kennt, und die nächste VM zu starten hieße, diese Unkenntnis zu überschreiben.
 
-Das Async-Verzeichnis wird nicht zusätzlich gespeichert, sondern aus dem ohnehin deterministischen Arbeitsverzeichnis des Auftrags abgeleitet: `<Arbeitsverzeichnis>/create.vm.<Position>/async`. Dadurch findet ein neu gestarteter Worker dieselbe Job-ID ohne zweite Kopie in der Datenbank. Das Gesamtbudget der Create-Strecke ist kein eigener Wert, sondern das SSH-Gesamtbudget; es läuft ab `deploy_jobs.create_started_at` und wird per `COALESCE` genau einmal gesetzt, also nicht durch einen Wiederaufnahmelauf zurückgedreht.
+Das Async-Verzeichnis wird nicht zusätzlich gespeichert, sondern aus dem ohnehin deterministischen Arbeitsverzeichnis des Auftrags abgeleitet: `<Arbeitsverzeichnis>/create.vm.<Position>/async` (ab dem zweiten Versuch `create.vm.<Position>.attempt<n>/async`). Dadurch findet ein neu gestarteter Worker dieselbe Job-ID ohne zweite Kopie in der Datenbank. Das Gesamtbudget der Create-Strecke ist kein eigener Wert, sondern das SSH-Gesamtbudget; es läuft ab `deploy_jobs.create_started_at` und wird per `COALESCE` genau einmal gesetzt, also nicht durch einen Wiederaufnahmelauf zurückgedreht.
 
 Eine feste Wartezeit nach dem Erstellen gibt es nicht. Jede Einheit wird bis zum Ende gepollt und ihre Live-Identität zurückgelesen; das ist der Beweis, den eine blinde Wartezeit nur ersetzen könnte.
 
@@ -512,7 +513,8 @@ Powercycle und Export speichern die per-VM Zulassung synchron vor der ersten
 eigenen Abfrage; es gibt keine Sammelrunde über die Auswahl. Ohne exakt passende
 Antwort startet diese Abfrage nicht. Der MAC-Reporter verwendet denselben
 API-URL-, TLS-Fingerprint- und transienten Retry-Eigentümer wie der Callback.
-Abfragefehler bleiben als VM-Fehler aggregiert.
+Beim Export bleibt ein Abfragefehler ein Fehler der einzelnen VM; beim
+Powercycle beendet er den Schritt vor der nächsten VM.
 
 Create ist ebenfalls pro VM belegt. `pending` oder `prepared` ohne Startabsicht
 belegt eine nicht gestartete Einheit. `prepared` mit Startabsicht enthält die
