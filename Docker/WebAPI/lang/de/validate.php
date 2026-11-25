@@ -95,7 +95,7 @@ return [
     'vm_hostname_active_job' => 'Der Windows-Hostname kann nicht geändert werden, solange ein Deploy-Auftrag dieser Mission läuft.',
     'mission_rename_mecm_locked' => 'Mission kann nicht umbenannt werden: Der Name ist der MECM-Collection-Name und VMs dieser Mission sind bereits in MECM registriert.',
     'mission_activation_vm_name_conflict' => 'Vorlage kann nicht zur Mission werden: Der VM-Name „:vm“ wird bereits in Mission „:mission“ verwendet.',
-    'template_clone_name_conflicts' => 'Template kann nicht geklont werden: Diese VM-Namen existieren bereits in anderen Missionen: :names',
+    'template_clone_name_conflicts' => 'Vorlage kann nicht geklont werden: Diese VM-Namen existieren bereits in anderen Missionen: :names',
     'mission_name_invalid' => 'Bitte einen gültigen Missionsnamen eingeben (keine Leerzeichen, höchstens 255 Zeichen).',
     'mission_import_no_template' => 'Importierte Missionen dürfen nicht mit dem Vorlagen-Präfix beginnen.',
     'mission_import_list_required' => ':field muss in der Datei eine Liste von Einträgen sein.',

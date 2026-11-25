@@ -36,14 +36,14 @@ return [
     // Topbar
     'account' => 'Konto',
     'theme' => 'Design',
-    'theme_title' => 'Darstellung umschalten',
+    'theme_title' => 'Design umschalten',
     'logout' => 'Abmelden',
 
     // Session-UI
     'session_title' => 'Sitzung',
-    'session_extend' => 'Session verlängern',
+    'session_extend' => 'Sitzung verlängern',
     'session_expiring_title' => 'Sitzung läuft bald ab',
-    'session_countdown_html' => 'Deine Session läuft in {n} Sekunden ab.',
+    'session_countdown_html' => 'Ihre Sitzung läuft in {n} Sekunden ab.',
     'logout_now' => 'Jetzt abmelden',
 
     // Fehlerabbildung (portal_error_message)
@@ -58,7 +58,7 @@ return [
     // derselbe Grund, und die Ablehnung ist hart (kein stiller Abbruch des
     // Auftrags), damit niemandes laufender Deploy nebenbei beendet wird.
     'err_mission_active_job' => 'Für diese Mission läuft oder wartet ein Bereitstellungsauftrag. Den Auftrag zuerst abwarten oder abbrechen.',
-    'err_esxi_write_license' => 'Der gewählte ESXi-Host meldet eine freie Lizenz: Seine API ist nur lesend, deshalb lässt sich dieser Modus nicht ausführen. Nur der MAC-Export und der Inventarabruf sind möglich. Nach einem Lizenzwechsel das ESXi-Inventar aktualisieren.',
+    'err_esxi_write_license' => 'Der gewählte ESXi-Host meldet eine kostenlose Lizenz: Seine API ist nur lesend, deshalb lässt sich dieser Modus nicht ausführen. Nur der MAC-Export und der Inventarabruf sind möglich. Nach einem Lizenzwechsel das ESXi-Inventar aktualisieren.',
     // Create-Urteil aus der gemeldeten ESXi-Version (ADR-0023 Nachtrag 7).
     'err_esxi_create_host' => 'Auf dem gewählten ESXi-Host lassen sich keine VMs erstellen: Er meldet ESXi :release, VirtuSphere erstellt VMs ab ESXi :floor. Nach einem Host-Update das ESXi-Inventar aktualisieren.',
     'err_esxi_create_guest' => 'VM :name: Das Guest OS :os braucht mindestens ESXi :floor, der gewählte Host meldet ESXi :release. In der VM ein anderes Guest OS wählen oder einen neueren Host verwenden.',

@@ -3,13 +3,13 @@
 declare(strict_types=1);
 
 return [
-    'page_title' => 'VirtuSphere - Login',
+    'page_title' => 'Sign in - VirtuSphere',
     'error_ip_locked' => 'This IP address is temporarily locked after too many failed attempts.',
     'error_rate_limited' => 'Too many sign-in attempts. Wait and try again later.',
     'error_directory_unavailable' => 'Active Directory is temporarily unavailable. Use a local emergency account if necessary.',
     'error_invalid' => 'Invalid username or password.',
-    'session_expired' => 'Your session expired. Please log in again.',
-    'sign_in_to_continue' => 'Please log in to continue.',
+    'session_expired' => 'Your session expired. Please sign in again.',
+    'sign_in_to_continue' => 'Please sign in to continue.',
     'input_not_saved' => 'Your input was not saved.',
     'username' => 'Username',
     'password' => 'Password',
@@ -18,6 +18,6 @@ return [
     'directory_username_hint' => 'Active Directory: sign in with name@domain',
     'source_local' => 'Local account',
     'directory_requires_https' => 'Active Directory sign-in is available only through the secure HTTPS address.',
-    'submit' => 'Log in',
-    'tagline' => 'Provisioning & Management',
+    'submit' => 'Sign in',
+    'tagline' => 'Deploy and management',
 ];

@@ -29,7 +29,7 @@ return [
     // editor may have typed over without saving. There the question says what
     // applies instead of which value.
     'vm_mecm_reset_confirm' => 'Reset the MECM ID of VM :name? The next rollout registers it with MECM as ":hostname". The old MECM device is not deleted automatically.',
-    'vm_mecm_reset_confirm_editing' => 'Reset the MECM ID of VM :name? What gets activated is the last SAVED Windows hostname, not an unsaved change in the field. The old MECM device is not deleted automatically.',
+    'vm_mecm_reset_confirm_editing' => 'Reset the MECM ID of VM :name? What gets activated is the last saved Windows hostname, not an unsaved change in the field. The old MECM device is not deleted automatically.',
     'vm_mecm_reset_template_blocked' => 'Templates cannot be queued for MECM.',
     'vm_mecm_reset_no_mac' => 'Reset is not possible yet: the VM has no imported MAC address.',
     // Etappe 14D: the reset is the only point at which a new rollout name takes

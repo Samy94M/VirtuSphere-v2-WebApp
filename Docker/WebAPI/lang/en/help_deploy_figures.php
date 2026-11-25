@@ -22,8 +22,8 @@ return [
     'job_states_intro' => 'A job always has exactly one status. The figure shows which status it can move to from which, and when it is finished.',
     'group_active' => 'Active',
     'group_terminal' => 'Finished',
-    'state_cancellable' => 'Can be cancelled',
-    'job_states_desc' => 'Active statuses: :active. Can be cancelled: :cancellable. Final states: :terminal. Transitions: :transitions.',
+    'state_cancellable' => 'Can be canceled',
+    'job_states_desc' => 'Active statuses: :active. Can be canceled: :cancellable. Final states: :terminal. Transitions: :transitions.',
     'job_states_transition' => 'from :from to :to',
     'job_states_note' => 'No way leads back out of a final state; "Run again" creates a new job. The supervision sets "Outcome unknown" when a running mission job stops reporting its heartbeat, and the worker sets it when the connection to the Ansible host drops in the middle of a step.',
 ];

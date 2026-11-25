@@ -102,7 +102,7 @@ return [
     'err_search_term' => 'The search term must be between :min and :max characters long.',
     'err_import_expired' => 'The search result expired or was already used. Search for the user again.',
     'err_import_disabled' => 'An account disabled in AD cannot be imported.',
-    'err_import_name_conflict' => 'The UPN is already used by another VirtuSphere user name. Nothing was imported.',
+    'err_import_name_conflict' => 'The UPN is already used by another VirtuSphere username. Nothing was imported.',
     'flash_config_saved' => 'AD configuration saved. :count enabled controllers are excluded from the admitted pool until tested again.',
     'flash_controller_added' => 'Controller added. Test and enable it now.',
     'flash_test_ok' => 'LDAPS, the search account, domain, search base, and writable controller passed validation.',

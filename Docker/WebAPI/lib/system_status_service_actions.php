@@ -103,7 +103,7 @@ function system_status_handle_service_action(mysqli $connection, array $user, st
         // The flash reports what was FOUND. "Review started" would be a
         // sentence about the button; an operator needs to know whether anything
         // moved and whether anything is still theirs to do.
-        flash_set($counts['manual'] > 0 ? 'warning' : 'success', __t('system_status.service_flash_reviewed', [
+        flash_set($counts['manual'] > 0 ? 'warning' : 'success', __t((int) $counts['reviewed'] === 1 ? 'system_status.service_flash_reviewed_one' : 'system_status.service_flash_reviewed_many', [
             'reviewed' => $counts['reviewed'],
             'requested' => $counts['requested'],
             'manual' => $counts['manual'],

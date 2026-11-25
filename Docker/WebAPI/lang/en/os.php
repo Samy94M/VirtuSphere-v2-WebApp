@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 return [
-    'title' => 'Operating Systems',
+    'title' => 'Operating systems',
     'readonly_hint' => 'Operating systems are synced from MECM (as Task Sequences); here they can only be deleted, not created or edited.',
     'th_vm_usage' => 'VMs',
     'confirm_delete_unused' => 'Operating system :name is used by no VM. Delete it? If the Task Sequence still exists in MECM, the next sync re-creates the entry.',

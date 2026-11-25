@@ -846,7 +846,7 @@ Admin-Löschen als self-healende Aufräum-Aktion (existiert die Task Sequence no
 in MECM, legt der nächste Sync den Eintrag wieder an), aber kein Anlegen oder
 Bearbeiten mehr (ADR-0020).
 
-Im Portal: Paketliste mit Status-Filter (Aktiv/Zurückgezogen/Alle); die
+Im Portal: Paketliste mit Statusfilter (Aktiv/Zurückgezogen/Alle); die
 VM-Bearbeitung blendet zurückgezogene Pakete aus (außer bereits verknüpfte,
 mit Kennzeichnung) und zeigt „Update verfügbar"-Hinweise.
 

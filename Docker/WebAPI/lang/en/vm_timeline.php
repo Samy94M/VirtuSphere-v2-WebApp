@@ -40,11 +40,11 @@ return [
     'note_sweep_apply' => 'Cleanup run: recorded job and VM outcome applied',
     'note_job_started' => 'Job #:job took over the VM',
     'note_job_failed' => 'Job #:job failed',
-    'note_job_cancelled' => 'Job #:job was cancelled',
+    'note_job_cancelled' => 'Job #:job was canceled',
     'note_job_mac_import_partial' => 'Job #:job: MAC import only partial',
     'note_job_restored' => 'Job #:job succeeded without an export step; lifecycle restored',
     'note_job_reaped' => 'Job #:job ended after a stale heartbeat',
-    'note_job_cancelled_reaped' => 'Job #:job cancelled; closed by the cleanup run after a stale heartbeat',
+    'note_job_cancelled_reaped' => 'Job #:job canceled; closed by the cleanup run after a stale heartbeat',
     'note_job_create_incomplete' => 'Job #:job stopped before its pipeline because the create section did not complete',
     'note_lifecycle_kept' => '(lifecycle stays at ":state", a later state is not overwritten)',
 ];

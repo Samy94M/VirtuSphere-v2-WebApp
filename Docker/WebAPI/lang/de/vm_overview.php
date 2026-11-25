@@ -12,7 +12,7 @@ return [
     'filter_mecm_pending' => 'MECM ausstehend',
     // Die vier Gruppen „VM-Prüfung fällig“ des Dashboards (SP4, F6); Gruppe,
     // Filter und Liste tragen denselben Namen.
-    'filter_mecm_overdue' => 'MECM wartet länger als :hours h',
+    'filter_mecm_overdue' => 'Wartet länger als :hours h auf MECM',
     'filter_os_install_overdue' => 'OS-Installation länger als :hours h',
     'filter_job_failed' => 'Auftrag fehlgeschlagen',
     'filter_create_uncertain' => 'Create ungeklärt',

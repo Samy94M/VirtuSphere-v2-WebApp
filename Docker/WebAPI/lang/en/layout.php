@@ -15,7 +15,7 @@ return [
     'nav_help' => 'Help',
     'help_page_link' => 'Help',
     'help_page_title' => 'Open help for this page',
-    'nav_os' => 'Operating Systems',
+    'nav_os' => 'Operating systems',
     'nav_vlans' => 'VLANs',
     'nav_packages' => 'Packages',
     'nav_credentials' => 'Credentials',
@@ -36,7 +36,7 @@ return [
     // Topbar
     'account' => 'Account',
     'theme' => 'Theme',
-    'theme_title' => 'Toggle appearance',
+    'theme_title' => 'Toggle theme',
     'logout' => 'Log out',
 
     // Session UI
@@ -58,7 +58,7 @@ return [
     // the refusal is hard (no implicit cancel), so nobody's running deploy is
     // ended as a side effect.
     'err_mission_active_job' => 'A deploy job for this mission is queued or running. Wait for it to finish or cancel it first.',
-    'err_esxi_write_license' => 'The selected ESXi host reports a free licence: its API is read-only, so this mode cannot run. Only the MAC export and the inventory pull are possible. After a licence change, refresh the ESXi inventory.',
+    'err_esxi_write_license' => 'The selected ESXi host reports a free license: its API is read-only, so this mode cannot run. Only the MAC export and the inventory pull are possible. After a license change, refresh the ESXi inventory.',
     // Create verdict from the reported ESXi release (ADR-0023 amendment 7).
     'err_esxi_create_host' => 'VMs cannot be created on the selected ESXi host: it reports ESXi :release, and VirtuSphere creates VMs from ESXi :floor. After a host update, refresh the ESXi inventory.',
     'err_esxi_create_guest' => 'VM :name: the guest OS :os needs at least ESXi :floor, but the selected host reports ESXi :release. Choose another guest OS in the VM or use a newer host.',

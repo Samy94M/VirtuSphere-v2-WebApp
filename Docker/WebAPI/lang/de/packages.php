@@ -13,7 +13,7 @@ return [
     'th_retired_at' => 'Zurückgezogen am',
     'status_active' => 'Aktiv',
     'status_retired' => 'Zurückgezogen',
-    'filter_label' => 'Status-Filter',
+    'filter_label' => 'Statusfilter',
     'filter_active' => 'Aktiv',
     'filter_retired' => 'Zurückgezogen',
     'filter_all' => 'Alle',

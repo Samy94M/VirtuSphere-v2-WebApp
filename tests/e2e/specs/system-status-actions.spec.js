@@ -90,7 +90,7 @@ echo 'JSON' . json_encode(['credential' => $credential, 'job' => $processed, 'ne
   await expect(row.locator(`a[href="deploy_log.php?id=${Number(seed.job)}"]`)).toBeVisible();
   // The newer never-claimed job stays out of the card entirely: neither its
   // outcome nor its log link may stand in for work that never happened.
-  await expect(row).not.toContainText(/Abgebrochen|Cancelled/);
+  await expect(row).not.toContainText(/Abgebrochen|Canceled/);
   await expect(row.locator(`a[href="deploy_log.php?id=${Number(seed.never_ran)}"]`)).toHaveCount(0);
 
   const form = row.locator('form[action="credentials.php"]:has(input[name="return_to"][value="ansible_status"])');

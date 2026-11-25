@@ -21,9 +21,9 @@ return [
     'empty_package' => 'No VM uses this package.',
     'empty_os' => 'No VM uses this operating system.',
     'empty_vlan' => 'No VM network adapter and no mission uses this VLAN.',
-    'empty_credential_esxi' => 'No job and no VM with a proven binding uses this access.',
-    'empty_credential_ansible' => 'No job uses this access.',
+    'empty_credential_esxi' => 'No job and no VM with a proven binding uses this credential.',
+    'empty_credential_ansible' => 'No job uses this credential.',
     'empty_generic' => 'No known use.',
-    'note_vm_binding' => 'A VM counts only when its binding to this access is proven. Without proof, a use is not ruled out.',
+    'note_vm_binding' => 'A VM counts only when its binding to this credential is proven. Without proof, a use is not ruled out.',
     'note_ansible_jobs' => 'Ansible accesses are proven through jobs only.',
 ];

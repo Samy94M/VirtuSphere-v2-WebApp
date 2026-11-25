@@ -19,7 +19,7 @@ return [
     'running' => 'Running',
     'evidence_incomplete' => 'No findings, evidence incomplete',
     'legend_heading' => 'Status words',
-    'legend_intro' => 'Every status word has the same colour and the same symbol on every page. The domain state says whether an area is in order; the reporter state says whether its evidence still arrives. The headline above the overview names the areas that need attention, the most severe first.',
+    'legend_intro' => 'Every status word has the same color and the same symbol on every page. The domain state says whether an area is in order; the reporter state says whether its evidence still arrives. The headline above the overview names the areas that need attention, the most severe first.',
     'axis_level' => 'Domain state',
     'axis_reporter' => 'Reporter state',
     'axis_activity' => 'Activity',

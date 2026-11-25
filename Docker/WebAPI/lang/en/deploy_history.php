@@ -12,7 +12,7 @@ return [
     'begin' => 'Start recorded',
     'end' => 'Result recorded',
     'result' => 'Result',
-    'create' => 'Provision VM',
+    'create' => 'Deploy VM',
     'mac' => 'MAC import',
     'pending' => 'Not started',
     'running' => 'In progress',

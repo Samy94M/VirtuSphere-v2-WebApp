@@ -15,7 +15,7 @@ This is the shared entry point. Before editing, read the relevant sections below
 | Machine endpoints or their clients | `GROK.md` 1.4 and 5; `docs/ai/contracts/machine.md`, `docs/ai/reference/machine-api.md` |
 | Schema/migrations/persistence | `docs/ai/reference/database.md`; affected writer/consumer rows above |
 | PowerShell / Ansible | `docs/ai/reference/powershell.md` / `docs/ai/reference/ansible.md`; affected machine/deploy contracts |
-| Portal-visible text / language helper | `docs/ai/reference/i18n.md`; preserve DE/EN parity and display-only locale |
+| Portal-visible text / language helper | `docs/ai/reference/i18n.md`; preserve DE/EN parity and display-only locale; use the glossary words (R15) |
 | Tests, runners, Compose, visuals | `GROK.md` 1.5; `docs/ai/contracts/qa.md`, `docs/QA.md`; gates from `scripts/check.ps1`, interpretation in `docs/QUALITY-GATES.md` |
 | Rules, review roles, long tasks | `docs/ai/workflow.md`; assigned role section in `docs/ai/review-workflow.md` |
 

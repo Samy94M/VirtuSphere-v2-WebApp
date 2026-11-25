@@ -14,7 +14,7 @@ return [
     'show_all' => 'Alle Einträge anzeigen',
     'flash_deleted' => 'Betriebssystem gelöscht.',
     'th_retired_at' => 'Zurückgezogen am',
-    'filter_label' => 'Status-Filter',
+    'filter_label' => 'Statusfilter',
     'filter_active' => 'Aktiv',
     'filter_retired' => 'Zurückgezogen',
     'filter_all' => 'Alle',

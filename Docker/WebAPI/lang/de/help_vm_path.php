@@ -13,6 +13,6 @@ return [
     'caption_mac_known' => 'Der Ansible-Host meldet die MAC zurück',
     'caption_handed_to_mecm' => 'Der Device-Sync meldet die ResourceID',
     'caption_windows_reports' => 'Der Client bestätigt, dass er bereit ist',
-    'caption_client_done' => 'Alle Clientphasen melden „abgeschlossen“',
+    'caption_client_done' => 'Alle Client-Phasen melden „abgeschlossen“',
     'note' => 'Es gilt die höchste Phase, deren Beleg angekommen ist; eine VM kann Phasen überspringen. Ein fehlgeschlagener Auftrag führt nicht zurück, er erscheint als Befund.',
 ];

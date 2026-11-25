@@ -12,7 +12,7 @@ return [
     'filter_sources_hint' => 'Ohne Auswahl werden alle Quellen gezeigt.',
     'filter_from' => 'Von',
     'filter_to' => 'Bis',
-    'filter_date_hint' => 'Die Tage gelten in der Zeitzone :tz.',
+    'filter_date_hint' => 'Zeitangaben in :tz.',
     'filter_apply' => 'Anwenden',
     'filter_reset' => 'Zurücksetzen',
     'error_date' => 'Bitte ein Datum im Format JJJJ-MM-TT angeben.',

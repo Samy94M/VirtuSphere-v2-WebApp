@@ -29,8 +29,8 @@ return [
     // behaupten, den der Bearbeiter gerade überschrieben, aber noch nicht
     // gespeichert hat. Dort sagt die Frage deshalb, was gilt, statt welchen Wert.
     'vm_mecm_reset_confirm' => 'MECM-ID für VM :name zurücksetzen? Der nächste Rollout meldet sie als „:hostname“ bei MECM an. Das alte MECM-Gerät wird nicht automatisch gelöscht.',
-    'vm_mecm_reset_confirm_editing' => 'MECM-ID für VM :name zurücksetzen? Aktiviert wird der zuletzt GESPEICHERTE Windows-Hostname, nicht eine ungespeicherte Änderung im Feld. Das alte MECM-Gerät wird nicht automatisch gelöscht.',
-    'vm_mecm_reset_template_blocked' => 'Templates können nicht für MECM eingereiht werden.',
+    'vm_mecm_reset_confirm_editing' => 'MECM-ID für VM :name zurücksetzen? Aktiviert wird der zuletzt gespeicherte Windows-Hostname, nicht eine ungespeicherte Änderung im Feld. Das alte MECM-Gerät wird nicht automatisch gelöscht.',
+    'vm_mecm_reset_template_blocked' => 'Vorlagen können nicht für MECM eingereiht werden.',
     'vm_mecm_reset_no_mac' => 'MECM-ID zurücksetzen nicht möglich: Die VM hat noch keine importierte MAC-Adresse.',
     // Etappe 14D: Der Reset ist der einzige Punkt, an dem ein neuer Rolloutname
     // wirksam wird. Jeder Erfolgstext nennt den Namen, der jetzt scharf ist, und

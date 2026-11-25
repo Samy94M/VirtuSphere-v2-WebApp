@@ -40,7 +40,7 @@ return [
     'job_cancelling' => 'Cancellation requested',
     'job_succeeded' => 'Succeeded',
     'job_failed' => 'Failed',
-    'job_cancelled' => 'Cancelled',
+    'job_cancelled' => 'Canceled',
     'job_partial' => 'Partially succeeded',
     'job_outcome_unknown' => 'Outcome unknown',
     'job_unknown' => 'Unknown status',

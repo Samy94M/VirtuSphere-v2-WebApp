@@ -11,7 +11,7 @@ function client_phase_attention_render(array $failures): void
     if ($failures === []) {
         return;
     }
-    echo '<div class="alert alert-warning"><p>' . portal_badge('warning', __t('missions.client_phase_failed', ['count' => count($failures)])) . '</p><ul>';
+    echo '<div class="alert alert-warning"><p>' . portal_badge('warning', __t(count($failures) === 1 ? 'missions.client_phase_failed_one' : 'missions.client_phase_failed_many', ['count' => count($failures)])) . '</p><ul>';
     foreach ($failures as $vm) {
         echo '<li><a href="' . h(vm_edit_url((int) $vm['mission_id'], (int) $vm['id'])) . '">' . h((string) $vm['vm_name']) . '</a></li>';
     }

@@ -12,7 +12,7 @@ return [
     'filter_mecm_pending' => 'MECM pending',
     // The four "check due" groups of the dashboard (SP4, F6); group, filter and
     // list share one name.
-    'filter_mecm_overdue' => 'MECM waiting longer than :hours h',
+    'filter_mecm_overdue' => 'Waiting for MECM longer than :hours h',
     'filter_os_install_overdue' => 'OS installation longer than :hours h',
     'filter_job_failed' => 'Job failed',
     'filter_create_uncertain' => 'Create unresolved',

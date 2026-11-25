@@ -119,7 +119,7 @@ return [
     'deploy_outcome' => 'Bereitstellungsauftrag mit ID :id (Mission :mission, Modus :mode): :status:reason_part',
     'inventory_requested' => 'ESXi-Inventarabruf für Zugangsdaten mit ID :id angefordert:reason_part:job_part',
     'job_part' => '; Auftrags-ID :job',
-    'inventory_refresh' => 'ESXi-Inventaraktualisierung angefordert für Ziele:targets und Aufträge:jobs (:queued eingereiht, :open offen, :paused pausiert, :failed fehlgeschlagen)',
+    'inventory_refresh' => 'ESXi-Inventarabruf angefordert für Ziele:targets und Aufträge:jobs (:queued eingereiht, :open offen, :paused pausiert, :failed fehlgeschlagen)',
     'vlan_reassigned' => 'VLAN :id auf :target_vlan umgehängt (:missions Missionen, :interfaces Schnittstellen)',
     'convergence_sweep' => '[maintenance-worker] Konvergenzlauf markierte VMs (:count) der Mission mit ID :id als fehlgeschlagen:reason_part',
     'claim_paused' => 'Annahme neuer Bereitstellungsaufträge: :state:claim_job_part',

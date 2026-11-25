@@ -117,7 +117,7 @@ layout_header(__t('vlans.title'), $user, 'vlans', 'system-status', 'help-vlans')
                         } elseif ($hostTotal === 0) {
                             echo h(implode(', ', $hosts));
                         } elseif ($missingHosts === []) {
-                            echo '<span class="muted">' . h(__t('vlans.hosts_all', ['total' => $hostTotal])) . '</span>';
+                            echo '<span class="muted">' . h(__t($hostTotal === 1 ? 'vlans.hosts_all_one' : 'vlans.hosts_all_many', ['total' => $hostTotal])) . '</span>';
                         } else {
                             echo portal_badge('warning', __t('vlans.hosts_partial', ['count' => count($presentOnEligible), 'total' => $hostTotal])) . ' ';
                             echo '<span class="muted">' . h(__t('vlans.hosts_missing', ['hosts' => implode(', ', $missingHosts)])) . '</span>';

@@ -12,7 +12,7 @@ return [
     'filter_sources_hint' => 'Without a selection, every source is shown.',
     'filter_from' => 'From',
     'filter_to' => 'To',
-    'filter_date_hint' => 'Days are read in the time zone :tz.',
+    'filter_date_hint' => 'Times shown in :tz.',
     'filter_apply' => 'Apply',
     'filter_reset' => 'Reset',
     'error_date' => 'Enter a date as YYYY-MM-DD.',

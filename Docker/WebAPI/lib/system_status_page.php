@@ -165,7 +165,7 @@ function system_status_handle_post(mysqli $connection, array $user): void
             ] : [];
             flash_set('warning', $message, '', $action);
         } else {
-            $parts = [__t('system_status.inv_refresh_queued', ['count' => $enqueued])];
+            $parts = [__t((int) $enqueued === 1 ? 'system_status.inv_refresh_queued_one' : 'system_status.inv_refresh_queued_many', ['count' => $enqueued])];
             if ($alreadyPending > 0) {
                 $parts[] = __t('system_status.inv_refresh_already_pending', ['count' => $alreadyPending]);
             }

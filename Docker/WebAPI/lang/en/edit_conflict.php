@@ -18,7 +18,7 @@ return [
     'th_current' => 'Saved now',
     'empty' => 'empty',
     'row_count' => 'Count: :count',
-    'rows_hint' => 'For interfaces, disks and packages the comparison shows only the count. Check the individual rows in the form.',
+    'rows_hint' => 'For network adapters, disks and packages the comparison shows only the count. Check the individual rows in the form.',
     'continue' => 'Continue with my input',
     'continue_hint' => '"Continue with my input" saves nothing. You can then adjust your input; only the next save overwrites the state shown.',
 ];

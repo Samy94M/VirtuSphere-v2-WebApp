@@ -226,7 +226,7 @@ test('a pending password change wins over the return target', async ({ browser }
   try {
     const page = await context.newPage();
     await page.goto('login.php?next=' + encodeURIComponent('vms.php'));
-    await expect(page.locator('.login-panel .alert-info')).toContainText('Please log in to continue');
+    await expect(page.locator('.login-panel .alert-info')).toContainText('Please sign in to continue');
     await submitSignIn(page, USER, /account\.php$/);
   } finally {
     await context.close();

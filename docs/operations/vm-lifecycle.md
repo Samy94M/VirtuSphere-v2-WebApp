@@ -1,6 +1,6 @@
 # Lebenszyklus einer VM
 
-Eine VM trägt drei gespeicherte Werte: den Lebenszyklus (`lifecycle_state`), den MECM-Abgleich (`mecm_sync_state`) und den Stufenwert x/5 (`vm_status`), den die MECM-Schnittstelle liest. Die Phase, die VM-Liste, VM-Übersicht und VM-Editor zeigen, wird beim Lesen aus diesen Werten und weiteren Belegen abgeleitet (`Docker/WebAPI/lib/vm_phase.php`, Referenz R56 in [`docs/ai/reference/portal.md`](../ai/reference/portal.md)); sie wird nicht gespeichert und nicht übertragen. Dieses Dokument zeichnet die Phasen und die beiden Achsen mit ihren Schreibern. Die Portalhilfe zeigt denselben Weg im Abschnitt „Der Weg einer VM“ (Hilfe, Reiter „Missionen & VMs“). Einstieg: [Abläufe](flows.md); die Gesamtkette steht in der [Bereitstellungskette](deploy-chain.md).
+Eine VM trägt drei gespeicherte Werte: den Lebenszyklus (`lifecycle_state`), den MECM-Abgleich (`mecm_sync_state`) und den Stufenwert x/5 (`vm_status`), den die MECM-Schnittstelle liest. Die Phase, die VM-Liste, VM-Übersicht und VM-Editor zeigen, wird beim Lesen aus diesen Werten und weiteren Belegen abgeleitet (`Docker/WebAPI/lib/vm_phase.php`, Referenz R56 in [`docs/ai/reference/portal.md`](../ai/reference/portal.md)); sie wird nicht gespeichert und nicht übertragen. Dieses Dokument zeichnet die Phasen und die beiden Achsen mit ihren Schreibern. Die Portalhilfe zeigt denselben Weg im Abschnitt „Der Weg einer VM“ (Hilfe, Reiter „Missionen und VMs“). Einstieg: [Abläufe](flows.md); die Gesamtkette steht in der [Bereitstellungskette](deploy-chain.md).
 
 ## Der Weg einer VM
 
