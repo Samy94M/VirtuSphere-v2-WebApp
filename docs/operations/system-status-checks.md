@@ -15,7 +15,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 | Host und Backup | Backup-Statuskanal des Docker-Hosts: Backup, Restore-Test, Prüfsummen, bei Befund Backup-Verschlüsselung, HTTPS-Zertifikat | je Prüfung | schlechteste Zeile; „Keine Daten“ ist nie grün |
 | Interne Dienste | Wartungsdienst und Deploy-Worker | je Dienst | schlechteste Dienstzeile |
 
-Über der Übersicht stehen drei Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`); offene ESXi-Zugangsdateien auf einem Ansible-Host (`repo_remote_secret_notice_groups()`). Der letzte Hinweis hat eine Gruppe je Zugang und Ziel. Sie erscheint, wenn eine ihrer Zeilen älter als 24 Stunden ist, sofort bei einem gelöschten Zugang oder einem Ziel, das nicht mehr zum Zugang passt. Laufende Leases und aktive Aufträge zählen nicht. Die Gruppe nennt die vollständige Anzahl, die älteste Zeile, Host und Grund. Benutzer mit `credentials.manage` bestätigen dort eine Gruppe mit Begründung; das ist dieselbe Bestätigung wie unter dem Zugang auf der Seite Zugangsdaten. Für `system.config` verlinken die ersten beiden Hinweise die Einstellung, die sie behebt. Diese drei betreffen die ganze Installation (Transport, Freigabeliste) oder einen Ansible-Host außerhalb jeder Kachel und bleiben deshalb Hinweise. Unverschlüsselte Backups (`backup_encryption_finding()`) standen bis SY3 ebenfalls hier und ließen die Kachel „Host und Backup“ grün; sie sind jetzt eine Zeile dieses Bereichs (siehe dort).
+Über der Übersicht stehen drei Hinweise, die keine Ampel haben und nur erscheinen, wenn sie zutreffen: Der Aufruf läuft über HTTP; Einträge der Machine-API-Freigabeliste haben keine Rolle und gelten deshalb für alle Maschinen-Endpunkte (`repo_api_access_without_role_count()`); offene ESXi-Zugangsdateien auf einem Ansible-Host (`repo_remote_secret_notice_groups()`). Der letzte Hinweis hat eine Gruppe je Zugang und Ziel. Sie erscheint, wenn eine ihrer Zeilen älter als `VIRTUSPHERE_REMOTE_SECRET_NOTICE_AFTER_SECONDS` ist, sofort bei einem gelöschten Zugang oder einem Ziel, das nicht mehr zum Zugang passt. Laufende Leases und aktive Aufträge zählen nicht. Die Gruppe nennt die vollständige Anzahl, die älteste Zeile, Host und Grund. Benutzer mit `credentials.manage` bestätigen dort eine Gruppe mit Begründung; das ist dieselbe Bestätigung wie unter dem Zugang auf der Seite Zugangsdaten. Für `system.config` verlinken die ersten beiden Hinweise die Einstellung, die sie behebt. Diese drei betreffen die ganze Installation (Transport, Freigabeliste) oder einen Ansible-Host außerhalb jeder Kachel und bleiben deshalb Hinweise. Unverschlüsselte Backups (`backup_encryption_finding()`) standen bis SY3 ebenfalls hier und ließen die Kachel „Host und Backup“ grün; sie sind jetzt eine Zeile dieses Bereichs (siehe dort).
 
 Die Bereiche heißen hier wie die Kacheln der Übersicht auf der Seite und stehen in deren Reihenfolge; die Kacheln laufen in der Reihenfolge der Abschnitte auf der Seite. `SystemStatusChecksDocContractTest` leitet Namen und Reihenfolge aus der Kartenliste ab (`system_status_overview_cards()`).
 
@@ -143,7 +143,8 @@ flowchart TD
     A -->|ja| B{"Letzte Beobachtung ok?"}
     B -->|nein| D["Kritisch (rot)"]
     B -->|ja| C{"Zertifikat abgelaufen?"}
-    C -->|ja| D
+    C -->|ja, kein Erfolg nach dem Ablaufdatum| D
+    C -->|ja, Erfolg nach dem Ablaufdatum: erneuertes Zertifikat noch nicht gelesen| S
     C -->|nein| E{"Zertifikat läuft innerhalb von VIRTUSPHERE_DIRECTORY_CERTIFICATE_EXPIRY_WARNING_DAYS ab?"}
     E -->|ja| W["Warnung (gelb)"]
     E -->|nein| F{"Letzter Erfolg fehlt oder älter als VIRTUSPHERE_DIRECTORY_OBSERVATION_STALE_AFTER_DAYS?"}
@@ -161,7 +162,7 @@ flowchart TD
   J -->|sonst, auch alle veraltet oder aktivierte Controller für aktuelle Revision ungetestet| G3["Gesamt: Eingeschränkt (gelb)"]
 ```
 
-Das Zertifikat kennt die Seite nur aus dem letzten manuellen Test. Ein unlesbares Ablaufdatum überspringt die beiden Zertifikatsfragen. Aktivierte Controller ohne Test für die aktuelle Revision fehlen im zugelassenen Pool und verhindern eine grüne Gesamtampel. Die Speichermeldung nennt ihre Anzahl.
+Das Zertifikat kennt die Seite aus dem letzten manuellen Test und aus dem täglichen Lesen nach einem erfolgreichen Verzeichniskontakt (Anmeldung, Sitzungsprüfung oder Suche), höchstens einmal je `VIRTUSPHERE_DIRECTORY_CERTIFICATE_REFRESH_SECONDS` je Controller und Revision. Ein unlesbares Ablaufdatum überspringt die beiden Zertifikatsfragen. Aktivierte Controller ohne Test für die aktuelle Revision fehlen im zugelassenen Pool und verhindern eine grüne Gesamtampel. Die Speichermeldung nennt ihre Anzahl.
 
 ## MECM
 
@@ -187,7 +188,7 @@ flowchart TD
   L -->|started| SZ{"Startzeit vorhanden, lesbar und höchstens VIRTUSPHERE_STATUS_EVIDENCE_FUTURE_SKEW_SECONDS in der Zukunft?"}
   SZ -->|nein| UK
   SZ -->|ja| ST{"Lauf länger offen als die Laufschonfrist (auch das Doppelte der zuletzt gemeldeten Laufdauer)?"}
-  ST -->|nein| SR["Badge „Lauf offen“ in der Farbe des vorigen Ergebnisses; ohne lesbares Ergebnis Keine Daten"]
+  ST -->|nein| SR["Badge „Abschluss offen“: bei Devices Sync und Packages Sync in der Farbe des vorigen Ergebnisses (ohne lesbares Ergebnis grau), beim Package Import blau (Läuft, vorige Bewertung getrennt unter „Letztes Scanergebnis“)"]
   ST -->|ja| SD{"Auch über der Gefahrschwelle?"}
   SD -->|ja| RD
   SD -->|nein| YL
@@ -220,7 +221,7 @@ flowchart TD
   T --> RAW["Rohdaten: die gespeicherte Zeile mit Kopieren-Knopf"]
 ```
 
-Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt den Reporter gelb („Warnung“, Melderzeile). Der letzte Site-Befund bleibt getrennt sichtbar, grau als „Veraltet“ und historisch markiert. Sein Alter behauptet keinen aktuellen kritischen MECM-Zustand. Dashboard und Systemstatus lesen beide Achsen aus demselben Snapshot. Der Standortzustand nutzt die fünf Wörter des fachlichen Zustands (OK, Warnung, Eingeschränkt, Kritisch, Unbekannt), nie ein Melderwort wie „Nicht erreichbar“. Bei MECM-kritisch ordnet das Portal die gemeldeten Rollen und Komponenten je Typ über die Tabelle in `lib/mecm_site_assessment.php` ein (ADR-0018 Amendment 2026-11-09). Die Einordnungstabelle mit Quellen und die MECM-Schwellen (Fehlermeldungen seit Mitternacht) stehen in `mecm-integration.md`, Abschnitte „Wie MECM den Standort rot färbt“ und „Einordnung der Rollen und Komponenten“.
+Der Site-Health-Reporter wird eigens bewertet: Ein überfälliger Bericht färbt den Reporter gelb („Warnung“, Melderzeile). Der letzte Site-Befund bleibt getrennt sichtbar, grau als „Veraltet“ und historisch markiert. Sein Alter behauptet keinen aktuellen kritischen MECM-Zustand. Dashboard und Systemstatus lesen beide Achsen aus demselben Snapshot. Der Standortzustand nutzt die fünf Wörter des fachlichen Zustands (OK, Warnung, Eingeschränkt, Kritisch, Unbekannt); fehlt ein gültiger Befund, steht „Keine Daten“, beziehungsweise auf der Abschnittskarte „Veraltet“ für einen alten Befund. Die Standortzeile der Kachel zeigt bei überfälligem Bericht „Warnung“. „Nicht erreichbar“ steht dort nie. Bei MECM-kritisch ordnet das Portal die gemeldeten Rollen und Komponenten je Typ über die Tabelle in `lib/mecm_site_assessment.php` ein (ADR-0018 Amendment 2026-11-09). Die Einordnungstabelle mit Quellen und die MECM-Schwellen (Fehlermeldungen seit Mitternacht) stehen in `mecm-integration.md`, Abschnitte „Wie MECM den Standort rot färbt“ und „Einordnung der Rollen und Komponenten“.
 
 ```mermaid
 flowchart TD
@@ -236,13 +237,13 @@ flowchart TD
   SC -->|Provider nicht lesbar oder Abfrage gescheitert| UU["Unbekannt (grau)"]
 ```
 
-Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle, `VIRTUSPHERE_RUN_GRACE_SECONDS` und dem `VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR`-fachen der Dauer, die der Reporter mit seinem letzten Abschluss gemeldet hat (dieser Anteil höchstens `VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS`). Ein langer Autoimporter-Scan bleibt so in der Farbe des vorigen Ergebnisses, statt nach 10 Minuten rot und beim Abschluss wieder gelb zu werden; ein Lauf, der deutlich länger braucht als der letzte, wird weiterhin rot. Seit AL1 hasht der Autoimporter nur neue oder geänderte Dateien, ruhige Läufe sind daher kurz. Der erste Lauf nach einem Neustart der Aufgabe hasht dagegen den ganzen Baum und kann bei vielen großen Installern die feste Frist überschreiten; die Karte zeigt ihn dann bis zum Abschluss als verspätet. Dasselbe gilt für einen langen Vollscan nach kurzen ruhigen Läufen, weil die Schonfrist an der zuletzt gemeldeten Dauer hängt (AR1-Folgepunkt, in SY3 geprüft und offen gelassen: Die Statuszeile speichert nur die letzte Dauer, eine längste jüngere Scandauer bräuchte Laufhistorie oder ein Reporterfeld). Ohne gemeldete Dauer (erster Lauf, Legacy-Vorgeschichte) gelten nur die festen Werte. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Warnung und Kritisch. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
+Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle, `VIRTUSPHERE_RUN_GRACE_SECONDS` und dem `VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR`-fachen der Dauer, die der Reporter mit seinem letzten Abschluss gemeldet hat (dieser Anteil höchstens `VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS`). Ein langer Autoimporter-Scan bleibt so in der Farbe des vorigen Ergebnisses, statt nach der festen Frist `VIRTUSPHERE_RUN_GRACE_SECONDS` rot und beim Abschluss wieder gelb zu werden; ein Lauf, der deutlich länger braucht als der letzte, wird weiterhin rot. Seit AL1 hasht der Autoimporter nur neue oder geänderte Dateien, ruhige Läufe sind daher kurz. Der erste Lauf nach einem Neustart der Aufgabe hasht dagegen den ganzen Baum und kann bei vielen großen Installern die feste Frist überschreiten; die Karte zeigt ihn dann bis zum Abschluss als verspätet. Dasselbe gilt für einen langen Vollscan nach kurzen ruhigen Läufen, weil die Schonfrist an der zuletzt gemeldeten Dauer hängt (AR1-Folgepunkt, in SY3 geprüft und offen gelassen: Die Statuszeile speichert nur die letzte Dauer, eine längste jüngere Scandauer bräuchte Laufhistorie oder ein Reporterfeld). Ohne gemeldete Dauer (erster Lauf, Legacy-Vorgeschichte) gelten nur die festen Werte. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Warnung und Kritisch. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
 
 ## Ansible-Test
 
 Nachweis ist der Volltest je Ansible-Zugang. Er läuft über **Volltest jetzt starten**, über **Verbindung und Umgebung prüfen** (Zugangsdaten) oder geplant als Kindprozess des Deploy-Workers. Der letzte tatsächlich bearbeitete Missionsauftrag steht daneben, färbt die Ampel aber nicht.
 
-Ein bestandener Volltest, manuell oder geplant, räumt danach liegengebliebene ESXi-Zugangsdateien dieses Ziels auf, soweit der Zugang noch darauf zeigt. Das Zeitbudget beträgt 60 Sekunden; bricht das Aufräumen ab, bleibt der Rest für den nächsten Kontakt, und die Meldung sagt es. Das Ergebnis des Tests ändert der Aufräumlauf nicht. Fehlt der Aufräum-Timer auf dem Ansible-Host, nennt die Meldung ihn als Hinweis, ohne die Ampel zu verändern.
+Ein bestandener Volltest, manuell oder geplant, räumt danach liegengebliebene ESXi-Zugangsdateien dieses Ziels auf, soweit der Zugang noch darauf zeigt. Das Zeitbudget ist `VIRTUSPHERE_REMOTE_SECRET_TEST_SWEEP_BUDGET_SECONDS`; bricht das Aufräumen ab, bleibt der Rest für den nächsten Kontakt, und die Meldung sagt es. Das Ergebnis des Tests ändert der Aufräumlauf nicht. Fehlt der Aufräum-Timer auf dem Ansible-Host, nennt die Meldung ihn als Hinweis, ohne die Ampel zu verändern.
 
 Die getrennte Hostidentitätsanzeige zeigt Pin, Bestätigung und zuletzt beobachtete Abweichung. Sie ist kein Volltest und färbt dessen vorhandenen Nachweis nicht um. Jede SSH-/SFTP-Anmeldung geht über den [gemeinsamen Vertrauensablauf](trust-flows.md#ssh-und-sftp-zum-ubuntu-host); das gilt auch für die SFTP-Probe nach bestandenem SSH-Preflight.
 
@@ -254,13 +255,13 @@ flowchart TD
   TK -->|nein| TFK["fehlgeschlagen (ansible_host_identity), kein Login"]
   TK -->|ja| T2{"SSH-Anmeldung?"}
   T2 -->|nein| TF2["fehlgeschlagen (Anmeldung oder Zeitbudget)"]
-  T2 -->|ja| T3["Werkzeugkette prüfen: ansible-playbook, python3, pyvmomi, requests, vmware_host_auto_start, Laufzeitversionen, Async-Arbeitsbereich; mit API-Basis-URL auch Portal-Erreichbarkeit. Zeitbudget 45 s ohne Ausgabe, dasselbe wie im Auftrag"]
+  T2 -->|ja| T3["Werkzeugkette prüfen: ansible-playbook, python3, pyvmomi, requests, vmware_host_auto_start, Laufzeitversionen, Async-Arbeitsbereich; mit API-Basis-URL auch Portal-Erreichbarkeit. Zeitbudget VIRTUSPHERE_ANSIBLE_PREFLIGHT_IDLE_SECONDS ohne Ausgabe, dasselbe wie im Auftrag"]
   T3 -->|Komponente fehlt| TF3["fehlgeschlagen mit Name der Komponente"]
   T3 --> T4{"SFTP-Schreibprobe in /tmp?"}
   T4 -->|nein| TF4["fehlgeschlagen (SFTP)"]
-  T4 -->|ja| T5{"IP-Freigabe für den MAC-Rückruf (Eintrag ohne Rolle oder mit Rolle Ansible-Host)?"}
+  T4 -->|ja| T5{"IP-Freigabe für den MAC-Rückruf (Eintrag ohne Rolle oder mit Rolle Ansible-Host)? Die Sonde läuft in der Werkzeugkette, hier wird ihr Urteil gelesen"}
   T5 -->|abgewiesen| TW["bestanden mit Einschränkung (warning)"]
-  T5 -->|frei oder ohne URL| TO["bestanden"]
+  T5 -->|frei, ohne URL oder nicht feststellbar| TO["bestanden"]
   TF --> R
   TFK --> R
   TF2 --> R
@@ -268,7 +269,7 @@ flowchart TD
   TF4 --> R
   TW --> SW
   TO --> SW
-  SW["Nur nach bestandenem Test: liegengebliebene Zugangsdateien dieses Ziels entfernen (Budget 60 s, Abbruch lässt den Rest offen; das Ergebnis bleibt)"] --> R
+  SW["Nur nach bestandenem Test: liegengebliebene Zugangsdateien dieses Ziels entfernen (Budget VIRTUSPHERE_REMOTE_SECRET_TEST_SWEEP_BUDGET_SECONDS, Abbruch lässt den Rest offen; das Ergebnis bleibt)"] --> R
   R{"Zugang während des Tests geändert?"} -->|ja| RX["Ergebnis verworfen (discarded), Audit warning; bisheriger Nachweis bleibt unverändert"]
   R -->|nein| RS["Ergebnis mit Konfigurationsstand speichern"] --> A{"Ergebnis gehört zum aktuellen Stand des Zugangs?"}
   A -->|nein, Zugang seither geändert oder nie getestet| U["Keine Daten (unknown, grau)"]
@@ -285,7 +286,7 @@ Die Deploy-Seite übernimmt die Ansible-Volltest-Ampel und den Prüfzeitpunkt au
 
 ## ESXi-Inventar
 
-Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** oder den Einzelabruf, beim Speichern und Testen eines ESXi-Zugangs und nach jedem Endzustand eines `create`- oder `full`-Auftrags, sobald eine Create-Einheit ihre Ansible-Job-ID dauerhaft gespeichert hat. Der Abruf ist fail-soft und wird durch den vorhandenen Systemauftrag-Writer dedupliziert.
+Nachweis ist der Inventarabruf je ESXi-Zugang, ein Systemauftrag des Deploy-Workers. Er läuft im eingestellten Intervall, manuell über **Alle aktualisieren** oder den Einzelabruf, beim Speichern und Testen eines ESXi-Zugangs und nach jedem Endzustand eines `create`- oder `full`-Auftrags, sobald eine Create-Einheit ihre Ansible-Job-ID dauerhaft gespeichert hat, und nach jedem Auftrag, dessen Startschritt gelaufen ist (`deploy_worker_after_start_step()`), solange die Anmeldung des Zugangs nicht pausiert ist. Der Abruf ist fail-soft und wird durch den vorhandenen Systemauftrag-Writer dedupliziert.
 
 ```mermaid
 flowchart TD
@@ -312,6 +313,7 @@ flowchart TD
   A{"ESXi-Zugang konfiguriert?"} -->|nein| N["Keine Daten (grau): keine ESXi-Quelle, Link zu den Zugangsdaten"]
   A -->|ja| K{"Je Objektart (Datacenter, Datastore, Portgruppe): von jedem Zugang mit exakter Namenssemantik und lesbarem Zeitpunkt beantwortet, auch leer?"}
   K -->|nein| C1["Art nicht auswertbar: weder Befund noch Freigabe"]
+  C1 -->|keine der drei Arten auswertbar| NE["Keine Daten (grau): keine Zahl, Hinweis mit Link zum ESXi-Inventar"]
   K -->|ja| K2{"Letzte Abfrage jedes Zugangs beantwortet und jünger als VIRTUSPHERE_ESXI_INVENTORY_STALE_FACTOR Intervalle?"}
   K2 -->|ja| KC["Aktueller Nachweis"]
   K2 -->|nein| KH["Historischer Nachweis: Treffer sind Diagnose, kein aktueller Negativnachweis"]

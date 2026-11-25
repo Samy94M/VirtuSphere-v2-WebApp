@@ -72,15 +72,17 @@ liest nur den Unterschlüssel daraus.
 
 Der Systemstatus zeigt Aktivierung, Revision, Anzahl einsatzbereiter Controller,
 den letzten erfolgreichen Kontakt sowie pro Controller Priorität, letzten Test,
-letzten Erfolg, Zertifikatsablauf und einen typisierten Zustand (aktiv,
-Zertifikat läuft bald ab, gestört, veraltet, nicht getestet). Die Gesamtampel
-ist neutral ohne Konfiguration oder bei deaktiviertem AD, rot ohne
-einsatzbereiten Controller, bei abgewiesenem Suchkonto oder wenn alle
-einsatzbereiten Controller gestört sind, grün nur, wenn alle einsatzbereiten
-Controller aktiv sind und kein aktivierter Controller für die aktuelle Revision
-ungetestet ist, in jedem anderen Fall gelb (zum Beispiel bei veralteten
-Controllern oder einem noch ungetesteten aktivierten Controller); die
-Hilfe (Systemstatus-Tab) erklärt dieselbe Legende. Detailereignisse stehen im
+letzten Erfolg, Zertifikatsablauf und einen Zustand: OK, Warnung (Zertifikat
+läuft bald ab), Kritisch, Veraltet oder Keine Daten (nicht aktiv oder für die
+aktuelle Revision nicht getestet). Die Gesamtanzeige heißt Deaktiviert bei
+ausgeschalteter AD-Anmeldung; Kritisch ohne einsatzbereiten Controller, bei
+abgewiesenem Suchkonto oder wenn alle einsatzbereiten Controller Kritisch
+sind; OK nur, wenn alle einsatzbereiten Controller OK sind und kein
+aktivierter Controller für die aktuelle Revision ungetestet ist; in jedem
+anderen Fall Eingeschränkt (zum Beispiel bei veralteten Controllern oder einem
+noch ungetesteten aktivierten Controller). Ohne gespeicherte Konfiguration
+erscheint der Bereich nicht. Die Hilfe (Systemstatus-Tab) erklärt dieselbe
+Legende. Detailereignisse stehen im
 Sicherheitsprotokoll in der Kategorie `directory`; Secrets, Benutzerpasswörter,
 DNs und rohe LDAP-Fehler werden dort nicht gespeichert.
 
@@ -91,7 +93,7 @@ und Revision über einen eigenen TLS-Handshake neu. Ein erneuertes
 DC-Zertifikat erscheint dadurch spätestens am Folgetag mit dem neuen Ablauf.
 Liegt der gespeicherte Ablauf in der Vergangenheit, gab es danach aber einen
 erfolgreichen Kontakt, hat der DC offensichtlich ein neues Zertifikat: Der
-Controller steht dann auf „veraltet“ statt „gestört“, bis der nächste Test
+Controller steht dann auf „Veraltet“ statt „Kritisch“, bis der nächste Test
 oder Lesevorgang den neuen Wert liefert. Ein Ablauf nach dem 19.01.2038
 wird als dieses Datum gespeichert und angezeigt (Grenze der Datenbankspalte);
 die Ablaufwarnung kommt dadurch höchstens zu früh.
@@ -101,9 +103,9 @@ priorisierten Controller ausweichen. Jede Antwortwartezeit ist durch die
 verbleibende Frist der Anfrage begrenzt; ein DC, der nach einem
 TLS-1.2-Handshake schweigt, kostet höchstens diese Frist und gilt dann als
 `timeout`. Nach einem TLS-1.3-Handshake greift diese Frist in libldap nicht:
-Ein solcher DC hält die Anfrage bis zur FPM-Grenze von 300 s (unten, kommt
-mit dem `php`-Image des nächsten Release), ohne Wechsel zum nächsten
-Controller. Gemessen im QA-Netz: mit TLS 1.2 Ende nach 3,0 s bei 3 s Frist,
+Ein solcher DC hält die Anfrage bis zur FPM-Grenze von 300 s (unten; im
+Release 2026.11.7 enthalten, auf Systemen mit älterem `php`-Image erst nach
+dem Update), ohne Wechsel zum nächsten Controller. Gemessen im QA-Netz: mit TLS 1.2 Ende nach 3,0 s bei 3 s Frist,
 mit TLS 1.3 kein Ende. Ursache: Nach dem TLS-1.3-Handshake wecken die
 Session-Tickets des Servers das Warten in libldap, danach liest libldap
 blockierend (OpenLDAP 2.6 `libraries/libldap/result.c`; PHP 8.4 ruft Bind und
@@ -126,8 +128,8 @@ Anfragen über 30 s meldet FPM mit Skriptnamen im Containerlog
 (`docker compose logs php`, Meldung „executing too slow“). Eine eigene
 Slowlog-Datei unter `logs/` gibt es nicht, weil der FPM-Master ohne
 Dateirechte-Übersteuerung und ohne ptrace läuft; deshalb enthält die Meldung
-auch keinen Backtrace. Die Grenze kommt mit dem neu gebauten `php`-Image
-(Release nach N1a). Ein sehr langsamer Client beim Herunterladen eines großen
+auch keinen Backtrace. Die Grenze ist im `php`-Image des Release 2026.11.7
+enthalten; ein System mit älterem Image hat sie erst nach dem Update. Ein sehr langsamer Client beim Herunterladen eines großen
 Roh-Deploylogs kann sie ebenfalls erreichen; der Download bricht dann ab.
 
 ## Sitzungsprüfung
@@ -193,7 +195,7 @@ den neuen Ablauf spätestens nach dem täglichen Lesen (siehe oben).
 Nach einem Restore muss einmal
 
 ```sh
-docker exec virtusphere-v2-webapp-php-1 php /var/www/html/lib/directory_restore_converge.php
+docker compose exec -T php php /var/www/html/lib/directory_restore_converge.php
 ```
 
 laufen. Der Schritt deaktiviert die AD-Anmeldung, erhöht die Revision und macht

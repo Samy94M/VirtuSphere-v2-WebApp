@@ -14,9 +14,14 @@ flowchart TD
     mac_known -->|Device-Sync meldet die ResourceID| handed_to_mecm[An MECM übergeben]
     handed_to_mecm -->|Client-Ready-ACK| windows_reports[Windows meldet sich]
     windows_reports -->|alle Clientphasen abgeschlossen| client_done[Client fertig]
+    handed_to_mecm -.->|MECM-ID zurücksetzen| mac_known
+    windows_reports -.->|MECM-ID zurücksetzen| mac_known
+    client_done -.->|MECM-ID zurücksetzen| mac_known
     classDef step fill:#eef2ff,stroke:#475569,color:#0f172a;
     class created,in_progress,on_esxi,mac_known,handed_to_mecm,windows_reports,client_done step;
 ```
+
+Gestrichelt: Rücksprung durch „MECM-ID zurücksetzen“. Übergangsweise gilt der Satz über fehlgeschlagene Aufträge oben noch nicht: Setzt der Worker nach einem gescheiterten Auftrag den Lebenszyklus auf „Fehlgeschlagen“, fällt die Phase heute zurück, bei gebundener VM auf „Auf ESXi“, sonst auf „Angelegt“; der Befund „Auftrag fehlgeschlagen“ erscheint trotzdem. Die Korrektur im Code ist geplant.
 
 | Nr. | Phase | Regel (erste zutreffende von oben) | Beleg und Schreiber |
 |---|---|---|---|
@@ -34,13 +39,13 @@ In Phase 5 läuft die Beobachtung der OS-Installation. Ihre Uhr ist kein Zustand
 
 ## Lebenszyklus
 
-Der Lebenszyklus wird nur vorwärts überschrieben, wenn ein Rückruf kommt: Device-Sync und Client-Ready-ACK lassen einen späteren Zustand stehen (`repo_set_vm_state_forward()`). Der Worker markiert eine VM beim Start eines Auftrags aus jedem Zustand außer `deploying`; eine VM mit ResourceID bleibt in einem Modus mit MAC-Ergebnis unmarkiert (`virtusphere_vm_is_mecm_bound()`). Was ein Auftrag angefasst hat, hält das Journal je Auftrag und VM fest (`deploy_job_vm_states`): Endet der Auftrag erfolgreich ohne MAC-Ergebnis oder wird er abgebrochen, stellt der Worker den Vorzustand wieder her; scheitert er, setzt er den Lebenszyklus auf „Fehlgeschlagen“ und die MECM-Achse auf `deploy_failed`, auch bei einer VM, die er nicht markiert hat. Der Konvergenzlauf des Wartungsdienstes wendet dieselbe Regel auf eine VM an, die nach dem Ende ihres Auftrags noch `deploying` steht. `initializing` hat keinen Schreiber; der Wert bleibt im Katalog, damit ein alter Datensatz einen Namen hat.
+Der Lebenszyklus wird nur vorwärts überschrieben, wenn ein Rückruf kommt: Device-Sync und Client-Ready-ACK lassen einen späteren Zustand stehen (`repo_set_vm_state_forward()`). Der Worker markiert eine VM beim Start eines Auftrags aus jedem Zustand außer `deploying`; eine VM mit ResourceID bleibt in einem Modus mit MAC-Ergebnis unmarkiert (`virtusphere_vm_is_mecm_bound()`). Was ein Auftrag angefasst hat, hält das Journal je Auftrag und VM fest (`deploy_job_vm_states`): Endet der Auftrag erfolgreich ohne MAC-Ergebnis oder wird er abgebrochen, stellt der Worker den Vorzustand wieder her; scheitert er, setzt er den Lebenszyklus auf „Fehlgeschlagen“ und die MECM-Achse auf `deploy_failed`, auch bei einer VM, die er nicht markiert hat. Übergangsweise entscheidet der Code bei Fehler und Abbruch dieselbe Journalregel je VM: Hat der Ansible-Host den ESXi-Zugriff auf die VM angemeldet oder gibt es einen ESXi-Async-Job, wird sie „Fehlgeschlagen“ mit `deploy_failed`, auch beim Abbruch; hat der Auftrag sie nicht berührt, stellt der Worker den Vorzustand wieder her; ist der Ausgang eines Create unklar, bleibt sie unverändert mit dem Befund „Create ungeklärt“. Der Konvergenzlauf des Wartungsdienstes wendet dieselbe Regel auf eine VM an, die nach dem Ende ihres Auftrags noch `deploying` steht. `initializing` hat keinen Schreiber; der Wert bleibt im Katalog, damit ein alter Datensatz einen Namen hat.
 
 ```mermaid
 flowchart TD
     initializing[In Vorbereitung]
-    ready[Bereit] -->|Worker markiert die VM| deploying[Wird bereitgestellt]
-    deploying -.->|Erfolg ohne MAC-Ergebnis oder Abbruch: Vorzustand| ready
+    ready[Bereit] -->|Worker markiert die VM, aus jedem Zustand außer Wird bereitgestellt| deploying[Wird bereitgestellt]
+    deploying -.->|Erfolg ohne MAC-Ergebnis oder Abbruch: Vorzustand, also der Zustand vor der Markierung| ready
     deploying -->|Auftrag scheitert| failed[Fehlgeschlagen]
     failed -->|neuer Auftrag| deploying
     deploying -->|MAC-Rückruf| deployed[Bereitgestellt]
@@ -48,6 +53,8 @@ flowchart TD
     os_installing -->|Client-Ready-ACK| os_installed[Betriebssystem installiert]
     deployed -->|Client-Ready-ACK vor dem Device-Sync| os_installed
     os_installed -.->|MECM-ID zurücksetzen| deployed
+    os_installing -.->|MECM-ID zurücksetzen| deployed
+    failed -.->|MECM-ID zurücksetzen| deployed
     deployed -->|Auftrag scheitert, auch ohne Markierung| failed
     os_installing -->|Auftrag scheitert, auch ohne Markierung| failed
     os_installed -->|Auftrag scheitert, auch ohne Markierung| failed
@@ -57,7 +64,7 @@ flowchart TD
     class failed blocked;
 ```
 
-Der MAC-Rückruf schreibt `deployed` nur für eine VM ohne ResourceID; eine schon gebundene VM behält ihren Zustand. „MECM-ID zurücksetzen“ setzt eine VM aus jedem Zustand auf `deployed` und den MECM-Abgleich auf `pending`; abgelehnt wird es für Vorlagen, bei laufendem Auftrag, ohne MAC und ohne gültigen Windows-Hostnamen.
+Der MAC-Rückruf schreibt `deployed` nur für eine VM ohne ResourceID; eine schon gebundene VM behält ihren Zustand. „MECM-ID zurücksetzen“ setzt eine VM aus jedem Zustand auf `deployed` und den MECM-Abgleich auf `pending`; abgelehnt wird es für Vorlagen, bei laufendem Auftrag, ohne MAC und ohne gültigen Windows-Hostnamen. Steht die VM schon auf „Wartet auf MECM“ ohne ResourceID und trägt den gewünschten Namen, ändert der Klick nichts.
 
 ## MECM-Abgleich
 

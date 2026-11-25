@@ -37,17 +37,17 @@ flowchart TD
 
 ## Devices Sync
 
-Trägt VMs aus der Warteschlange des Portals in MECM ein und setzt ihre Mitgliedschaften in OS-, Paket- und Missions-Collections. In der Warteschlange stehen neue VMs vor dem Rollout und VMs, deren Zuweisungen jemand an MECM übertragen hat. Jede Mitgliedschaftsänderung steht vorher im Journal, damit ein Absturz nichts Unklares hinterlässt.
+Trägt VMs aus der Warteschlange des Portals in MECM ein und setzt ihre Mitgliedschaften in OS-, Paket- und Missions-Collections. In der Warteschlange stehen VMs, deren MAC das Portal kennt und die MECM noch nicht registriert hat („Wartet auf MECM“), und VMs, deren Zuweisungen jemand an MECM übertragen hat. VMs ohne Netzwerkkarte und VMs aus Vorlagen-Missionen stehen nie in der Warteschlange; der Sync zeigt für sie keine Ursache. Jede Mitgliedschaftsänderung steht vorher im Journal, damit ein Absturz nichts Unklares hinterlässt.
 
 ```mermaid
 flowchart TD
   L["Einmal beim Start: Mitgliedschafts-Journal für die ganze Laufzeit sperren"] --> LJ{"Sperre und Journal in Ordnung?"}
   LJ -->|nein| LX["Skript endet ohne MECM-Änderung und ohne Meldung ans Portal (Ursache nur im Serverlog); die Aufgabenplanung startet es neu. Liegt eine Journal-Quarantäne vor, endet jeder Neustart genauso, bis sie geklärt ist"]
   LJ -->|ja| S["Neuer Lauf, „started“ melden"]
-  S --> Q["Warteschlange holen (getDeviceList): neue VMs und zur Übertragung markierte"]
+  S --> Q["Warteschlange holen (getDeviceList): VMs mit bekannter MAC, die auf MECM warten, und zur Übertragung markierte; ohne Netzwerkkarte und aus Vorlagen-Missionen nie"]
   Q --> QE{"Warteschlange leer?"}
   QE -->|ja| R
-  QE -->|nein| DUE{"Eine VM fällig? Gesperrte VMs nur bei geänderter Portalzeile oder nach dem Wiederholungstakt $script:VsDeviceRecheckSeconds"}
+  QE -->|nein| DUE{"Eine VM fällig? Gesperrte VMs nur bei geänderter Portalzeile oder nach dem Wiederholungstakt (5 Minuten)"}
   DUE -->|nein| DUE1["Keine MECM-Abfrage; die Ursachen der gesperrten VMs gehen in den Laufbericht"] --> R
   DUE -->|ja| M["Mit MECM verbinden (einmal), alle Geräte, Task Sequences und Device Collections lesen; ein Gerät gilt unter jeder seiner MACs, auch wenn MECM sie als einen Text liefert; je Task Sequence eine Collection anlegen"]
   M --> V
@@ -63,12 +63,12 @@ flowchart TD
     G -->|ja| RID["ResourceID lesen; fehlt sie: nächster Lauf"]
     RID --> J{"Offene Einträge im Mitgliedschafts-Journal?"}
     J -->|ja| J1["Erst nachmelden; unklare Einträge bleiben zur Klärung stehen; VM wartet auf den nächsten Lauf"]
-    J -->|nein| PL["Plan: Soll (OS-, Paket-, Missions-Collection) gegen eigene und vorhandene Regeln"]
-    PL --> SE{"Soll eindeutig, eigene Regeln mit gültiger Provenienz?"}
+    J -->|nein| SE{"Soll (OS-, Paket-, Missions-Collection) eindeutig, eigene Regeln mit gültiger Provenienz?"}
     SE -->|nein| SE1["Keine Änderung, VM bleibt in der Warteschlange (membership_identity_ambiguous, membership_provenance_invalid)"]
     SE -->|ja| RD{"Mitgliedschaften lesbar?"}
-    RD -->|nein| RD1["Keine Änderung, VM bleibt in der Warteschlange (membership_query_failed)"]
-    RD -->|ja| AP["Fehlende Direktregeln hinzufügen, eigene, nicht mehr gewünschte entfernen; jede Änderung steht vorher im Journal; fehlt eine Collection: collection_missing"]
+    RD -->|nein| RD1["Keine Änderung, VM bleibt in der Warteschlange (membership_query_failed, bei mehrfach vorhandenem Collectionnamen membership_identity_ambiguous)"]
+    RD -->|ja| PL["Plan: Soll gegen eigene und vorhandene Regeln; ein Plan ohne vollständige Provenienz bleibt ohne Änderung (membership_provenance_invalid)"]
+    PL --> AP["Fehlende Direktregeln hinzufügen, eigene, nicht mehr gewünschte entfernen; jede Änderung steht vorher im Journal; fehlt eine Collection: collection_missing"]
     AP --> RM["Änderungen melden (reportMembership); nur eine Antwort mit success quittiert und löscht den Journaleintrag; abgelehnt oder ohne success (etwa die HTML-Seite eines falschen Ziels oder Proxys mit Status 200): Eintrag bleibt, VM bleibt in der Warteschlange"]
     RM --> OK{"Alle Zuweisungen gesetzt?"}
     OK -->|nein| OK1["ResourceID nicht melden, VM bleibt in der Warteschlange"]
@@ -79,7 +79,7 @@ flowchart TD
   CU --> R["„completed“ melden (empfangen, importiert, Fehler, Warnungen)"]
   R --> DC{"Ursache je VM: Stand seit der letzten Quittung geändert oder diese älter als 5 Minuten, und keine Versandpause?"}
   DC -->|nein| P["Pause = Takt (Standard 10 s)"]
-  DC -->|ja| DS["Ursache je VM melden (reportDeviceCauses): je VM die erste gerätebezogene Ursache ihres Durchgangs mit VM-ID und Rollout-Revision ihrer Zeile, gesperrte und nicht fällige VMs aus dem gespeicherten Sperrzustand; complete nur nach einem Lauf ohne Fehler über die ganze Warteschlange; höchstens 500 VMs, sonst complete=false; Zustellfehler nur im Log, nach 400, 404 oder 413 ruht der Versand 15 Minuten; das Laufergebnis bleibt unberührt"]
+  DC -->|ja| DS["Ursache je VM melden (reportDeviceCauses): je VM die erste gerätebezogene Ursache ihres Durchgangs mit VM-ID und Rollout-Revision ihrer Zeile, gesperrte und nicht fällige VMs aus dem gespeicherten Sperrzustand; complete nur, wenn der Durchgang ohne Abbruch über die ganze Warteschlange lief (auch mit Warnungen und Teilfehlern); höchstens 500 VMs und 64 KiB, sonst complete=false; Zustellfehler nur im Log, nach 400, 404 oder 413 ruht der Versand 15 Minuten; das Laufergebnis bleibt unberührt"]
   DS --> P
   P -.->|nächster Lauf| S
 ```
@@ -102,7 +102,7 @@ flowchart TD
   U -->|ja| U1["Nichts senden, Ergebnis „ok“ (unverändert)"] --> R
   U -->|nein| P["Katalog an mecm_packages.php senden"]
   P -.->|2xx ohne success, etwa die HTML-Seite eines falschen Ziels oder Proxys| P1["Keine Quittung: Katalogstand nicht merken, Ergebnis „fail“ mit portal_unreachable; der nächste Lauf sendet erneut"] --> R
-  P --> T{"Portal: mindestens VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE aktive Einträge, und fehlen mehr als die eingestellte Schwelle (5 bis 90 %, Standard 30 %)?"}
+  P --> T{"Portal, je Katalog getrennt (Pakete, Task Sequences): mindestens VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE aktive Einträge, und fehlen mehr als die eingestellte Schwelle (5 bis 90 %, Standard 30 %; ein durch eine höhere Version ersetztes Paket zählt nicht)?"}
   T -->|ja| T1["Portal lehnt ab (409), Warnung catalog_conflict; der nächste Lauf sendet erneut"] --> R
   T -->|nein| RT["Portal: fehlende Einträge „zurückgezogen“, neue und wieder aufgetauchte aktiv"]
   RT --> RL["Portal: echte VMs nie umhängen; Vorlagen-VMs folgen einer höheren Version einmal, wenn sie in diesem Katalog zum ersten Mal erscheint; Rückzug einer noch zugewiesenen Version protokollieren; der VM-Editor zeigt „Update verfügbar“"]
@@ -128,7 +128,7 @@ flowchart TD
   C -->|nein| C1["Kein Scan (unverändert): offene Punkte der Wiederholliste und Verteilhinweise weiter melden, mit offenen Punkten „warning“; Verteilstand höchstens alle 30 Minuten lesend auffrischen"] --> R
   C -->|ja| B{"Ordner files vorhanden?"}
   B -->|nein| B1["Warnung source_missing, Dateistand nicht merken"] --> R
-  B -->|ja| RC["Alle config.json lesen (ungültige sind offene Punkte bis zur nächsten Dateiänderung; DeployTo muss eine Zeichenkette ohne Randleerraum und Wildcards sein), je Produkt die höchste Version bestimmen. Bei geänderten Dateien jedes Paket bearbeiten, sonst nur die fälligen der Wiederholliste"]
+  B -->|ja| RC["Alle config.json lesen (ungültige sind offene Punkte package_config_invalid bis zur nächsten Dateiänderung: ProjectName und version nichtleer ohne Randleerraum und Wildcards, version ohne Bindestrich und Leerraum, ErrorAction Stop oder Continue, bekannter InstallationBehaviorType, DeployTo eine Zeichenkette ohne Randleerraum und Wildcards), je Produkt die höchste Version bestimmen. Bei geänderten Dateien jedes Paket bearbeiten, sonst nur die fälligen der Wiederholliste"]
   RC --> T
   subgraph JP["Je bearbeitetem Paketordner, mit eigenem Fehlerrahmen"]
     T["Vorlage (install.ps1, Reporter) ins Paket kopieren, wenn sie abweicht; eine Altvorlage ohne reporting-Ordner gleicht bis zum Cutover nur install.ps1 ab"]
@@ -138,12 +138,14 @@ flowchart TD
     AM -->|ja| A{"Application Name-Version vorhanden?"}
     A -->|nein| A1["Application (Marker) und Deployment Type anlegen: install.ps1, Erkennung per Registry-Schlüssel der Version"] --> DT
     A1 -.->|Deployment Type scheitert| A2["Application wieder entfernen; das Paket endet mit package_scan_failed"]
-    A -->|ja| DT{"Genau ein Deployment Type, Identität lesbar?"}
-    DT -->|nein| DT1["Paket übersprungen, offener Punkt"]
-    DT -->|ja| FA{"Gespeicherter Auftrag nennt eine andere Identität (Application neu angelegt), und sie hat weder VirtuSphere-Marker noch liegt sie in VirtuSphere_Applications?"}
+    A -->|ja| DT{"Genau ein Deployment Type, Application eindeutig lesbar?"}
+    DT -->|nein| DT1["Paket übersprungen, offener Punkt package_definition_drift oder package_content_unknown"]
+    DT -->|ja| CI{"Identität von Application und Deployment Type lesbar?"}
+    CI -->|nein| CI1["Kein Contentauftrag in diesem Lauf, offener Punkt package_content_unknown; Collection und Deployments laufen weiter"] --> TR
+    CI -->|ja| FA{"Gespeicherter Auftrag nennt eine andere Identität (Application neu angelegt), und sie hat weder VirtuSphere-Marker noch liegt sie in VirtuSphere_Applications?"}
     FA -->|ja, fremd| FA1["Paket übersprungen: kein Content, kein Deployment, offener Punkt package_definition_drift"]
     FA -->|nein| CR{"Neues Dateimanifest, oder noch kein von MECM angenommener Auftrag?"}
-    CR -->|ja| CR1["Höchstens ein Auftrag je Manifest: Erstverteilung an die DP-Gruppe oder neue Contentversion; nicht angenommen oder keine DP-Gruppe: offener Punkt package_content_request_failed"] --> TR
+    CR -->|ja| CR1["Höchstens ein Auftrag je Manifest: Erstverteilung an die DP-Gruppe oder neue Contentversion; nicht angenommen oder keine DP-Gruppe konfiguriert: offener Punkt package_content_request_failed; DP-Gruppe ohne Verteilungspunkt: offener Punkt package_content_group_empty"] --> TR
     CR -->|nein| TR["Verteilstand nur lesen: Fehler oder laufende Kopie auf DPs ist ein Hinweis, kein offener Punkt; DPs sperren nichts"]
     TR --> CO["Nur mit generateOwnDeviceColletion: Collection Name-Version und Deployment „Erforderlich“ anlegen; Fehlendes nachziehen. Ohne das Feld entsteht keine Collection, und das Paket fehlt im Portalkatalog, weil der Packages Sync nur Collections liest"]
     CO --> DD{"DeployTo gesetzt? Exakt in MECM prüfen (Device- oder User-Collection)"}
@@ -173,7 +175,7 @@ Im Portal (SY3) nennt die Fazitzeile der Karte Scan und Verteilung getrennt, ein
 
 ## Site Health
 
-Fragt den Status der konfigurierten MECM-Site ab und meldet ihn als Ampel. Gemeldet werden nur Site-Code, Provider und der Rohstatus, bei Warnung oder kritisch dazu die Zahl der Rollen und Komponenten je Typname und Status (`site_parts`), nie ein Servername und nie der Text der MECM-Statusmeldung.
+Fragt den Status der konfigurierten MECM-Site ab und meldet ihn als Ampel. Gemeldet werden nur Site-Code, Rechnername des SMS-Providers und der Rohstatus, bei Warnung oder kritisch dazu die Zahl der Rollen und Komponenten je Typname und Status (`site_parts`, ohne Servernamen); nie der Text der MECM-Statusmeldung.
 
 ```mermaid
 flowchart TD

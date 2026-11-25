@@ -10,7 +10,7 @@ Ist im Portal ein Zertifikat hinterlegt, heißen 1. und 2. `db-<ts>.sql.gz.cms` 
 
 Die Override-Datei ist host-spezifisch und nicht in Git, und genau deshalb liegt sie im Archiv: der Produktionshost braucht sie zum Starten (Subnetz-Pins für `default` und `front`, damit keine Docker-Bridge das SSH abschneidet, geleerte Proxy-Umgebung je Service). Ein Restore ohne sie bringt den Stack nicht hoch, obwohl beide Archive intakt sind.
 
-Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt), Laufzeit-Logs und die **Rechte des PHP-Logverzeichnisses**. Letztere sind Hostzustand, den kein Archiv erfasst: nach einem Restore auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen, sonst kann der Fehlerhandler nicht schreiben (Begruendung in `docs/operations/go-live.md`, Schritt 1a). nginx schreibt in keinen Host-Logmount, sondern in die begrenzten Docker-Streams.
+Nicht enthalten: `Docker/mysql/mysql-data/` (wird aus dem Dump wiederhergestellt), Laufzeit-Logs und die **Rechte des PHP-Logverzeichnisses**. Letztere sind Hostzustand, den kein Archiv erfasst: nach einem Restore auf einem Linux-Host `chmod 0777 Docker/WebAPI/logs` setzen, sonst kann der Fehlerhandler nicht schreiben (Begründung in `docs/operations/go-live.md`, Schritt 1a). nginx schreibt in keinen Host-Logmount, sondern in die begrenzten Docker-Streams.
 
 ## Backup ausführen
 
@@ -75,7 +75,7 @@ Greift nichts davon, bleiben die Felder leer; die Karte kennzeichnet den nächst
 
 ### Andere Hintergrundaufgaben
 
-Das Backup ist der einzige Cron-Job. Deploy-Worker (alle 5 s) und Wartungs-Worker (alle 15 s, darin die Retention-Aufräumjobs und der ESXi-Inventar-Abruf nach eingestelltem Intervall; der Wartungs-Worker führt keine MECM-Probe mehr aus) sind Dauerläufer im Compose-Stack und brauchen keinen Zeitplan.
+Das Backup ist der einzige Cron-Job. Deploy-Worker (Takt `VIRTUSPHERE_DEPLOY_WORKER_SLEEP_SECONDS`) und Wartungs-Worker (Takt `VIRTUSPHERE_MAINTENANCE_WORKER_SLEEP_SECONDS`, darin die Retention-Aufräumjobs und der ESXi-Inventar-Abruf nach eingestelltem Intervall; der Wartungs-Worker führt keine MECM-Probe mehr aus) sind Dauerläufer im Compose-Stack und brauchen keinen Zeitplan.
 
 ## Statuskanal und Portal-Anzeige (ADR-0021)
 
@@ -92,9 +92,9 @@ Das Portal liest die Backupläufe an genau einer Stelle (`lib/backup_status.php`
 - **Systemstatus**, Abschnitt „Host und Backup“ mit eigener Kachel im Überblick: je eine Zeile für Backup (Zustand, letzter Lauf), Restore-Test (letzter nachgewiesener Erfolg „vor N Tagen“, geprüfter Stand; Hinweis „Fällig“ ab `VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS` Tagen), Prüfsummen (letzte Prüfung, Ergebnis) und, nur solange nginx HTTPS ausliefert, das HTTPS-Zertifikat (Ablaufdatum, Hinweis ab `VIRTUSPHERE_HTTPS_CERT_EXPIRY_WARN_DAYS` Tagen). Die Zeilen sprechen das Statusvokabular des Systemstatus: ein fehlgeschlagenes Backup und eine abweichende Prüfsumme heißen „Kritisch“, ein überfälliges Backup, wenig Speicher, ein fälliger Restore-Test und ein bald ablaufendes Zertifikat „Warnung“, die Ursache steht im Hinweis darunter. Fehlt ein Nachweis, steht „Keine Daten“, nie „OK“. Die Kachel „Host und Backup“ zeigt die schlechteste Zeile; „Keine Daten“ macht sie grau, nie grün. Die Zeilen ändern die Ampel der Kachel „Interne Dienste“ nicht.
 - **health.php** meldet den Backupzustand nicht; es liefert nur `status`, `db` und `php`. Backupzustand und -alter stehen ausschließlich im Portal.
 
-Abgeleitete Zustände (Schwere `failed` > `stale` > `disk_low`): `ok`, `failed` (letzter Lauf gescheitert), `stale` (der erwartete Lauf blieb samt Kulanzzeit aus), `disk_low` (freier Speicher unter 10 %), `unknown` (kein lesbarer Status: Skript lief nie oder der Mount fehlt).
+Abgeleitete Zustände (Schwere `failed` > `stale` > `disk_low`): `ok`, `failed` (letzter Lauf gescheitert), `stale` (der erwartete Lauf blieb samt Kulanzzeit aus), `disk_low` (freier Speicher unter `VIRTUSPHERE_BACKUP_DISK_LOW_PCT` Prozent), `unknown` (kein lesbarer Status: Skript lief nie oder der Mount fehlt).
 
-Die Überfälligkeitsgrenze ist der *erwartete* Lauf plus `VIRTUSPHERE_BACKUP_GRACE_SECONDS` (2 h), nicht ein festes Alter. Ist ein Zeitplan gemeldet, stammt der erwartete Lauf daraus; sonst aus `VIRTUSPHERE_BACKUP_INTERVAL_SECONDS` (24 h). Ein wöchentliches Backup gilt damit nicht mehr dauerhaft als veraltet.
+Die Überfälligkeitsgrenze ist der *erwartete* Lauf plus `VIRTUSPHERE_BACKUP_GRACE_SECONDS`, nicht ein festes Alter. Ist ein Zeitplan gemeldet, stammt der erwartete Lauf daraus; sonst aus `VIRTUSPHERE_BACKUP_INTERVAL_SECONDS`. Ein wöchentliches Backup gilt damit nicht mehr dauerhaft als veraltet.
 
 ## Restore-Drill
 
@@ -303,16 +303,23 @@ Kurzfassung auch im Hilfe-Panel `stack`; hier die ausführlichen Maßnahmen.
 
 | Symptom im Portal | Ursache | Maßnahme |
 |---|---|---|
-| Banner/Karte `failed` | Letzter Lauf gescheitert | Cron-Log (`/var/log/virtusphere-backup.log`) und `error`-Feld der Karte lesen; Stack läuft? Platz frei? |
-| Banner/Karte `stale` | Erwarteter Lauf blieb samt Kulanzzeit aus | `sh scripts/install-backup-schedule.sh --show`, dann `sudo sh scripts/backup.sh` manuell testen |
+| Banner/Karte „Kritisch“, Hinweis: letztes Backup fehlgeschlagen | Letzter Lauf gescheitert | Cron-Log (`/var/log/virtusphere-backup.log`) und `error`-Feld der Karte lesen; Stack läuft? Platz frei? |
+| Banner/Karte „Warnung“, Hinweis: erwarteter Backup-Lauf ausgeblieben | Erwarteter Lauf blieb samt Kulanzzeit aus | `sh scripts/install-backup-schedule.sh --show`, dann `sudo sh scripts/backup.sh` manuell testen |
 | Karte: Zeitplan „Nicht gemeldet" | Kein Cron-Eintrag gefunden (Backup lief von Hand) | `sudo sh scripts/install-backup-schedule.sh` ausführen; danach zeigt die Karte Zeitplan und nächsten Lauf |
 | Systemstatus/Karte „Backups unverschlüsselt“ | Kein Zertifikat hinterlegt | Schlüsselpaar offline erzeugen und das Zertifikat unter Einstellungen > System > Backup hinterlegen (Abschnitt „Verschlüsselung“) |
 | Systemstatus/Karte: letzter Lauf nicht mit dem hinterlegten Zertifikat verschlüsselt | Zertifikat erst nach dem letzten Lauf hinterlegt oder ersetzt | Nächsten Lauf abwarten oder `sudo sh scripts/backup.sh` ausführen; danach `*.cms`-Dateien und `encrypted: true` in der Statuszeile prüfen |
-| Karte `failed`, Fehler nennt das Zertifikat oder die Verschlüsselung | Zertifikat nicht lesbar, `openssl` fehlt auf dem Host oder die Datenbankabfrage scheiterte | `openssl version` auf dem Host prüfen, Zertifikat im Portal neu hinterlegen; das Skript legt in diesem Fall bewusst nichts unverschlüsselt ab |
-| Karte `failed`, Fehler nennt `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` | Der Pin in `.env` passt nicht zum Zertifikat im Portal, fehlt dort ganz oder ist kein gültiger Fingerabdruck | Den Fingerabdruck der Karte im Portal mit dem Wert in `.env` vergleichen und beide Stellen auf denselben Schlüssel bringen (Abschnitt „Verschlüsselung“, „Schlüsselwechsel“). Nichts wurde abgelegt |
+| Karte „Kritisch“, Fehler nennt das Zertifikat oder die Verschlüsselung | Zertifikat nicht lesbar, `openssl` fehlt auf dem Host oder die Datenbankabfrage scheiterte | `openssl version` auf dem Host prüfen, Zertifikat im Portal neu hinterlegen; das Skript legt in diesem Fall bewusst nichts unverschlüsselt ab |
+| Karte „Kritisch“, Fehler nennt `VIRTUSPHERE_BACKUP_RECIPIENT_SHA256` | Der Pin in `.env` passt nicht zum Zertifikat im Portal, fehlt dort ganz oder ist kein gültiger Fingerabdruck | Den Fingerabdruck der Karte im Portal mit dem Wert in `.env` vergleichen und beide Stellen auf denselben Schlüssel bringen (Abschnitt „Verschlüsselung“, „Schlüsselwechsel“). Nichts wurde abgelegt |
 | Lauf meldet „verwaiste Klartext-Tempdateien entfernt“ oder eine Warnung „flock fehlt“ | Ein früherer Lauf brach hart ab, bevor er aufräumte; oder der Host hat kein `flock` | Bei der Entfernung ist nichts zu tun, aber den Backup-Host prüfen: Liegt dort eine Datei `.db-*`, `.config-*` oder `.cert-*`, löschen. Bei der Warnung `flock` installieren, sonst bleiben die Reste liegen |
-| Banner/Karte `disk_low` (<10 %) | Backup-Volume voll | Ältere Läufe/`KEEP` prüfen, Volume vergrößern |
-| Karte zeigt `unknown` nach Update | Status-Mount fehlt oder Skript lief nie | `docker-compose.yml`-Mount vorhanden? Container neu erstellt? Einmal `sudo sh scripts/backup.sh` laufen lassen |
+| Banner/Karte „Warnung“, Hinweis: wenig freier Speicher (unter `VIRTUSPHERE_BACKUP_DISK_LOW_PCT` Prozent) | Backup-Volume voll | Ältere Läufe/`KEEP` prüfen, Volume vergrößern |
+| Karte zeigt „Keine Daten“ nach Update | Status-Mount fehlt oder Skript lief nie | `docker-compose.yml`-Mount vorhanden? Container neu erstellt? Einmal `sudo sh scripts/backup.sh` laufen lassen |
+
+## Störungsbilder (Mission-Import)
+
+Missions-Export und -Import sind kein Backup (siehe oben); ihre Störungsbilder stehen getrennt von denen des Backups.
+
+| Symptom im Portal | Ursache | Maßnahme |
+|---|---|---|
 | Import bricht ab | Fehlende VLANs, falsche Version, kein JSON | Fehlliste in der Vorschau lesen; VLANs zuerst anlegen; Datei aus passender Version exportieren |
 | Vorschau zeigt Befunde, Bestätigen ist grau | Grau machen ausschließlich Befunde in der Datei: fehlende VLANs, global vergebene VM-Namen, VM-Namen doppelt in derselben Datei, ungültige Angaben zur Mission oder zu VMs sowie kaputte Listen oder Einträge. Ein ungültiger oder bereits vergebener **Zielname** gehört ausdrücklich nicht dazu | Befunde in der Exportdatei beheben und neu hochladen. Fehlende Pakete blockieren nicht, sie werden übersprungen |
 | Vorschau zeigt einen Namensfehler, Bestätigen bleibt aktiv | Der Zielname ist leer, enthält Leerzeichen, trägt das Vorlagenpräfix oder ist bereits vergeben | Anderen Namen ins Feld der Vorschau eintragen und erneut bestätigen; die Prüfung läuft gegen den gerade eingetippten Namen. Nach einem gescheiterten Bestätigen steht genau dieser Name wieder im Feld |

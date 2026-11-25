@@ -358,7 +358,7 @@ docker compose exec -T php php /var/www/html/lib/migrate.php --check # muss saub
 Erwartet: `--check` meldet `migrations pending=0` und keine Drift. Die Anzahl
 steht hier bewusst nicht: sie wächst mit jeder Migration, und eine Zahl im
 Runbook lässt eine korrekte Installation falsch aussehen. Der Befehl ist die
-Aussage. (Auf ubuntu-102 am 2026-07-22 einmal produktiv bestätigt.)
+Aussage. (Auf ansible-host am 2026-07-22 einmal produktiv bestätigt.)
 
 ## Schritt 3: Backup einrichten (vor dem ersten echten Datenbestand)
 
