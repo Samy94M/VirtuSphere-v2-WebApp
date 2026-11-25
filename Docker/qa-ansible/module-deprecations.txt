@@ -11,8 +11,10 @@
 # Diese Liste ist kein Freibrief, sondern eine Notiz mit Frist. Der Nachfolger
 # steht dabei, damit die Portierung nicht neu recherchiert werden muss.
 #
-# vmware_guest_powerstate: benutzt von startVMs-ESXi_playbook.yml und
-# powercycleVMs-ESXi_playbook.yml. Der Nachfolger liegt in vmware.vmware 2.9.0,
+# vmware_guest_powerstate: benutzt von start_vm_power_tasks.yml (eingebunden
+# von startVMs-ESXi_playbook.yml) sowie powercycle_power_on_tasks.yml und
+# powercycle_power_off_tasks.yml (eingebunden von powercycle_vm_tasks.yml, das
+# powercycleVMs-ESXi_playbook.yml einbindet). Der Nachfolger liegt in vmware.vmware 2.9.0,
 # die als Abhaengigkeit des Pins mitinstalliert wird (community.vmware 6.x
 # verlangt vmware.vmware >= 2.5.0 und benutzt deren Code).
 #

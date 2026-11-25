@@ -1,16 +1,17 @@
 #Requires -Version 5.1
 # ============================================================================
 # client_getInfos.ps1 (V23) - holt die Geraeteinformationen der VM von der
-# VirtuSphere-WebAPI (per MAC) und legt sie in der Registry
+# VirtuSphere-WebAPI (per MAC) und legt sie als versionierten Snapshot unter
 # HKLM:\SOFTWARE\VirtuSphere ab. Erste Phase der Client-Kette.
 #
 # Verbesserungen gegenueber V21:
 #  - geschlossene Bootstrap-/Registry-Konfiguration statt Adress-Fallback;
 #    Folge-Skripte lesen nur den veroeffentlichten hashgebundenen Satz
 #  - Invoke-RestMethod mit Timeout statt WebClient
-#  - Stale-Fix: der Interfaces-Zweig wird VOR dem Schreiben geloescht (sonst
-#    ueberleben Interface-Eintraege frueherer Ausrollungen -> client_staticip
-#    wendet veraltete Netzconfig an)
+#  - Stale-Fix: jeder Lauf schreibt einen neuen Snapshot (Snapshots\<id>);
+#    SetupState wird schon vor dem ersten Schreiben entfernt, aeltere Snapshots
+#    erst nach erfolgreichem ACK (sonst wendet client_staticip veraltete
+#    Netzconfig an)
 #  - Erfolgs-Marker (SetupState=complete) erst NACH vollstaendigem Schreiben
 #  - Whitelist der geschriebenen Felder (kein Datenmuell/Notizen auf dem Client)
 #  - expliziter, wiederholbarer Client-Ready-ACK statt Lifecycle-Seiteneffekt

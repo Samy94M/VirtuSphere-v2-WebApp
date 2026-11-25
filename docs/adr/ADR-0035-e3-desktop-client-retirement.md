@@ -63,7 +63,7 @@ Deliberately **kept**:
 - Dev (2026-07-27): 698 `legacy_api` log rows, all test traffic (PHPUnit/E2E
   seeds); 13 tokens, 12 unexpired, all test-issued. No production client.
 - **Prod (open rollout checkpoint)**: before the first 5b deploy on
-  ubuntu-102, record the last real usage from the production DB:
+  ansible-host, record the last real usage from the production DB:
   `SELECT MAX(created_at), COUNT(*) FROM deploy_logs WHERE
   category='legacy_api';` plus the latest rows in detail. The check is
   booked in PRE-SHIP-CHECKLIST.md; the migration keeps the evidence

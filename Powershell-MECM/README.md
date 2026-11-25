@@ -78,6 +78,10 @@ hashgebundenen nativen Registry-/Snapshot-Satz.
 
 ## Erstinstallation auf dem MECM-Server (3 Schritte)
 
+Derzeit gesperrt (MC01): Der Aufruf in Schritt 2 bricht bis zum
+Core-/Reporter-Cutover mit der MC01-Meldung ab; die Schritte gelten erst danach.
+Lauffähig ist bis dahin nur das reine Serverupdate (siehe unten).
+
 Die vollständig chronologische Anleitung für wechselndes Adminpersonal steht im
 Abschnitt **„Admin-Runbook: MECM erstmals anbinden“** in
 [`docs/operations/mecm-integration.md`](../docs/operations/mecm-integration.md).
@@ -105,7 +109,8 @@ beide Installer und die Abnahmecheckliste.
    Wert selbst.
 3. Im Portal unter *Einstellungen → Machine-API → Zugriff auf das Portal (eingehend)* die IP des
    MECM-Servers freischalten, dann den *Systemstatus* beobachten – die
-   drei Sync-Quellen und der MECM-Site-Status sollten auf „OK“ springen.
+   Quellen Devices Sync, Packages Sync, Package Import und Site Health sollten
+   auf „OK“ springen.
 
 Ist noch kein DNS-Eintrag verfügbar, darf der Server-Installer vorläufig eine
 feste IP als `-WebApi '<WEBAPP-IP>:8021'` erhalten. Vor dem Client-Installer muss
@@ -122,10 +127,12 @@ Skript-Update setzt einen getunten Takt also nicht auf den Standard zurück.
 ## Update einer vorhandenen MECM-Installation
 
 Einen neuen, zusammengehörigen `Powershell-MECM`-Quellstand in ein frisches
-Stagingverzeichnis entpacken und in dessen Wurzel als Administrator ausführen:
+Stagingverzeichnis entpacken und in dessen Wurzel als Administrator ausführen.
+Bis zum Core-/Reporter-Cutover (MC01) ist `-Upgrade` ohne `-ServerOnly`
+gesperrt; bis dahin gilt der Aufruf aus „Reines Serverupdate“:
 
 ```powershell
-.\install-VirtuSphere-MECM.ps1 -Upgrade
+.\install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly
 ```
 
 Der Upgrade-Modus übernimmt WebAPI, Schema, Zertifikatfingerabdruck,
@@ -134,9 +141,10 @@ Intervalle aus `HKLM:\SOFTWARE\VirtuSphere\MECM`. Er fragt keinen Token ab und
 akzeptiert aufgrund seines eigenen Parametersatzes keine
 Konfigurationsänderungen. Fehlt die vorhandene Registry-Konfiguration oder einer
 der beiden Pflichtwerte `VirtuSphere_WebAPI`/`PackagesShare`, bricht er vor der
-Transaktion ab. Eine beabsichtigte Konfigurationsänderung verwendet weiterhin
-den normalen Erstinstallations-/Re-Run-Aufruf mit `-WebApi` und
-`-PackagesShare`.
+Transaktion ab. Eine beabsichtigte Konfigurationsänderung verwendet nach dem
+Cutover den normalen Erstinstallations-/Re-Run-Aufruf mit `-WebApi` und
+`-PackagesShare`; derzeit ist er gesperrt (MC01), auch die vier Intervalle
+lassen sich bis dahin nicht mit dem Installer ändern.
 
 Der gleiche Mutex-, Staging-, Hash-, Aufgabenstopp-, Verifikations- und
 Rollbackpfad bleibt aktiv. Ein erfolgreiches Update endet mit Exit-Code 0; die
@@ -170,7 +178,7 @@ MECM-Serververtrag. Das Upgrade vergleicht ihn im Staging und nochmals im
 aktivierten Livebestand. Meldet ein bereits laufender Autoimporter eine
 unbekannte Common-Funktion wie `Get-VsPackageRetainedNames`, wurde zuvor nur ein
 Teil des Pakets ersetzt. Nicht die einzelne Datei nachkopieren: immer den
-vollständigen neuen `Powershell-MECM`-Baum mit dem Befehl oben installieren. Ein
+vollständigen neuen `Powershell-MECM`-Baum mit `-Upgrade -ServerOnly` installieren. Ein
 unpassender Stand endet danach sofort mit einer eindeutigen Vertragsmeldung,
 statt erst nach einem langen Paketscan an der ersten neuen Funktion zu scheitern.
 
@@ -178,19 +186,22 @@ statt erst nach einem langen Paketscan an der ersten neuen Funktion zu scheitern
 **Blocker** (`!!`) heißt, dass die Gesamtabnahme des Laufs fehlgeschlagen ist. Er
 besagt nicht pauschal, dass vorher keinerlei lokale oder MECM-seitige Änderung
 erfolgte; Tageslog und vorherige Meldungen zeigen den erreichten Stand. Eine
-Aufgabe läuft nicht, das Portal antwortet nicht oder mit 403, ein Tageslog bleibt
-leer, die Freigabe zeigt nicht auf den Paketpfad, oder eine Application, ihr
+Aufgabe läuft nicht, das Portal antwortet nicht oder mit 403, die Freigabe zeigt
+nicht auf den Paketpfad, oder eine Application, ihr
 Content oder die Vorlage fehlt. Die Schlusszeile nennt dann die Zahl der offenen
 Punkte, und der Prozess endet mit Exit-Code 1. Beim Client-Installer werden immer
-alle veröffentlichten Client-Contentmanifeste geprüft. Fehlt eines, ist es nicht
-vollständig lesbar oder weicht es ab, endet der Lauf nach dieser vollständigen
-Prüfung vor Site-Initialisierung und vor jedem Configuration-Manager-Cmdlet. Erst
+alle veröffentlichten Client-Contentmanifeste geprüft, im Preflight nach der
+Site-Initialisierung und nur lesend. Fehlt eines, ist es nicht vollständig lesbar
+oder weicht es ab, meldet der Preflight es als Befund; Apply bleibt blockiert, und
+der Lauf ändert nichts. Erst
 nach Korrektur von Freigabepfad, Leserechten oder Inhalt darf der Installer erneut
 gestartet werden. Ein **Hinweis** (`~~`) berührt das Ergebnis nicht: die
 DP-Gruppe darf legitim erst nach der Installation entstehen,
 DNS löst auf dem MECM-Server anders auf als im Deploy-VLAN, der Paketordner ist
-für Benutzer beschreibbar (eine ACL-Entscheidung), oder der Site-Health-Provider
-ist nicht abfragbar (das heißt „nicht abfragbar“, nicht „Site krank“). Die
+für Benutzer beschreibbar (eine ACL-Entscheidung), der Site-Health-Provider
+ist nicht abfragbar (das heißt „nicht abfragbar“, nicht „Site krank“), oder ein
+Tageslog ist im 40-Sekunden-Fenster des Installers noch nicht aktualisiert (bei
+langem Takt normal; später Tageslog und Systemstatus prüfen). Die
 Abhängigkeitskette der Client-Apps wird bei jedem Re-Run geprüft; ein
 fehlender verwalteter Deployment Type oder eine nicht eindeutig nachweisbare
 notwendige Abhängigkeit ist ein Blocker. Ohne
@@ -235,7 +246,8 @@ wiederhergestellt. Zuvor laufende alte Aufgaben werden nur neu gestartet, wenn
 Prozessende, Datei- und Registry-Rollback vollständig belegt sind; andernfalls
 bleiben sie deaktiviert und die Fehlermeldung nennt den unvollständigen Teil.
 
-Die Intervalle sind Registry-owned (Installerparameter, Spalte oben = Standard)
+Die Intervalle sind Registry-owned (Installerparameter, nach dem Cutover
+einstellbar, derzeit gesperrt (MC01); Spalte oben = Standard)
 und je Aufgabe auf 5/10/30/60 s bis 3600 s begrenzt; die Spanne steht in
 `$script:VsIntervalBounds` (`mecm\VirtuSphere-Common.ps1`), der Installer
 spiegelt sie in `ValidateRange`. Ein Wert außerhalb wird beim Start geklemmt
@@ -243,7 +255,7 @@ spiegelt sie in `ValidateRange`. Ein Wert außerhalb wird beim Start geklemmt
 dem, den sie meldet und den der Systemstatus als geltend anzeigt. Ein Re-Run des
 Installers ohne den jeweiligen Parameter behält den eingestellten Wert.
 
-Die drei Sync-Aufgaben melden je Lauf einen **Ergebnisbericht** an
+Die Aufgaben Devices Sync, Packages Sync und Package Import melden je Lauf einen **Ergebnisbericht** an
 `mecm_report.php?action=reportRun`: `started` vor der Arbeit, `completed` im
 `finally` mit Ergebnis (`ok`/`warning`/`fail`/`unknown`) und quellenspezifischen
 Zählern. Die Site-Health-Aufgabe sendet nur `completed`. Der Systemstatus kann
@@ -322,7 +334,7 @@ Common stellt bereit:
 | `New-VsRunId` / `Send-VsRunReport` | Ergebnisbericht an `mecm_report.php?action=reportRun`: eigene `run_id` je Lauf, `started`/`completed`, Ergebnis, Fehlerkategorie, quellenspezifisches Summary; zentrale Detail-Redaction und Byte-Kürzung vor dem Versand. Ein fehlgeschlagener Bericht bricht den eigentlichen Lauf nie ab; Zustellfehler werden lokal gedrosselt protokolliert |
 | `Get-VsProviderMachine` / `Get-VsMecmSiteHealth` | SMS-Provider ermitteln (Installerparameter → Registry `MECM_ProviderMachine` → lokale WMI-Erkennung → CMSite-PSDrive → Computername) und `SMS_SummarizerSiteStatus` per CIM für exakt den konfigurierten Site-Code abfragen; fehlende, mehrdeutige oder unlesbare Zeilen sind `unknown`, die reine Statusabbildung bleibt `0→ok`, `1→warning`, `2→fail`, sonst `unknown` (ohne MECM per Pester testbar) |
 | `ConvertTo-VsNormalizedMac` | MAC kanonisch: Großbuchstaben, Doppelpunkte; verhindert falsche Konfliktmeldungen zwischen ESXi- und MECM-Schreibweisen. **Existiert dreimal** (hier, im Client-Common, als `virtusphere_normalize_mac()` in PHP) — die drei laufen auf drei Maschinen und teilen sich keine Datei, aber `Docker/WebAPI/tests/fixtures/mac-vectors.json` als gemeinsame Wahrheit: wer eine ändert, ohne die anderen nachzuziehen, bricht den Build (ADR-0029) |
-| `Read-VsPackageConfig` / `Get-VsSupersededNamePattern` | `config.json` eines Paketordners lesen und validieren; Muster zum Erkennen namensähnlicher Alt-Versionen (`^Name-<version>$`, exakt). Das Muster ist kein Eigentumsnachweis und autorisiert keine Löschung. Liegen hier und nicht im Autoimporter, weil der eine Endlosschleife ist und dort kein Test hinkommt |
+| `Read-VsPackageConfig` / `Get-VsSupersededNamePattern` | `config.json` eines Paketordners lesen und validieren; `Get-VsSupersededNamePattern` (Muster `^Name-<version>$`) ist ungenutzt, die Bereinigung entscheidet über `Get-VsPackageRetainedNames` und `Get-VsPackageRetirementPlan`. Liegen hier und nicht im Autoimporter, weil der eine Endlosschleife ist und dort kein Test hinkommt |
 | `Get-VsSiteCode` / `Initialize-VsCmSite` | Site-Code dreistufig ermitteln (WMI-Namespace → CMSite-PSDrive → Registry-Fallback), ConfigurationManager-Modul laden, ins Site-Drive wechseln |
 
 Außerdem ist Common die SSoT für den MECM-Ordnernamen
@@ -458,8 +470,9 @@ Meldet den verfügbaren Software-Katalog an die WebApp:
 
 ### Autoimporter (`mecm_autoimporter.ps1`, alle 60 s)
 
-Erzeugt aus Paketordnern automatisch MECM-Applications, -Collections und
--Deployments. Quelle: `<PackagesRoot>\files\<Paket>\config.json`,
+Erzeugt aus Paketordnern automatisch MECM-Applications, mit
+`generateOwnDeviceColletion: "true"` auch -Collections und -Deployments (siehe
+unten). Quelle: `<PackagesRoot>\files\<Paket>\config.json`,
 ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
 
 - **Ordner-Self-Healing:** Nach jeder Site-Initialisierung stellt der
@@ -490,7 +503,8 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   Punkt: Der Lauf bleibt `ok` und merkt den Manifest-Stamp. Geräte können das
   Paket verwenden, sobald der ihnen zugeordnete DP den Inhalt anbietet. Eine
   fehlende DP-Gruppe oder ein von MECM nicht angenommener Aufruf meldet
-  `package_content_request_failed`.
+  `package_content_request_failed`. Hat die DP-Gruppe keine Verteilungspunkte,
+  meldet der Autoimporter `package_content_group_empty`.
 - **Neu angelegte Application gleichen Namens** (der gespeicherte Auftrag nennt
   eine andere Identität): Mit VirtuSphere-Marker oder im Ordner
   `VirtuSphere_Applications` wird sie neu gebunden, bei gleichem Manifest ohne
@@ -506,9 +520,10 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   übersprungen. `"0.2"` ist gültig, `0.2` und `"0.1-final"` sind ungültig.
   Bestehendes `"0.1b"` bleibt importierbar, aber nicht numerisch bereinigbar.
 - Je Paket (`Name-Version`):
-  - **Alt-Versionen** (bei `removeOldVersion: "true"`): werden mit dem exakten
-    Muster `^Name-<Version>$` erkannt und nach einem unmittelbar revalidierten
-    Plan automatisch entfernt. Zuerst verschwinden ihre Deployments, danach
+  - **Alt-Versionen** (bei `removeOldVersion: "true"`): Der Autoimporter liest
+    alle Objekte `Name-*` und entscheidet über einen Plan
+    (`Get-VsPackageRetirementPlan`), welche Versionen ersetzt sind; nach einem
+    unmittelbar revalidierten Plan werden sie automatisch entfernt. Zuerst verschwinden ihre Deployments, danach
     Applications und Collections. Name und Ordner allein beweisen weder Eigentum
     noch Ersatzbereitschaft. Parallele Quellversionen und höhere Versionen sind
     keine Löschkandidaten; numerisch gleiche Quellen wie `1` und `1.0` blockieren
@@ -568,7 +583,8 @@ dass das Portal MECM selbst ansprechen muss (der frühere TCP-445-Check im Porta
 ist entfernt, ADR-0018 Amendment 2026-07-23):
 
 - Fragt über den SMS Provider `SMS_SummarizerSiteStatus` für den Site-Code aus
-  dem Registry-Wert `MECM_SiteCode` ab; fehlt er, lautet das Ergebnis `unknown`.
+  dem Registry-Wert `MECM_SiteCode` ab (vom Installer nur beim Erkennen der Site
+  geschrieben); fehlt er, lautet das Ergebnis `unknown`.
   Die Abfrage läuft per CIM, ein ConfigurationManager-Modul wird nicht geladen.
   Die Provider-Ermittlung liest höchstens ein bereits vorhandenes
   CMSite-Laufwerk.
@@ -593,6 +609,8 @@ ist entfernt, ADR-0018 Amendment 2026-07-23):
   steht eine WARN-Zeile im Tageslog und das Urteil geht unverändert raus.
 
 **Provider und Intervall (Registry, `HKLM:\SOFTWARE\VirtuSphere\MECM`):**
+Die beiden Installerparameter gehören zum Parametersatz Install und wirken erst
+nach dem Cutover (MC01).
 
 - `MECM_ProviderMachine`: SMS-Provider-Rechner (Installerparameter
   `-ProviderMachine`). Leer lassen, wenn der Provider lokal auf dem Site-Server
@@ -624,7 +642,7 @@ Alle vier Dienste teilen dieselbe Überlebensstrategie:
   60-Sekunden-Schleife statt mit `exit 1` abzubrechen. Sonst wären die
   Taskplaner-Neustarts nach Minuten aufgebraucht und der Task bis zum Reboot
   tot.
-- **Ergebnisbericht je Durchlauf:** die Sync-Aufgaben senden `started`/`completed`,
+- **Ergebnisbericht je Durchlauf:** Devices Sync, Packages Sync und Package Import senden `started`/`completed`,
   die Site-Health-Aufgabe nur `completed`; das macht tote Tasks und fachliche
   Fehlschläge auf der Portal-Seite *Systemstatus* sichtbar, ohne den Lauf je
   auszubremsen. Ein fehlgeschlagener Bericht bricht den Lauf nie ab.
@@ -645,7 +663,9 @@ Alle vier Dienste teilen dieselbe Überlebensstrategie:
 1. Unter `<PackagesRoot>\files\<Paketname>\` einen Ordner mit `config.json` und
    den Installationsdateien ablegen.
 2. Der Autoimporter erkennt die Änderung (SHA-256-Manifest der Dateien) und legt automatisch
-   Application, Collection und Deployment an. Collection-Name = `Name-Version`.
+   die Application an, mit `generateOwnDeviceColletion: "true"` auch Collection
+   (`Name-Version`) und Deployment. Ohne dieses Feld erscheint das Paket nicht im
+   Portal.
 
 **Konvention:** Die **Version darf keinen Bindestrich enthalten** (die WebApp
 splittet `Name-Version` am letzten Bindestrich).
@@ -735,8 +755,9 @@ die App einmal in der Konsole.
 
 > **Hinweis Self-Healing:** Die Standard-`install.ps1`, eine
 > `config.json`-Blaupause und das versionierte Reporter-Lieferbundle liefert der Installer nach
-> `<PackagesRoot>\Package_Vorlage`. Beim Anlegen eines Pakets überschreibt
-> der Autoimporter die paketeigene `install.ps1` und synchronisiert die in
+> `<PackagesRoot>\Package_Vorlage`. Bei jedem Scan eines Pakets, nicht nur beim
+> Anlegen, gleicht der Autoimporter die paketeigene `install.ps1` mit der
+> Vorlage ab, überschreibt sie bei Abweichung und synchronisiert die in
 > `reporting\current.json` ausgewählte, vollständig gehashte Generation. Das ist
 > beabsichtigt (einheitliche Standard-Installation). SSoT ist der Repo-Ordner
 > `Package_Vorlage/` für den Wrapper; Common, Client-Logging, Reporteradapter
@@ -808,19 +829,22 @@ Anwendungsabhängigkeiten. Heute ausgerollt ist der alte Graph `client_getinfo`
 `client_staticip` ist im Packaging verdrahtet, aber noch nicht freigegeben
 (Installer gesperrt). Details in `clients/README.md`.
 V23 trennt das read-only `getDeviceInfos` vom verbindlichen, idempotenten
-`mecm_client_ack.php`-POST. Beide verwenden denselben Schema-Schalter; mit dem
-Default `http` funktionieren sie ohne CA, Zertifikat oder Thumbprint.
+`mecm_client_ack.php`-POST. Beide verwenden denselben Schema-Schalter (`Scheme`
+der Standortdatei, Pflichtwert ohne Default); mit `http` funktionieren sie ohne
+CA, Zertifikat oder Thumbprint.
 
 `client_staticip` setzt beide Modi, die das Portal kennt: `static` konfiguriert
 Adresse, Präfix, optional genau ein Gateway und bei nichtleerem Soll die DNS-
-Server; leeres statisches DNS erhält den vorhandenen Stand. `dhcp` stellt eine
-zuvor von VirtuSphere statisch verwaltete Karte wieder auf DHCP und automatische
-DNS-Ermittlung zurück. Vor dem ersten Write müssen alle Soll-MACs eindeutig auf
+Server; leeres statisches DNS erhält den vorhandenen Stand. `dhcp` schaltet die
+Karte auf DHCP und setzt die DNS-Server auf automatische Ermittlung zurück; eine
+zuvor von VirtuSphere statisch gesetzte Adresse und Default-Route entfernt es
+zusätzlich. Vor dem ersten Write müssen alle Soll-MACs eindeutig auf
 aktive Adapter zeigen; doppelte MACs/Namen, fehlende oder Down-Adapter,
 ungültige IPv4-Werte und mehrere Gateways blockieren den ganzen Plan. IPv4-
 Adresse und Default-Route werden nur entfernt, wenn der vorherige erfolgreiche
 Lauf ihre Eigentümerschaft dokumentiert; IPv6 und fremde Werte bleiben erhalten.
-Beide Zweige lesen DHCP, Adresse, Route und DNS nach; `Tentative` hat ein
+Der statische Zweig liest DHCP-Zustand, Adresse, Route und DNS nach, der
+DHCP-Zweig den DHCP-Zustand. `Tentative` hat im statischen Zweig ein
 15-Sekunden-Limit, `Duplicate`/`Invalid` scheitern. Ein Modus, den das Skript
 nicht kennt, ist ein benannter Fehlschlag. Das Detail des Laufs nennt die Verteilung
 (`applied=3 (static=2 dhcp=1)`), damit die Portalkarte mehr zeigt als eine Zahl.
@@ -836,8 +860,10 @@ und Onlinezustand wieder, gleicht Disk, GPT-Basic-Data-Partition,
 Laufwerksbuchstabe, NTFS und das erwartete Label mit der tatsächlichen
 Storageansicht ab und setzt nur eindeutige eigene Arbeit fort. Unbekannte
 online-RAW-Platten werden nicht adoptiert oder formatiert. Vorhandene GPT-/MBR-
-Datenplatten werden ausschließlich online geschaltet. Boot-/System-, Read-only,
-Cluster-, größenlose oder mehrdeutige Datenträger sind benannte Fehler; eine VM
+Datenplatten werden online geschaltet, nie formatiert oder umpartitioniert.
+Boot-/System-, Cluster-, größenlose oder mehrdeutige Datenträger sind benannte
+Fehler. Einen Schreibschutz (SAN-Richtlinie) hebt die Phase vor dem
+Onlineschalten auf; nur ein Schreibschutz, der danach bleibt, ist ein Fehler. Eine VM
 ohne Zusatzplatte bleibt dagegen ein ausdrücklich optionaler Erfolgsfall. Neue
 Datenplatten erhalten ihren Portalnamen als Bezeichnung (DN1); bestehende
 Datenplatten werden nie umbenannt. Trägt die Systemplatte im Portal einen

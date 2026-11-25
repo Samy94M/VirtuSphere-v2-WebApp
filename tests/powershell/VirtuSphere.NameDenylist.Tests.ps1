@@ -380,7 +380,8 @@ Describe 'shipped pattern list .githooks/name-patterns.txt' {
             'docs https://learn.microsoft.com/de-de/ and https://github.com/x/y',
             'mac 00:00:5E:00:53:01 and AA-BB-CC-DD-EE-01',
             'share \\fileserver.example.test\packages',
-            'site code XYZ in root\sms\site_XYZ'
+            'site code XYZ in root\sms\site_XYZ',
+            'runner ubuntu-24.04, role host root@ansible-host and ansible-host.example.test'
         ) -join "`n"
         $r = Test-StagedText $script:Shipped ($clean + "`n") $script:ShippedEnv
         $r.ExitCode | Should -Be 0 -Because $r.Output
@@ -399,7 +400,10 @@ Describe 'shipped pattern list .githooks/name-patterns.txt' {
             @{ Label = 'public FQDN'; Text = ('host portal.' + 'acme-corp.' + 'de') },
             @{ Label = 'site code'; Text = ('ns root\sms\' + 'site_' + 'Q7Z') },
             @{ Label = 'site code assignment'; Text = ('SiteCode = ' + "'" + 'Q7Z' + "'") },
-            @{ Label = 'MAC'; Text = ('mac ' + '3C:5A:' + 'B4:01:02:03') }
+            @{ Label = 'MAC'; Text = ('mac ' + '3C:5A:' + 'B4:01:02:03') },
+            @{ Label = 'distribution host name'; Text = ('host ' + 'debian' + '-7' + '31') },
+            @{ Label = 'distribution host name with domain'; Text = ('host ' + 'rocky' + '-4' + '2.example.test') },
+            @{ Label = 'distribution host name in a key comment'; Text = ('key root@' + 'ubuntu' + '-9' + '07') }
         )
         foreach ($case in $cases) {
             $r = Test-StagedText $script:Shipped ($case.Text + "`n") $script:ShippedEnv

@@ -83,8 +83,10 @@ def load_vm_infos(path):
 def build_payload(data, mission_value=mission_id, job_value=job_id, correlation_value=None):
     parsed_mission_id = positive_int(mission_value)
     if parsed_mission_id is None:
-        # Legacy/Desktop rendering can leave placeholders unresolved. Keep the
-        # historic array shape in that path; the web worker always patches IDs.
+        # An unresolved mission placeholder means the template was not patched.
+        # The bare array is sent unchanged and the portal refuses it
+        # (db_importMAC.php requires mission_id); the web worker always
+        # patches IDs.
         return data
 
     payload = {'mission_id': parsed_mission_id, 'results': data}

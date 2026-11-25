@@ -18,7 +18,9 @@
 #        vs_identity_conflict, vs_identity_conflict_code,
 #        vs_identity_conflict_reason, vs_replaced_instance_uuid.
 #
-# Diese Datei bricht den Lauf NICHT ab (Etappe 14B-E). Eine fremde
+# Ein Identitätsbefund (fremde Namensgleichheit, Konflikt) bricht den Lauf
+# NICHT ab (Etappe 14B-E); abgebrochen wird nur nach einer gescheiterten
+# Inventarabfrage (siehe unten). Eine fremde
 # Namensgleichheit ist der häufigste echte Betriebsfall und ein fachliches
 # Ergebnis dieser Einheit, kein Fehler des Steueraufrufs: als abgebrochener
 # Aufruf ohne Marker käme sie beim Worker als `protocol_error` an und schickte
@@ -27,8 +29,12 @@
 # abgebrochener Aufruf bleibt damit das, was er ist: Transport, Zugangsdaten
 # oder Modul kaputt.
 #
-# vs_identity_require_stored_match (Standard: true) steuert die LETZTE
-# Bedingung. Vor einer Mutation muss eine vorhandene namensgleiche VM die im
+# vs_identity_require_stored_match (Standard: true) schaltet die Prüfung gegen
+# die im Portal gespeicherte UUID an drei Stellen: den Code
+# identity_bound_vm_renamed, die Bedingung identity_conflict (fremde VM gleichen
+# Namens) und vs_replaced_instance_uuid. Das Status-Playbook setzt ihn auf
+# false; dort entfallen damit auch Umbenennungserkennung und der Befund
+# "ersetzt". Vor einer Mutation muss eine vorhandene namensgleiche VM die im
 # Portal gespeicherte UUID tragen, sonst ist sie fremd. Nach einem erfolgreichen
 # Async-Job gilt das ausdrücklich nicht: die VM wurde gerade erst erstellt, ihre
 # UUID ist genau das, was dieser Lauf zurückmeldet, und das Portal kann sie noch

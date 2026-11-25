@@ -1185,7 +1185,7 @@ while ($true) {
 
     # Ursache je VM (MX1): nach der Abschlussmeldung und ausserhalb von finally.
     # Die Funktion wirft nie und aendert weder outcome noch Zaehler; ein altes
-    # Portal (400/413) laesst den Versand 15 Minuten ruhen.
+    # Portal (400/404/413) laesst den Versand 15 Minuten ruhen.
     [void](Send-VsDeviceCauseReport -Config $config -RunId $runId -Complete $deviceCausesComplete -DeviceCauses $deviceCauses)
 
     if ($loop % 100 -eq 0) { [System.GC]::Collect() }

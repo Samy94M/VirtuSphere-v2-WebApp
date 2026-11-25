@@ -252,9 +252,11 @@ function Initialize-VsTls {
 # Ermittelt eine erreichbare API-Adresse (health-Probe). $null wenn keine geht.
 #
 # Das ist eine ADRESSWAHL, keine Gesundheitspruefung: die Frage ist "antwortet
-# unter dieser Adresse die WebApp", nicht "ist ihr gerade wohl". Jede HTTP-Antwort
-# beantwortet die erste Frage mit ja, auch eine mit Statuscode 4xx oder 5xx, denn
-# einen Statuscode kann nur liefern, wer erreichbar ist.
+# unter dieser Adresse die WebApp", nicht "ist ihr gerade wohl". Jede HTTP-Antwort,
+# die das VirtuSphere-Health-Schema traegt, beantwortet die erste Frage mit ja,
+# auch mit Statuscode 4xx oder 5xx, denn einen Statuscode kann nur liefern, wer
+# erreichbar ist. Eine Antwort ohne das Schema (etwa die Fehlerseite eines
+# Proxys) zaehlt als nicht erreichbar.
 #
 # Das war der Unterschied zwischen einem gedrosselten Portal und einem
 # abgeschalteten Client: Invoke-RestMethod wirft unter PS 5.1 bei 5xx, health.php
@@ -456,7 +458,7 @@ function Send-VsPhase {
         # Rueckkanal ist best effort - die IP-/Adapterkonfiguration kann den
         # Client offline nehmen.
         # Trotzdem ins Dateilog, sonst ist ein dauerhaft stiller Rueckkanal
-        # (falscher Token, IP nicht freigegeben, Portal auf HTTPS umgestellt)
+        # (unbekannte MAC, IP nicht freigegeben, Portal auf HTTPS umgestellt)
         # auf dem Client nicht diagnostizierbar.
         Write-VsClientLog -Level WARN -Context ("{0}/{1}" -f $Phase, $PhaseEvent) `
             -Message ("reportPhase nicht zugestellt: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
@@ -685,8 +687,8 @@ function Get-VsSha256Hex {
     }
 }
 
-# Erste MAC der Registry-Interfaces (von client_getinfo geschrieben) fuer die
-# reportPhase-Aufrufe der Folge-Skripte.
+# Pfad des vollstaendig veroeffentlichten aktiven Snapshots (SetupState=complete,
+# SnapshotState=published, 1 bis 16 Interfaces), sonst $null.
 function Get-VsActiveSnapshotRoot {
     try {
         $base = Get-ItemProperty -Path $script:VsRegistryBase -Name 'ActiveSnapshot', 'SetupState' -ErrorAction Stop
@@ -784,6 +786,8 @@ function Get-VsSnapshotInterfacesRoot {
     return $interfaces
 }
 
+# Erste MAC der Registry-Interfaces (von client_getInfos geschrieben) fuer die
+# reportPhase-Aufrufe der Folge-Skripte.
 function Get-VsReportMac {
     try {
         $ifRoot = Get-VsSnapshotInterfacesRoot

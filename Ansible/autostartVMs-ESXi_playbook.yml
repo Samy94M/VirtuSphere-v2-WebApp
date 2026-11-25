@@ -10,7 +10,8 @@
 #
 # Requires API write access, so it does NOT work on a free ESXi licence, and it
 # is a silent no-op on a host inside a vSphere HA cluster. The worker checks both
-# from the cached capability facts before it ever gets here.
+# from the cached capability facts, but only while they are fresh; stale or
+# unknown facts only warn, so the playbook can still reach such a host.
 #
 # start_order is pinned to -1 on purpose. community.vmware#1903 (still open)
 # rejects any value above 1, so a numeric order would be a trap; the mission

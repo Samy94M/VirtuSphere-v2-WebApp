@@ -15,7 +15,7 @@ require_once dirname(__DIR__, 2) . '/lib/ssh_host_key_format.php';
  */
 final class AnsibleHostKeyFormatTest extends TestCase
 {
-    private const SHORT_TYPE_LINE = '%d %s root@ubuntu-102 (%s)';
+    private const SHORT_TYPE_LINE = '%d %s root@ansible-host (%s)';
 
     /** A canonical SHA256 fingerprint of a seed, the shape ssh-keygen prints. */
     private static function fp(string $seed): string
@@ -56,7 +56,7 @@ final class AnsibleHostKeyFormatTest extends TestCase
     public function testExtraSpacesTabsAndAMissingCommentAreTolerated(): void
     {
         $fp = self::fp('spaces');
-        $spaced = "  256 \t " . $fp . "    root@ubuntu-102   with words   (ED25519)  ";
+        $spaced = "  256 \t " . $fp . "    root@ansible-host   with words   (ED25519)  ";
         self::assertSame(['fingerprint' => $fp, 'type' => 'ssh-ed25519'], ssh_host_key_parse_input($spaced));
         $bare = '256  ' . $fp . '  (ED25519)';
         self::assertSame(['fingerprint' => $fp, 'type' => 'ssh-ed25519'], ssh_host_key_parse_input($bare));
