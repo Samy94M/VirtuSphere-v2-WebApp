@@ -92,6 +92,14 @@ allow:([a-z0-9-]+\.)*(asit-asso|datasphere)\.ch
 allow:([a-z0-9-]+\.)*(boisestate|eku|oregonstate|psu|stanford|ucsd)\.edu
 allow:([a-z0-9-]+\.)*nist\.gov
 
+# --- Hostnamen nach Distribution und Nummer ------------------------------------
+# Automatisch vergebene Linux-Hostnamen der Form <distribution>-<nummer>, allein
+# oder mit Domainteil (TS1 S1-10, 25.11.2026). Doku und Tests nehmen stattdessen
+# einen Rollennamen wie ansible-host. Versionsangaben wie ubuntu-24.04 trifft das
+# Muster nicht: nach der Nummer muss ein Label mit einem Buchstaben beginnen, ein
+# '.' mit folgender Ziffer setzt das Wort fort.
+re:(ubuntu|debian|centos|rhel|rocky|alma|fedora|suse)-[0-9]+(\.[a-z][a-z0-9-]*)*
+
 # --- MECM-Site-Code -----------------------------------------------------------
 # WMI-Namensraum site_<code> und Zuweisungen an SiteCode/site_code.
 re:site_[a-z0-9][a-z0-9][a-z0-9]

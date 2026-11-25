@@ -1,7 +1,9 @@
 #Requires -Version 5.1
 # Prozesshost-Vertrag des Paket-Reporters (ADR-0044). T3 verteilt diesen Host
-# als Teil eines unveraenderlichen Bundles. Prozesskapselung, IPC und Transport
-# werden in T4 implementiert und vor Aktivierung im Wrapper gesondert gemessen.
+# als Teil eines unveraenderlichen Bundles. IPC, Transport und Zeitbudget sind
+# hier implementiert; der Wrapper startet den Host nur, wenn die Vorlage ein
+# vollstaendiges reporting\current.json traegt (bis zum Cutover nicht
+# ausgeliefert).
 param([string]$VsReporterPipeName)
 Set-StrictMode -Version 1.0
 
@@ -112,7 +114,7 @@ function Invoke-VsPackageReportBudgetedAttempt {
     return $result
 }
 
-# Called only by the later isolated reporter process. The request timeout is
+# Called only by the isolated reporter process. The request timeout is
 # defense in depth, not a wall-clock guarantee for DNS/TLS or a replacement
 # for the wrapper-owned job object and cumulative Stopwatch budget.
 function Invoke-VsPackageReportHttp {

@@ -4,7 +4,8 @@
 # VirtuSphere WebAPI (mecm_report.php?action=reportRun, source mecm-site-health).
 # Laeuft als geplante Aufgabe "VirtuSphere MECM Site Health" auf dem MECM-Server.
 #
-# Anders als die drei Sync-Tasks meldet dieser Reporter NUR das Ergebnis
+# Anders als die anderen drei Aufgaben (Devices Sync, Packages Sync, Package
+# Import) meldet dieser Reporter NUR das Ergebnis
 # (event=completed, nie started): eine Site-Health-Abfrage hat keinen relevanten
 # Startzeitpunkt, nur einen Zustand. Der Zustand ist immer eine der vier Ampeln
 # ok/warning/fail/unknown; ein Providerfehler ist grau (unknown), nie

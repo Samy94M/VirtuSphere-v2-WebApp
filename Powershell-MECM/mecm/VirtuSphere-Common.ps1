@@ -2084,18 +2084,6 @@ function Limit-VsImporterOpenPackages {
 }
 
 # ---------------------------------------------------------------------------
-# MECM-Mitgliedschafts-Reconciliation (ADR-0034)
-# ---------------------------------------------------------------------------
-# Pure Planfunktion: desired (Portalwunsch, {name,type}), owned (Provenienz,
-# {collection_id,collection_name}), present (aktuelle Direct-Rules) -> Buckets.
-# Die IDENTISCHE Abbildung existiert auf der PHP-Seite (lib/mecm_plan.php);
-# beide laufen die gemeinsamen Vektoren in
-# Docker/WebAPI/tests/fixtures/mecm-plan-vectors.json, damit Portal-Vorschau
-# und Sync-Apply nie auseinanderlaufen. Die eine Sicherheitsregel: `remove`
-# enthaelt nur Regeln, die owned UND present UND nicht mehr desired sind - eine
-# Hand-Regel hat keine Provenienz und ist konstruktionsbedingt unantastbar
-# (preserve_manual/foreign werden nie angefasst, adoptiert wird nur im Portal).
-# ---------------------------------------------------------------------------
 # Identitaet eines MECM-Geraets (Etappe 14D, ADR-0043)
 # ---------------------------------------------------------------------------
 #
@@ -2270,6 +2258,19 @@ function Resolve-VsDeviceIdentity {
     return (& $block 'mac_conflict')
 }
 
+# ---------------------------------------------------------------------------
+# MECM-Mitgliedschafts-Reconciliation (ADR-0034)
+# ---------------------------------------------------------------------------
+# Pure Planfunktion: desired (Portalwunsch, {name,type}), owned (Provenienz,
+# {collection_id,collection_name}), present (aktuelle Direct-Rules) -> Buckets.
+# Die IDENTISCHE Abbildung existiert auf der PHP-Seite (lib/mecm_plan.php);
+# beide laufen die gemeinsamen Vektoren in
+# Docker/WebAPI/tests/fixtures/mecm-plan-vectors.json, damit Portal-Vorschau
+# und Sync-Apply nie auseinanderlaufen. Die eine Sicherheitsregel: `remove`
+# enthaelt nur Regeln, die owned UND present UND nicht mehr desired sind - eine
+# Hand-Regel hat keine Provenienz und ist konstruktionsbedingt unantastbar
+# (preserve_manual/foreign werden nie angefasst, adoptiert wird nur im Portal).
+# ---------------------------------------------------------------------------
 function Get-VsMembershipPlan {
     param(
         [array]$Desired = @(),
@@ -3278,8 +3279,9 @@ function Read-VsPackageConfig {
     #
     # Ein FEHLENDES Feld ist harmlos. Die Blaupause in der README nennt
     # InstallForSystem, das ist der Normalfall, und ein Bestandspaket ohne das
-    # Feld darf nicht verschwinden. Es wird deshalb kanonisch gesetzt und
-    # zurueckgeschrieben, damit der Autoimporter nur noch einen bekannten Wert
+    # Feld darf nicht verschwinden. Es wird deshalb im eingelesenen Objekt
+    # kanonisch gesetzt (die config.json bleibt unveraendert), damit der
+    # Autoimporter nur noch einen bekannten Wert
     # sieht; die Vorlage kommt fuer denselben Ordner zum selben Zweig.
     #
     # Ein UNBEKANNTER Wert ist laut. "InstalForSystem" ist keine

@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 # ============================================================================
 # mecm_autoimporter.ps1 - erzeugt aus config.json-Paketordnern automatisch
-# MECM-Applications, Collections und Deployments.
+# MECM-Applications, mit generateOwnDeviceColletion auch Collections und
+# Deployments.
 # Laeuft als geplante Aufgabe "VirtuSphere MECM Package Import".
 #
 # Quelle: <PackagesRoot>\files\<Paket>\config.json
@@ -9,10 +10,12 @@
 #
 # Haertung/Optimierung gegenueber v1.8.2:
 #  - Konfiguration aus Registry (keine harten Pfade/Site-Codes/UNCs)
-#  - Wildcard-Fix: Alt-Versions-Bereinigung matcht exakt '^Name-<Version>$'
-#    statt 'Name*' (frueher loeschte ein 'Firefox'-Update auch 'Firefox-ESR-*')
-#  - config.json-Pflichtfeldpruefung (ProjectName, version) - fehlerhafte
-#    Ordner werden uebersprungen statt Apps wie '-1.0' zu erzeugen
+#  - Altversions-Bereinigung nur mit removeOldVersion, nur fuer numerische
+#    Versionen und erst, wenn der Ersatz belegt ist (Get-VsPackageRetirementPlan;
+#    frueher loeschte ein 'Firefox'-Update auch 'Firefox-ESR-*')
+#  - config.json-Pruefung (ProjectName, version ohne Bindestrich, DeployTo,
+#    ErrorAction, InstallationBehaviorType) - fehlerhafte Ordner werden
+#    uebersprungen statt Apps wie '-1.0' zu erzeugen
 #  - Change-Detection ueber SHA-256-Manifest des files-Verzeichnisses -
 #    Voll-Scan nur bei Inhaltsaenderung, sonst Millisekunden-Leerlauf
 #  - LogonRequirementType korrigiert (WhetherOrNotUserLoggedOn)
@@ -28,7 +31,7 @@ $script:VsRequiredMecmServerContractVersion = 4
 $loadedMecmServerContract = Get-Variable -Name VsMecmServerContractVersion -Scope Script -ErrorAction SilentlyContinue
 if (-not $loadedMecmServerContract -or [int]$loadedMecmServerContract.Value -ne $script:VsRequiredMecmServerContractVersion) {
     $loadedVersion = if ($loadedMecmServerContract) { [string]$loadedMecmServerContract.Value } else { 'nicht deklariert' }
-    throw ("MECM-Serverpaket inkompatibel: Autoimporter benoetigt Common-Vertrag {0}, geladen ist {1}. Den vollstaendigen Ordner 'Powershell-MECM' bereitstellen und install-VirtuSphere-MECM.ps1 -Upgrade ausfuehren; keine einzelne Skriptdatei kopieren." -f $script:VsRequiredMecmServerContractVersion, $loadedVersion)
+    throw ("MECM-Serverpaket inkompatibel: Autoimporter benoetigt Common-Vertrag {0}, geladen ist {1}. Den vollstaendigen Ordner 'Powershell-MECM' bereitstellen und install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly ausfuehren; keine einzelne Skriptdatei kopieren." -f $script:VsRequiredMecmServerContractVersion, $loadedVersion)
 }
 
 $config = Get-VsConfig
@@ -93,9 +96,9 @@ $lastHintRefresh = Get-Date
 # naechster Termin. Prozessintern; nach einem Neustart scannt der erste Lauf voll.
 $openPackages = New-VsImporterOpenPackageSet
 
-# Read-VsPackageConfig und Get-VsSupersededNamePattern liegen in
-# VirtuSphere-Common.ps1: dieses Skript ist eine Endlosschleife, was in ihm steht
-# kann kein Test aufrufen, ohne sie zu starten. Dort deckt Pester beide ab.
+# Read-VsPackageConfig und die Planfunktionen der Altversions-Bereinigung liegen
+# in VirtuSphere-Common.ps1: dieses Skript ist eine Endlosschleife, was in ihm
+# steht kann kein Test aufrufen, ohne sie zu starten. Dort deckt Pester sie ab.
 
 while ($true) {
     $loop++
@@ -152,8 +155,10 @@ while ($true) {
             }
         }
 
-        # Change-Detection: nur bei geaendertem files-Baum voll scannen. Das
-        # Der vollstaendige verwaltete Vorlagensatz zaehlt mit (B7/T3): eine
+        # Change-Detection: voll gescannt wird nur bei geaendertem Stamp ueber
+        # files und Package_Vorlage; ein faelliger Eintrag der Wiederholliste
+        # wird allein erneut bearbeitet (siehe unten). Der vollstaendige
+        # verwaltete Vorlagensatz zaehlt mit (B7/T3): eine
         # Aenderung an Common, Logging, Adapter, Host, Manifest, Deskriptor oder
         # Wrapper muss den Abgleich ausloesen, nicht erst die naechste config.json.
         # Ein Hash je Datei je Lauf (AR1): Gesamtstamp und Paketstamps teilen sich
@@ -528,8 +533,10 @@ while ($true) {
                         # Die Abfrage laeuft mit -ErrorAction Stop und ohne lokalen Catch. Ein
                         # Providerfehler ist kein "keine Collection": frueher wurde nach dem
                         # stillen Fehler trotzdem angelegt, und der Lauf meldete
-                        # collection_missing. Jetzt geht der Fehler in den Scan-Catch und wird
-                        # dort als mecm_unavailable gemeldet (Phase scan; der Rohtext bleibt
+                        # collection_missing. Jetzt geht der Fehler in den Paket-Catch:
+                        # antwortet MECM noch, ist es ein offener Punkt package_scan_failed
+                        # nur dieses Pakets, die uebrigen laufen weiter; nur ohne Antwort
+                        # wird mecm_unavailable gemeldet (Phase scan; der Rohtext bleibt
                         # lokal im Log). Die Anlage hat einen eigenen Catch, dessen MECM-Text
                         # in der bestehenden WARN-Zeile steht.
                         $collection = Get-CMDeviceCollection -Name $fullName -ErrorAction Stop

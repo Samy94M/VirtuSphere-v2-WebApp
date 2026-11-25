@@ -21,15 +21,17 @@
       register: powercycle_touch
       changed_when: false
   rescue:
-    - name: Abgelehnten Powercycle-Marker als geschlossene Ursache melden
+    - name: Nicht bestaetigten Powercycle-Marker als geschlossene Ursache melden
       ansible.builtin.debug:
         msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] fail Powercycle info {{ powercycle_target['vm_name'] }}: touch_refused"
 
     - name: Keine ESXi-Abfrage ohne Markerbestaetigung starten
       ansible.builtin.fail:
         msg: >-
-          Powercycle access marker was refused for portal VM
-          {{ powercycle_target['portal_vm_id'] }}; no ESXi query was started.
+          Powercycle access marker was not confirmed for portal VM
+          {{ powercycle_target['portal_vm_id'] }} (refused by the portal or
+          portal not reachable; the output of the previous task names which);
+          no ESXi query was started.
 
 # AN-01: addressed by the bound instance UUID, never by the name. The identity
 # assertion in powercycleVMs-ESXi_playbook.yml still checks both. A failed read

@@ -1,15 +1,16 @@
 #Requires -Version 5.1
 # ============================================================================
-# client_staticip.ps1 - benennt Netzwerkadapter um und wendet statische
-# IP-Konfiguration an, anhand der von client_getinfo geschriebenen
-# Interface-Registry. Dritte Phase der Client-Kette.
+# client_staticip.ps1 - benennt Netzwerkadapter um und setzt je Sollschnittstelle
+# statische IP-Konfiguration oder DHCP, anhand der von client_getInfos
+# geschriebenen Interface-Registry. Dritte Phase der Client-Kette.
 #
 # Verbesserungen:
 #  - idempotent: passende Werte bleiben stehen; nur exakt dokumentierte,
 #    vorher selbst verwaltete IPv4-Werte werden ersetzt
 #  - ehrlicher Status: Erfolg wird pro Adapter getrackt und real gemeldet
 #    (Registry VirtuSphere\staticip + reportPhase), nicht mehr hart auf $true
-#  - leeres Gateway / leere DNS-Liste sauber via Parameter-Splatting
+#  - leeres Gateway: keine Route; leere DNS-Liste: bestehender DNS-Stand bleibt
+#    (static), bei dhcp Rueckstellung auf automatische DNS-Ermittlung
 #  - Rename-Kollisionen abgefangen; Get-CimInstance statt Get-WmiObject
 #  - reportPhase 'started' VOR der Umstellung (IP-/Adapterkonfiguration kann den
 #    Client danach offline nehmen), 'finished' best effort danach

@@ -39,7 +39,7 @@
     # bewiesen (Gate ansible-powercycle-selection);
     # tests/Static/PowercyclePlaybookContractTest.php pinnt beide Dateien
     # aufeinander.
-    - name: Ziele bestimmen (nur VMs, deren PXE-NIC laut Portal keine MAC hat)
+    - name: Ziele bestimmen (nur VMs mit needs_mac - WDS-Karte ohne MAC oder keine WDS-Karte bestimmbar)
       ansible.builtin.set_fact:
         powercycle_targets: "{{ vm_configurations | selectattr('needs_mac', 'defined') | selectattr('needs_mac') | list }}"
 

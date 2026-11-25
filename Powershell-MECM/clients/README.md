@@ -114,7 +114,8 @@ Programm-Befehlszeile jeweils:
 `powershell.exe -NoProfile -ExecutionPolicy Bypass -NonInteractive -File "<skript>.ps1"`
 (`Get-VsPowerShellCommandLine` in `VirtuSphere-Common.ps1`),
 als System ausführen, Administratorrechte erforderlich. Für `client_hostname`
-den Rückgabecode **1641** als „Erfolg mit Neustart" konfigurieren.
+prüfen, dass der Rückgabecode **1641** als Neustart-Code gilt (MECM-Standardtabelle,
+kein Eingriff nötig).
 Maximale Laufzeit (Maximum Runtime) jeder Phase: **15 Minuten**. Das Programm
 läuft als 64-Bit-Prozess; die Option „Als 32-Bit-Prozess auf 64-Bit-Clients
 ausführen" bleibt aus. Beide Werte stammen aus `Get-VsClientAppSpecs`; eine
@@ -132,9 +133,9 @@ als einen SHA-256-geprüften Paketsatz per atomarem Verzeichnis-Swap und rollt b
 einem Aktivierungsfehler den vollständigen Altstand zurück. Das vollständige
 Pfad-/Längen-/SHA-256-Manifest jedes lokalen Ordners muss am tatsächlichen
 `ContentShare` identisch lesbar sein; eine alte gleichnamige Datei reicht nicht.
-Der Installer prüft alle veröffentlichten Clientordner und bricht bei einem fehlenden, nicht
-vollständig lesbaren oder abweichenden Manifest vor Site-Initialisierung und vor
-jedem Configuration-Manager-Cmdlet ab. In diesem Lauf werden keine Applications,
+Der Installer prüft alle veröffentlichten Clientordner im Preflight (nach der
+Site-Initialisierung, nur lesend) und meldet ein fehlendes, nicht vollständig
+lesbares oder abweichendes Manifest als Befund; Apply bleibt blockiert. In diesem Lauf werden keine Applications,
 Deployment Types, Dependencies oder Contentverteilungen geändert. Freigabepfad,
 Leserechte beziehungsweise Inhalt korrigieren und den Installer danach erneut
 starten.
@@ -214,8 +215,9 @@ sowie einmal die Erholung. Daraus entstehen keine weiteren Portalaufrufe.
   VMDKs nach seiner SAN-Richtlinie (`OfflineShared`, `OfflineAll`) offline und
   schreibgeschützt an; das Skript hebt den Schreibschutz einer solchen
   Offline-Platte vor dem Onlineschalten auf und liest ihn danach nach. Nur wenn weder
-  eine offene eigene Operation noch eine optionale Zusatzplatte existiert, ist
-  `optional: no disk work required` ein erfolgreicher Leerlauf. Ein exklusiver
+  eine offene eigene Operation noch eine Zusatzplatte existiert und das
+  Windows-Laufwerk nicht umbenannt wurde, lautet das Detail
+  `optional: no disk work required system=<Ergebnis>` (erfolgreicher Leerlauf). Ein exklusiver
   Prozesslock verhindert zwei parallele Storage-Läufe. Eine neue Platte bekommt
   ihren Namen aus dem VM-Editor als Laufwerksbezeichnung, wenn ihr SCSI-Target
   und ihre Größe eindeutig zu einer Portalplatte passen (Feld `disks` von

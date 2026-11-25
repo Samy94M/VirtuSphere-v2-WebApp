@@ -32,7 +32,7 @@
         # Arbeitsverzeichnis); VM-Namen/MACs gehen niemanden sonst etwas an.
         mode: "0600"
 
-    - name: Fuehre Python-Skript aus, um Daten zu verarbeiten und in CSV umzuwandeln
+    - name: Fuehre Python-Skript aus, das die gesammelten Daten per MAC-Upload an das Portal uebergibt
       ansible.builtin.command: python3 ./upload_mac_list.py
       delegate_to: localhost
       register: mac_upload

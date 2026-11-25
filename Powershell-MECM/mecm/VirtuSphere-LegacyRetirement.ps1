@@ -543,7 +543,7 @@ function Write-VsLegacyRetirementSummary {
                 ((@($application.ContentFiles) -join ', ')), $(if ($application.ScriptVersion) { $application.ScriptVersion } else { 'unbekannt' }), $(if ($application.DetectsSetupState) { 'ja' } else { 'nein' }))
             if ($missing.Count -gt 0) { Write-Host ('    Fehlt im Inhalt: {0}' -f ($missing -join ', ')) }
         } else {
-            Write-Host '    Inhalt: Definition des Deployment Types nicht lesbar'
+            Write-Host '    Inhalt: kein lesbarer Deployment Type (fehlt oder Definition nicht lesbar)'
         }
     }
     foreach ($item in @($Plan.Items)) {

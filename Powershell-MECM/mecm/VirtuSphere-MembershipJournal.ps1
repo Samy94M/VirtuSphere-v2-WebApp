@@ -140,7 +140,10 @@ function Enter-VsMembershipJournalInstance {
     try {
         return [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     } catch {
-        throw 'Membership-Journal ist durch eine andere Device-Sync-Instanz gesperrt.'
+        # Jede Ausnahme von Open landet hier, nicht nur die Sperre einer zweiten
+        # Instanz: die Meldung nennt deshalb beide Moeglichkeiten und den
+        # Originaltext, damit fehlende Rechte nicht als zweite Instanz erscheinen.
+        throw ('Membership-Journal nicht sperrbar: durch eine andere Device-Sync-Instanz gesperrt oder kein Zugriff auf die Sperrdatei ({0}).' -f $_.Exception.Message)
     }
 }
 

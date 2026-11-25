@@ -20,15 +20,17 @@
       register: export_touch
       changed_when: false
   rescue:
-    - name: Abgelehnten Export-Marker als geschlossene Ursache melden
+    - name: Nicht bestaetigten Export-Marker als geschlossene Ursache melden
       ansible.builtin.debug:
         msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}] fail Export info {{ export_vm_config['vm_name'] }}: touch_refused"
 
     - name: Keine Exportabfrage ohne Markerbestaetigung starten
       ansible.builtin.fail:
         msg: >-
-          Export access marker was refused for portal VM
-          {{ export_vm_config['portal_vm_id'] }}; no ESXi query was started.
+          Export access marker was not confirmed for portal VM
+          {{ export_vm_config['portal_vm_id'] }} (refused by the portal or
+          portal not reachable; the output of the previous task names which);
+          no ESXi query was started.
           Results already read in this run were NOT uploaded: start the export again.
 
 # AN-01: the bound instance UUID addresses the VM, as every mutation of this run

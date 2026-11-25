@@ -88,7 +88,7 @@ final class RemoteSecretNoticeRenderTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function group(string $reason, ?int $credentialId = 5, ?string $name = 'esxi-ansible', string $host = 'ubuntu-102.example.test', int $port = 22, int $count = 2): array
+    private function group(string $reason, ?int $credentialId = 5, ?string $name = 'esxi-ansible', string $host = 'ansible-host.example.test', int $port = 22, int $count = 2): array
     {
         return [
             'credential_id' => $credentialId,
@@ -132,13 +132,13 @@ final class RemoteSecretNoticeRenderTest extends TestCase
         self::assertMatchesRegularExpression('/<form[^>]*action="credentials\.php"/', $html);
         self::assertMatchesRegularExpression('/<input[^>]*name="action"[^>]*value="' . self::ACTION . '"/', $html);
         self::assertMatchesRegularExpression('/<input[^>]*name="credential_id"[^>]*value="5"/', $html);
-        self::assertMatchesRegularExpression('/<input[^>]*name="target_host"[^>]*value="ubuntu-102\.example\.test"/', $html);
+        self::assertMatchesRegularExpression('/<input[^>]*name="target_host"[^>]*value="ansible-host\.example\.test"/', $html);
         self::assertMatchesRegularExpression('/<input[^>]*name="target_port"[^>]*value="22"/', $html);
         self::assertMatchesRegularExpression('/<input[^>]*name="return_to"[^>]*value="system_status"/', $html, 'the notice returns to the status page');
         self::assertMatchesRegularExpression('/<textarea[^>]*name="reason"[^>]*required/', $html, 'the reason is a required field');
         self::assertStringContainsString('name="_csrf"', $html);
         self::assertMatchesRegularExpression('/data-confirm="[^"]+"/', $html, 'the acknowledgement asks before it writes');
-        self::assertStringContainsString(h(__t('credentials.remote_secret_acknowledge_confirm', ['name' => 'ubuntu-102.example.test:22'])), $html, 'the question names its target');
+        self::assertStringContainsString(h(__t('credentials.remote_secret_acknowledge_confirm', ['name' => 'ansible-host.example.test:22'])), $html, 'the question names its target');
     }
 
     public function testOrphanedGroupPostsNoCredentialId(): void
@@ -148,7 +148,7 @@ final class RemoteSecretNoticeRenderTest extends TestCase
         self::assertStringContainsString(self::ACTION, $html);
         self::assertDoesNotMatchRegularExpression('/name="credential_id" value="[1-9]/', $html);
         self::assertStringContainsString(h(__t('system_status.remote_secret_group_line_orphan', [
-            'target' => 'ubuntu-102.example.test:22',
+            'target' => 'ansible-host.example.test:22',
             'files' => __t('credentials.remote_secret_count_other', ['count' => 2]),
             'oldest' => portal_format_timestamp('2026-10-10 08:00:00'),
             'reason' => __t('system_status.remote_secret_reason_orphaned'),
@@ -169,15 +169,15 @@ final class RemoteSecretNoticeRenderTest extends TestCase
     {
         $html = $this->render([
             $this->group('overdue', 5),
-            $this->group('orphaned', null, null, 'ubuntu-103.example.test'),
-            $this->group('moved', 6, 'esxi-ansible-2', 'ubuntu-104.example.test', 2222),
+            $this->group('orphaned', null, null, 'ansible-host-2.example.test'),
+            $this->group('moved', 6, 'esxi-ansible-2', 'ansible-host-3.example.test', 2222),
         ], $this->manager());
 
         self::assertSame(3, substr_count($html, '<form'));
         self::assertStringContainsString(h(__t('system_status.remote_secret_reason_overdue', ['hours' => $this->hours()])), $html);
         self::assertStringContainsString(h(__t('system_status.remote_secret_reason_orphaned')), $html);
         self::assertStringContainsString(h(__t('system_status.remote_secret_reason_moved')), $html);
-        self::assertStringContainsString('ubuntu-104.example.test:2222', $html);
+        self::assertStringContainsString('ansible-host-3.example.test:2222', $html);
     }
 
     public function testTheCountUsesItsSingularOrPluralSentence(): void
@@ -195,7 +195,7 @@ final class RemoteSecretNoticeRenderTest extends TestCase
 
     public function testRemedyAndPasswordRecommendationAreShownOnceEach(): void
     {
-        $html = $this->render([$this->group('overdue'), $this->group('moved', 6, 'x', 'ubuntu-103.example.test')], $this->manager());
+        $html = $this->render([$this->group('overdue'), $this->group('moved', 6, 'x', 'ansible-host-2.example.test')], $this->manager());
 
         self::assertSame(1, substr_count($html, h(__t('system_status.remote_secret_remedy'))));
         self::assertSame(1, substr_count($html, h(__t('system_status.remote_secret_password_hint'))));
@@ -221,14 +221,14 @@ final class RemoteSecretNoticeRenderTest extends TestCase
 
     public function testTheCredentialLineCarriesTheSameFormWithTheCredentialsReturnToken(): void
     {
-        $html = $this->renderOpenLine(7, [['target_host' => 'ubuntu-102.example.test', 'target_port' => 22, 'count' => 1, 'oldest' => '2026-10-13 08:00:00']], $this->manager());
+        $html = $this->renderOpenLine(7, [['target_host' => 'ansible-host.example.test', 'target_port' => 22, 'count' => 1, 'oldest' => '2026-10-13 08:00:00']], $this->manager());
 
         self::assertSame(1, substr_count($html, '<form'));
         self::assertMatchesRegularExpression('/<input[^>]*name="credential_id"[^>]*value="7"/', $html);
         self::assertMatchesRegularExpression('/<input[^>]*name="return_to"[^>]*value="credentials"/', $html);
         self::assertMatchesRegularExpression('/<textarea[^>]*name="reason"[^>]*required/', $html);
         self::assertStringContainsString(h(__t('credentials.remote_secret_open_line', [
-            'target' => 'ubuntu-102.example.test:22',
+            'target' => 'ansible-host.example.test:22',
             'files' => __t('credentials.remote_secret_count_one'),
             'oldest' => portal_format_timestamp('2026-10-13 08:00:00'),
         ])), $html);

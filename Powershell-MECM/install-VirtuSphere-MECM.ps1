@@ -5,6 +5,12 @@
     Installiert oder aktualisiert die VirtuSphere-MECM-Integration.
 
 .DESCRIPTION
+    Zurzeit gesperrt (MC01): Erstinstallation und -Upgrade ohne -ServerOnly
+    brechen ab, bis der gemeinsame Core-/Reporter-Cutover erfolgt ist.
+    Lauffaehig ist nur -Upgrade -ServerOnly (Beispiel 3). Die Parameter des
+    Parametersatzes Install (auch die vier Intervalle) wirken erst nach dem
+    Cutover; bis dahin laesst sich kein Intervall mit dem Installer aendern.
+
     Schreibt die Konfiguration in die Registry, legt Verzeichnisse an,
     deaktiviert und beendet laufende Aufgaben, kopiert die Sync-Skripte nach
     %ProgramFiles%\VirtuSphere\mecm, registriert die vier geplanten Aufgaben
@@ -29,6 +35,7 @@
 .PARAMETER Upgrade
     Aktualisiert Skripte, Paketvorlage und Aufgaben mit der vollstaendigen
     vorhandenen Registry-Konfiguration. Nur fuer eine bestehende Installation.
+    Bis zum Cutover (MC01) nur zusammen mit -ServerOnly lauffaehig.
 
 .PARAMETER ServerOnly
     Nur zusammen mit -Upgrade: tauscht die Serverskripte und registriert die
@@ -56,7 +63,10 @@
     gesamte MECM-Integration mit ab.
 
 .PARAMETER ReportToken
-    Optionaler Rueckkanal-Token (im Portal generiert). Leer = ohne Token.
+    Rueckkanal-Token (im Portal generiert). Ohne den Parameter fragt der
+    Installer verdeckt danach; eine leere Eingabe behaelt den vorhandenen Token.
+    Nur -ReportToken '' loescht ihn. Als Argument ist er in History und
+    Prozessliste sichtbar.
 
 .PARAMETER DpGroupName
     Name der Distribution-Point-Gruppe fuer die Content-Verteilung.
@@ -83,11 +93,17 @@
     .\install-VirtuSphere-MECM.ps1 -WebApi virtusphere.lan:8021 `
         -PackagesShare \\MECM-01\VirtuSphere\Packages\files
 
+    Erstinstallation (gesperrt, MC01).
+
 .EXAMPLE
     .\install-VirtuSphere-MECM.ps1 -Upgrade
 
+    Volles Update (gesperrt, MC01).
+
 .EXAMPLE
     .\install-VirtuSphere-MECM.ps1 -Upgrade -ServerOnly
+
+    Reines Serverupdate; bis zum Cutover der einzige lauffaehige Aufruf.
 
 .NOTES
     Die vier Intervalle behalten bei einem Re-Run ohne den jeweiligen Parameter
@@ -146,13 +162,13 @@ $logRoot = Join-Path $env:ProgramFiles 'VirtuSphere\Logs'
 # Test pruefbar.
 #
 # Write-Warn = BLOCKER. Die Erstinstallation hat ihre Arbeit nicht geleistet:
-#   Aufgabe laeuft nicht, Portal antwortet nicht oder mit 403, kein frisches
-#   Log, Freigabe zeigt nicht auf den Paketpfad. Faerbt die Schlusszeile und
-#   setzt den Exit-Code.
+#   Aufgabe laeuft nicht, Portal antwortet nicht oder mit 403, Freigabe zeigt
+#   nicht auf den Paketpfad. Faerbt die Schlusszeile und setzt den Exit-Code.
 # Write-Hint = HINWEIS. Etwas ist bemerkenswert, aber der Lauf ist trotzdem
 #   gelungen: die DP-Gruppe darf legitim erst spaeter entstehen, DNS loest hier
-#   anders auf als im Deploy-VLAN, und ein nicht abfragbarer Site-Health-Provider
-#   heisst laut Common ausdruecklich "nicht abfragbar", nicht "Site krank".
+#   anders auf als im Deploy-VLAN, ein nicht abfragbarer Site-Health-Provider
+#   heisst laut Common ausdruecklich "nicht abfragbar", nicht "Site krank", und
+#   ein Tageslog ist im Pruef-Fenster des Installers noch nicht frisch.
 #
 # Ohne diese Trennung waere ein blindes Mitzaehlen aller Warnungen die falsche
 # Korrektur: ein voellig korrekter Erstlauf ginge gelb.
@@ -446,9 +462,11 @@ try {
         Where-Object { $_.Name -like 'site_*' } | Select-Object -First 1
     if ($ns) { $siteCode = $ns.Name -replace '^site_', '' }
 } catch { Write-Debug $_ }
-# Hinweis, kein Blocker: die Skripte ermitteln den Site-Code zur Laufzeit selbst
-# ueber WMI bzw. PSDrive; der Installer braucht ihn nur fuer seine eigene Anzeige.
-if ($siteCode) { Write-Ok "Site-Code erkannt: $siteCode" } else { Write-Hint 'Site-Code nicht automatisch erkennbar - Skripte nutzen WMI/PSDrive zur Laufzeit.' }
+# Hinweis, kein Blocker: Devices Sync, Packages Sync und Package Import ermitteln
+# den Site-Code zur Laufzeit selbst ueber WMI bzw. PSDrive. Site Health liest
+# dagegen nur den Registry-Wert MECM_SiteCode, den der Installer weiter unten nur
+# bei erkannter Site schreibt; ohne ihn meldet Site Health "unbekannt".
+if ($siteCode) { Write-Ok "Site-Code erkannt: $siteCode" } else { Write-Hint "Site-Code nicht automatisch erkennbar. Devices Sync, Packages Sync und Package Import ermitteln ihn zur Laufzeit selbst; Site Health braucht den Registry-Wert MECM_SiteCode und meldet bis dahin 'unbekannt'. Installer auf dem MECM-Server mit installierter Konsole ausfuehren." }
 
 # DP-Gruppe pruefen: der Installer nimmt den Namen nur entgegen, verteilt selbst
 # nichts. Ein Tippfehler oder ein Namenszusatz der Umgebung (im Feld gesehen: die
@@ -1193,8 +1211,18 @@ foreach ($comp in $logComponents) {
 Write-Step 'Registriere geplante Aufgaben'
 # Auch der Task-Principal verwendet die sprachunabhaengige SYSTEM-SID.
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -RunLevel Highest
+# Zweck je Aufgabe fuer die Spalte "Beschreibung" der Aufgabenplanung: sonst
+# traegt jede der vier Aufgaben denselben Satz. Bewusst neben $tasks statt darin,
+# weil Tests und Doku-Vertrag die Eintraege von $tasks als Name/Script lesen.
+$taskPurposes = @{
+    'VirtuSphere MECM Devices Sync'   = 'Uebertraegt VMs aus der Portal-Warteschlange nach MECM (Import, Collections) und meldet die ResourceID zurueck.'
+    'VirtuSphere MECM Packages Sync'  = 'Meldet den Paket- und Task-Sequence-Katalog an das Portal.'
+    'VirtuSphere MECM Package Import' = 'Legt aus den Paketordnern MECM-Applications an (Autoimporter).'
+    'VirtuSphere MECM Site Health'    = 'Meldet den Zustand der MECM-Site an das Portal.'
+}
 foreach ($task in $tasks) {
     $scriptFile = Join-Path $installDir $task.Script
+    $taskPurpose = if ($taskPurposes.ContainsKey($task.Name)) { ' ' + $taskPurposes[$task.Name] } else { '' }
     # Schalter aus $script:VsPowerShellArgs (Common), wo auch die Begruendung
     # steht: -NoProfile gegen Fremdcode im SYSTEM-Prozess, -NonInteractive
     # gegen eine Rueckfrage, die niemand sieht. Diese Zeile war die einzige, die
@@ -1218,7 +1246,7 @@ foreach ($task in $tasks) {
     $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
     # Endlosschleifen: kein Laufzeitlimit (Standard 72h wuerde sie killen).
     $set.ExecutionTimeLimit = 'PT0S'
-    $definition = New-ScheduledTask -Action $action -Trigger $triggers -Principal $principal -Settings $set -Description ('VirtuSphere MECM Integration, Build {0} {1}, installiert {2} ({3})' -f $buildLabel, [string]$buildInfo.Date, (Get-Date -Format 'yyyy-MM-dd HH:mm'), $installMode)
+    $definition = New-ScheduledTask -Action $action -Trigger $triggers -Principal $principal -Settings $set -Description ('VirtuSphere MECM Integration, Build {0} {1}, installiert {2} ({3}).{4}' -f $buildLabel, [string]$buildInfo.Date, (Get-Date -Format 'yyyy-MM-dd HH:mm'), $installMode, $taskPurpose)
     Register-ScheduledTask -TaskName $task.Name -InputObject $definition -Force | Out-Null
     Start-ScheduledTask -TaskName $task.Name
     Write-Ok ("Aufgabe registriert und gestartet: {0}" -f $task.Name)

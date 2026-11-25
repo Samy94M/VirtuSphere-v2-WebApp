@@ -88,6 +88,12 @@ try {
         foreach ($stageName in @('DisableDeployments', 'Retire')) {
             if (@($ready | Where-Object { [string]$_.Stage -ceq $stageName }).Count -gt 0) {
                 Write-Host ('Naechster Schritt: .\retire-VirtuSphere-LegacyGetInfo.ps1 -Stage {0} -Apply -PlanId {1}' -f $stageName, $plan.PlanId)
+                # Ohne den Schalter blockiert Retire einen Schritt, der die
+                # Bestaetigung braucht (policy_convergence_unconfirmed); der
+                # vorgeschlagene Aufruf allein liefe dort in die Sperre.
+                if ($stageName -ceq 'Retire' -and @($ready | Where-Object { [string]$_.Stage -ceq 'Retire' -and [bool]$_.RequiresConvergenceConfirmation }).Count -gt 0) {
+                    Write-Host '  Fuer Altanwendungen mit Deployments zusaetzlich -ConfirmPolicyConvergence angeben, erst nachdem die Clients die Policy abgerufen haben.'
+                }
             }
         }
         $exitCode = 0

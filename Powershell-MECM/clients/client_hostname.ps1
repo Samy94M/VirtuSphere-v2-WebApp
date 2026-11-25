@@ -5,14 +5,17 @@
 #
 # Verbesserungen:
 #  - reportPhase (finished wird VOR dem Reboot gesendet)
-#  - Sanitisierung bleibt als Sicherheitsnetz, weicht der bereinigte Name aber
-#    vom Soll ab, wird das als 'failed' gemeldet (nach Portal-E2 sollte das
-#    Portal solche Namen gar nicht mehr liefern)
+#  - Sanitisierung bleibt als Sicherheitsnetz: weicht der bereinigte Name vom
+#    Soll ab, laeuft die Phase weiter, die Abweichung steht im Log und im Detail
+#    der 'finished'-Meldung; nur ein Name ohne gueltiges Zeichen wird als
+#    'failed' gemeldet (nach Portal-E2 sollte das Portal solche Namen gar nicht
+#    mehr liefern)
 #  - die dreifach duplizierten MECM-Erkennungs-Registry-Bloecke in eine
 #    Funktion gezogen; Get-CimInstance statt Get-WmiObject
 #
 # Exit-Codes: 0 = kein Neustart noetig, 1641 = Neustart eingeleitet, 1 = Fehler
-# MECM-Erkennungsregel: HKLM:\SOFTWARE\VirtuSphere\HostnameUpdate\Status = Erfolgreich
+# MECM-Erkennungsregel: HKLM:\SOFTWARE\VirtuSphere\HostnameUpdate\Status =
+# Erfolgreich ODER Uebersprungen (Domain-Computer)
 # ============================================================================
 
 . "$PSScriptRoot\VirtuSphere-Client-Common.ps1"
