@@ -90,12 +90,6 @@ if ($deployPreview !== null) {
 
 <section class="panel">
     <h2><?php echo h(__t('deploy.queue_heading')); ?></h2>
-    <?php // What happens after Queue (Etappe 13R). It is deliberately NOT a
-          // blocker: a service that is offline or paused does not make the job
-          // invalid, it makes it wait, and refusing to save it would lose work
-          // an operator has already entered. The sentence says which of the two
-          // it will be. ?>
-    <p class="muted"><?php echo h(deploy_service_queue_expectation($serviceSnapshot)); ?></p>
     <?php deploy_render_blockers($deployBlockers, $user, $deployWarnings, $deployPresentation, $deployFormValues); ?>
     <?php if ($selectedMissionDeviates) { ?>
         <div class="alert alert-warning"><strong><?php echo h(__t('deploy.warning_prefix')); ?></strong> <?php echo h(__t('deploy.inventory_deviation_warn')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('deploy.inventory_deviation_link')); ?></a></div>
@@ -250,6 +244,16 @@ if ($deployPreview !== null) {
         <div class="actions actions-row">
             <noscript><button class="button button-secondary" type="submit" name="action" value="check"><?php echo h(__t('deploy.preparation_check')); ?></button></noscript>
             <button class="button" type="submit" name="action" value="start" data-deploy-queue-button <?php echo $canQueue ? '' : 'disabled'; ?>><?php echo h(__t('deploy.queue_button')); ?></button>
+            <?php // What happens after Queue (Etappe 13R). It is deliberately NOT a
+                  // blocker: a service that is offline or paused does not make the job
+                  // invalid, it makes it wait, and refusing to save it would lose work
+                  // an operator has already entered. The sentence says which of the two
+                  // it will be. It stands beside the button it describes and is hidden
+                  // while that button is disabled (controls.css): at the top of the
+                  // panel "starts at once" stood directly above the open prerequisites.
+                  // The live blocker check only toggles the button, so the sentence
+                  // follows it without a second state. ?>
+            <span class="queue-expectation"><?php echo h(deploy_service_queue_expectation($serviceSnapshot)); ?></span>
         </div>
     </form>
 </section>

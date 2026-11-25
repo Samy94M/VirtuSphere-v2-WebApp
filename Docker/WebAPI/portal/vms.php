@@ -338,15 +338,11 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                         <td><?php echo h((string) count($vm['disks'] ?? [])); ?></td>
                         <td><?php echo h((string) count($vm['packages'] ?? [])); ?></td>
                         <td class="actions table-action-cell">
+                            <?php // Two rows (tables.css, .row-actions): edit and delete, then the
+                                  // MECM reset across both. The source order is the visual order,
+                                  // so the keyboard walks the cell the way it reads. ?>
+                            <div class="row-actions">
                             <a class="button button-secondary" href="<?php echo h(vm_edit_url($missionId, (int) $vm['id'], null, $workContext)); ?>"><?php echo h(__t('common.edit')); ?></a>
-                            <?php if (!$isTemplate && can('vms.write', $user)) { ?>
-                                <form class="inline-form" method="post" action="<?php echo h($vmListUrl); ?>">
-                                    <?php echo csrf_field(); ?>
-                                    <input type="hidden" name="action" value="reset_mecm_id">
-                                    <input type="hidden" name="vm_id" value="<?php echo h((string) $vm['id']); ?>">
-                                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm', ['name' => (string) ($vm['vm_name'] ?? ''), 'hostname' => (string) ($vm['vm_hostname'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
-                                </form>
-                            <?php } ?>
                             <?php if (can('vms.write', $user)) { ?>
                                 <form class="inline-form" method="post" action="<?php echo h($vmListUrl); ?>">
                                     <?php echo csrf_field(); ?>
@@ -355,6 +351,15 @@ layout_header(($isTemplate ? __t('vms.title_template') : __t('vms.title_mission'
                                     <button class="button button-danger" type="submit" data-confirm="<?php echo h(__t('vms.confirm_delete', ['name' => (string) ($vm['vm_name'] ?? '')])); ?>"><?php echo h(__t('common.delete')); ?></button>
                                 </form>
                             <?php } ?>
+                            <?php if (!$isTemplate && can('vms.write', $user)) { ?>
+                                <form class="inline-form row-actions-wide" method="post" action="<?php echo h($vmListUrl); ?>">
+                                    <?php echo csrf_field(); ?>
+                                    <input type="hidden" name="action" value="reset_mecm_id">
+                                    <input type="hidden" name="vm_id" value="<?php echo h((string) $vm['id']); ?>">
+                                    <button class="button button-secondary" type="submit" data-confirm="<?php echo h(__t('portal.vm_mecm_reset_confirm', ['name' => (string) ($vm['vm_name'] ?? ''), 'hostname' => (string) ($vm['vm_hostname'] ?? '')])); ?>"><?php echo h(__t('portal.vm_mecm_reset_button')); ?></button>
+                                </form>
+                            <?php } ?>
+                            </div>
                         </td>
                     </tr>
                 <?php } ?>

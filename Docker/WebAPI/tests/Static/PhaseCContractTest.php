@@ -16,7 +16,7 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('function virtusphere_debug_enabled()', $debugGate);
         self::assertStringContainsString("envboot_optional('VIRTUSPHERE_DEBUG', '0')", $debugGate);
         self::assertStringContainsString("require_once __DIR__ . '/error_debug.php';", $source);
-        self::assertStringContainsString("\$details = ['Reference' => \$refId];", $source);
+        self::assertStringContainsString("\$details = ['Korrelations-ID' => \$refId];", $source);
         self::assertStringContainsString('if ($debug) {', $source);
         self::assertStringContainsString('Stacktrace', $source);
     }

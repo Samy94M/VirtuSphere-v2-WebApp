@@ -362,7 +362,7 @@ echo 'FAILED';
 
   await page.goto(`system_status.php#credential-${seed.esxi}`);
   const failedCard = page.locator(`#credential-${seed.esxi}`);
-  const failedLog = failedCard.locator(`.alert-error a[href="deploy_log.php?id=${seed.job}"]`);
+  const failedLog = failedCard.locator(`[data-inventory-failure] a[href="deploy_log.php?id=${seed.job}"]`);
   await expect(failedLog, 'the durable failure links the exact job that produced it').toBeVisible();
   await failedLog.click();
   await expect(page).toHaveURL(new RegExp(`deploy_log\\.php\\?id=${seed.job}$`));
@@ -382,7 +382,7 @@ echo 'FAILED';
 `, ['lib/repo/esxi_inventory.php']);
 
   await page.goto(`system_status.php#credential-${seed.esxi}`);
-  const alert = page.locator(`#credential-${seed.esxi} .alert-error`);
+  const alert = page.locator(`#credential-${seed.esxi} [data-inventory-failure]`);
   const repair = alert.getByRole('link', { name: /Ansible-Status öffnen|Open Ansible status/ });
   const jobLog = alert.locator(`a[href="deploy_log.php?id=${seed.job}"]`);
   await expect(repair, 'an ansible_* failure carries the way to the Ansible section').toBeVisible();
@@ -546,7 +546,7 @@ test('Systemstatus overview: the deviation card and its section agree', async ({
   const card = page.locator('.status-overview .status-overview-card', { hasText: 'Deviations' });
   await expect(card).toHaveCount(1);
   const cardBadge = (await card.locator('.badge').textContent()).trim();
-  const sectionBadge = (await page.locator('#deviations h2 .badge').textContent()).trim();
+  const sectionBadge = (await page.locator('#deviations .status-heading .badge').textContent()).trim();
 
   expect(cardBadge, 'strip and section render the same one count').toBe(sectionBadge);
 

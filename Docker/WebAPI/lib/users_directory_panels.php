@@ -24,7 +24,7 @@ function users_directory_app_key_help_html(string $error): string
 function users_render_directory(mysqli $db, array $actor, array $searchRows): void
 {
     if (!directory_schema_available($db)) {
-        ?><section class="panel"><h1><?php echo h(__t('directory.heading')); ?></h1><div class="alert alert-warning"><?php echo h(__t('directory.schema_pending')); ?></div></section><?php
+        ?><section class="panel"><h2><?php echo h(__t('directory.heading')); ?></h2><div class="alert alert-warning"><?php echo h(__t('directory.schema_pending')); ?></div></section><?php
         return;
     }
     $config = repo_directory_config($db);
@@ -34,7 +34,7 @@ function users_render_directory(mysqli $db, array $actor, array $searchRows): vo
     $actionUrl = users_url(VIRTUSPHERE_USERS_VIEW_DIRECTORY);
     ?>
     <section class="panel">
-        <h1><?php echo h(__t('directory.heading')); ?></h1>
+        <h2><?php echo h(__t('directory.heading')); ?></h2>
         <p><?php echo h(__t('directory.intro')); ?></p>
         <p class="muted"><?php echo h(__t('directory.setup_steps')); ?></p>
         <?php echo portal_badge($enabled ? 'success' : 'neutral', $enabled ? __t('directory.state_enabled') : __t('directory.state_disabled')); ?>

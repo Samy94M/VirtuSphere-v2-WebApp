@@ -232,9 +232,13 @@ final class SystemStatusPanelBranchTest extends TestCase
 
             foreach (VIRTUSPHERE_INVENTORY_ERROR_CATEGORIES as $category) {
                 $html = $this->renderEsxi($this->inventoryState('failed', 9723, $category), null, $user);
-                $alert = substr($html, (int) strpos($html, '<div class="alert alert-error">'));
-                $alert = substr($alert, 0, (int) strpos($alert, '</div>'));
                 $where = $label . '/' . $category;
+                // The failure box is found by its hook, not by its class: the
+                // class follows the level of the card's badge (PR-R1).
+                $start = strpos($html, ' data-inventory-failure>');
+                self::assertNotFalse($start, $where);
+                $alert = substr($html, $start);
+                $alert = substr($alert, 0, (int) strpos($alert, '</div>'));
 
                 self::assertStringContainsString(
                     h(connection_error_message($category, ['host' => 'esxi-23.example.test'])),

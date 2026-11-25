@@ -261,6 +261,16 @@ button.button:disabled:hover,
     max-width: 78ch;
 }
 
+/* A hint rendered inside its field's <label> stays secondary. The label is
+   bold for its caption, and the hint inherited that weight, so twelve lines of
+   explanation read louder than the field they explain. The subject a hint
+   names (.hint-subject) keeps its own weight. */
+
+label .hint,
+label > small {
+    font-weight: 400;
+}
+
 /* A pair of related fields plus the prose that explains them. The group takes two
    tracks of the parent grid and repeats its track sizing inside, so its controls
    keep the column width of the fields above while the hint runs directly under
@@ -281,6 +291,31 @@ button.button:disabled:hover,
 .field-group > .hint,
 .field-group > .alert {
     grid-column: 1 / -1;
+}
+
+/* Prose that explains only the second control of the group sits under that
+   control. As an unplaced child it landed in the first track, under the field
+   it does not describe. Prose about both controls spans the group instead
+   (.form-grid-full). */
+
+.field-group > .field-group-second {
+    grid-column: 2;
+}
+
+.field-group-second > p {
+    margin: 0;
+}
+
+/* What queueing will do right now, beside the button that does it. While the
+   button is disabled nothing can be queued, so the sentence would promise a
+   start that the open prerequisites above it rule out. */
+
+.queue-expectation {
+    color: var(--muted);
+}
+
+[data-deploy-queue-button]:disabled ~ .queue-expectation {
+    display: none;
 }
 
 /* Even under its own field the hint names its subject: the group holds two
@@ -493,11 +528,15 @@ label > .compound-field,
         width: 100%;
     }
 
+    /* minmax(0, 1fr), not 1fr: a bare 1fr track is at least as wide as its
+       widest content, and a select is as wide as its longest option. One long
+       mission name then set the width of the whole form and pushed it out of
+       the viewport. */
     .form-grid,
     .interface-row,
     .vm-form-grid,
     .checkbox-grid-aligned {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 
     /* One track left: a span would add an implicit second column and push the
@@ -508,6 +547,10 @@ label > .compound-field,
 
     .field-group {
         grid-column: auto;
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .field-group > .field-group-second {
+        grid-column: auto;
     }
 }

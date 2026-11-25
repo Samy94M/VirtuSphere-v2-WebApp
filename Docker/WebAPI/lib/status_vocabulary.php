@@ -165,6 +165,18 @@ function status_tone_for_variant(string $variant): string
 }
 
 /**
+ * The alert class of a message box that explains a badge: the box takes the
+ * level of its badge. A failed ESXi pull below the failure streak is a warning
+ * by esxi_inventory_ampel() and a pause is critical; a red box under an amber
+ * "Warnung", or an amber one under a red badge, stated two severities for one
+ * fact (PR-R1). Markup hooks therefore never use the class to find the box.
+ */
+function status_tone_alert_class(string $kind, string $state): string
+{
+    return status_tone_meta(status_tone_for($kind, $state))['variant'] === 'danger' ? 'alert-error' : 'alert-warning';
+}
+
+/**
  * Severity of a tone for roll-ups and the System status headline, on the one
  * scale of virtusphere_heartbeat_state_rank(): each tone ranks like the token it
  * stands for, so critical and unreachable rank with danger, limited with missing

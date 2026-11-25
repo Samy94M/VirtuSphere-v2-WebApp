@@ -60,6 +60,21 @@
     gap: var(--space-2);
 }
 
+/* A heading and the badge that states its level: one row, the badge beside the
+   heading rather than inside it, so the heading's text is the section's name
+   alone. The row gives the heading's margin up for the same reason as above. */
+.status-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+}
+
+.status-heading > h2,
+.status-heading > h3 {
+    margin: 0;
+}
+
 /* The heading copy of a section: title and its one-line hint. A grid rather than
    a margin, for the same reason as everything else here. */
 .status-section .section-heading-actions > div {

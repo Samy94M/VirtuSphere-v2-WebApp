@@ -109,6 +109,30 @@ td.actions .inline-form .button {
     border-left: 1px solid var(--border);
 }
 
+/* The pinned column covers whatever scrolls under it, so its width is the
+   price of the pin. Three buttons in one line took 378px of a 1100px wrap at
+   1440px, about twice what two rows need. The actions therefore sit in two rows:
+   edit and delete on the first, the MECM reset across the second. A grid, not
+   a wrapping row, so the split does not depend on how wide a language makes
+   the three labels; with one or two actions there is only the first row. */
+
+.row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    justify-content: start;
+    gap: 6px 8px;
+}
+
+.row-actions > .row-actions-wide {
+    grid-column: 1 / -1;
+}
+
+.row-actions > .inline-form,
+.row-actions > .inline-form > .button,
+.row-actions > .button {
+    width: 100%;
+}
+
 /* Stacking against the sticky header from base.css (th, z-index 1): the body's
    pinned cell has to clear the data cells, and the header's pinned cell has to
    clear both. The header rule also restores the header tone, which the

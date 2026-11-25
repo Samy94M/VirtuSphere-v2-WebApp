@@ -292,7 +292,7 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                 $showJobLogGap = $lastJobId <= 0 && can('deploy.run', $user);
                 ?>
                 <?php if ($state !== null && (string) ($state['last_status'] ?? '') === 'failed' && $failedCategory !== '') { ?>
-                    <div class="alert alert-error">
+                    <div class="alert <?php echo status_tone_alert_class('esxi', (string) $entry['health']); ?>" data-inventory-failure>
                         <?php echo h(connection_error_message($failedCategory, ['host' => (string) $credential['host']])); ?>
                         <?php if ($showAnsibleLink || $showJobLog || $showJobLogGap) { ?>
                             <div class="alert-actions">
@@ -309,7 +309,7 @@ function system_status_render_esxi(array $snapshot, array $user, int $selectedId
                 <?php // The pause names its own release condition, and that condition is
                       // met on another page: without the link the row states a fix and
                       // hides where it happens. ?>
-                <?php if ($state !== null && (int) ($state['paused_until_credential_change'] ?? 0) === 1) { ?><div class="alert alert-warning"><?php echo h(__t('system_status.inv_paused')); ?><?php if (can('credentials.manage', $user)) { ?> <a href="credentials.php"><?php echo h(__t('system_status.inv_open_credentials')); ?></a><?php } ?></div><?php } ?>
+                <?php if ($state !== null && (int) ($state['paused_until_credential_change'] ?? 0) === 1) { ?><div class="alert <?php echo status_tone_alert_class('esxi', (string) $entry['health']); ?>"><?php echo h(__t('system_status.inv_paused')); ?><?php if (can('credentials.manage', $user)) { ?> <a href="credentials.php"><?php echo h(__t('system_status.inv_open_credentials')); ?></a><?php } ?></div><?php } ?>
                 <?php if ($pending !== null) { ?><p><?php echo status_value_badge($pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? 'running' : 'warning', $pending['status'] === VIRTUSPHERE_DEPLOY_STATUS_RUNNING ? __t('system_status.inv_job_running') : __t('system_status.inv_job_queued')); ?> <?php if (can('deploy.run', $user)) { ?><a href="<?php echo h(deploy_job_log_url((int) $pending['id'])); ?>"><?php echo h(__t('system_status.inv_open_job_log')); ?><?php echo $linkContext; ?></a><?php } ?></p><?php } ?>
                 <div class="actions">
                     <?php if ($isSelected) { ?><a class="button button-secondary" href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('system_status.inv_close_details')); ?><?php echo $linkContext; ?></a><?php } else { ?><a class="button button-secondary" href="<?php echo h(system_status_url('credential-' . $credentialId, ['inventory' => $credentialId])); ?>"><?php echo h(__t('system_status.inv_open_details')); ?><?php echo $linkContext; ?></a><?php } ?>
@@ -341,7 +341,7 @@ function system_status_render_deviations(array $view, array $activeVlanNames, ar
     $hasVlanDeviation = (bool) ($view['has_vlan'] ?? false);
     ?>
     <section class="panel status-section" id="<?php echo h(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEVIATIONS); ?>">
-        <h2><?php echo h(__t('system_status.dev_heading')); ?> <?php echo deviation_count_badge($deviationCount, system_status_deviation_evidence_current($report)); ?></h2>
+        <div class="status-heading"><h2><?php echo h(__t('system_status.dev_heading')); ?></h2><?php echo deviation_count_badge($deviationCount, system_status_deviation_evidence_current($report)); ?></div>
         <p class="muted"><?php echo h(__t('system_status.dev_hint')); ?></p><?php echo system_status_verdict(deviation_count_tone($deviationCount, system_status_deviation_evidence_current($report))); ?>
         <?php system_status_render_deviation_evidence($report); ?>
         <?php if ($hasEvaluableEvidence) { ?>

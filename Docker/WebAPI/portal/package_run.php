@@ -44,7 +44,7 @@ if ($run === null) {
     <section class="panel">
         <p><a href="<?php echo h($returnUrl); ?>"><?php echo h(__t($fromList && $dateFilter['errors'] === []
             ? 'package_report.back_list' : 'package_report.back_vm')); ?></a></p>
-        <h1><?php echo h(__t('package_report.not_available')); ?></h1>
+        <h2><?php echo h(__t('package_report.not_available')); ?></h2>
     </section>
     <?php
 } else {

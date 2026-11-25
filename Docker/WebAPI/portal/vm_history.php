@@ -49,6 +49,8 @@ $page = repo_vm_history_page($connection, $vmId, $filter['sources'], $filter['fr
 $vmName = trim((string) ($vm['vm_name'] ?? ''));
 layout_header(__t('vm_history.title') . ($vmName !== '' ? ': ' . $vmName : ''), $user, $isTemplate ? 'templates' : 'missions', 'missions');
 ?>
+<?php // The stack owns the distance between the panels; without it they touched. ?>
+<div class="stack">
 <section class="panel" aria-labelledby="vm-history-filter-heading">
     <p><a href="<?php echo h(vm_edit_url($missionId, $vmId, null, $workContext)); ?>">&laquo; <?php echo h(__t('vm_history.back')); ?></a></p>
     <p class="muted"><?php echo h(__t('vm_history.intro')); ?></p>
@@ -64,4 +66,7 @@ layout_header(__t('vm_history.title') . ($vmName !== '' ? ': ' . $vmName : ''), 
 </section>
 <?php
 vm_history_render_retention($filter['sources']);
+?>
+</div>
+<?php
 layout_footer();

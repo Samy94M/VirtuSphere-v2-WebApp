@@ -48,7 +48,7 @@ layout_header(__t('package_report.list_heading'), $user, 'packages', 'packages')
 ?>
 <div class="stack">
     <section class="panel">
-        <h1><?php echo h(__t('package_report.list_heading')); ?></h1>
+        <h2><?php echo h(__t('package_report.list_heading')); ?></h2>
         <p class="muted"><?php echo h(__t('package_report.list_hint')); ?></p>
         <?php if ($filter['scope'] === 'package') { ?>
             <p><?php echo h(__t('package_report.fixed_package', [

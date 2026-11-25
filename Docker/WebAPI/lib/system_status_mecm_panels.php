@@ -241,14 +241,14 @@ function system_status_render_mecm(array $snapshot, array $user): void
 
         <?php if ($setupPending) { ?><details class="technical-details"><summary><?php echo h(__t('system_status.mecm_setup_sources_summary')); ?></summary><?php } ?>
         <div class="status-subgroup">
-            <h3><?php echo h(__t('system_status.mecm_sync_heading')); ?> <?php echo heartbeat_badge($syncState); ?></h3>
+            <div class="status-heading"><h3><?php echo h(__t('system_status.mecm_sync_heading')); ?></h3><?php echo heartbeat_badge($syncState); ?></div>
             <p class="muted"><?php echo h(__t('system_status.mecm_sync_hint')); ?></p>
             <?php if (!$setupPending) { echo system_status_verdict(status_tone_for('result', $syncState)); } ?>
             <?php system_status_render_run_rows($snapshot['mecm_sync']['rows'], $setupPending, $user); ?>
         </div>
 
         <div class="status-subgroup">
-            <h3><?php echo h(__t('system_status.mecm_site_heading')); ?> <?php echo mecm_site_badge($siteState); ?></h3>
+            <div class="status-heading"><h3><?php echo h(__t('system_status.mecm_site_heading')); ?></h3><?php echo mecm_site_badge($siteState); ?></div>
             <p class="muted"><?php echo h(__t('system_status.mecm_site_hint')); ?></p>
             <?php if (!$setupPending) { echo system_status_verdict(mecm_site_tone($siteState)); } ?>
             <?php system_status_render_site($snapshot['mecm_site']['rows']); ?>

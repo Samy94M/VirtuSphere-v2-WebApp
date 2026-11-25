@@ -48,7 +48,10 @@ function users_render_accounts(array $rows, array $actor, int $passwordMinLength
                     <td><?php echo h(role_label((string) $row['role'])); ?></td>
                     <td class="nowrap"><?php echo portal_badge($isActive ? 'success' : 'neutral', $isActive ? __t('common.yes') : __t('common.no')); ?><?php if ($isLocked) { ?> <span class="badge badge-warning" title="<?php echo h(__t('users.locked_until_hint', ['time' => portal_format_timestamp($lockedUntil)])); ?>"><?php echo h(__t('users.badge_locked')); ?></span><?php } ?><?php if ($isDirectory && (int) ($row['ad_account_enabled'] ?? 1) !== 1) { ?> <?php echo portal_badge('warning', __t('directory.ad_disabled')); ?><?php } ?></td>
                     <td><?php echo $isDirectory ? '<span class="muted">&mdash;</span>' : portal_badge((int) $row['must_change_password'] === 1 ? 'warning' : 'neutral', (int) $row['must_change_password'] === 1 ? __t('common.yes') : __t('common.no')); ?></td>
-                    <td class="nowrap"><?php $lastSeen = (string) ($row['last_seen_at'] ?? ''); echo $lastSeen !== '' ? h(portal_format_timestamp($lastSeen)) : '<span class="muted">—</span>'; ?></td>
+                    <?php // No .nowrap: the stacked action cell makes every row several lines
+                          // high anyway, and the 50px a one-line timestamp costs are what
+                          // pushed the table past its frame at 1440px. ?>
+                    <td><?php $lastSeen = (string) ($row['last_seen_at'] ?? ''); echo $lastSeen !== '' ? h(portal_format_timestamp($lastSeen)) : '<span class="muted">—</span>'; ?></td>
                     <td class="actions actions-stack">
                         <?php if ($isLocked) { ?>
                         <form class="inline-form" method="post" action="<?php echo h($actionUrl); ?>">

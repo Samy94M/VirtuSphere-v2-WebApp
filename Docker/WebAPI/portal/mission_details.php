@@ -296,7 +296,12 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                         'attributes' => form_control_attrs('update', 'hypervisor_datacenter'),
                     ]); ?><?php echo form_error_html('update', 'hypervisor_datacenter'); ?></label>
                 <?php } ?>
-                <?php if ($hasLocationHint) { ?><div id="<?php echo h($locationHintId); ?>"><?php } ?>
+                <?php // The prose needs a placement of its own inside the group: without a
+                      // class the wrapper fell into the first track, so a hint about the
+                      // datacenter stood under the datastore. Prose about the datacenter
+                      // alone goes under that field; once a note concerns both controls,
+                      // all of it spans the group, as in the VM editor. ?>
+                <?php if ($hasLocationHint) { ?><div class="<?php echo $locationNotes === [] ? 'field-group-second' : 'form-grid-full'; ?>" id="<?php echo h($locationHintId); ?>"><?php } ?>
                 <?php foreach ($locationHints as [$hintSubject, $hintText]) { ?>
                     <p class="hint"><span class="hint-subject"><?php echo h($hintSubject); ?>:</span> <?php echo h($hintText); ?></p>
                 <?php } ?>

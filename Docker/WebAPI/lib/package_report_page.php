@@ -177,7 +177,7 @@ function package_report_render_detail(array $run, array $steps, string $returnUr
     <section class="panel">
         <p><a href="<?php echo h($returnUrl); ?>"><?php echo h(__t($listFilter !== []
             ? 'package_report.back_list' : 'package_report.back_vm')); ?></a></p>
-        <h1><?php echo h(__t('package_report.detail_heading')); ?></h1>
+        <h2><?php echo h(__t('package_report.detail_heading')); ?></h2>
         <p><?php echo h((string) $run['project_name'] . ' ' . (string) $run['package_version']); ?></p>
         <p><?php echo package_report_result_badge($run); ?></p>
         <p><?php echo portal_copy_local_link($canonicalUrl, __t('package_report.copy_run_link')); ?></p>

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/log_redaction.php';
 require_once __DIR__ . '/log_rotation.php';
 require_once __DIR__ . '/error_debug.php';
+require_once __DIR__ . '/error_page_style.php';
 
 /**
  * The stable mark of the portal error page (virtusphere_render_error_page()).
@@ -352,7 +353,9 @@ function virtusphere_render_error_page(Throwable $exception, string $refId): voi
         header('Referrer-Policy: same-origin');
     }
 
-    $details = ['Reference' => $refId];
+    // The word of the log viewer's filter (i18n.md R15): whoever copies the id
+    // from this page finds the field it belongs in by its name.
+    $details = ['Korrelations-ID' => $refId];
     $debug = virtusphere_debug_enabled();
     if ($debug) {
         $details += [
@@ -363,28 +366,26 @@ function virtusphere_render_error_page(Throwable $exception, string $refId): voi
         ];
     }
 
-    echo "<!doctype html>\n<html lang=\"de\">\n<head>\n<meta charset=\"utf-8\">\n<title>VirtuSphere Fehler</title>\n";
-    echo '<style nonce="' . htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8') . '">';
-    echo 'body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#1f2937;color:#f9fafb;}';
-    echo 'main{max-width:900px;margin:0 auto;padding:32px;}';
-    echo 'h1{font-size:28px;margin:0 0 16px;}';
-    echo 'p{color:#e5e7eb;line-height:1.5;}';
-    echo 'dl{display:grid;grid-template-columns:minmax(140px,220px) 1fr;gap:8px 16px;margin:24px 0;}';
-    echo 'dt{color:#cbd5e1;font-weight:700;}dd{margin:0;overflow-wrap:anywhere;}';
-    echo 'pre{white-space:pre-wrap;overflow:auto;background:#111827;border:1px solid #475569;padding:16px;}';
-    echo '</style></head><body><main ' . VIRTUSPHERE_ERROR_PAGE_ATTRIBUTE . '="1">';
+    echo "<!doctype html>\n<html lang=\"de\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Fehler - VirtuSphere</title>\n";
+    echo '<style nonce="' . htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8') . '">' . virtusphere_error_page_css() . '</style></head>';
+    echo '<body><main ' . VIRTUSPHERE_ERROR_PAGE_ATTRIBUTE . '="1"><section>';
     echo '<h1>VirtuSphere Fehler</h1>';
     echo '<p>Ein unerwarteter Fehler ist aufgetreten. Details wurden intern protokolliert.</p><dl>';
     foreach ($details as $name => $value) {
         echo '<dt>' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</dt><dd>' . htmlspecialchars($value, ENT_QUOTES, 'UTF-8') . '</dd>';
     }
     echo '</dl>';
+    // The way back. Two plain links, because a link needs nothing that can
+    // have failed: the empty href is this address again, fetched by GET (after
+    // a failed POST nothing is sent twice), and the dashboard is the page every
+    // signed-in user may open. Both are relative to the portal page that failed.
+    echo '<nav><a href="">Seite neu laden</a><a href="dashboard.php">Zurück zum Dashboard</a></nav>';
     if ($debug) {
         echo '<h2>Stacktrace</h2><pre>';
         echo htmlspecialchars(virtusphere_redact_log_text($exception->getTraceAsString()), ENT_QUOTES, 'UTF-8');
         echo '</pre>';
     }
-    echo "</main></body></html>\n";
+    echo "</section></main></body></html>\n";
 }
 
 function virtusphere_error_nonce(): string

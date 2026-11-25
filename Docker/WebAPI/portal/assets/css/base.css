@@ -230,6 +230,17 @@ textarea:disabled {
     background: var(--surface);
 }
 
+/* A selected value longer than its field ends in an ellipsis. Without it the
+   text ran under the native arrow and was cut mid-letter there. A select does
+   not wrap in Chromium or Firefox, so the closed field cannot show more than
+   one line; the open list still shows every value in full. Only the select
+   that is its label's own field: the ellipsis keeps clear of the arrow, and in
+   a narrow unit or row select ("Maske", a role in a table cell) that margin
+   would cut a word that fits today. */
+label > select {
+    text-overflow: ellipsis;
+}
+
 textarea {
     min-height: 110px;
     resize: vertical;
@@ -259,7 +270,13 @@ code {
     overflow-wrap: anywhere;
 }
 
+/* The wrap is the containing block of everything positioned inside its table.
+   Without `position` an absolutely positioned child (a visually hidden label in
+   an action cell) is placed against the page, at its place in the unscrolled
+   table: outside the wrap's clip, so the whole page scrolled sideways by the
+   width of a table that itself scrolls inside the wrap. */
 .table-wrap {
+    position: relative;
     overflow: auto;
     max-height: 70vh;
     border: 1px solid var(--border);

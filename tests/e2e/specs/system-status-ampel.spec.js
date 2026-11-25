@@ -352,7 +352,7 @@ echo 'JSON' . json_encode(['esxi' => $esxi]) . 'JSON';
 `, ['lib/repo/credentials.php', 'lib/repo/esxi_inventory.php']);
   try {
     await page.goto('system_status.php');
-    const badge = page.locator('#deviations h2 .badge');
+    const badge = page.locator('#deviations .status-heading .badge');
     await expect(badge).toHaveCount(1);
     // The scan runs because an inventory now exists; the not-checked branch has
     // its own test below, which removes that precondition on purpose.
@@ -385,7 +385,7 @@ echo 'JSON' . json_encode(['ids' => $rows]) . 'JSON';
     await page.goto('system_status.php');
     await expect(page.locator('article.inventory-card')).toHaveCount(0);
 
-    const badge = page.locator('#deviations h2 .badge');
+    const badge = page.locator('#deviations .status-heading .badge');
     await expect(badge).toHaveText(/Keine Daten|No data/);
     await expect(badge).toHaveClass(/badge-neutral/);
     await expect(badge).not.toHaveClass(/badge-success/);
