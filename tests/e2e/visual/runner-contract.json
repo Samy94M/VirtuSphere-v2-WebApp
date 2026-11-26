@@ -94,7 +94,7 @@
             "href": "system_status.php#deploy-service",
             "className": "badge badge-danger",
             "icon": "critical",
-            "text": "Manuelle Klärung nötig"
+            "text": "Handlung nötig"
           },
           {
             "href": "system_status.php#mecm",

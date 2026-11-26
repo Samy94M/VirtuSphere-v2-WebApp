@@ -140,7 +140,7 @@ test('an old link with the removed attention filter opens the normal mission lis
   expect(response.status()).toBe(200);
   const row = page.locator(`#mission-${ids.mission.id}`);
   await expect(row, 'a mission without an overdue VM is listed: the parameter has no effect').toBeVisible();
-  await expect(page.getByRole('link', { name: 'Clear filter' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Reset filters' })).toHaveCount(0);
   const vmList = await row.getByRole('link', { name: 'VMs', exact: true }).getAttribute('href');
   expect(vmList).not.toContain('attention');
 

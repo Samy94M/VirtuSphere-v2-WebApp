@@ -31,7 +31,7 @@ return [
     'mecm_not_ready' => 'Noch nicht bereit',
     'mecm_pending' => 'Wartet auf MECM',
     'mecm_registered' => 'In MECM registriert',
-    'mecm_deploy_failed' => 'MECM-Abgleich offen nach Fehler',
+    'mecm_deploy_failed' => 'MECM-Sync offen nach Fehler',
     'mecm_unknown' => 'Unbekannter Zustand',
 
     // Auftragsstatus (aktive und terminale Menge aus lib/deploy_constants.php).
@@ -87,7 +87,7 @@ return [
     // Befunde (VIRTUSPHERE_VM_FINDINGS, lib/vm_phase.php). Der Zeitbestandteil
     // fällt nur weg, wenn kein gültiger Serverzeitpunkt vorliegt; dann greift die
     // Variante ohne Zeit oder ohne Herkunft. `mecm_sync_deploy_failed` nutzt `mecm_deploy_failed`.
-    'finding_create_uncertain' => 'Create ungeklärt (Auftrag :job_id, Einheit :position)',
+    'finding_create_uncertain' => 'Anlegen ungeklärt (Auftrag :job_id, Einheit :position)',
     'finding_job_failed' => 'Auftrag fehlgeschlagen: :mode, :time',
     'finding_create_failed' => 'Auf ESXi nicht angelegt: :mode, :time',
     'finding_job_failed_unknown' => 'Auftrag fehlgeschlagen',
@@ -101,7 +101,7 @@ return [
     'finding_mecm_pending_since' => 'Wartet auf MECM seit :since',
     'finding_mecm_pending' => 'Wartet auf MECM',
     'finding_powered_off' => 'Laut Inventar ausgeschaltet (Stand :time)',
-    'finding_os_install_overdue' => 'OS-Installation länger als :hours h beobachtet',
+    'finding_os_install_overdue' => 'Installation des Betriebssystems länger als :hours h beobachtet',
     'finding_pxe_unwatched' => 'Einschaltbeleg fehlt',
     'finding_os_install_watching' => 'Beobachtung läuft seit :since',
     'finding_client_phase_failed' => 'Client-Phase fehlgeschlagen: :phase',
@@ -112,7 +112,7 @@ return [
     'finding_more_title' => ':count weitere Befunde, alle im VM-Editor',
     // Kurzform je Befund für die Tabellen (SP4, F7): ohne Zeit, Zahl und Namen;
     // der volle Satz steht im Tooltip und im VM-Editor.
-    'finding_short_create_uncertain' => 'Create ungeklärt',
+    'finding_short_create_uncertain' => 'Anlegen ungeklärt',
     'finding_short_job_failed' => 'Auftrag fehlgeschlagen',
     'finding_short_create_failed' => 'Nicht angelegt',
     'finding_short_job_outcome_unknown' => 'Ausgang unbekannt',
@@ -128,7 +128,7 @@ return [
     'finding_short_client_phase_failed' => 'Client-Phase fehlgeschlagen',
     'finding_short_client_phase_unconfirmed' => 'Client-Phase unbestätigt',
     'finding_short_package_run_failed' => 'Paketbericht fehlgeschlagen',
-    'finding_short_mecm_sync_deploy_failed' => 'MECM-Abgleich offen',
+    'finding_short_mecm_sync_deploy_failed' => 'MECM-Sync offen',
     // Grund des Devices Sync am Befund „Wartet auf MECM“ (MX1). Er steht im vollen
     // Satz (VM-Editor und Tooltip der Tabellenzelle), nie in der Kurzform; ab
     // einem gewissen Alter mit „Stand“ und Beobachtungszeit.
@@ -139,7 +139,7 @@ return [
     'sync_cause_mission_missing' => 'VM ohne Mission',
     'sync_cause_mac_missing' => 'keine MAC auf der WDS-Portgruppe',
     'sync_cause_pxe_nic_ambiguous' => 'mehrere Netzwerkkarten auf der WDS-Portgruppe',
-    'sync_cause_mac_conflict' => 'Name und MAC zeigen auf verschiedene MECM-Geräte',
+    'sync_cause_mac_conflict' => 'Windows-Hostname und MAC passen in MECM nicht zusammen',
     'sync_cause_device_name_invalid' => 'Windows-Hostname taugt nicht als Gerätename',
     'sync_cause_device_identity_ambiguous' => 'mehrere MECM-Datensätze passen auf die VM',
     'sync_cause_previous_resource_present' => 'altes MECM-Gerät besteht noch',
@@ -149,14 +149,14 @@ return [
     'sync_cause_resource_id_pending' => 'MECM hat noch keine ResourceID vergeben',
     'sync_cause_stale_rollout_revision' => 'Scan mit veraltetem Stand, der nächste läuft neu',
     'sync_cause_collection_missing' => 'eine {mecm:collection} der VM fehlt in MECM',
-    'sync_cause_collection_folder_failed' => 'Ordner einer {mecm:collection} nicht angelegt oder nicht verschoben',
+    'sync_cause_collection_folder_failed' => 'Ordner einer {mecm:collection} nicht angelegt oder nicht verschoben (hält die VM nicht auf)',
     'sync_cause_collection_assign_failed' => 'Zuordnung zu einer {mecm:collection} fehlgeschlagen',
     'sync_cause_collection_remove_failed' => 'eigene Zuordnung zu einer {mecm:collection} nicht entfernt',
     'sync_cause_membership_provenance_invalid' => 'Herkunft einer Zuordnung zu einer {mecm:collection} unvollständig',
     'sync_cause_membership_identity_ambiguous' => '{mecm:Collection} nicht eindeutig',
     'sync_cause_membership_query_failed' => 'Mitgliedschaften in einer {mecm:collection} nicht sicher lesbar',
-    'sync_cause_membership_operation_uncertain' => 'Zuordnung zur {mecm:collection} nach Abbruch unbestätigt',
-    'sync_cause_membership_report_pending' => 'Zuordnung zur {mecm:collection} bestätigt, Meldung folgt',
+    'sync_cause_membership_operation_uncertain' => 'Ausgang einer Zuordnung zur {mecm:collection} ungeklärt, wird im nächsten Lauf geprüft',
+    'sync_cause_membership_report_pending' => 'Zuordnung zur {mecm:collection} nachgemeldet, der nächste Scan prüft die VM erneut',
     'sync_cause_membership_report_failed' => 'Meldung der Zuordnung zur {mecm:collection} ans Portal fehlgeschlagen',
     'sync_cause_resource_update_failed' => 'Meldung der ResourceID ans Portal fehlgeschlagen',
 ];

@@ -83,7 +83,7 @@ return [
     // VM findings (VIRTUSPHERE_VM_FINDINGS, lib/vm_phase.php). The time part drops
     // out only when no valid server time exists; then the variant without time or
     // origin applies. `mecm_sync_deploy_failed` reuses `mecm_deploy_failed`.
-    'finding_create_uncertain' => 'Create unresolved (job :job_id, unit :position)',
+    'finding_create_uncertain' => 'Creation unresolved (job :job_id, unit :position)',
     'finding_job_failed' => 'Job failed: :mode, :time',
     'finding_create_failed' => 'Not created on ESXi: :mode, :time',
     'finding_job_failed_unknown' => 'Job failed',
@@ -97,7 +97,7 @@ return [
     'finding_mecm_pending_since' => 'Waiting for MECM since :since',
     'finding_mecm_pending' => 'Waiting for MECM',
     'finding_powered_off' => 'Powered off according to the inventory (as of :time)',
-    'finding_os_install_overdue' => 'OS installation observed for longer than :hours h',
+    'finding_os_install_overdue' => 'Operating system installation observed for longer than :hours h',
     'finding_pxe_unwatched' => 'Power-on evidence missing',
     'finding_os_install_watching' => 'Observation running since :since',
     'finding_client_phase_failed' => 'Client phase failed: :phase',
@@ -108,7 +108,7 @@ return [
     'finding_more_title' => ':count more findings, all in the VM editor',
     // Short form per finding for the tables (SP4, F7): no time, number or name;
     // the full sentence is the tooltip and the VM editor's text.
-    'finding_short_create_uncertain' => 'Create unresolved',
+    'finding_short_create_uncertain' => 'Creation unresolved',
     'finding_short_job_failed' => 'Job failed',
     'finding_short_create_failed' => 'Not created',
     'finding_short_job_outcome_unknown' => 'Outcome unknown',
@@ -135,7 +135,7 @@ return [
     'sync_cause_mission_missing' => 'VM without a mission',
     'sync_cause_mac_missing' => 'no MAC on the WDS port group',
     'sync_cause_pxe_nic_ambiguous' => 'several network adapters on the WDS port group',
-    'sync_cause_mac_conflict' => 'name and MAC point to different MECM devices',
+    'sync_cause_mac_conflict' => 'Windows hostname and MAC do not match in MECM',
     'sync_cause_device_name_invalid' => 'Windows hostname is not a valid device name',
     'sync_cause_device_identity_ambiguous' => 'several MECM records match the VM',
     'sync_cause_previous_resource_present' => 'old MECM device still exists',
@@ -145,14 +145,14 @@ return [
     'sync_cause_resource_id_pending' => 'MECM has not assigned a ResourceID yet',
     'sync_cause_stale_rollout_revision' => 'scan used an outdated state, the next one starts over',
     'sync_cause_collection_missing' => 'a {mecm:collection} of the VM is missing in MECM',
-    'sync_cause_collection_folder_failed' => 'folder of a {mecm:collection} not created or not moved',
+    'sync_cause_collection_folder_failed' => 'folder of a {mecm:collection} not created or not moved (does not hold the VM)',
     'sync_cause_collection_assign_failed' => 'assignment to a {mecm:collection} failed',
     'sync_cause_collection_remove_failed' => 'own {mecm:collection} assignment not removed',
     'sync_cause_membership_provenance_invalid' => 'origin of a {mecm:collection} assignment incomplete',
     'sync_cause_membership_identity_ambiguous' => '{mecm:collection} not unique',
     'sync_cause_membership_query_failed' => '{mecm:collection} memberships not reliably readable',
-    'sync_cause_membership_operation_uncertain' => '{mecm:collection} assignment unconfirmed after an abort',
-    'sync_cause_membership_report_pending' => '{mecm:collection} assignment confirmed, report follows',
+    'sync_cause_membership_operation_uncertain' => 'outcome of a {mecm:collection} assignment unclear, checked again on the next run',
+    'sync_cause_membership_report_pending' => '{mecm:collection} assignment reported late, the next scan checks the VM again',
     'sync_cause_membership_report_failed' => 'reporting the {mecm:collection} assignment to the portal failed',
     'sync_cause_resource_update_failed' => 'reporting the ResourceID to the portal failed',
 ];

@@ -9,7 +9,7 @@ Die Diagramme beschreiben den ausgelieferten Code. Wer eine Ampelregel, eine Que
 | Bereitstellungsdienst | Laufzeitidentität, Supervisor, Worker-Status, Warteschlange, Auftragsannahme, Prüffälle | Verfügbarkeit, Auftragsannahme und Aufmerksamkeit | Summe der Karte; eine Pause ist nie grün |
 | Active Directory | LDAPS-Konfiguration und Domänencontroller | je Controller | Gesamtzustand |
 | MECM | Laufberichte der drei Sync-Aufgaben und des Site-Health-Reporters | je Aufgabe | zwei Zeilen: Datenfluss (schlechteste Sync-Zeile) und Standort (Site-Bewertung) |
-| Ansible-Test | Volltest je Ansible-Zugang, manuell oder geplant | je Zugang | schlechteste Zeile |
+| Ansible-Volltest | Volltest je Ansible-Zugang, manuell oder geplant | je Zugang | schlechteste Zeile |
 | ESXi-Inventar | Inventarabruf je ESXi-Zugang | je Zugang | schlechteste Zeile |
 | Abweichungen | Missionen und VMs gegen den Inventar-Cache | Anzahl Befunde | Anzahl; null ist nur mit vollständigem, aktuellem Nachweis grün |
 | Host und Backup | Backup-Statuskanal des Docker-Hosts: Backup, Restore-Test, Prüfsummen, bei Befund Backup-Verschlüsselung, HTTPS-Zertifikat | je Prüfung | schlechteste Zeile; „Keine Daten“ ist nie grün |
@@ -239,7 +239,7 @@ flowchart TD
 
 Schwellen: Die Warnschwelle liegt bei `VIRTUSPHERE_HEARTBEAT_WARN_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_WARN_FLOOR_SECONDS`; die Gefahrschwelle bei `VIRTUSPHERE_HEARTBEAT_DANGER_MULTIPLIER` Intervallen, mindestens `VIRTUSPHERE_HEARTBEAT_DANGER_FLOOR_SECONDS`; die Laufschonfrist eines offenen Laufs ist der größte Wert aus Warnschwelle, `VIRTUSPHERE_RUN_GRACE_SECONDS` und dem `VIRTUSPHERE_RUN_DURATION_GRACE_FACTOR`-fachen der Dauer, die der Reporter mit seinem letzten Abschluss gemeldet hat (dieser Anteil höchstens `VIRTUSPHERE_RUN_DURATION_GRACE_MAX_SECONDS`). Ein langer Autoimporter-Scan bleibt so in der Farbe des vorigen Ergebnisses, statt nach der festen Frist `VIRTUSPHERE_RUN_GRACE_SECONDS` rot und beim Abschluss wieder gelb zu werden; ein Lauf, der deutlich länger braucht als der letzte, wird weiterhin rot. Seit AL1 hasht der Autoimporter nur neue oder geänderte Dateien, ruhige Läufe sind daher kurz. Der erste Lauf nach einem Neustart der Aufgabe hasht dagegen den ganzen Baum und kann bei vielen großen Installern die feste Frist überschreiten; die Karte zeigt ihn dann bis zum Abschluss als verspätet. Dasselbe gilt für einen langen Vollscan nach kurzen ruhigen Läufen, weil die Schonfrist an der zuletzt gemeldeten Dauer hängt (AR1-Folgepunkt, in SY3 geprüft und offen gelassen: Die Statuszeile speichert nur die letzte Dauer, eine längste jüngere Scandauer bräuchte Laufhistorie oder ein Reporterfeld). Ohne gemeldete Dauer (erster Lauf, Legacy-Vorgeschichte) gelten nur die festen Werte. Erst nach ihr wird ein offener Lauf bewertet, und die Gefahrschwelle entscheidet zwischen Warnung und Kritisch. Liegt die Gefahrschwelle unter der Laufschonfrist, wie bei kurzen Takten, springt ein hängender Lauf nach der Schonfrist sofort auf Rot. Über den Zeilen stehen zwei Hinweise, die keine Ampel färben: abgewiesene Maschinenzugriffe des letzten Tages mit IP, und frische Meldungen von mehr als einer IP-Adresse.
 
-## Ansible-Test
+## Ansible-Volltest
 
 Nachweis ist der Volltest je Ansible-Zugang. Er läuft über **Volltest jetzt starten**, über **Verbindung und Umgebung prüfen** (Zugangsdaten) oder geplant als Kindprozess des Deploy-Workers. Der letzte tatsächlich bearbeitete Missionsauftrag steht daneben, färbt die Ampel aber nicht.
 

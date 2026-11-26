@@ -79,7 +79,7 @@ echo 'JSON' . json_encode(['credential' => $credential, 'job' => $processed, 'ne
   await page.goto('system_status.php');
   const row = page.locator('#ansible article.status-row').filter({ hasText: `${MARK}-ansible-status` });
   await expect(row.locator('.status-row-head .badge')).toHaveText(/Veraltet|Stale/);
-  await expect(row).toContainText(/Letzter vom Worker bearbeiteter Missionsauftrag|Last mission job processed by the worker/);
+  await expect(row).toContainText(/Letzter vom Bereitstellungsdienst bearbeiteter Missionsauftrag|Last mission job processed by the deploy service/);
   await expect(row).toContainText(/Erfolgreich|Succeeded/);
   // Which mode ran decides how much the row proves, so it has to be readable -
   // and since Etappe 13 that means the portal's own name for the mode, not the

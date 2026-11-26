@@ -25,9 +25,9 @@ return [
     'create_mission' => 'Create mission',
     'empty' => 'No missions found.',
     'backup_banner_title' => 'Backup notice:',
-    'backup_banner_failed' => 'The last backup failed. Please check the backup log and the cron job.',
-    'backup_banner_stale' => 'The expected backup run did not happen, grace window included. Is the cron job on the host running?',
+    'backup_banner_failed' => 'The last backup failed. Please check the backup log and the schedule (cron or systemd timer).',
+    'backup_banner_stale' => 'The expected backup run did not happen, grace window included. Is the schedule (cron or systemd timer) running on the host?',
     'backup_banner_disk_low' => 'Low free space on the backup volume. Check retention or disk space.',
     'backup_banner_unknown' => 'No backup status available. The script has never run or the status mount is missing.',
-    'backup_banner_link' => 'Go to backup card',
+    'backup_banner_link' => 'Go to Settings → Backup',
 ];

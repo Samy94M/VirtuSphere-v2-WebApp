@@ -7,7 +7,7 @@ return [
     'tabs_label' => 'Help topics',
     'tab_overview' => 'Overview',
     'tab_missions' => 'Missions and VMs',
-    'tab_deploy' => 'Deployment',
+    'tab_deploy' => 'Deploy',
     'tab_packages' => 'Packages',
     'tab_system_status' => 'System status and logs',
     'tab_credentials' => 'Credentials',

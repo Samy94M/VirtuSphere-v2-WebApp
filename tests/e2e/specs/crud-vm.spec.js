@@ -359,7 +359,7 @@ test('bulk MECM reset: Cancel changes nothing, Confirm re-queues the selection',
   }
   const outcome = page.locator('.alert-success').first();
   await expect(outcome, 'the exact bulk scope is named').toContainText('2 of 2');
-  await expect(outcome, 'the message does not claim an MECM deletion').toContainText(/were not deleted/i);
+  await expect(outcome, 'the message does not claim an MECM deletion').toContainText(/If not done yet: delete the old device in MECM/i);
   await expect(outcome.locator('.alert-actions a'), 'the next read path is the MECM status').toHaveAttribute('href', 'system_status.php#mecm');
 });
 

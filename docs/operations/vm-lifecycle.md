@@ -75,7 +75,7 @@ flowchart TD
     not_ready[Noch nicht bereit] -->|MAC-Rückruf| pending[Wartet auf MECM]
     pending -->|Device-Sync meldet die ResourceID| registered[In MECM registriert]
     registered -.->|MECM-ID zurücksetzen| pending
-    not_ready -->|Auftrag scheitert| deploy_failed[MECM-Abgleich offen nach Fehler]
+    not_ready -->|Auftrag scheitert| deploy_failed[MECM-Sync offen nach Fehler]
     pending -->|Auftrag scheitert| deploy_failed
     registered -->|Auftrag scheitert| deploy_failed
     deploy_failed -->|MAC-Rückruf oder MECM-ID zurücksetzen| pending

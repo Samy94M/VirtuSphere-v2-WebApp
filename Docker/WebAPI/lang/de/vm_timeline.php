@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 return [
-    'heading' => 'Zeitleiste',
-    'hint' => 'Status, Aufträge, Paketläufe und Client-Meldungen dieser VM, neueste zuerst. Statuseinträge, die älter sind als :days Tage, werden automatisch entfernt.',
+    'heading' => 'Chronik (neueste Einträge)',
+    'hint' => 'Status, Aufträge, Paketberichte und Client-Meldungen dieser VM, neueste zuerst. Ältere Einträge entfernen die Quellen nach ihrer jeweiligen Aufbewahrungsfrist; die Fristen stehen in der Chronik.',
     'truncated' => 'Es werden nur die neuesten :limit Einträge gezeigt. Ältere Ereignisse können fehlen.',
     'empty' => 'Keine Einträge.',
     'th_source' => 'Quelle',
@@ -15,8 +15,8 @@ return [
     'job_started' => 'Auftrag #:id gestartet: :mode',
     'job_started_no_mode' => 'Auftrag #:id gestartet',
     'job_finished' => 'Auftrag #:id beendet',
-    'package_received' => 'Paketlauf :package empfangen',
-    'package_completed' => 'Paketlauf :package abgeschlossen',
+    'package_received' => 'Paketbericht :package empfangen',
+    'package_completed' => 'Versuch mit :package abgeschlossen',
     'package_failed' => 'Fehler gemeldet',
     'package_ok' => 'Ohne gemeldeten Fehler',
     'client_started' => 'gestartet',
@@ -43,8 +43,8 @@ return [
     'note_job_cancelled' => 'Auftrag #:job wurde abgebrochen',
     'note_job_mac_import_partial' => 'Auftrag #:job: MAC-Import nur teilweise',
     'note_job_restored' => 'Auftrag #:job ist ohne Exportschritt erfolgreich; Lebenszyklus wiederhergestellt',
-    'note_job_reaped' => 'Auftrag #:job nach veraltetem Herzschlag beendet',
-    'note_job_cancelled_reaped' => 'Auftrag #:job abgebrochen; nach veraltetem Herzschlag vom Aufräumdienst abgeschlossen',
-    'note_job_create_incomplete' => 'Auftrag #:job vor der Pipeline beendet, weil der Create-Abschnitt nicht abgeschlossen wurde',
+    'note_job_reaped' => 'Auftrag #:job nach veraltetem Lebenszeichen beendet',
+    'note_job_cancelled_reaped' => 'Auftrag #:job abgebrochen; nach veraltetem Lebenszeichen vom Wartungsdienst abgeschlossen',
+    'note_job_create_incomplete' => 'Auftrag #:job vor der Pipeline beendet, weil der Anlageschritt nicht abgeschlossen wurde',
     'note_lifecycle_kept' => '(Lebenszyklus bleibt bei „:state“, ein späterer Zustand wird nicht überschrieben)',
 ];

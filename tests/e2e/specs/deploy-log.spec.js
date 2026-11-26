@@ -78,14 +78,16 @@ echo 'SEEDED';
   await page.goto(`deploy_log.php?id=${job}`);
   const history = page.locator('[data-deploy-history]');
   await expect(history).toContainText('Job started');
-  await expect(history).toContainText('14.09.2026');
+  await expect(history).toContainText('2026-09-14');
   await expect(history).toContainText('No individual VM results');
   const cards = await history.locator('.grid').boundingBox();
   const steps = await history.locator('.panel').boundingBox();
   expect(steps.y).toBeGreaterThan(cards.y + cards.height);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   const payload = await (await page.request.get(`deploy_log.php?id=${job}&format=json`)).json();
-  expect(payload.history_html).toContain('14.09.2026');
+  // The API request context sends no Accept-Language, so the JSON renders in the
+  // default locale; the date format follows the display language only (i18n R15, E4).
+  expect(payload.history_html).toMatch(/2026-09-14|14\.09\.2026/);
   expect(payload.history_html).not.toContain('Deploy job claimed by history-fixture');
 });
 
