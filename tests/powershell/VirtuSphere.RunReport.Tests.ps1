@@ -693,9 +693,12 @@ Describe 'Device-Sync entlaesst keine VM mit unvollstaendiger Zuweisung' {
         # Missionswechsel weiter das alte Image, waehrend MECM korrekt aussah.
         # Ein "naechster Lauf", auf den sich das vertagen liesse, existiert fuer
         # diese VM nicht mehr.
+        # TS1-K5: auch der Replay-Catch nennt membership_report_failed; der
+        # Report-Catch nach dem Apply ist der mit stale_rollout_revision.
         $catches = @($script:DeviceSyncAst.FindAll({
             param($n) $n -is [System.Management.Automation.Language.CatchClauseAst] -and
-                      $n.Extent.Text -match 'membership_report_failed'
+                      $n.Extent.Text -match 'membership_report_failed' -and
+                      $n.Extent.Text -match 'stale_rollout_revision'
         }, $true))
         $catches.Count | Should -Be 1 -Because 'sonst prueft dieser Test die falsche Stelle'
 

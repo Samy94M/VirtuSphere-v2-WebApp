@@ -437,9 +437,15 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
      gibt es nicht.
    - Direct-Membership-Regeln für OS-, Paket- und Mission-Collections setzen.
      Vor jedem Remote-Write wird ein lokaler Journal-Intent dauerhaft
-     gespeichert. Nur ein bestätigtes Remote-Ergebnis wird idempotent ans
-     Portal nachgemeldet; ein beim Absturz offener Intent blockiert als
-     ungeklärter Ownership-Fall statt eine vorhandene Regel zu adoptieren.
+     gespeichert. Nur ein bestätigtes Remote-Ergebnis des aktuellen Rollouts
+     wird idempotent ans Portal nachgemeldet. Ein beim Absturz offener Intent,
+     ein Eintrag nach fehlgeschlagenem Aufruf und ein Eintrag einer anderen
+     Revision oder ResourceID werden im nächsten Lauf aus der gelesenen
+     Mitgliedschaft geklärt und aus dem Journal genommen, ohne eine
+     vorhandene Regel zu adoptieren und ohne etwas zu melden; danach plant der
+     Lauf neu (ADR-0034 Amendment 9). Gesperrt bleibt die VM nur, solange die
+     Mitgliedschaft nicht lesbar ist oder das alte MECM-Gerät die Regel noch
+     trägt.
      Beschädigte Journale werden unverändert quarantiniert; vorhandene
      `membership-journal.json.quarantine.*.json` sperren auch spätere Starts.
      Ein neues Hauptjournal hebt diese Grenze nicht auf. Vor dem Entfernen
@@ -450,6 +456,9 @@ Synchronisiert VMs aus der VirtuSphere-Datenbank nach MECM. Ablauf je Scan:
      beides mit `rollout_revision`. Antwortet das Portal mit 409, arbeitet
      dieser Scan mit einem veralteten Rollout: eigener Code
      `stale_rollout_revision`, kein Transportfehler, kein Handgriff nötig.
+     Bestätigte Journaleinträge tragen dann die alte Revision; der nächste
+     Scan klärt sie aus der gelesenen Mitgliedschaft (ohne Nachmeldung der
+     Provenienz) und läuft mit der aktuellen Revision durch.
 5. Collection-Updates gesammelt anstoßen (einmal je geänderter Collection).
 
 ### Packages Sync (`mecm_Packages-TaskSeq-sync.ps1`, alle 60 s)

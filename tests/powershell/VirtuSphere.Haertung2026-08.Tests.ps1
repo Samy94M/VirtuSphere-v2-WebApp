@@ -369,8 +369,15 @@ Describe 'E2b - Ein fehlgeschlagener Provenienz-Report entlaesst die VM' -Tag 'H
         $ast = Get-PsAst -Path $script:DeviceSync
         $catch = Find-Ast -Ast $ast `
             -Type ([System.Management.Automation.Language.CatchClauseAst]) `
-            -Where { $_.Extent.Text -match 'membership_report_failed' }
+            -Where { $_.Extent.Text -match 'membership_report_failed' -and $_.Extent.Text -match 'stale_rollout_revision' }
         $catch.Count | Should -Be 1 -Because 'sonst prueft dieser Test die falsche Stelle'
+        # TS1-K5: auch der Replay-Catch nennt membership_report_failed. Er
+        # haelt die VM ueber $journalBlocked fest, der Block endet mit continue.
+        $replayCatch = Find-Ast -Ast $ast `
+            -Type ([System.Management.Automation.Language.CatchClauseAst]) `
+            -Where { $_.Extent.Text -match 'membership_report_failed' -and $_.Extent.Text -notmatch 'stale_rollout_revision' }
+        $replayCatch.Count | Should -Be 1
+        $replayCatch[0].Body.Extent.Text | Should -Match '\$journalBlocked = \$true'
 
         $continues = Find-Ast -Ast $catch[0].Body -Type ([System.Management.Automation.Language.ContinueStatementAst])
         $continues.Count | Should -BeGreaterThan 0 -Because 'ohne continue laeuft updateDevice und nimmt die VM aus der Warteschlange'

@@ -2348,6 +2348,88 @@ function Test-VsDesiredMembershipTargets {
     return $true
 }
 
+# ---------------------------------------------------------------------------
+# Klaerung ungeklaerter Membership-Journaleintraege (TS1-K5, ADR-0034
+# Amendment 9). Rein: keine Providerabfrage, kein Schreiben.
+#
+# Kandidat ist ein Eintrag, der `intent` oder `uncertain` ist oder zu einer
+# anderen Rolloutrevision oder ResourceID gehoert (auch `remote_confirmed`,
+# etwa der Rest nach einer 409). Ein bestaetigter Eintrag des aktuellen
+# Rollouts ist kein Kandidat; er geht wie bisher in den Replay.
+#
+# Klaeren heisst: den Eintrag aus dem Journal nehmen, nachdem die tatsaechliche
+# Mitgliedschaft gelesen wurde. Das begruendet weder Eigentum noch Adoption und
+# meldet nichts; der Plan des Laufs leitet danach aus Portal und Live-Bestand
+# neu ab. Gesperrt bleibt nur, was sich nicht lesen laesst, und eine Regel am
+# noch vorhandenen alten MECM-Geraet.
+#
+# Zweistufig, damit der Aufrufer das Lesen nicht ueberspringen kann: ohne
+# ReadState ('not_read') antwortet die Funktion mit Action 'read' und der
+# ResourceID, deren Mitgliedschaft zu lesen ist; mit dem gelesenen Zustand
+# entscheidet sie. Action: replay | read | clear | keep_blocked.
+# ---------------------------------------------------------------------------
+function Get-VsJournalClearance {
+    param(
+        [Parameter(Mandatory)]$Entry,
+        $CurrentRevision,
+        [Parameter(Mandatory)][string]$CurrentResourceId,
+        [bool]$CollectionKnown = $true,
+        [bool]$PreviousResourceKnown = $false,
+        [ValidateSet('not_read', 'present', 'absent', 'unknown')][string]$ReadState = 'not_read'
+    )
+
+    $decide = {
+        param([string]$action, [string]$outcome, [string]$cause = '', [string]$level = 'INFO', [string]$readResourceId = '')
+        return [pscustomobject]@{ Action = $action; Outcome = $outcome; Cause = $cause; Level = $level; ReadResourceId = $readResourceId }
+    }
+
+    $entryResourceId = [string]$Entry.resource_id
+    $resourceChanged = -not [string]::Equals($entryResourceId, $CurrentResourceId, [StringComparison]::Ordinal)
+    $revisionChanged = ([int]$Entry.rollout_revision -ne [int]$CurrentRevision)
+    if (-not $resourceChanged -and -not $revisionChanged -and [string]$Entry.state -eq 'remote_confirmed') {
+        return (& $decide 'replay' 'not_candidate')
+    }
+
+    # Zeile 1: andere ResourceID, altes Geraet steht nicht mehr im MECM-Bestand
+    # dieses Scans. Ohne Geraet traegt keine Regel mehr eine Mitgliedschaft; die
+    # Identitaetsaufloesung hat ein noch vorhandenes Vorgaengergeraet vorher
+    # schon als previous_resource_present gesperrt.
+    if ($resourceChanged -and -not $PreviousResourceKnown) { return (& $decide 'clear' 'resource_changed') }
+    # Zeile 2: die Collection gibt es nicht mehr (AV-F03), also auch keine Regel.
+    if (-not $CollectionKnown) { return (& $decide 'clear' 'collection_gone') }
+
+    $readResourceId = if ($resourceChanged) { $entryResourceId } else { $CurrentResourceId }
+    if ($ReadState -eq 'not_read') { return (& $decide 'read' 'read_required' '' 'INFO' $readResourceId) }
+    # Zeile 3: nicht lesbar. Kein Ausgang ist bestimmbar; die VM bleibt gesperrt
+    # und der naechste Lauf liest erneut.
+    if ($ReadState -eq 'unknown') { return (& $decide 'keep_blocked' 'membership_unreadable' 'membership_query_failed' 'WARN' $readResourceId) }
+
+    if ($resourceChanged) {
+        # Restfall von Zeile 1: das alte Geraet besteht noch, passt aber nicht
+        # mehr zu dieser VM. Eine dort noch vorhandene Regel ist eine Handsache
+        # (altes Geraet loeschen), danach klaert der naechste Lauf den Eintrag.
+        if ($ReadState -eq 'present') { return (& $decide 'keep_blocked' 'previous_resource_rule_present' 'previous_resource_present' 'WARN' $readResourceId) }
+        return (& $decide 'clear' 'resource_changed' '' 'INFO' $readResourceId)
+    }
+
+    switch ([string]$Entry.change) {
+        'added' {
+            # Zeile 5: die Regel ist da, aber ihr Ursprung ist nicht belegt.
+            # Praesenz begruendet nie Eigentum (Amendment 3); der Plan sieht sie
+            # als preserve_manual und entfernt sie nie. Ist sie nicht mehr
+            # gewuenscht, entfernt sie der Bediener in der MECM-Konsole.
+            if ($ReadState -eq 'present') { return (& $decide 'clear' 'add_present_unowned' '' 'WARN' $readResourceId) }
+            return (& $decide 'clear' 'add_not_applied' '' 'INFO' $readResourceId)
+        }
+        'removed' {
+            if ($ReadState -eq 'present') { return (& $decide 'clear' 'remove_not_applied' '' 'INFO' $readResourceId) }
+            return (& $decide 'clear' 'remove_applied_or_gone' '' 'INFO' $readResourceId)
+        }
+    }
+    # Das Journal laesst nur added/removed zu; alles andere bleibt ungeklaert.
+    return (& $decide 'keep_blocked' 'change_unknown' 'membership_operation_uncertain' 'WARN' $readResourceId)
+}
+
 function Get-VsDirectMembershipState {
     param(
         [Parameter(Mandatory)][string]$CollectionId,
