@@ -87,6 +87,14 @@
     line-height: 1.25;
 }
 
+/* A sub-heading is one step below its panel heading (G6, PR-R2). At the same
+   18px a panel title and the section under it ("Bereitstellungsauftrag
+   einreihen" over "Bereitstellung vorbereiten") read as two equal titles. */
+.panel h3,
+.card h3 {
+    font-size: 16px;
+}
+
 .panel p + h3,
 .panel ul + h3 {
     margin-top: 18px;
@@ -112,13 +120,63 @@
     margin: 0 0 14px;
 }
 
+/* :last-child misses a paragraph that is followed only by hidden elements (the
+   live status line has its hidden notice after it), and its margin then stood
+   as 14px of air above the panel edge (G14, PR-R2). */
+
+.panel > p:not(:has(~ :not([hidden], script, template))) {
+    margin-bottom: 0;
+}
+
+/* A sentence under a button row explains that row; touching the buttons it
+   read as part of them (G13, G14, PR-R2: the export note in the mission
+   details, the live status line of the VM list). */
+
+.panel > .actions + p {
+    margin-top: 8px;
+}
+
+/* The live status line of the dashboard stands between the tiles it dates and
+   the next panel. In the stack it had the paragraph margins on top of the gap
+   on both sides, about 33px each way; it now sits under the tiles (G14). */
+
+.stack > p[data-vm-live] {
+    margin: calc(var(--space-2) - 18px) 0 0;
+}
+
+/* A status row with nothing to say yet (the network editor's undo row before
+   any change) has no height, but the stack still spaced it on both sides: with
+   the paragraph margins about 90px between the last network card and its hints
+   (G16, PR-R2). While it is empty it leaves the flow, so the stack gives it no
+   track and no gap; its live region stays in the document and is read when the
+   script writes the sentence, which brings the row back. */
+
+.actions > p {
+    margin: 0;
+}
+
+.stack > .actions:not(:has(> :not(:empty, [hidden]))) {
+    position: absolute;
+}
+
+/* Prose stops at a reading measure. Explanations ran across the whole panel,
+   170 to 190 characters a line in the VM editor, the credentials and the help
+   (G10, PR-R2). Only bare, muted and hint paragraphs and list items: a
+   paragraph that is a box (an alert, a status line) keeps its width. */
+
+.panel p:is(:not([class]), .muted, .hint),
+.panel li {
+    max-width: 78ch;
+}
+
 /* Keep a filter form and its table, and a table and its follow-up create form,
    from butting together. Adjacent-sibling margins so a table that is the panel's
-   first content still sits flush under the heading. */
+   first content still sits flush under the heading. One step with the button
+   row above a table below (G15, PR-R2: 16px against 14px). */
 
 .panel > form + .table-wrap,
 .panel > .table-wrap + form {
-    margin-top: 16px;
+    margin-top: 14px;
 }
 
 /* A mid-panel filter/action button row (not the panel header) sitting directly
@@ -329,8 +387,12 @@
 /* The dashboard's tile section has a fixed column count, so its tiles do not
    fall into an auto-fit row of four or five. The shared .grid stays auto-fit
    for the other pages. The steps use the System status strip's breakpoints. */
+/* Every tile row as tall as the tallest: a tile with two signal lines made its
+   row 110px against 100px above it (G17, PR-R2). */
+
 .kpi-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: 1fr;
 }
 
 @media (max-width: 850px) {
@@ -403,12 +465,12 @@ a.card:hover {
 .copy-control .copy-button {
     min-height: 26px;
     padding: 2px 8px;
-    font-size: 0.8rem;
+    font-size: 12px;
 }
 
 .copy-status {
     color: var(--success);
-    font-size: 0.8rem;
+    font-size: 12px;
 }
 
 .copy-status.is-error {
@@ -647,7 +709,7 @@ a.card:hover {
 }
 
 .signal-label {
-    font-size: 0.85rem;
+    font-size: 13px;
     color: var(--muted);
 }
 

@@ -105,7 +105,7 @@ layout_header(__t('os.title'), $user, 'os', 'packages');
                     <td><?php echo h((string) $usage); ?> <span class="muted" aria-hidden="true">&middot;</span> <?php echo usage_evidence_toggle_html(usage_evidence_toggle_href('os.php', ['status' => $statusFilter], (int) $row['id']), $osName); ?></td>
                     <td><?php echo h(portal_format_timestamp((string) ($row['retired_at'] ?? ''))); ?></td>
                     <?php if ($canWrite) { ?>
-                        <td>
+                        <td class="actions">
                             <form method="post" action="os.php">
                                 <?php echo csrf_field(); ?>
                                 <input type="hidden" name="os_id" value="<?php echo h((string) $row['id']); ?>">
