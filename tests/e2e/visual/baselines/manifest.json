@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "updatedAt": "2026-11-25T13:49:47.108Z",
-  "reason": "PR-R1 und PR-R3A: Satz zur Auftragsannahme, Feldhinweise nicht fett, Sitzungsknopf, Zeitzonenhinweis",
+  "updatedAt": "2026-11-26T10:50:34.788Z",
+  "reason": "PR-R2: form typography, spacing and narrow widths after the portal review; PR-R3B: glossary words in the page catalogs and system status fixture (Handlung noetig)",
   "runner": {
     "runnerId": "virtusphere-visual-linux-x64-chromium-1228-noble",
     "platform": "linux",
@@ -115,7 +115,7 @@
               "href": "system_status.php#deploy-service",
               "className": "badge badge-danger",
               "icon": "critical",
-              "text": "Manuelle Klärung nötig"
+              "text": "Handlung nötig"
             },
             {
               "href": "system_status.php#mecm",
@@ -181,23 +181,23 @@
     "maskColor": "#ff00ff"
   },
   "files": {
-    "dark/deploy-desktop.png": "15212813d987592ae8336d9065530e32bfc4a775b65f7d98d0b35e401b582a8c",
-    "dark/deploy-mobile.png": "671ba43d335503c609f1dbd51f31aa416c88610195e8b09a2945cd288e08a79b",
-    "dark/deploy-wrap.png": "f5ff059ecf5b623bcfd8e9ec42c57f973f1bed58e91bf53c9ced578de74a7c58",
-    "dark/missions-desktop.png": "8edfa9dce1060795e6ee024573ca87873af481dd0882831469a03b4dec39e2db",
-    "dark/missions-mobile.png": "424baf9c3c9358c6e484edf1e18eb6dca4316b40a20c7aff846992170c19e303",
-    "dark/missions-wrap.png": "1c266e2f51b7345cde9ea6b5c2bd9126d2d214cd9443a4bb4d1fc5f05b5a68ea",
-    "dark/system-status-desktop.png": "fb43d584340f17c20afe0bf19657dbb0354492daf40615368172acd0369a27ee",
-    "dark/system-status-mobile.png": "866a565dfd1fe68c4afb77181332a23718235854fd4f139680821f32e8c6f493",
-    "dark/system-status-wrap.png": "1b05942d2c3b731207681c5cb2a6bf07bdcac62f232357d1736bd295eb4eb098",
-    "light/deploy-desktop.png": "ddf6432f4dfced4ec222c470dae655d620b2e1ca839bfc89b5565a120db27688",
-    "light/deploy-mobile.png": "d5a2f594b70a1357a3e2bd2296d0767566cbdf9bec604d2dd4119ce728bd1d2f",
-    "light/deploy-wrap.png": "45dcedc4d4aad82920b67ac757f157b2b28b6dd914269ea07516b176a637b41b",
-    "light/missions-desktop.png": "d87b71ac260b84f011b92ad808eedced767eeb54c8173994f45dd0b5e299e278",
-    "light/missions-mobile.png": "f784239408bf066638cd6da60e651b2ed1a578ae633ddf1a6f7fc7d080b9a326",
-    "light/missions-wrap.png": "24c23b4e31ac77ec4aab4e9cd206830ea1f3ca145f6e0b114670b82edc3b8fc1",
-    "light/system-status-desktop.png": "1db0b4cbec4836c3f35556c138bf39388cfa05ea74cc85206282af49affabeb9",
-    "light/system-status-mobile.png": "11d9d986fe5fbfb62116cebbf871fc98750dc0d00627e799d016c18d59964606",
-    "light/system-status-wrap.png": "157be8ad50b154d9ab0218895e1b6e1df1577b255ae7df75a4ddacee2196be6f"
+    "dark/deploy-desktop.png": "60c0bc7f8b950cf16d7df980a6af6bc1a56021e1cbec1057ae911dd9057b9e6e",
+    "dark/deploy-mobile.png": "5d4b74cd7007291032c4ce85fa5a74299b8d65490194723973cbbd4388194875",
+    "dark/deploy-wrap.png": "97c1aa0411af38ecebcc9070cccc9ca18a27281b88e66878f6acff93f042a12c",
+    "dark/missions-desktop.png": "f646e2a55ef41cfad164d64c7099481848a57ceaffacf73e4086f0df9cd0ab4a",
+    "dark/missions-mobile.png": "f65dc2ce218ee9d34a62b31bef732ff6c20546e1471e589e8d74089350618388",
+    "dark/missions-wrap.png": "ce290c46a793bff78534de0ad4579c7f8f1b99b68792f55df73b2852677fbb5f",
+    "dark/system-status-desktop.png": "652d0b3275c0fd2c9ed13db0f0064274d102ebf0287bc0ace1816b1a215c73c2",
+    "dark/system-status-mobile.png": "e1e95c07f1ff481c94d164d8b18b1cbf78839617c197565411f69c3be7a165df",
+    "dark/system-status-wrap.png": "5e51fe78c0b856020add79fe3140405e9f9ba670f0a38f6ca3414effb89f1520",
+    "light/deploy-desktop.png": "d501ddc3f305498cbcf1bc4b8dfde684751b244c91da3e7b175150582b914a91",
+    "light/deploy-mobile.png": "bbfac70aef57c32a836daaa25d73c421d51348638aa88b775d799c81999c18a1",
+    "light/deploy-wrap.png": "c3826210fe1501815d4cd705711e0138dbbb90595d8ec50bf31610cb5ea600f0",
+    "light/missions-desktop.png": "fb8ad1a80b1d429f1c21abf0779912aa3b853d863939eb5929692e7e3b770c01",
+    "light/missions-mobile.png": "e2f0d00b631322c55794e4759ac963ddc65043edbf4e19a7b109bd8ca6d45e2b",
+    "light/missions-wrap.png": "7a3d4527f9f3a543efd54d8520f0ea18c2faeabd5d4b17497d376b59611ac59e",
+    "light/system-status-desktop.png": "334ee2f4462d265b4f4b55df32dc4ae732abd3943e60b167b2f220fea6b007d3",
+    "light/system-status-mobile.png": "7c3ccfb8780349a15564769326710b82255b3d1ccbbbcc3c106803b71cb04973",
+    "light/system-status-wrap.png": "edd611545b5a2c105c601401c3047dc9850609033a0a4633f383e9163008b9ae"
   }
 }
