@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 /** @var string $currentTimezone */
 /** @var array<string,list<string>> $timezoneGroups */
+/** @var string $currentMecmConsoleLanguage */
+/** @var array<string,string> $mecmConsoleLanguageChoices */
 /** @var int $serverEpoch */
 /** @var string $sessionLifetimeMinutes */
 /** @var string $passwordMinLength */
@@ -58,6 +60,25 @@ declare(strict_types=1);
                     'drift_message' => __t('settings.time_drift_warn'),
                 ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             ?></script>
+        </section>
+
+        <section class="panel" id="panel-mecm-terms">
+            <h2><?php echo h(__t('settings.mecm_console_language_title')); ?></h2>
+            <p class="muted" id="<?php echo h(form_hint_id('mecm_console_language', 'mecm_console_language')); ?>"><?php echo h(__t('settings.mecm_console_language_hint')); ?></p>
+            <form class="form-grid" method="post" action="settings.php" autocomplete="off">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="save_mecm_console_language">
+                <label><?php echo h(__t('settings.mecm_console_language_label')); ?>
+                    <select name="mecm_console_language"<?php echo form_control_attrs('mecm_console_language', 'mecm_console_language', null, true); ?>>
+                        <?php $selectedMecmConsoleLanguage = form_old('mecm_console_language', 'mecm_console_language', $currentMecmConsoleLanguage); ?>
+                        <?php foreach ($mecmConsoleLanguageChoices as $language => $languageLabel) { ?>
+                            <option value="<?php echo h($language); ?>"<?php echo $language === $selectedMecmConsoleLanguage ? ' selected' : ''; ?>><?php echo h($languageLabel); ?></option>
+                        <?php } ?>
+                    </select>
+                    <?php echo form_error_html('mecm_console_language', 'mecm_console_language'); ?>
+                </label>
+                <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
+            </form>
         </section>
 
         <section class="panel" id="panel-session">

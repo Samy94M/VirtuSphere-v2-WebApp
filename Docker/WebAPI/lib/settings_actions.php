@@ -11,6 +11,7 @@ require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/backup_encryption.php';
 require_once __DIR__ . '/settings_allowlist_actions.php';
+require_once __DIR__ . '/settings_mecm_terms_action.php';
 
 /**
  * Guarding and permission checks stay in the page shell. This dispatcher owns
@@ -40,6 +41,7 @@ function settings_handle_post(mysqli $connection, array $user): never
         'save_esxi_inventory' => 'catalog',
         'save_ansible_test_interval' => 'catalog',
         'save_timezone' => 'system',
+        'save_mecm_console_language' => 'system',
         'save_session' => 'system',
         'save_password_policy' => 'system',
         'save_backup_certificate' => 'system',
@@ -104,6 +106,8 @@ function settings_handle_post(mysqli $connection, array $user): never
                 flash_set('error', portal_error_message($exception));
             }
         }
+    } elseif ($action === 'save_mecm_console_language') {
+        settings_save_mecm_console_language($connection, $user);
     } elseif ($action === 'save_ansible_test_interval') {
         $hours = ansible_test_parse_interval(request_trimmed($_POST, 'ansible_test_interval_hours'));
         if ($hours === null) {

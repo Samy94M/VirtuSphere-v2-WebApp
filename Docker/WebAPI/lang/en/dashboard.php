@@ -17,7 +17,7 @@ return [
     'kpi_vm_attention' => 'VM check due',
     'kpi_system_status' => 'MECM system status',
     'kpi_integration' => 'Integration',
-    'kpi_mecm_site' => 'MECM site',
+    'kpi_mecm_site' => 'MECM {mecm:site}',
     'kpi_hypervisor' => 'Hypervisor',
     'kpi_active_deploys' => 'Active deploys',
     'recent_missions' => 'Recent missions',

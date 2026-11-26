@@ -29,7 +29,7 @@ return [
     'glossary_instance_uuid' => 'Instance UUID: the identifier by which ESXi tracks a VM uniquely. The portal binds it to the VM when the VM is created. The name alone is not enough to find the same VM again.',
     'glossary_moid' => 'MOID: the internal reference number of an ESXi object (managed object ID). It can change when the host is registered again and therefore decides nothing on its own.',
     'glossary_resource_id' => 'ResourceID: the device number that MECM assigns to a device. After matching, the portal stores it as the MECM ID of the VM.',
-    'glossary_task_sequence' => 'Task sequence: the MECM process that installs the operating system on a device. An operating system entry in the portal must have exactly the name of the task sequence in MECM.',
+    'glossary_task_sequence' => '{mecm:Task_sequence}: the MECM process that installs the operating system on a device. An operating system entry in the portal must have exactly the name of the {mecm:task_sequence} in MECM.',
     'glossary_async_job' => 'Async job: an operation that ESXi runs in the background. The job stores its job ID and polls for the result later; until then the outcome stays open.',
     'glossary_start_intent' => 'Start intent: the note stored before a call to ESXi that this step is about to begin. Without the note the step counts as not started; with it the outcome stays open until a result is known.',
     'glossary_client_ready_ack' => 'Client-ready ACK: the reply from the Windows client that its device information has been written completely. The portal accepts it only for the revision it belongs to.',

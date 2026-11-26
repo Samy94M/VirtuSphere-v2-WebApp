@@ -11,6 +11,6 @@ return [
     'headline_no_evidence_one' => '1 Bereich ohne aktuellen Nachweis:',
     'headline_no_evidence_many' => ':count Bereiche ohne aktuellen Nachweis:',
     'mecm_flow' => 'Datenfluss',
-    'mecm_site' => 'Standort',
+    'mecm_site' => '{mecm:site}',
     'link_context' => 'für :name',
 ];

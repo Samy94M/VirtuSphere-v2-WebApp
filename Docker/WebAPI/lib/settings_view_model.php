@@ -8,6 +8,7 @@ require_once __DIR__ . '/repo/api_access.php';
 require_once __DIR__ . '/repo/settings.php';
 require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/backup_encryption.php';
+require_once __DIR__ . '/mecm_terms.php';
 require_once __DIR__ . '/settings_backup_drill.php';
 require_once __DIR__ . '/version_overview.php';
 
@@ -68,6 +69,8 @@ function settings_build_view_model(mysqli $connection): array
 
     $currentTimezone = portal_timezone();
     $timezoneGroups = portal_timezone_choices($currentTimezone);
+    $currentMecmConsoleLanguage = mecm_console_language();
+    $mecmConsoleLanguageChoices = mecm_console_language_choices();
     $esxiIntervalHours = repo_setting_value($connection, VIRTUSPHERE_SETTING_ESXI_INVENTORY_INTERVAL_HOURS, (string) VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_DEFAULT);
     $ansibleTestIntervalHours = ansible_test_interval_hours($connection);
     $esxiAnsibleResolution = esxi_inventory_ansible_resolution($connection);
@@ -135,6 +138,8 @@ function settings_build_view_model(mysqli $connection): array
         'backupDrill',
         'currentTimezone',
         'timezoneGroups',
+        'currentMecmConsoleLanguage',
+        'mecmConsoleLanguageChoices',
         'esxiIntervalHours',
         'esxiAnsibleResolution',
         'esxiSelectedAnsible',

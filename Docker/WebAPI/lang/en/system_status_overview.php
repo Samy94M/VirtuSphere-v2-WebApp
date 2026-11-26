@@ -11,6 +11,6 @@ return [
     'headline_no_evidence_one' => '1 area without current evidence:',
     'headline_no_evidence_many' => ':count areas without current evidence:',
     'mecm_flow' => 'Data flow',
-    'mecm_site' => 'Site',
+    'mecm_site' => '{mecm:Site}',
     'link_context' => 'for :name',
 ];

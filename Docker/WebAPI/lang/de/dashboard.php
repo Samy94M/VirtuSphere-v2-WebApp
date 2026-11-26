@@ -17,7 +17,7 @@ return [
     'kpi_vm_attention' => 'VM-Prüfung fällig',
     'kpi_system_status' => 'MECM-Systemstatus',
     'kpi_integration' => 'Integration',
-    'kpi_mecm_site' => 'MECM-Site',
+    'kpi_mecm_site' => 'MECM-{mecm:site}',
     'kpi_hypervisor' => 'Hypervisor',
     'kpi_active_deploys' => 'Aktive Deploys',
     'recent_missions' => 'Letzte Missionen',
