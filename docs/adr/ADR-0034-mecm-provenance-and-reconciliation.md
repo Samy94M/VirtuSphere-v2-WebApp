@@ -1,5 +1,82 @@
 # ADR-0034: MECM-Provenienz und sichere Reconciliation
 
+## Amendment 9 (26.11.2026): Klärung ungeklärter Journaleinträge (TS1-K5)
+
+Anlass: Befund K12 der Text-Ist-Soll-Prüfung TS1. Kein Code führte einen
+Eintrag des Membership-Journals aus `uncertain` heraus. Ein beim Absturz
+verbliebener `intent`, ein Eintrag nach geworfenem Cmdlet, ein Eintrag einer
+alten Rolloutrevision oder anderen ResourceID und ein Replay mit 404/409
+sperrten die VM im Device-Sync dauerhaft, obwohl Doku und Katalog „der nächste
+Lauf konvergiert“ zusagten. Aufheben ließ sich das nur durch Handedit der
+Journaldatei.
+
+Regel: Klärungskandidat ist jeder Eintrag einer VM, der `intent` oder
+`uncertain` ist oder dessen Rolloutrevision oder ResourceID vom aktuellen Lauf
+abweicht, auch ein `remote_confirmed`-Rest nach einer 409. Ein bestätigter
+Eintrag des aktuellen Rollouts ist kein Kandidat und wird wie bisher replayt.
+Vor dem Replay entscheidet `Get-VsJournalClearance` (Common, rein) je Kandidat,
+`Clear-VsUncertainJournalEntries` (Device-Sync) liest und entfernt:
+
+| Lage | Ergebnis |
+|---|---|
+| andere ResourceID, altes Gerät nicht mehr im MECM-Bestand des Scans | geklärt, ohne Lesen (`resource_changed`) |
+| Collection existiert nicht mehr (AV-F03) | geklärt, ohne Lesen (`collection_gone`) |
+| Mitgliedschaft nicht lesbar | gesperrt, Ursache `membership_query_failed` |
+| andere ResourceID, altes Gerät besteht noch und trägt die Regel | gesperrt, Ursache `previous_resource_present` |
+| andere ResourceID, altes Gerät ohne die Regel | geklärt (`resource_changed`) |
+| Add, Regel fehlt | geklärt (`add_not_applied`) |
+| Add, Regel vorhanden | geklärt ohne Eigentum (`add_present_unowned`, WARN) |
+| Remove, Regel fehlt | geklärt (`remove_applied_or_gone`) |
+| Remove, Regel vorhanden | geklärt (`remove_not_applied`) |
+
+Gelesen wird die exakte CollectionID für die aktuelle ResourceID, bei
+abweichender ResourceID für die alte. Alle geklärten Einträge einer VM verlassen
+das Journal in einer atomaren Ersetzung; danach plant der Lauf aus Portal
+(desired, owned) und Live-Bestand neu und schreibt jede Mutation wieder zuerst
+als frischen `intent`. Die Annahme zur abweichenden ResourceID ist im Code
+belegt: ohne Bindung sperrt `Resolve-VsDeviceIdentity` ein noch vorhandenes
+Vorgängergerät als `previous_resource_present`, bevor der Replay erreicht wird;
+für den Restfall eines noch vorhandenen, aber nicht mehr zugeordneten alten
+Geräts gilt die vierte Zeile.
+
+Kernsätze:
+
+- Ein Eintrag im Zustand `intent` oder `uncertain` oder mit abweichender
+  Revision oder ResourceID wird im nächsten Lauf aus der erfolgreich gelesenen
+  Mitgliedschaft geklärt und aus dem Journal genommen.
+- Klären begründet weder Eigentum noch Adoption und meldet nichts ans Portal.
+  Eigentum entsteht nur durch ein bestätigtes Remote-Ergebnis des aktuellen
+  Rollouts. Präsenz begründet weiterhin kein Eigentum (Amendment 3).
+- Ein nicht lesbarer Bestand und eine Regel am noch vorhandenen alten Gerät
+  halten den Eintrag gesperrt. Eine zeitbasierte Löschung gibt es weiterhin
+  nicht.
+- Ein Transportfehler beim Replay ist `membership_report_failed`; der Eintrag
+  bleibt `remote_confirmed` für den nächsten Replay. 404 und 409 bleiben
+  `uncertain` mit `membership_operation_uncertain` und werden im Folgelauf
+  geklärt.
+
+Präzisierungen: „weder Adoption noch erneuter Remote-Write“ aus Amendment 3
+gilt für den ungeklärten Eintrag selbst; der Klärungslauf plant danach neu und
+schreibt nur, was der Plan aus Portal und Live-Bestand ergibt. Die
+„dokumentierte manuelle Ownership-Entscheidung“ aus Amendment 4 betrifft nur
+noch Quarantäne, ein nicht schreibbares Journal und den Restfall am alten
+Gerät. Ein isolierter Remove, der beim Replay nicht als abwesend bestätigt ist,
+bleibt `uncertain` (Amendment 4) und wird im Folgelauf geklärt.
+
+Folge: Ein bestätigtes Add, dessen Meldung eine 409 oder ein Revisionswechsel
+verwarf, verliert seine Provenienz. Die Regel bleibt in MECM unbeansprucht
+(`preserve_manual`); VirtuSphere beansprucht sie nicht und entfernt sie auch
+bei einem späteren OS- oder Paketwechsel nicht. Ist die Zuordnung nicht mehr
+gewünscht, entfernt der Bediener sie in der MECM-Konsole von Hand, sonst bleibt
+sie stehen. Die WARN-Zeile im Device-Sync-Log nennt Operation, Collection und
+Revision. Die Übernahme im Portal, die die Entscheidung dieses ADR nennt
+(Etappe 9), gibt es heute nicht; vorhanden ist nur die Herkunft
+`explicitly_adopted` im Schema, kein Schreiber und keine Anzeige.
+Unverändert: Wire-Verträge (`reportMembership`, `reportDeviceCauses`), das
+Ursachenvokabular, Journalschema 1, Zustände, Bounds, Quarantäne und
+Instanzsperre. Verwaiste Einträge gelöschter VMs räumt dieser Nachtrag nicht ab.
+Register: `docs/register/2026-11-26-TS1-K5.md`.
+
 ## Amendment 8 (10.11.2026): Wiederholliste statt zurückgehaltenem Stamp, DeployTo-Prüfung, Fehlerrahmen je Paket (AR1)
 
 Ersetzt die Regel, dass ein offener Punkt des Autoimporters den Manifest-Stamp

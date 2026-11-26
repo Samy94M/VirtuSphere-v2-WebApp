@@ -231,6 +231,27 @@ Describe 'H01-2 portal acknowledgement before the journal is cleared' {
         }
     }
 
+    It 'TS1-K5: the only journal removal without a portal report is the clearance, and it reports nothing' {
+        # Abgeleitet: jede Loeschstelle im Device-Sync ist entweder eine
+        # quittierte Portalmeldung (oben) oder liegt in
+        # Clear-VsUncertainJournalEntries, die nie meldet. Eine dritte Art
+        # von Loeschstelle faellt hier auf.
+        $source = Get-Content -LiteralPath $script:DeviceSyncPath -Raw
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$null, [ref]$null)
+        $clearance = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Clear-VsUncertainJournalEntries' }, $true)
+        $clearance | Should -Not -BeNullOrEmpty
+        $removals = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Remove-VsMembershipJournalEntries' }, $true))
+        $removals.Count | Should -BeGreaterOrEqual 3
+        foreach ($removal in $removals) {
+            $inClearance = $removal.Extent.StartOffset -ge $clearance.Extent.StartOffset -and $removal.Extent.EndOffset -le $clearance.Extent.EndOffset
+            if (-not $inClearance) {
+                $removal.Extent.Text | Should -Match '^Remove-VsMembershipJournalEntries\s+-Path\s+\$membershipJournalPath' -Because 'every other removal is checked against its portal answer above'
+            }
+        }
+        @($removals | Where-Object { $_.Extent.StartOffset -ge $clearance.Extent.StartOffset -and $_.Extent.EndOffset -le $clearance.Extent.EndOffset }).Count | Should -Be 1
+        $clearance.Extent.Text | Should -Not -Match 'Invoke-VsApi|reportMembership'
+    }
+
     It 'checks the ResourceID update answer as well' {
         $source = Get-Content -LiteralPath $script:DeviceSyncPath -Raw
         $source | Should -Not -Match "action=updateDevice'[^\r\n]*\|\s*Out-Null"

@@ -125,6 +125,87 @@ function Get-VsStaleOwnedDisposition {
     return 'defer_until_restored'
 }
 
+# TS1-K5 (ADR-0034 Amendment 9): clears journal entries whose outcome was left
+# open (intent after a crash, uncertain after a failed call or a 404/409 replay,
+# another rollout revision or ResourceID) from the membership actually read.
+# The decision table is Get-VsJournalClearance in Common. Clearing never claims
+# ownership and never reports to the portal: the run's plan afterwards derives
+# everything from portal and live state again. All cleared entries leave the
+# journal in ONE replacement; the caller runs this in phase 'journal', because
+# the membership reads cannot throw and the removal is the only write.
+# Returns the entries for the replay (current confirmed ones and those still
+# blocked), the cleared count and the causes of the entries still blocked.
+function Clear-VsUncertainJournalEntries {
+    param(
+        [array]$JournalEntries = @(),
+        $RolloutRevision,
+        [Parameter(Mandatory)][string]$ResourceId,
+        # An empty set must bind: it means "no collection known", every
+        # entry is then collection_gone, never a binding error mid-scan.
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$KnownCollectionIds,
+        [Parameter(Mandatory)][hashtable]$KnownResourceIds,
+        [Parameter(Mandatory)][string]$JournalPath,
+        [string]$DeviceName = '-'
+    )
+
+    $remaining = New-Object System.Collections.Generic.List[object]
+    $clearedIds = New-Object System.Collections.Generic.List[string]
+    $blockedCauses = New-Object System.Collections.Generic.List[string]
+    $clearanceLines = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($JournalEntries)) {
+        if ($null -eq $entry) { continue }
+        $entryCollectionId = [string]$entry.collection_id
+        $clearanceArgs = @{
+            Entry                 = $entry
+            CurrentRevision       = $RolloutRevision
+            CurrentResourceId     = $ResourceId
+            CollectionKnown       = $KnownCollectionIds.Contains($entryCollectionId)
+            PreviousResourceKnown = $KnownResourceIds.ContainsKey([string]$entry.resource_id)
+        }
+        $readState = 'not_read'
+        $decision = Get-VsJournalClearance @clearanceArgs
+        if ($decision.Action -eq 'replay') {
+            $remaining.Add($entry)
+            continue
+        }
+        if ($decision.Action -eq 'read') {
+            $readState = [string](Get-VsDirectMembershipState -CollectionId $entryCollectionId -ResourceId ([string]$decision.ReadResourceId)).State
+            if ($readState -notin @('present', 'absent')) { $readState = 'unknown' }
+            $decision = Get-VsJournalClearance @clearanceArgs -ReadState $readState
+        }
+
+        $operationText = [string]$entry.operation_id
+        if ($operationText.Length -gt 12) { $operationText = $operationText.Substring(0, 12) }
+        $reasonText = if ([string]::IsNullOrWhiteSpace([string]$entry.reason)) { '-' } else { [string]$entry.reason }
+        $readText = if ($readState -eq 'not_read') { 'nicht gelesen' } else { $readState }
+        $fields = "operation={0} aktion={1} collection={2} ({3}) zustand={4} grund={5} gelesen={6} ausgang={7} revision_eintrag={8} revision_aktuell={9} resource_eintrag={10} resource_aktuell={11}" -f `
+            $operationText, [string]$entry.change, [string]$entry.collection_name, $entryCollectionId, [string]$entry.state, $reasonText, $readText, [string]$decision.Outcome, [string]$entry.rollout_revision, [string]$RolloutRevision, [string]$entry.resource_id, $ResourceId
+
+        if ($decision.Action -eq 'clear') {
+            $clearedIds.Add([string]$entry.operation_id)
+            $clearanceLines.Add([pscustomobject]@{ Level = [string]$decision.Level; Message = ('Journaleintrag aus gelesener Mitgliedschaft geklaert: ' + $fields) })
+            continue
+        }
+        # keep_blocked: the entry stays; the replay loop marks it uncertain.
+        $remaining.Add($entry)
+        if (-not $blockedCauses.Contains([string]$decision.Cause)) { $blockedCauses.Add([string]$decision.Cause) }
+        $clearanceLines.Add([pscustomobject]@{ Level = 'WARN'; Message = ('Journaleintrag nicht geklaert: {0} journal={1} - VM bleibt blockiert; naechster Lauf liest erneut.' -f $fields, $JournalPath) })
+    }
+
+    if ($clearedIds.Count -gt 0) {
+        Remove-VsMembershipJournalEntries -Path $JournalPath -OperationIds $clearedIds.ToArray()
+    }
+    # Only after the removal succeeded: a line saying "geklaert" must be true.
+    foreach ($line in $clearanceLines) {
+        Write-VsDeviceLog -Level $line.Level -Context $DeviceName -Message $line.Message
+    }
+    return [pscustomobject]@{
+        Remaining     = $remaining.ToArray()
+        Cleared       = $clearedIds.Count
+        BlockedCauses = $blockedCauses.ToArray()
+    }
+}
+
 # --- Gesperrte VMs (AV-F16) ----------------------------------------------------
 #
 # Eine dauerhaft gesperrte VM bleibt in der Warteschlange. Ohne Bremse lief jeder
@@ -720,19 +801,28 @@ while ($true) {
                     continue
                 }
 
-                # Replay is deliberately before a fresh plan. A confirmed
-                # remote result may be reported again idempotently; an intent
-                # without that confirmation is an ownership-uncertain crash
-                # window and must never be reconstructed from current presence.
+                # Replay runs before a fresh plan. A confirmed result of the
+                # current rollout is reported again idempotently. An entry that
+                # is intent, uncertain (crash or failed call) or belongs to
+                # another revision or ResourceID is cleared first from the
+                # membership actually read (ADR-0034 Amendment 9); clearing
+                # never claims ownership and never reports. Only an unreadable
+                # membership, or a rule on a still existing old MECM device,
+                # keeps the VM blocked.
                 # Journalzugriffe ausserhalb der try-Bloecke: ein gesperrtes oder
                 # unlesbares Journal endet als journal_blocked, nicht als MECM-Fehler.
                 $phase = 'journal'
                 $journalEntries = @(Get-VsMembershipJournalEntriesForVm -Path $membershipJournalPath -VmId ([int]$device.id))
+                $journalClearance = Clear-VsUncertainJournalEntries -JournalEntries $journalEntries -RolloutRevision $rolloutRevision -ResourceId ([string]$resourceId) `
+                    -KnownCollectionIds $knownCollectionIds -KnownResourceIds $mecmIndex.ByResourceId -JournalPath $membershipJournalPath -DeviceName $deviceName
+                $journalEntries = @($journalClearance.Remaining)
+                $journalClearanceCauses = @($journalClearance.BlockedCauses)
                 $phase = 'mecm'
                 if ($journalEntries.Count -gt 0) {
                     $journalBlocked = $false
                     $journalReplayed = $false
                     $journalFailureCounted = $false
+                    $journalReplayUncertain = $false
                     # Upgrade recovery for journals written before D-01: that
                     # sender could persist a confirmed add and a stale-owned
                     # removal for the same exact fenced CollectionID. Replaying
@@ -776,7 +866,8 @@ while ($true) {
                             # observation after its paired add was already ACKed.
                             # Presence therefore cannot authorize a provenance
                             # delete. Only confirmed absence is safe to replay;
-                            # present/unknown becomes durable manual evidence.
+                            # present/unknown becomes an uncertain entry that
+                            # the next run clears from the read membership.
                             $removeReplayState = Get-VsDirectMembershipState -CollectionId ([string]$journalEntry.collection_id) -ResourceId ([string]$resourceId)
                             if ($removeReplayState.State -ne 'absent') {
                                 $removeReplayReason = if ($removeReplayState.State -eq 'present') { 'replay_remove_still_present' } else { 'replay_remove_presence_unknown' }
@@ -784,7 +875,8 @@ while ($true) {
                                 Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason $removeReplayReason
                                 $phase = 'mecm'
                                 $journalBlocked = $true
-                                Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Entfernte Membership aus altem Journal ist nicht als abwesend bestaetigt ({0}); Provenienz bleibt zur manuellen Klaerung erhalten." -f $journalEntry.collection_id)
+                                $journalReplayUncertain = $true
+                                Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Entfernte Membership aus altem Journal ist nicht als abwesend bestaetigt ({0}); Eintrag bleibt ungeklaert, der naechste Lauf klaert ihn aus der gelesenen Mitgliedschaft." -f $journalEntry.collection_id)
                                 continue
                             }
                         }
@@ -808,23 +900,44 @@ while ($true) {
                             Remove-VsMembershipJournalEntries -Path $membershipJournalPath -OperationIds $acknowledgedOperationIds
                             $journalReplayed = $true
                         } catch {
-                            $statusCode = Get-VsErrorStatusCode -ErrorRecord $_
+                            # 404/409: the portal refused this entry; it becomes
+                            # uncertain and the next run clears it from the read
+                            # membership. Any other failure (transport, no
+                            # success in the answer) leaves it confirmed for the
+                            # next replay and is a failed report, not an
+                            # uncertain operation.
+                            $replayError = $_
+                            $statusCode = Get-VsErrorStatusCode -ErrorRecord $replayError
+                            $replayCause = 'membership_report_failed'
                             if ($statusCode -in @(404, 409)) {
                                 $phase = 'journal'
                                 Set-VsMembershipJournalState -Path $membershipJournalPath -OperationId $journalEntry.operation_id -State uncertain -Reason ('portal_http_' + $statusCode)
                                 $phase = 'mecm'
+                                $replayCause = 'membership_operation_uncertain'
                             }
                             $journalBlocked = $true
                             $journalFailureCounted = $true
                             $itemFailures++
-                            Add-VsRunCause -Causes $causes -Cause 'membership_operation_uncertain' -Target $deviceName
-                            Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Membership-Journal konnte nicht quittiert werden; VM bleibt blockiert: {0}" -f (Get-VsErrorDetail -ErrorRecord $_))
+                            Add-VsRunCause -Causes $causes -Cause $replayCause -Target $deviceName
+                            Write-VsDeviceLog -Level WARN -Context $deviceName -Message ("Membership-Journal konnte nicht quittiert werden ({0}); VM bleibt blockiert: {1}" -f $replayCause, (Get-VsErrorDetail -ErrorRecord $replayError))
                         }
                     }
                     if ($journalBlocked -or $journalReplayed) {
                         if (-not $journalFailureCounted) { $itemFailures++ }
-                        $journalCause = if ($journalBlocked) { 'membership_operation_uncertain' } else { 'membership_report_pending' }
-                        if (-not $journalFailureCounted) { Add-VsRunCause -Causes $causes -Cause $journalCause -Target $deviceName }
+                        # A blocked VM names why: the causes of the entries the
+                        # clearance kept (membership unreadable, rule on the old
+                        # device) and membership_operation_uncertain for an
+                        # entry the replay itself just left uncertain. A failed
+                        # replay report already added its own cause above.
+                        $journalCauses = New-Object System.Collections.Generic.List[string]
+                        foreach ($journalCause in @($journalClearanceCauses | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+                            if (-not $journalCauses.Contains([string]$journalCause)) { $journalCauses.Add([string]$journalCause) }
+                        }
+                        if ($journalReplayUncertain -or ($journalBlocked -and -not $journalFailureCounted -and $journalCauses.Count -eq 0)) {
+                            if (-not $journalCauses.Contains('membership_operation_uncertain')) { $journalCauses.Add('membership_operation_uncertain') }
+                        }
+                        if (-not $journalBlocked -and -not $journalFailureCounted) { $journalCauses.Add('membership_report_pending') }
+                        foreach ($journalCause in $journalCauses) { Add-VsRunCause -Causes $causes -Cause $journalCause -Target $deviceName }
                         continue
                     }
                 }
@@ -971,7 +1084,9 @@ while ($true) {
 
                 # Entfernen NUR aus $plan.remove: owned UND present UND nicht
                 # mehr desired (Entscheidung 2). Ein Fehlschlag laesst das
-                # Device in der Warteschlange, der naechste Lauf konvergiert.
+                # Device in der Warteschlange, der naechste Lauf konvergiert:
+                # der Eintrag steht dann als uncertain, der naechste Lauf klaert
+                # ihn aus der gelesenen Mitgliedschaft und plant danach neu.
                 foreach ($rule in @($plan.remove)) {
                     $journalRevision = if ([int]$rolloutRevision -gt 0) { [int]$rolloutRevision } else { 1 }
                     $journalEntry = New-VsMembershipJournalEntry -VmId ([int]$device.id) -RolloutRevision $journalRevision -ResourceId ([string]$resourceId) -CollectionId ([string]$rule.collection_id) -CollectionName ([string]$rule.collection_name) -Type ([string]$rule.type) -Change removed
@@ -1002,7 +1117,9 @@ while ($true) {
                 # erhalten; bei einer ersetzten ID wird nur die alte entfernt.
                 # Ein nicht bestaetigtes Add darf die alte Ownership nicht
                 # loeschen, denn der naechste Lauf muss den Wunsch weiter sicher
-                # rekonstruieren koennen.
+                # rekonstruieren koennen: der Eintrag bleibt zunaechst
+                # uncertain, der naechste Lauf klaert ihn aus der gelesenen
+                # Mitgliedschaft und plant danach neu.
                 foreach ($rule in @($plan.stale_owned)) {
                     # Windows PowerShell 5.1 wirft beim direkten Binden einer
                     # generischen List[object] durch @() eine ArgumentException.
@@ -1063,6 +1180,11 @@ while ($true) {
                         # 409 heisst: dieser Scan arbeitet mit einem veralteten
                         # Rollout. Kein Transportfehler, keine Handarbeit - der
                         # naechste Scan liest die neue Revision und laeuft durch.
+                        # Die bestaetigten Journaleintraege tragen dann die alte
+                        # Revision; er klaert sie aus der gelesenen
+                        # Mitgliedschaft ohne Nachmeldung, die Provenienz dieses
+                        # Scans wird also nicht nachgemeldet (ADR-0034
+                        # Amendment 9).
                         # Eigener Code, weil "Meldung fehlgeschlagen" den Operator
                         # sonst einen Netzwerkfehler suchen laesst, den es nicht
                         # gibt.
