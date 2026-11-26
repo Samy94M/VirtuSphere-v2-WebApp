@@ -5,6 +5,26 @@
 
    One of the four domain sheets that replaced components.css in Etappe 16. */
 
+/* A table wider than its frame shows a shade at the edge it continues past
+   (G20, PR-R2). At 390px every table scrolled inside its frame with nothing to
+   say so, and the cut-off last column read as the end of the row. Two covers in
+   the surface colour scroll with the content (`local`) and hide the two shades,
+   which stay at the frame edges (`scroll`), wherever there is nothing more to
+   see; a table that fits shows none. Cells have no fill of their own, so the
+   shade shows through them; the header and the pinned action column are
+   opaque and keep their edge clean. */
+
+.table-wrap,
+.panel .table-wrap,
+.card .table-wrap {
+    background:
+        linear-gradient(to right, var(--surface) 30%, transparent) left center / 32px 100% no-repeat local,
+        linear-gradient(to left, var(--surface) 30%, transparent) right center / 32px 100% no-repeat local,
+        radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--control-border) 55%, transparent), transparent) left center / 12px 100% no-repeat scroll,
+        radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--control-border) 55%, transparent), transparent) right center / 12px 100% no-repeat scroll,
+        var(--surface);
+}
+
 /* Log message column: audit rows quote user input and tokens, i.e. long
    unbroken strings. `anywhere` also lowers min-content, so a floor keeps the
    column from being squeezed by the near-nowrap columns beside it. */
@@ -69,7 +89,7 @@ td.actions button.button,
 td.actions a.button {
     min-height: 30px;
     padding: 4px 9px;
-    font-size: 0.85rem;
+    font-size: 13px;
 }
 
 td.actions .inline-form {
@@ -179,14 +199,10 @@ tr.row-editor .form-grid {
     margin-top: 8px;
 }
 
-/* The drawer background is the same muted tone the fields normally use, so
-   inside it the field/background relationship inverts to keep the contrast. */
-
-tr.row-editor input,
-tr.row-editor select,
-tr.row-editor textarea {
-    background: var(--surface);
-}
+/* The drawer background is the muted tone a locked field uses. An editable
+   field is the solid surface everywhere since PR-R2 (G3), so it already stands
+   off the drawer; only a locked one keeps the drawer tone, and its muted text
+   and border say what the fill no longer can. */
 
 /* UX-HK: the host identity of an Ansible credential is a full-width row under
    its record, reached through the anchor host-identity-<id>. It opens by itself

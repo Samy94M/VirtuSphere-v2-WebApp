@@ -207,8 +207,34 @@ textarea {
     border: 1px solid var(--control-border);
     border-radius: 6px;
     padding: 8px 10px;
-    background: var(--surface-muted);
+    /* An editable field is the solid surface (ADR-0013: form controls stay
+       --surface), a locked one the muted tint below (G3, PR-R2). It was the
+       other way round, which read as "grey = editable". */
+    background: var(--surface);
     color: var(--text);
+    /* A value is not a caption. `font: inherit` above takes the weight of the
+       bold <label> the control sits in, so 91 of 107 values rendered bold (G5,
+       PR-R2). */
+    font-weight: 400;
+}
+
+/* One height for every single-line field (G8, PR-R2): one line of text, the
+   padding and the border. Left to the engine a date field was 42px, a file
+   field 41px and a WebKit select 48px beside 40px inputs, which put filter rows
+   and form rows 2 to 8px out of line. */
+input:not([type="checkbox"], [type="radio"], [type="submit"], [type="button"], [type="reset"], [type="image"]),
+select:not([multiple], [size]) {
+    height: calc(1.45em + 18px);
+}
+
+/* A placeholder is an example, not a value: normal weight and the muted
+   colour, so a filled field and an empty one read apart (G4, PR-R2). Firefox
+   dims placeholders with opacity on top of the colour; the token already
+   carries the contrast. */
+::placeholder {
+    color: var(--muted);
+    font-weight: 400;
+    opacity: 1;
 }
 
 /* Checkboxes and radios keep their intrinsic size. The width:100% / min-height
@@ -221,13 +247,15 @@ input[type="radio"] {
     min-height: auto;
 }
 
-input:read-only,
+/* A file field is never text-editable, so :read-only matches it although it
+   is a working control. */
+input:read-only:not([type="file"]),
 input:disabled,
 select:disabled,
 textarea:read-only,
 textarea:disabled {
     color: var(--muted);
-    background: var(--surface);
+    background: var(--surface-muted);
 }
 
 /* A selected value longer than its field ends in an ellipsis. Without it the
@@ -317,6 +345,17 @@ th {
     text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
+    /* A 24px target (WCAG 2.5.8, G21, PR-R2): the 13px header text gave 19px.
+       The negative margin hands the padding back, so the header keeps its
+       height. */
+    padding-block: 3px;
+    margin-block: -3px;
+}
+
+/* A disclosure is a control of its own, not a word in a sentence: 24px like
+   the other small targets (G21, PR-R2; it was 22px). */
+summary {
+    padding-block: 1px;
 }
 
 .sort-link:hover,

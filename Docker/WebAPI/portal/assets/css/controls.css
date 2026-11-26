@@ -136,10 +136,21 @@ button.button:disabled:hover,
     margin: 0;
 }
 
+/* 1px of block padding takes the target from 22px to 24px (WCAG 2.5.8, G21,
+   PR-R2). The jump to the first deploy blocker and a text link in a button row
+   ("Heute auswählen", "Filter zurücksetzen") are the same kind of standalone
+   link. */
+
+.actions > a:not(.button),
+[data-deploy-blocker-jump] {
+    display: inline-block;
+    padding-block: 1px;
+}
+
 .button-as-link {
     appearance: none;
     border: 0;
-    padding: 0;
+    padding: 1px 0;
     background: none;
     color: inherit;
     font: inherit;
@@ -264,10 +275,12 @@ button.button:disabled:hover,
 /* A hint rendered inside its field's <label> stays secondary. The label is
    bold for its caption, and the hint inherited that weight, so twelve lines of
    explanation read louder than the field they explain. The subject a hint
-   names (.hint-subject) keeps its own weight. */
+   names (.hint-subject) keeps its own weight. A muted note in a label is the
+   same kind of prose (Active Directory, PR-R2). */
 
 label .hint,
-label > small {
+label > small,
+label > .muted {
     font-weight: 400;
 }
 
@@ -552,5 +565,172 @@ label > .compound-field,
 
     .field-group > .field-group-second {
         grid-column: auto;
+    }
+}
+
+/* One line for the controls of a form row (G9, PR-R2). A caption that wraps to
+   two lines pushed its own control about 20px below its neighbours, because a
+   field was one grid cell and its caption simply took more of it. Every child of
+   the form grid now spans the same band of six row tracks: caption, control,
+   three slots for hints and field errors, and one for the prose of a field
+   group. A field is a subgrid of that band, so its caption, control and
+   trailing items land in the shared tracks and every control of the row starts
+   on the same line. A field error still grows downward, in its own slot, which
+   is why the cells stay top-aligned (see .form-grid above).
+
+   A tall control (a textarea, the RAM value with its preset list) spans the
+   control track and the first two slots, and its own hint follows in the third.
+   Kept in the control track alone it would stretch that track, and every hint
+   and error of the row would start under the textarea instead of under its own
+   input. Spanning, its extra height goes to a slot the short fields leave empty.
+
+   Spacing moves from the grid's row gap to the fields. A row gap would also sit
+   between the tracks of one field, and an empty slot would still cost it; the
+   subgrid's own gap is zeroed for the same reason, or a group would space its
+   tracks differently from the fields beside it. The band ends in a 14px margin;
+   the grid's negative margin takes the last one back, so the form keeps its
+   outer size.
+
+   Only where it can work: one column has nothing to line up with, and an engine
+   without subgrid keeps the one-cell layout above. A field has room for a
+   caption, a control and three trailing items (two beside a tall control); one
+   more would share the last slot with its predecessor. The browser measurement
+   in docs/register/2026-11-25-PR-R2.md checks the rendered pages for overlap. */
+
+@supports (grid-template-rows: subgrid) {
+    @media (min-width: 521px) {
+        .form-grid {
+            row-gap: 0;
+            margin-bottom: -14px;
+        }
+
+        .form-grid > * {
+            grid-row: span 6;
+            margin-bottom: 14px;
+        }
+
+        /* WebKit keeps the first, unconstrained layout of a select in a subgrid
+           field as horizontal overflow: the page scrolled sideways by the width
+           of the longest option (88px on the VM editor at 1000px) until any
+           style change laid it out again, although every box fits. A field
+           therefore clips its horizontal overflow. The 4px of padding, taken
+           back by the margin, keep the 2px focus ring with its 2px offset
+           inside the clip; WebKit has no overflow-clip-margin. */
+        .form-grid > label:not(.checkbox-item, .form-grid-full),
+        .form-grid > div:not([class]),
+        .form-grid > .ram-control-group,
+        .field-group > label:not(.checkbox-item, .form-grid-full) {
+            overflow-x: clip;
+            padding-inline: 4px;
+            margin-inline: -4px;
+        }
+
+        .form-grid > label:not(.checkbox-item, .form-grid-full),
+        .form-grid > div:not([class]),
+        .form-grid > .ram-control-group,
+        .form-grid > .field-stack,
+        .form-grid > .field-group,
+        .field-group > label:not(.checkbox-item, .form-grid-full),
+        .field-group > .field-stack {
+            display: grid;
+            grid-template-rows: subgrid;
+            row-gap: 0;
+            /* A track is as tall as the tallest neighbour in it (a textarea);
+               a stretched input would grow to match. */
+            align-items: start;
+        }
+
+        .form-grid > .field-stack,
+        .field-group > .field-stack {
+            justify-items: start;
+        }
+
+        .form-grid > .field-stack > label:not(.checkbox-item),
+        .field-group > .field-stack > label:not(.checkbox-item) {
+            justify-self: stretch;
+        }
+
+        .form-grid label > textarea,
+        .form-grid .ram-control-group > .compound-field {
+            grid-row: 2 / span 3;
+        }
+
+        /* A field inside a group spans only the tracks it fills: caption,
+           control and each trailing item it shows (a captioned option group:
+           caption and each card). Spanning the whole band, its box would lie
+           over the group prose below and take the clicks meant for its link.
+           :has() follows a hint that a script shows or hides. */
+        .field-group > label,
+        .field-group > .field-stack {
+            grid-row: 1 / span 2;
+            grid-column: 1;
+        }
+
+        .field-group > label:has(> :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])),
+        .field-group > .field-stack:has(> :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])) {
+            grid-row: 1 / span 3;
+        }
+
+        .field-group > label:has(> :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])),
+        .field-group > .field-stack:has(> :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])) {
+            grid-row: 1 / span 4;
+        }
+
+        .field-group > label:has(> :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])),
+        .field-group > .field-stack:has(> :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])) {
+            grid-row: 1 / span 5;
+        }
+
+        /* Explicit columns, because the prose below is placed in both axes and
+           the grid places such items first: an auto-placed field then found its
+           rows taken in both tracks and opened a third column (WebKit). */
+        .field-group > :is(label, .field-stack) ~ :is(label, .field-stack) {
+            grid-column: 2;
+        }
+
+        /* The group's own prose (a hint, an alert, a note block under both
+           fields) starts in the first slot its fields leave free and runs to the
+           end of the band. Fixed in the last track it would wait for the longest
+           hint of the whole row: the datastore note of the VM editor stood under
+           the RAM hints. */
+        .field-group > .hint,
+        .field-group > .alert,
+        .field-group > .form-grid-full {
+            grid-row: 3 / -1;
+            margin-top: 8px;
+        }
+
+        .field-group:has(> label > :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]), > .field-stack > :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])) > :is(.hint, .alert, .form-grid-full) {
+            grid-row: 4 / -1;
+        }
+
+        .field-group:has(> label > :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]), > .field-stack > :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])) > :is(.hint, .alert, .form-grid-full) {
+            grid-row: 5 / -1;
+        }
+
+        /* A note about the second control alone stays directly under it, after
+           what that control shows itself (an error); under the whole group it
+           would wait for the long WDS port group hint beside the mission
+           location. */
+        .field-group > .field-group-second {
+            grid-row: 3 / -1;
+            margin-top: 4px;
+        }
+
+        .field-group:has(> label ~ label > :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])) > .field-group-second {
+            grid-row: 4 / -1;
+        }
+
+        .field-group:has(> label ~ label > :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"]) ~ :not([hidden], [type="hidden"])) > .field-group-second {
+            grid-row: 5 / -1;
+        }
+
+        /* The option cards and the prose of a captioned group start where the
+           controls beside them start. */
+        .field-stack > .checkbox-item,
+        .field-stack > label:not(.checkbox-item),
+        .field-stack > .hint {
+            margin-top: 6px;
+        }
     }
 }
