@@ -6,7 +6,8 @@ declare(strict_types=1);
  * Audits the VirtuSphere portal language catalog for DE/EN key parity,
  * placeholder parity (a `:placeholder` missing in one locale silently drops
  * the interpolated value there, .claude/rules/i18n.md), the quote form (i18n
- * R11/R12), the sentence dash (R8) and German replacement spellings (R14).
+ * R11/R12), the sentence dash (R8), German replacement spellings (R14) and
+ * written-out MECM terms instead of `{mecm:<name>}` placeholders (R15, PR-R3M).
  *
  * CLI contract:
  *   php scripts/lang-audit.php          Full report, exit 1 on findings.
@@ -15,7 +16,9 @@ declare(strict_types=1);
  *   php scripts/lang-audit.php --help   Usage.
  *
  * Tests may override the catalog root with VIRTUSPHERE_LANG_BASE (or point
- * VIRTUSPHERE_CHECK_ROOT at a fixture repo root, guard harness convention).
+ * VIRTUSPHERE_CHECK_ROOT at a fixture repo root, guard harness convention) and
+ * the MECM term sets with VIRTUSPHERE_MECM_TERMS_BASE (default: lib/mecm_terms
+ * next to the catalog root).
  * Finding lines carry stable [lang-audit.*] IDs as the diagnostic contract.
  */
 
@@ -122,6 +125,10 @@ foreach (array_keys($modules) as $module) {
  */
 $placeholderDrifts = [];
 $placeholdersOf = static function (string $text): array {
+    // MECM term placeholders {mecm:<name>} are filled by Lang itself; their
+    // DE/EN parity is the term parity rule below ([lang-audit.mecm-term-drift]),
+    // which ignores the case of the first letter.
+    $text = (string) preg_replace('/\{mecm:[^}]*\}/', '', $text);
     preg_match_all('/:([a-z][a-z0-9_]*)/', $text, $matches);
     $tokens = array_values(array_unique($matches[1]));
     sort($tokens);
@@ -277,6 +284,202 @@ foreach ($catalog['de'] ?? [] as $module => $entries) {
 }
 
 /**
+ * MECM terms (i18n R15, PR-R3M): the six MECM object names (Task Sequence,
+ * Distribution Point, Site, SMS Provider, Collection, Deployment) come only from
+ * the term set of the environment's console language, as `{mecm:<name>}`.
+ *
+ * The word list is derived from the term sets themselves (Docker/WebAPI/lib/
+ * mecm_terms/<language>.php): every form of every set, matched as a whole word,
+ * case-insensitive, with space and hyphen treated alike ("SMS Provider" also
+ * finds "SMS-Provider"). A catalog value that writes one of them out is
+ * `[lang-audit.mecm-term-literal]`, unless the exemption file
+ * (scripts/lang-audit-mecm-exemptions.php) names the phrase, the key or the
+ * module with a reason, or lists the key as not yet converted. Literals in
+ * <code>/<pre> are exempt as in R11.
+ *
+ * Also: `[lang-audit.mecm-term-drift]` when DE and EN of a key name different
+ * term placeholders (first-letter case ignored, deliberate cases in
+ * `term_parity`), `[lang-audit.mecm-term-unknown]` for a placeholder no set defines,
+ * `[lang-audit.mecm-terms]` for a missing default set, a malformed entry or
+ * sets whose names differ, and `[lang-audit.mecm-term-stale]` for an exemption
+ * or pending key that no longer matches anything, so the lists only shrink.
+ *
+ * @var array{set: list<string>, unknown: list<string>, literal: list<string>, drift: list<string>, stale: list<string>} $mecmTermFindings
+ */
+$mecmTermFindings = ['set' => [], 'unknown' => [], 'literal' => [], 'drift' => [], 'stale' => []];
+$envTermsBase = getenv('VIRTUSPHERE_MECM_TERMS_BASE');
+$termsBase = is_string($envTermsBase) && $envTermsBase !== ''
+    ? $envTermsBase
+    : dirname($base) . DIRECTORY_SEPARATOR . 'lib' . DIRECTORY_SEPARATOR . 'mecm_terms';
+$termSets = [];
+foreach (glob($termsBase . DIRECTORY_SEPARATOR . '*.php') ?: [] as $termFile) {
+    $language = basename($termFile, '.php');
+    $data = require $termFile;
+    if (!is_array($data) || $data === []) {
+        $mecmTermFindings['set'][] = $language . ': term set did not return a non-empty array';
+        continue;
+    }
+    foreach ($data as $name => $forms) {
+        if (!is_string($name) || preg_match('/^[a-z][a-z0-9_]*$/', $name) !== 1) {
+            $mecmTermFindings['set'][] = $language . ': name ' . var_export($name, true) . ' is not lower snake case';
+            continue;
+        }
+        foreach ($locales as $locale) {
+            if (!is_array($forms) || !isset($forms[$locale]) || !is_string($forms[$locale]) || trim($forms[$locale]) === '') {
+                $mecmTermFindings['set'][] = $language . ': ' . $name . ' has no ' . $locale . ' form';
+                continue 2;
+            }
+        }
+        $termSets[$language][$name] = $forms;
+    }
+}
+ksort($termSets);
+if (!isset($termSets['de'])) {
+    $mecmTermFindings['set'][] = 'no default term set de.php under ' . $termsBase;
+}
+$termNames = [];
+foreach ($termSets as $language => $terms) {
+    $termNames[$language] = array_keys($terms);
+    sort($termNames[$language]);
+}
+$referenceNames = $termNames['de'] ?? (reset($termNames) ?: []);
+foreach ($termNames as $language => $names) {
+    if ($names !== $referenceNames) {
+        $mecmTermFindings['set'][] = $language . ': names differ from de: missing=[' . implode(',', array_diff($referenceNames, $names))
+            . '] extra=[' . implode(',', array_diff($names, $referenceNames)) . ']';
+    }
+}
+
+/** A phrase as a whole-word, case-insensitive pattern with space and hyphen alike. */
+$mecmPhrasePattern = static function (string $phrase): string {
+    $parts = preg_split('/[\s\-]+/u', trim($phrase), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $quoted = array_map(static fn (string $part): string => preg_quote($part, '/'), $parts);
+
+    return '(?<![\p{L}\p{N}])' . implode('[\s\x{00A0}\-]+', $quoted) . '(?![\p{L}\p{N}])';
+};
+$mecmWords = [];
+foreach ($termSets as $terms) {
+    foreach ($terms as $forms) {
+        foreach ($locales as $locale) {
+            $mecmWords[mb_strtolower($forms[$locale])] = $forms[$locale];
+        }
+    }
+}
+uksort($mecmWords, static fn (string $a, string $b): int => (mb_strlen($b) <=> mb_strlen($a)) ?: strcmp($a, $b));
+$mecmWordPattern = $mecmWords === []
+    ? null
+    : '/' . implode('|', array_map($mecmPhrasePattern, array_values($mecmWords))) . '/iu';
+
+$mecmExemptionFile = __DIR__ . DIRECTORY_SEPARATOR . 'lang-audit-mecm-exemptions.php';
+$mecmExemptions = is_file($mecmExemptionFile) ? require $mecmExemptionFile : null;
+if (!is_array($mecmExemptions)) {
+    $mecmTermFindings['set'][] = 'exemption file ' . $mecmExemptionFile . ' missing or not an array';
+    $mecmExemptions = [];
+}
+/** @var array<string,string> $exemptPhrases */
+$exemptPhrases = (array) ($mecmExemptions['phrases'] ?? []);
+/** @var array<string,string> $exemptKeys locale:module.key => reason */
+$exemptKeys = (array) ($mecmExemptions['keys'] ?? []);
+/** @var array<string,string> $exemptModules */
+$exemptModules = (array) ($mecmExemptions['modules'] ?? []);
+/** @var list<string> $pendingKeys module.key, both locales */
+$pendingKeys = array_values((array) ($mecmExemptions['pending'] ?? []));
+$pendingLookup = array_fill_keys($pendingKeys, true);
+
+$phraseUsed = array_fill_keys(array_keys($exemptPhrases), false);
+$keyUsed = array_fill_keys(array_keys($exemptKeys), false);
+$moduleUsed = array_fill_keys(array_keys($exemptModules), false);
+$pendingUsed = array_fill_keys($pendingKeys, false);
+$knownNames = array_fill_keys($referenceNames, true);
+foreach ($locales as $locale) {
+    foreach ($catalog[$locale] ?? [] as $module => $entries) {
+        foreach ($entries as $key => $text) {
+            $id = $module . '.' . $key;
+            preg_match_all('/\{mecm:([^}]*)\}|\{mecm:(?![^}]*\})/', $text, $placeholderMatches, PREG_SET_ORDER);
+            foreach ($placeholderMatches as $placeholder) {
+                $name = lcfirst((string) ($placeholder[1] ?? ''));
+                if (!isset($knownNames[$name])) {
+                    $mecmTermFindings['unknown'][] = $id . ' ' . $locale . ': ' . $placeholder[0] . ' is not in the term sets';
+                }
+            }
+            if ($mecmWordPattern === null) {
+                continue;
+            }
+            $plain = (string) preg_replace('/\{mecm:[^}]*\}/', ' ', $withoutLiterals($text));
+            foreach (array_keys($exemptPhrases) as $phrase) {
+                $phrasePattern = '/' . $mecmPhrasePattern((string) $phrase) . '/iu';
+                if (preg_match($phrasePattern, $plain) === 1) {
+                    $phraseUsed[$phrase] = true;
+                    $plain = (string) preg_replace($phrasePattern, ' ', $plain);
+                }
+            }
+            if (preg_match($mecmWordPattern, $plain, $wordMatch) !== 1) {
+                continue;
+            }
+            if (isset($exemptModules[$module])) {
+                $moduleUsed[$module] = true;
+            } elseif (isset($exemptKeys[$locale . ':' . $id])) {
+                $keyUsed[$locale . ':' . $id] = true;
+            } elseif (isset($pendingLookup[$id])) {
+                $pendingUsed[$id] = true;
+            } else {
+                $mecmTermFindings['literal'][] = $id . ' ' . $locale . ': "' . $wordMatch[0] . '" written out, use {mecm:<name>} from the term set';
+            }
+        }
+    }
+}
+/*
+ * Term parity: a key present in both locales names the same term placeholders in
+ * DE and EN, compared without the case of the first letter (sentence start and
+ * running text are one term). A placeholder in one locale only would show the
+ * MECM word in one language and drop it in the other, like a :placeholder drift.
+ * A deliberate difference stands in `term_parity` of the exemption file.
+ */
+$termParityExempt = (array) ($mecmExemptions['term_parity'] ?? []);
+$termParityUsed = array_fill_keys(array_keys($termParityExempt), false);
+$termNamesOf = static function (string $text): array {
+    preg_match_all('/\{mecm:([^}]*)\}/', $text, $matches);
+    $names = array_values(array_unique(array_map('lcfirst', $matches[1])));
+    sort($names);
+
+    return $names;
+};
+foreach (array_keys($modules) as $module) {
+    foreach ($catalog['de'][$module] ?? [] as $key => $deText) {
+        $enText = $catalog['en'][$module][$key] ?? null;
+        if ($enText === null) {
+            continue;
+        }
+        $deNames = $termNamesOf($deText);
+        $enNames = $termNamesOf($enText);
+        if ($deNames === $enNames) {
+            continue;
+        }
+        $id = $module . '.' . $key;
+        if (isset($termParityExempt[$id])) {
+            $termParityUsed[$id] = true;
+            continue;
+        }
+        $mecmTermFindings['drift'][] = $id . ' de=[' . implode(',', $deNames) . '] en=[' . implode(',', $enNames) . ']';
+    }
+}
+foreach ($termParityUsed as $entry => $hit) {
+    if (!$hit) {
+        $mecmTermFindings['stale'][] = 'term_parity ' . $entry . ' names the same terms in both locales; remove it from the exemption file';
+    }
+}
+
+if ($mecmWordPattern !== null) {
+    foreach (['phrase' => $phraseUsed, 'key' => $keyUsed, 'module' => $moduleUsed, 'pending key' => $pendingUsed] as $kind => $used) {
+        foreach ($used as $entry => $hit) {
+            if (!$hit) {
+                $mecmTermFindings['stale'][] = $kind . ' ' . $entry . ' matches no MECM term any more; remove it from the exemption file';
+            }
+        }
+    }
+}
+
+/**
  * Zero match: an empty catalog is never proof of a clean one. Every rule above
  * walks the values of both locales; with no value in one of them, each would be
  * vacuously green.
@@ -294,11 +497,13 @@ foreach ($locales as $locale) {
     }
 }
 
+$mecmTermIds = ['set' => 'mecm-terms', 'unknown' => 'mecm-term-unknown', 'literal' => 'mecm-term-literal', 'drift' => 'mecm-term-drift', 'stale' => 'mecm-term-stale'];
+$mecmTermCount = array_sum(array_map('count', $mecmTermFindings));
 $failed = $fileErrors !== [] || $gaps !== [] || $placeholderDrifts !== [] || $quoteMixes !== []
-    || $sentenceDashes !== [] || $umlautSpellings !== [] || $zeroMatches !== [];
+    || $sentenceDashes !== [] || $umlautSpellings !== [] || $zeroMatches !== [] || $mecmTermCount > 0;
 $summary = count($fileErrors) . ' file error(s), ' . count($gaps) . ' parity gap(s), ' . count($placeholderDrifts) . ' placeholder drift(s), '
     . count($quoteMixes) . ' quote mix(es), ' . count($sentenceDashes) . ' sentence dash(es), ' . count($umlautSpellings) . ' umlaut spelling(s), '
-    . count($zeroMatches) . ' zero match(es).';
+    . $mecmTermCount . ' MECM term finding(s), ' . count($zeroMatches) . ' zero match(es).';
 
 if ($mode === 'quiet') {
     if ($failed) {
@@ -332,10 +537,16 @@ if ($mode === 'ci') {
         foreach ($umlautSpellings as $spelling) {
             fwrite(STDERR, '  - [lang-audit.umlaut-spelling] ' . $spelling['key'] . ' ' . $spelling['detail'] . "\n");
         }
+        foreach ($mecmTermFindings as $kind => $findings) {
+            foreach ($findings as $finding) {
+                fwrite(STDERR, '  - [lang-audit.' . $mecmTermIds[$kind] . '] ' . $finding . "\n");
+            }
+        }
         exit(1);
     }
 
-    fwrite(STDOUT, 'OK: Lang-Audit - DE/EN catalog clean: parity, placeholders, quotes, dashes, umlauts (' . count($modules) . " module(s)).\n");
+    fwrite(STDOUT, 'OK: Lang-Audit - DE/EN catalog clean: parity, placeholders, quotes, dashes, umlauts, MECM terms (' . count($modules) . ' module(s), '
+        . count($termSets) . " term set(s)).\n");
     exit(0);
 }
 
@@ -366,6 +577,12 @@ foreach ($sentenceDashes as $dash) {
 echo 'Umlaut spellings (de): ' . count($umlautSpellings) . "\n";
 foreach ($umlautSpellings as $spelling) {
     echo 'UMLAUT [lang-audit.umlaut-spelling] ' . $spelling['key'] . ' ' . $spelling['detail'] . "\n";
+}
+echo 'MECM term findings: ' . $mecmTermCount . ' (term sets: ' . implode(', ', array_keys($termSets)) . ")\n";
+foreach ($mecmTermFindings as $kind => $findings) {
+    foreach ($findings as $finding) {
+        echo 'MECM [lang-audit.' . $mecmTermIds[$kind] . '] ' . $finding . "\n";
+    }
 }
 echo 'Zero matches: ' . count($zeroMatches) . "\n";
 foreach ($zeroMatches as $zero) {

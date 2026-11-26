@@ -26,6 +26,7 @@ require_once __DIR__ . '/db.php';
 // page reaches for portal_forbid()/portal_reject_csrf() without its own require.
 require_once __DIR__ . '/audit_events.php';
 require_once __DIR__ . '/portal_time.php';
+require_once __DIR__ . '/mecm_terms.php';
 require_once __DIR__ . '/permissions.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/https_config.php';
@@ -107,6 +108,9 @@ virtusphere_start_session();
 Lang::load(__locale_resolve());
 
 $connection = db();
+// MECM term set of this environment (display-only, PR-R3M); falls back to the
+// default on a missing or unknown value.
+Lang::useMecmTerms(mecm_console_language());
 
 // Portal-only HTTP->HTTPS redirect (ADR-0012): only pages loading this
 // bootstrap redirect; the machine API and health.php stay exempt because they

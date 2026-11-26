@@ -151,8 +151,9 @@ final class AutoimporterStatusPresentationTest extends TestCase
             $requestFailed = (string) $catalog['finding_package_content_request_failed'];
             self::assertStringContainsString($locale === 'de' ? 'DP-Gruppe' : 'DP group', $requestFailed);
             self::assertStringContainsString($locale === 'de' ? 'Tageslog' : 'daily autoimporter log', $requestFailed);
-            self::assertStringContainsString($locale === 'de' ? 'Collection und Deployments' : 'collections and deployments', $requestFailed);
-            self::assertStringContainsString($locale === 'de' ? 'Collection und Deployments' : 'collections and deployments', (string) $catalog['finding_package_content_unknown']);
+            // MECM words are term placeholders (PR-R3M, i18n R15).
+            self::assertStringContainsString($locale === 'de' ? '{mecm:collection} und die {mecm:deployments}' : '{mecm:collection} and the {mecm:deployments}', $requestFailed);
+            self::assertStringContainsString($locale === 'de' ? '{mecm:collection} und die {mecm:deployments}' : '{mecm:collection} and the {mecm:deployments}', (string) $catalog['finding_package_content_unknown']);
             self::assertStringContainsString('VirtuSphere_Applications', (string) $catalog['finding_package_definition_drift']);
             self::assertStringContainsString($locale === 'de' ? 'noch kein DP erfolgreich' : 'no DP is successful yet', (string) $help['system_status_status_counters']);
             foreach (['Kopiernachweis', 'copy evidence', 'copy record', 'Zielverlust', 'target loss', 'Zielprojektion', 'target projection'] as $retired) {
@@ -166,7 +167,7 @@ final class AutoimporterStatusPresentationTest extends TestCase
             $cleanupHelp = (string) $help['system_status_status_cleanup_p4'];
             self::assertStringContainsString($locale === 'de' ? 'null erfolgreiche DPs' : 'zero successful DPs', $cleanupHelp);
             self::assertStringContainsString('removeOldVersion=true', $cleanupHelp);
-            self::assertStringContainsString($locale === 'de' ? 'Deployments, Applications und Collections' : 'deployments, applications, and collections', $cleanupHelp);
+            self::assertStringContainsString($locale === 'de' ? '{mecm:deployments}, Applications und {mecm:collections}' : '{mecm:deployments}, applications, and {mecm:collections}', $cleanupHelp);
             $packageHelp = (string) $help['system_status_status_package_p5'];
             self::assertStringContainsString('Get-VsPackageRetainedNames', $packageHelp);
             self::assertStringContainsString('install-VirtuSphere-MECM.ps1 -Upgrade', $packageHelp);

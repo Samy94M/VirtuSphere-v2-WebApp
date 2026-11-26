@@ -36,6 +36,7 @@ const VIRTUSPHERE_SETTINGS_TABS = [
 // are not tabpanels; the dashboard's backup banner uses one.
 const VIRTUSPHERE_SETTINGS_SECTIONS = [
     'time',
+    'mecm-terms',
     'session',
     'password-policy',
     'retention',

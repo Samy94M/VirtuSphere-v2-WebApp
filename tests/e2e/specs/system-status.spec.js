@@ -173,7 +173,14 @@ test('MECM section: two separate subgroups and no outbound probe control', async
   await page.goto('system_status.php#mecm');
   // The MECM section is two visually equal subgroups, never one worst-of.
   await expect(page.locator('#mecm')).toContainText(/VirtuSphere-MECM-Integration|VirtuSphere MECM integration/);
-  await expect(page.locator('#mecm')).toContainText(/MECM-Site-Status|MECM site status/);
+  // The heading names the site status with the MECM term set of this
+  // environment (PR-R3M). The QA stack runs the default German console, so the
+  // wording is pinned for it; the catalog rendering must agree with that pin.
+  const { console: mecmConsole, headings } = phpJson(`$console = mecm_console_language(); Lang::useMecmTerms($console);
+echo 'JSON' . json_encode(['console' => $console, 'headings' => [Lang::getIn('de', 'system_status.mecm_site_heading'), Lang::getIn('en', 'system_status.mecm_site_heading')]]) . 'JSON';`, ['lib/mecm_terms.php']);
+  expect(mecmConsole, 'the QA stack runs the default German MECM console').toBe('de');
+  expect(headings, 'the catalog renders the German console word in both portal languages').toEqual(['MECM-Standortstatus', 'MECM Standortstatus']);
+  await expect(page.locator('#mecm')).toContainText(/MECM-Standortstatus|MECM Standortstatus/);
   // The 445 probe is gone: no "Erneut prüfen"/"Check again" control, no run_mecm_probe form.
   await expect(page.locator('form:has(input[name="action"][value="run_mecm_probe"])')).toHaveCount(0);
   await expect(page.locator('#mecm')).not.toContainText(/Erneut prüfen|Check again/);
@@ -224,7 +231,8 @@ test('MECM site: only supporting parts critical reads limited, with the parts by
     await expect(mecm.locator('.status-subgroup').nth(1)).not.toContainText(/Ausgefallen|\bDown\b|Verzögert|Delayed/);
 
     await page.goto('dashboard.php');
-    const siteRow = page.locator('a.card.kpi .signal-row').filter({ hasText: /MECM-Site|MECM site/ });
+    // The QA stack runs the default German console terms (PR-R3M): the KPI label is fixed.
+    const siteRow = page.locator('a.card.kpi .signal-row').filter({ hasText: /MECM-Standort|MECM Standort/ });
     await expect(siteRow.locator('.badge')).toHaveText(/Eingeschränkt|Limited/);
   } finally {
     restoreSite(snapshot);
@@ -236,7 +244,7 @@ test('Dashboard: the MECM tile shows two separate signal rows', async ({ page })
   const tile = page.locator('a.card.kpi:has(.value-signals)');
   await expect(tile.locator('.signal-row')).toHaveCount(2);
   await expect(tile).toContainText(/Integration/);
-  await expect(tile).toContainText(/MECM-Site|MECM site/);
+  await expect(tile).toContainText(/MECM-Standort|MECM Standort/);
 
   // At 900px the portal sidebar is still visible and the dashboard's fixed three
   // columns leave each tile only about 192px wide, so the MECM badge is measured

@@ -383,6 +383,8 @@ $docSemFixtureFiles = @(
 # die Datei mit audit-context-zero-match ab. Jeder andere Fall waere dann rot
 # aus einem anderen Grund als seiner eigenen Mutation, also unproven.
 $boundsFixtureFiles = @('Docker/WebAPI/lib', 'Docker/WebAPI/lang', 'Docker/mysql/mysql-init/struktur.sql')
+# lang-audit reads the catalogs and the MECM term sets next to them (PR-R3M).
+$langFixtureFiles = @('Docker/WebAPI/lang', 'Docker/WebAPI/lib/mecm_terms')
 # check-audit-contract scannt jede first-party PHP-Datei unter Docker/WebAPI und
 # liest die Registry als SSoT. Die Wurzeldateien gehoeren dazu, weil die
 # Machine-API-Endpunkte eigene Producer sind; ohne sie waere jeder Negativfall
@@ -736,12 +738,12 @@ $cases = @(
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci')) @(0)
     } }
     @{ Name = 'lang-audit.missing-key'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_probe' => 'Probe',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.parity-gap\].*zz_guard_probe'
     } }
     @{ Name = 'lang-audit.placeholder-drift'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_ph' => 'Wert :min',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_ph' => 'value :minimum',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.placeholder-drift\].*zz_guard_ph'
@@ -750,13 +752,13 @@ $cases = @(
     # double-quoted string with \u{...} escapes, so this file stays ASCII and the
     # fixture bytes do not depend on the encoding Edit-Fixture writes.
     @{ Name = 'lang-audit.quote-mix'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_quote' => `"Reiter \u{201E}Probe\`" offen`",`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_quote' => 'Tab Probe open',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_quote'
     } }
     @{ Name = 'lang-audit.quote-unclosed'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_open' => `"Reiter \u{201E}Probe offen`",`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_open' => 'Tab Probe open',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_open.*never closed'
@@ -764,68 +766,122 @@ $cases = @(
     # i18n R12: English quotes with the straight pair. Same ASCII-only fixture
     # technique as above for the typographic marks.
     @{ Name = 'lang-audit.quote-en-typographic'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_en_quote' => 'Reiter Probe offen',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_en_quote' => `"Tab \u{201C}Probe\u{201D} open`",`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_en_quote en: typographic quote mark U\+201C'
     } }
     @{ Name = 'lang-audit.quote-en-unclosed'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_en_open' => 'Reiter Probe offen',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_en_open' => 'Tab `"Probe open',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.quote-mix\].*zz_guard_en_open en: straight quote " is never closed'
     } }
     # i18n R8: no sentence dash in either locale (same ASCII-only fixture technique).
     @{ Name = 'lang-audit.sentence-dash'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_dash' => `"Probe \u{2014} offen`",`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_dash' => 'Probe open',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.sentence-dash\] deploy\.zz_guard_dash de: em dash U\+2014'
     } }
     @{ Name = 'lang-audit.sentence-dash-en-dash'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_endash' => 'Probe offen',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_endash' => `"Probe \u{2013} open`",`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.sentence-dash\] deploy\.zz_guard_endash en: en dash U\+2013 between words'
     } }
     # Gegenprobe: digit range, a literal in <code>, the bare empty-cell placeholder.
     @{ Name = 'lang-audit.sentence-dash-allowed'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_range' => `"Port 1\u{2013}5, <code>a \u{2014} b</code>`",`n    'zz_guard_cell' => `"\u{2014}`",`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_range' => `"Port 1\u{2013}5, <code>a \u{2013} b</code>`",`n    'zz_guard_cell' => `"\u{2014}`",`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(0)
     } }
     # i18n R14: replacement spellings in DE, as a whole word and as a stem inside a compound.
     @{ Name = 'lang-audit.umlaut-spelling'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_umlaut' => 'Bitte fuer die Probe',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_umlaut' => 'Please probe',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.umlaut-spelling\] deploy\.zz_guard_umlaut de: replacement spelling "fuer"'
     } }
     @{ Name = 'lang-audit.umlaut-spelling-stem'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_stem' => 'Die Dateigroesse fehlt',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_stem' => 'The file size is missing',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.umlaut-spelling\] deploy\.zz_guard_stem de: replacement spelling "groess"'
     } }
     @{ Name = 'lang-audit.umlaut-word-start'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_start' => 'Nichts bleibt uebrig',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_start' => 'Nothing is left',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.umlaut-spelling\] deploy\.zz_guard_start de: replacement spelling "uebrig"'
     } }
     # Gegenprobe: real words that contain ae/oe/ue, loan words, an acronym and a code literal stay clean.
     @{ Name = 'lang-audit.umlaut-clean'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_clean' => 'Aktuell neue Quelle in der Queue, Steuerung erneut, Feuer, Poet, Israel, UEFI, <code>Get-Ueberblick</code>',`n];"
         Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_clean' => 'Current new source in the queue',`n];"
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(0)
     } }
     # Zero match: a locale without a single value would leave every rule vacuously green.
     @{ Name = 'lang-audit.zero-match'; Body = {
-        $fx = New-Fixture @('Docker/WebAPI/lang')
+        $fx = New-Fixture $langFixtureFiles
         Get-ChildItem -Path (Join-Path $fx 'Docker/WebAPI/lang/de') -Filter '*.php' | Remove-Item -Force
         Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.zero-match\] de: no catalog value'
+    } }
+    # i18n R15 (PR-R3M): MECM terms only as {mecm:<name>}; the word list comes from
+    # the term sets in Docker/WebAPI/lib/mecm_terms, so these probes name words
+    # of both sets.
+    @{ Name = 'lang-audit.mecm-term-literal'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_mecm' => 'Die Collection fehlt',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_mecm' => 'The probe is missing',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.mecm-term-literal\] deploy\.zz_guard_mecm de: "Collection" written out'
+    } }
+    # Space and hyphen alike: "SMS Provider" in the set also finds "SMS-Provider".
+    @{ Name = 'lang-audit.mecm-term-literal-hyphen'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_mecm_hyphen' => 'Probe offen',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_mecm_hyphen' => 'The SMS-Provider is down',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.mecm-term-literal\] deploy\.zz_guard_mecm_hyphen en: "SMS-Provider" written out'
+    } }
+    # Gegenprobe: placeholders in both forms, the exempt component name and a code literal stay clean.
+    @{ Name = 'lang-audit.mecm-term-clean'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_mecm_clean' => '{mecm:Collection} fehlt, der Site-Health-Reporter meldet <code>Collection</code>',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_mecm_clean' => 'The {mecm:collection} is missing',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(0)
+    } }
+    # Term parity: a term placeholder in one locale only is a drift. Case of the
+    # first letter is no difference; lang-audit.mecm-term-clean pins that
+    # ({mecm:Collection} against {mecm:collection} stays green).
+    @{ Name = 'lang-audit.mecm-term-drift'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_mecm_drift' => 'Probe offen',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_mecm_drift' => '{mecm:The_site} is open',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.mecm-term-drift\] deploy\.zz_guard_mecm_drift de=\[\] en=\[the_site\]'
+    } }
+    @{ Name = 'lang-audit.mecm-term-unknown'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/deploy.php' '];' "    'zz_guard_mecm_unknown' => 'Die {mecm:colection} fehlt',`n];"
+        Edit-Fixture $fx 'Docker/WebAPI/lang/en/deploy.php' '];' "    'zz_guard_mecm_unknown' => 'The probe is missing',`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.mecm-term-unknown\] deploy\.zz_guard_mecm_unknown de: \{mecm:colection\}'
+    } }
+    # An exemption that matches nothing any more is a finding, so the list only shrinks.
+    @{ Name = 'lang-audit.mecm-term-stale'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lang/de/vms.php' "'th_location' => 'Standort'," "'th_location' => 'Ort',"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.mecm-term-stale\] key de:vms\.th_location'
+    } }
+    @{ Name = 'lang-audit.mecm-terms-parity'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Edit-Fixture $fx 'Docker/WebAPI/lib/mecm_terms/en.php' '];' "    'zz_probe' => ['de' => 'Probe', 'en' => 'probe'],`n];"
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.mecm-terms\] en: names differ from de: missing=\[\] extra=\[zz_probe\]'
+    } }
+    @{ Name = 'lang-audit.mecm-terms-missing'; Body = {
+        $fx = New-Fixture $langFixtureFiles
+        Remove-Item -Force (Join-Path $fx 'Docker/WebAPI/lib/mecm_terms/de.php')
+        Assert-Guard (Invoke-GuardPhp 'lang-audit.php' @('--ci') $fx) @(1) '\[lang-audit\.mecm-terms\] no default term set de\.php'
     } }
 
     @{ Name = 'bounds-sync.green'; Body = {

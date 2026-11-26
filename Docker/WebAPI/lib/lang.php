@@ -13,6 +13,9 @@ declare(strict_types=1);
  *   status transitions or machine API wire contracts (see .claude/rules/i18n.md).
  * - Missing keys return the key itself, so gaps stay visible during development
  *   instead of silently falling back to unrelated prose.
+ * - MECM terms are placeholders `{mecm:<name>}` filled from the term set of the
+ *   environment's MECM console language (lib/mecm_terms/, PR-R3M), independent
+ *   of the portal locale and just as display-only.
  *
  * Usage:
  *   __t('portal.invalid_request')            -> "Ungueltige Abmeldeanfrage."
@@ -35,6 +38,18 @@ final class Lang
 
     /** @var array<string, array<string, string>> Per-locale catalog cache. */
     private static array $catalogCache = [];
+
+    /**
+     * MECM console language whose term set fills `{mecm:<name>}` (PR-R3M, i18n
+     * R15). Display-only like the locale; without useMecmTerms() (CLI, workers,
+     * tests) the default applies, so this class never reads the database.
+     */
+    public const MECM_CONSOLE_DEFAULT = 'de';
+
+    private static string $mecmConsole = self::MECM_CONSOLE_DEFAULT;
+
+    /** @var array<string, array<string, string>>|null Per-locale `{mecm:...}` => word pairs of the active term set. */
+    private static ?array $mecmPairs = null;
 
     /**
      * Loads the catalog for a locale. Unknown locales fall back to the default.
@@ -91,7 +106,7 @@ final class Lang
      */
     public static function get(string $key, array $replace = []): string
     {
-        return self::replace(self::$strings[$key] ?? $key, $replace);
+        return self::fill(self::$strings[$key] ?? $key, $replace, self::$locale);
     }
 
     /**
@@ -109,7 +124,7 @@ final class Lang
         }
         $strings = self::catalog($locale);
 
-        return self::replace($strings[$key] ?? $key, $replace);
+        return self::fill($strings[$key] ?? $key, $replace, $locale);
     }
 
     /**
@@ -147,6 +162,130 @@ final class Lang
         }
 
         return $pairs === [] ? $text : strtr($text, $pairs);
+    }
+
+    /**
+     * Catalog text as shown in a locale: fills the MECM term placeholders
+     * `{mecm:<name>}` from the active term set and the call-site :placeholders
+     * in the same single strtr() pass, so a value passed in by a caller (a VM
+     * name that happens to read `{mecm:site}`) is never searched again. An
+     * unknown term placeholder stays visible (R7). `<locale>` picks the form of
+     * the word inside that portal language; an unknown one falls back to the
+     * default.
+     *
+     * @param array<string, string|int> $replace
+     */
+    public static function fill(string $text, array $replace, string $locale): string
+    {
+        $pairs = [];
+        if (str_contains($text, '{mecm:')) {
+            $terms = self::mecmPairs();
+            $pairs = $terms[$locale] ?? $terms[self::DEFAULT_LOCALE] ?? [];
+        }
+        foreach ($replace as $placeholder => $value) {
+            $pairs[':' . $placeholder] = (string) $value;
+        }
+
+        return $pairs === [] ? $text : strtr($text, $pairs);
+    }
+
+    /**
+     * Selects the term set of a MECM console language for this request. Called
+     * by the portal bootstrap with mecm_console_language(); an unknown language
+     * falls back to the default. Display-only: never feed it into auth, RBAC,
+     * deploy decisions, status transitions or machine API wire contracts.
+     */
+    public static function useMecmTerms(string $console): void
+    {
+        self::$mecmConsole = in_array($console, self::mecmConsoleLanguages(), true) ? $console : self::MECM_CONSOLE_DEFAULT;
+        self::$mecmPairs = null;
+    }
+
+    /** Active MECM console language, e.g. "de". */
+    public static function mecmConsole(): string
+    {
+        return self::$mecmConsole;
+    }
+
+    /**
+     * Console languages that have a term set: one file per language in
+     * lib/mecm_terms/, so another language is another file and no code. Sorted.
+     *
+     * @return list<string>
+     */
+    public static function mecmConsoleLanguages(): array
+    {
+        static $languages = null;
+        if ($languages === null) {
+            $languages = [];
+            foreach (glob(__DIR__ . '/mecm_terms/*.php') ?: [] as $termSetFile) {
+                $languages[] = basename($termSetFile, '.php');
+            }
+            sort($languages);
+        }
+
+        return $languages;
+    }
+
+    /**
+     * Term set of a console language: name => [portal locale => word]. An
+     * unknown language falls back to the default; a broken file yields [].
+     *
+     * @return array<string, array<string, string>>
+     */
+    public static function mecmTerms(string $console): array
+    {
+        if (!in_array($console, self::mecmConsoleLanguages(), true)) {
+            $console = self::MECM_CONSOLE_DEFAULT;
+        }
+        // A glob over the literal directory, so the portal require-closure
+        // analysis sees every term set as a static edge.
+        $data = null;
+        foreach (glob(__DIR__ . '/mecm_terms/*.php') ?: [] as $termFile) {
+            if (basename($termFile, '.php') === $console) {
+                $data = require $termFile;
+            }
+        }
+        if (!is_array($data)) {
+            error_log("MECM term set {$console} did not return an array.");
+
+            return [];
+        }
+        $terms = [];
+        foreach ($data as $name => $forms) {
+            if (!is_string($name) || !is_array($forms)) {
+                continue;
+            }
+            foreach ($forms as $locale => $word) {
+                if (is_string($locale) && is_string($word)) {
+                    $terms[$name][$locale] = $word;
+                }
+            }
+        }
+
+        return $terms;
+    }
+
+    /**
+     * `{mecm:name}` and `{mecm:Name}` (first letter upper case) per portal
+     * locale for the active term set, built once per term set.
+     *
+     * @return array<string, array<string, string>>
+     */
+    private static function mecmPairs(): array
+    {
+        if (self::$mecmPairs !== null) {
+            return self::$mecmPairs;
+        }
+        $pairs = [];
+        foreach (self::mecmTerms(self::$mecmConsole) as $name => $forms) {
+            foreach ($forms as $locale => $word) {
+                $pairs[$locale]['{mecm:' . $name . '}'] = $word;
+                $pairs[$locale]['{mecm:' . ucfirst($name) . '}'] = mb_ucfirst($word);
+            }
+        }
+
+        return self::$mecmPairs = $pairs;
     }
 
     /** Active locale, e.g. "de". */

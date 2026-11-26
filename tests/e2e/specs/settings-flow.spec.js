@@ -196,6 +196,32 @@ test('save_timezone: persists a changed timezone', async ({ page }) => {
   }
 });
 
+// e2e-covers: settings.php:save_mecm_console_language
+test('save_mecm_console_language: persists the console language and switches the MECM words', async ({ page }) => {
+  // '' = no row: the default applies and the test must leave no row behind.
+  const before = readSetting('VIRTUSPHERE_SETTING_MECM_CONSOLE_LANGUAGE');
+  const next = before === 'en' ? 'de' : 'en';
+  try {
+    await openTab(page, 'system');
+    const hint = page.locator('#panel-mecm-terms p.muted');
+    const hintBefore = (await hint.innerText()).trim();
+    expect(hintBefore, 'the term placeholders are filled').not.toContain('{mecm:');
+    const form = settingsForm(page, 'save_mecm_console_language');
+    await form.locator('select[name="mecm_console_language"]').selectOption(next);
+    await submitAndReturnToTab(page, form, 'system');
+    expect(readSetting('VIRTUSPHERE_SETTING_MECM_CONSOLE_LANGUAGE'), 'the console language persisted').toBe(next);
+    const hintAfter = (await page.locator('#panel-mecm-terms p.muted').innerText()).trim();
+    expect(hintAfter, 'the term placeholders are filled after the switch').not.toContain('{mecm:');
+    expect(hintAfter, 'the other term set names the MECM objects differently').not.toBe(hintBefore);
+  } finally {
+    if (before === '') {
+      runPhp(`repo_delete_setting(db(), VIRTUSPHERE_SETTING_MECM_CONSOLE_LANGUAGE); echo 'CLEANED';`, SETTING_LIBS);
+    } else {
+      writeSetting('VIRTUSPHERE_SETTING_MECM_CONSOLE_LANGUAGE', before);
+    }
+  }
+});
+
 // e2e-covers: settings.php:save_session
 test('save_session: persists a changed lifetime', async ({ page }) => {
   const before = readSetting('VIRTUSPHERE_SETTING_SESSION_LIFETIME_MINUTES', String(phpConst('VIRTUSPHERE_SESSION_LIFETIME_MINUTES_DEFAULT')));

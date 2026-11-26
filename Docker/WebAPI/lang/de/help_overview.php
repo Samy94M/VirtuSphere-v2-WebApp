@@ -29,7 +29,7 @@ return [
     'glossary_instance_uuid' => 'Instance-UUID: die Kennung, mit der ESXi eine VM eindeutig führt. Das Portal bindet sie beim Anlegen an die VM. Der Name allein genügt nicht, um dieselbe VM wiederzufinden.',
     'glossary_moid' => 'MOID: die interne Verweisnummer eines ESXi-Objekts (Managed Object ID). Sie kann sich beim erneuten Registrieren des Hosts ändern und entscheidet deshalb allein nichts.',
     'glossary_resource_id' => 'ResourceID: die Gerätenummer, die MECM für ein Gerät vergibt. Das Portal speichert sie nach dem Abgleich als MECM-ID der VM.',
-    'glossary_task_sequence' => 'Task Sequence: der Ablauf in MECM, der das Betriebssystem auf einem Gerät installiert. Ein Betriebssystem-Eintrag im Portal muss genau so heißen wie die Task Sequence in MECM.',
+    'glossary_task_sequence' => '{mecm:Task_sequence}: der Ablauf in MECM, der das Betriebssystem auf einem Gerät installiert. Ein Betriebssystem-Eintrag im Portal muss genau so heißen wie die {mecm:task_sequence} in MECM.',
     'glossary_async_job' => 'Async-Auftrag: ein Vorgang, den ESXi im Hintergrund ausführt. Der Auftrag merkt sich dessen Job-ID und fragt das Ergebnis später ab; bis dahin bleibt der Ausgang offen.',
     'glossary_start_intent' => 'Startabsicht: der vor einem Aufruf an ESXi gespeicherte Vermerk, dass dieser Schritt beginnen soll. Ohne Vermerk gilt der Schritt als nicht begonnen; mit ihm bleibt der Ausgang offen, bis ein Ergebnis feststeht.',
     'glossary_client_ready_ack' => 'Client-Ready-ACK: die Rückmeldung des Windows-Clients, dass seine Geräteinfos vollständig geschrieben sind. Das Portal akzeptiert sie nur für die Revision, zu der sie gehört.',

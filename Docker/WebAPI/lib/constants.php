@@ -201,6 +201,8 @@ const VIRTUSPHERE_SETTING_API_BASE_URL = 'api_base_url';
 // deploy decisions or wire contracts.
 const VIRTUSPHERE_SETTING_PORTAL_TIMEZONE = 'portal_timezone';
 const VIRTUSPHERE_PORTAL_TIMEZONE_DEFAULT = 'Europe/Berlin';
+// Display-only MECM console language, picks lib/mecm_terms/<language>.php (owner lib/mecm_terms.php).
+const VIRTUSPHERE_SETTING_MECM_CONSOLE_LANGUAGE = 'mecm_console_language';
 // SHA-256 hash of the optional machine report token. The plaintext token is
 // shown exactly once when generated and lives only in the MECM server registry.
 const VIRTUSPHERE_SETTING_MACHINE_REPORT_TOKEN_HASH = 'machine_report_token_hash';

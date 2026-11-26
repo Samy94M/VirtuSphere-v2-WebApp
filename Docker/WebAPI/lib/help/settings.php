@@ -80,6 +80,8 @@ require_once __DIR__ . '/../backup_evidence.php';
             <h3><?php echo h(__t('help_settings.settings_time_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_time_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_time_p2')); ?></p>
+            <h3><?php echo h(__t('help_settings.settings_mecm_terms_heading')); ?></h3>
+            <p><?php echo h(__t('help_settings.settings_mecm_terms_p1')); ?></p>
             <h3><?php echo h(__t('help_settings.settings_session_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_session_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_session_p2', ['warn' => intdiv(VIRTUSPHERE_SESSION_WARN_SECONDS, 60)])); ?></p>

@@ -52,7 +52,10 @@ final class DeviceSyncCauseMirrorContractTest extends TestCase
                 self::assertArrayHasKey($key, $catalog, "{$locale}/status.php misses {$key}");
                 self::assertNotSame('', trim((string) $catalog[$key]), "{$locale}: {$key} is empty");
                 self::assertStringNotContainsString($code, (string) $catalog[$key], "{$locale}: {$key} repeats its token");
-                self::assertStringNotContainsString(':', (string) $catalog[$key], "{$locale}: {$key} takes no placeholder");
+                // MECM term placeholders {mecm:<name>} are filled by __t() itself before the
+                // word goes into :cause (PR-R3M); a call-site :placeholder stays forbidden.
+                $withoutTerms = (string) preg_replace('/\{mecm:[A-Za-z_]+\}/', '', (string) $catalog[$key]);
+                self::assertStringNotContainsString(':', $withoutTerms, "{$locale}: {$key} takes no placeholder");
             }
             $stray = array_diff(
                 array_filter(array_keys($catalog), static fn (string $key): bool => str_starts_with($key, 'sync_cause_')),

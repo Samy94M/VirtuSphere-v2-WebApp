@@ -20,11 +20,15 @@ final class LangCatalogTest extends TestCase
 
         self::assertSame(array_keys($catalogs['de']), array_keys($catalogs['en']));
 
+        $termExemptions = $this->termParityExemptions();
         foreach ($catalogs['de'] as $key => $deValue) {
             $enValue = $catalogs['en'][$key];
             self::assertNotSame('', trim($deValue), $key . ' has empty DE text');
             self::assertNotSame('', trim($enValue), $key . ' has empty EN text');
             self::assertSame($this->placeholders($deValue), $this->placeholders($enValue), $key . ' placeholder parity');
+            if (!isset($termExemptions[$key])) {
+                self::assertSame($this->termPlaceholders($deValue), $this->termPlaceholders($enValue), $key . ' MECM term placeholder parity');
+            }
         }
     }
 
@@ -134,10 +138,45 @@ final class LangCatalogTest extends TestCase
      */
     private function placeholders(string $value): array
     {
+        // MECM term placeholders {mecm:<name>} are compared on their own
+        // (termPlaceholders()); without this, the ':' inside them would read
+        // as a call-site placeholder.
+        $value = (string) preg_replace('/\{mecm:[^}]*\}/', '', $value);
         preg_match_all('/:([A-Za-z_][A-Za-z0-9_]*)/', $value, $matches);
         $placeholders = $matches[1];
         sort($placeholders);
 
         return $placeholders;
+    }
+
+    /**
+     * Term placeholders by name, first letter lower case: {mecm:Site} at a
+     * sentence start and {mecm:site} in running text are the same term (PR-R3M).
+     *
+     * @return list<string>
+     */
+    private function termPlaceholders(string $value): array
+    {
+        preg_match_all('/\{mecm:([^}]*)\}/', $value, $matches);
+        $names = array_values(array_unique(array_map('lcfirst', $matches[1])));
+        sort($names);
+
+        return $names;
+    }
+
+    /**
+     * Keys with a deliberate term difference between DE and EN; the same list
+     * lang-audit reads, so one decision covers both checks.
+     *
+     * @return array<string, string>
+     */
+    private function termParityExemptions(): array
+    {
+        $file = dirname(__DIR__, 4) . '/scripts/lang-audit-mecm-exemptions.php';
+        self::assertFileExists($file, 'the MECM term exemption file is missing');
+        $exemptions = require $file;
+        self::assertIsArray($exemptions);
+
+        return (array) ($exemptions['term_parity'] ?? []);
     }
 }
