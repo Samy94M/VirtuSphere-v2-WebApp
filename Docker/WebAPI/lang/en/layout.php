@@ -16,7 +16,7 @@ return [
     'help_page_link' => 'Help',
     'help_page_title' => 'Open help for this page',
     'nav_os' => 'Operating systems',
-    'nav_vlans' => 'VLANs',
+    'nav_vlans' => 'Port groups',
     'nav_packages' => 'Packages',
     'nav_credentials' => 'Credentials',
     'nav_settings' => 'Settings',
@@ -37,14 +37,14 @@ return [
     'account' => 'Account',
     'theme' => 'Theme',
     'theme_title' => 'Toggle theme',
-    'logout' => 'Log out',
+    'logout' => 'Sign out',
 
     // Session UI
     'session_title' => 'Session',
     'session_extend' => 'Extend session',
     'session_expiring_title' => 'Session is expiring soon',
     'session_countdown_html' => 'Your session expires in {n} seconds.',
-    'logout_now' => 'Log out now',
+    'logout_now' => 'Sign out now',
 
     // Error mapping (portal_error_message)
     'err_user_name_taken' => 'This username is already taken.',
@@ -62,8 +62,8 @@ return [
     // Create verdict from the reported ESXi release (ADR-0023 amendment 7).
     'err_esxi_create_host' => 'VMs cannot be created on the selected ESXi host: it reports ESXi :release, and VirtuSphere creates VMs from ESXi :floor. After a host update, refresh the ESXi inventory.',
     'err_esxi_create_guest' => 'VM :name: the guest OS :os needs at least ESXi :floor, but the selected host reports ESXi :release. Choose another guest OS in the VM or use a newer host.',
-    // An unexpected fault of a portal action (R18). :ref is the same reference
-    // that the server log line carries, so the failure can be found there.
-    'err_unexpected' => 'The action could not be completed. Please give the administrator the reference :ref so the error can be found in the server log.',
+    // An unexpected fault of a portal action (R18). :ref is the request's
+    // correlation ID, the same one the server log line carries (C18).
+    'err_unexpected' => 'The action could not be completed. Please give the administrator the correlation ID :ref so the error can be found in the server log.',
     'err_action_failed' => 'The action could not be completed.',
 ];

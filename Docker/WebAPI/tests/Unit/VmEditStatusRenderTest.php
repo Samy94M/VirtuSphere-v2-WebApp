@@ -94,7 +94,7 @@ final class VmEditStatusRenderTest extends TestCase
         self::assertArrayHasKey(1, $head, 'the panel has no status header');
         self::assertStringContainsString(vm_phase_badge(VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM), $head[1]);
         self::assertStringContainsString('An MECM übergeben', self::visible($head[1]));
-        self::assertStringContainsString('Status und Deploy-Fortschritt', self::visible($html));
+        self::assertStringContainsString('Status und Bereitstellungsfortschritt', self::visible($html));
     }
 
     public function testEachFindingIsALinkToItsTargetWrappingItsBadgeInSeverityOrder(): void
@@ -193,7 +193,7 @@ final class VmEditStatusRenderTest extends TestCase
 
         $values = self::definitions($this->panel($vm, self::evidence()));
 
-        self::assertGreaterThanOrEqual(6, count(array_filter($values, static fn (string $value): bool => $value === 'nicht gesetzt')));
+        self::assertGreaterThanOrEqual(6, count(array_filter($values, static fn (string $value): bool => $value === 'Nicht gesetzt')));
         self::assertContains(vm_edit_inventory_text(virtusphere_vm_inventory_observation($vm, null)), $values, 'an unbound VM says so');
     }
 

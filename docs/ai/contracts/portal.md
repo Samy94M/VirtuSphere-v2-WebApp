@@ -8,7 +8,7 @@ Read the sections relevant to the current change. Paths below are relative to Do
 
 ## A27 Render display-only timestamps through portal_format_timestamp() in lib/layout_response.php (d.
 
-- Render display-only timestamps through `portal_format_timestamp()` in `lib/layout_response.php` (`d.m.Y H:i:s`, via `portal_format_datetime()` in `lib/portal_time.php`); do not echo raw MySQL datetime strings in portal views. A status card shows a point in time through `portal_time_html()` (`lib/portal_time_display.php`), which wraps that same absolute format in `<time datetime>` and puts the relative age before it (R60). VM and mission editors round-trip the raw `edit_version` counter, independently of display timestamps; portal writes require it (`docs/operations/edit-concurrency.md`).
+- Render display-only timestamps through `portal_format_timestamp()` in `lib/layout_response.php` (via `portal_format_datetime()` in `lib/portal_time.php`, format from `portal_datetime_format()`: `d.m.Y H:i:s` in the German portal and without a loaded catalog, `Y-m-d H:i:s` in the English portal; display only, i18n R15 E4); do not echo raw MySQL datetime strings in portal views. A status card shows a point in time through `portal_time_html()` (`lib/portal_time_display.php`), which wraps that same absolute format in `<time datetime>` and puts the relative age before it (R60). VM and mission editors round-trip the raw `edit_version` counter, independently of display timestamps; portal writes require it (`docs/operations/edit-concurrency.md`).
 
 ## A28 Solid buttons take their fill/text from the --btn-bg/--btn-fg theme tokens (base.css); do not h
 

@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 return [
-    'heading' => 'Timeline',
-    'hint' => 'Status, jobs, package runs and client reports of this VM, newest first. Status entries older than :days days are removed automatically.',
+    'heading' => 'History (latest entries)',
+    'hint' => 'Status, jobs, package reports and client reports of this VM, newest first. Each source removes older entries after its own retention period; the periods are listed in the history.',
     'truncated' => 'Only the newest :limit entries are shown. Older events may be missing.',
     'empty' => 'No entries.',
     'th_source' => 'Source',
@@ -15,8 +15,8 @@ return [
     'job_started' => 'Job #:id started: :mode',
     'job_started_no_mode' => 'Job #:id started',
     'job_finished' => 'Job #:id finished',
-    'package_received' => 'Package run :package received',
-    'package_completed' => 'Package run :package completed',
+    'package_received' => 'Package report :package received',
+    'package_completed' => 'Attempt with :package completed',
     'package_failed' => 'Failure reported',
     'package_ok' => 'No failure reported',
     'client_started' => 'started',
@@ -44,7 +44,7 @@ return [
     'note_job_mac_import_partial' => 'Job #:job: MAC import only partial',
     'note_job_restored' => 'Job #:job succeeded without an export step; lifecycle restored',
     'note_job_reaped' => 'Job #:job ended after a stale heartbeat',
-    'note_job_cancelled_reaped' => 'Job #:job canceled; closed by the cleanup run after a stale heartbeat',
-    'note_job_create_incomplete' => 'Job #:job stopped before its pipeline because the create section did not complete',
+    'note_job_cancelled_reaped' => 'Job #:job canceled; closed by the maintenance service after a stale heartbeat',
+    'note_job_create_incomplete' => 'Job #:job stopped before its pipeline because the creation step did not complete',
     'note_lifecycle_kept' => '(lifecycle stays at ":state", a later state is not overwritten)',
 ];

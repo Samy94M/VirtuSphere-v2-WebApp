@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Wiederverwendete Portal-Begriffe (Buttons, Tabellenköpfe, Zustände).
  */
 return [
-    'conn_ansible_host_identity' => 'Der Host-Schlüssel des Ansible-Zugangs ist abweichend, unbestätigt oder nicht prüfbar. Prüfen Sie den Fingerprint in den Zugangsdaten; vor der Freigabe wird kein Passwort übertragen.',
+    'conn_ansible_host_identity' => 'Der Host-Schlüssel des Ansible-Zugangs ist abweichend, unbestätigt oder nicht prüfbar. Prüfen Sie den Fingerabdruck in den Zugangsdaten; solange der Host-Schlüssel nicht bestätigt ist, wird kein Passwort übertragen.',
     'name' => 'Name',
     'status' => 'Status',
     'vms' => 'VMs',
@@ -21,7 +21,7 @@ return [
     'save' => 'Speichern',
     'delete' => 'Löschen',
     'edit' => 'Bearbeiten',
-    'create' => 'Erstellen',
+    'create' => 'Anlegen',
     'remove' => 'Entfernen',
     'yes' => 'Ja',
     'no' => 'Nein',
@@ -72,7 +72,7 @@ return [
     'conn_host_error' => 'Der Host „:host“ hat geantwortet, aber sein Verwaltungsdienst war nicht bereit. Meist ist das ein kurzer Aussetzer.',
     'conn_certificate' => 'Das Zertifikat von „:host“ konnte nicht verifiziert werden. Gespeichertes CA-Bundle bzw. Serverzertifikat und Hostnamen prüfen oder im Zugang „Ohne Zertifikatsprüfung“ wählen.',
     'conn_tls' => 'Die TLS-Verbindung zu „:host“ wurde abgelehnt. TLS-Version, Port und Gegenstelle prüfen.',
-    'conn_auth' => 'Die Anmeldung wurde abgelehnt. Benutzername oder Secret stimmt nicht.',
+    'conn_auth' => 'Die Anmeldung wurde abgelehnt. Benutzername oder Passwort stimmt nicht.',
     'conn_authz' => 'Die Anmeldung hat funktioniert, aber dem Konto fehlen die nötigen Rechte.',
     'conn_ansible_dns' => 'Der Name des Ansible-Hosts konnte nicht aufgelöst werden.',
     'conn_ansible_unreachable' => 'Die Verbindung zum Ansible-Host kam nicht zustande.',
@@ -85,7 +85,7 @@ return [
     'conn_ansible_transport' => 'Der sonstige SSH-Transport zum Ansible-Host ist fehlgeschlagen.',
     'conn_http' => 'Historischer HTTP-Fehler eines älteren Abrufs (Status :status).',
     'conn_ssh' => 'Altwert aus früheren Abrufen: neue Abrufe schreiben ihn nicht mehr. Ein neuer Abruf ersetzt den Befund durch eine Kategorie, die den Ansible-Host oder den ESXi-Host beim Namen nennt.',
-    'conn_worker' => 'Der Abruf ist an einem Worker- oder Datenbankfehler gescheitert.',
+    'conn_worker' => 'Der Abruf ist an einem Fehler des Bereitstellungsdienstes oder der Datenbank gescheitert.',
     'conn_parse' => 'Marker, Ausgabe oder Ergebnisvertrag des Abrufs war unerwartet.',
     'conn_config' => 'Portal- oder Auftragskonfiguration war bereits vor dem entfernten Lauf unvollständig.',
     'conn_unknown' => 'Die Verbindung ist fehlgeschlagen.',

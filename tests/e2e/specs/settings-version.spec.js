@@ -26,7 +26,7 @@ test('Version tab opens by its deep link and answers the release question per co
   // Database: no migration pending, so the state reads as matching.
   const database = rowFor(panel, /^(Database|Datenbank)$/);
   await expect(database).toHaveCount(1);
-  await expect(database.locator('td').last()).toContainText(/passt|matches/);
+  await expect(database.locator('td').last()).toContainText(/Passt|Matches/);
 
   // One row per MECM report source, whatever state each one is in.
   await expect(rowFor(panel, /^MECM[ -]/)).toHaveCount(4);

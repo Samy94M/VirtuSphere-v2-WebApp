@@ -134,7 +134,7 @@ final class DeployFlowsDocContractTest extends TestCase
         ));
         self::assertSame([], self::closedVocabularyProblems(
             VIRTUSPHERE_ANSIBLE_AMPEL_STATES,
-            self::mermaidBlocks(self::sectionBody($system, 'Ansible-Test')),
+            self::mermaidBlocks(self::sectionBody($system, 'Ansible-Volltest')),
             $systemExceptions['Ampelzustand'] ?? [],
             'Ansible-Ampelzustand'
         ));

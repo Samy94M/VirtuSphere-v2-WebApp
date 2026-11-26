@@ -30,7 +30,7 @@ final class RegisteredVmExportPresenterTest extends TestCase
         self::assertNotNull($decoded);
         self::assertSame(0, $decoded['counts']['updated_interfaces']);
         self::assertSame([1], $decoded['successful_vm_ids']);
-        foreach (['de' => 'unverändert', 'en' => 'unchanged'] as $locale => $label) {
+        foreach (['de' => 'Unverändert', 'en' => 'Unchanged'] as $locale => $label) {
             Lang::load($locale);
             $rows = mac_import_present_vm_rows($decoded, ['id' => 1, 'mission_id' => 2]);
             self::assertStringContainsString($label, deploy_terminal_vm_results_html($rows));
@@ -66,7 +66,7 @@ final class RegisteredVmExportPresenterTest extends TestCase
         self::assertNull(mac_import_bound_first_mac_log_vm_id('x ' . $line));
         self::assertNull(mac_import_bound_first_mac_log_vm_id(VIRTUSPHERE_MAC_IMPORT_BOUND_FIRST_MAC_LOG_PREFIX . '0; x'));
 
-        foreach (['de' => ['MAC erstmals übernommen', 'erfolgreich'], 'en' => ['MAC imported for the first time', 'successful']] as $locale => [$notice, $label]) {
+        foreach (['de' => ['MAC erstmals übernommen', 'Erfolgreich'], 'en' => ['MAC imported for the first time', 'Successful']] as $locale => [$notice, $label]) {
             Lang::load($locale);
             $marked = deploy_terminal_vm_results_html(mac_import_present_vm_rows($decoded, ['id' => 1, 'mission_id' => 2, 'mac_bound_first_vm_ids' => [1]]));
             self::assertStringContainsString($notice, $marked);
@@ -85,7 +85,7 @@ final class RegisteredVmExportPresenterTest extends TestCase
         require __DIR__ . '/../fixtures/registered-vm-export-rbac.php';
         $error = ['code' => 'bound_mac_changed', 'vm_id' => 3];
         $job = ['id' => 1, 'mission_id' => 2];
-        foreach (['de' => 'MECM-ID zurücksetzen', 'en' => 'reset the MECM ID'] as $locale => $instruction) {
+        foreach (['de' => 'MECM-ID zurücksetzen', 'en' => 'choose "Reset MECM ID" in the VM list'] as $locale => $instruction) {
             Lang::load($locale);
             $GLOBALS['k3_can_write'] = true;
             $shown = mac_import_present_error($error, $job);

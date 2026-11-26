@@ -124,7 +124,7 @@ test('deploy runtime separates API source and per-job SSH credential without mob
   await expect(firstRuntimeFact).toBeInViewport();
 
   await page.goto('credentials.php');
-  await expect(page.getByRole('link', { name: /Deploy-Einstellungen|deploy settings/i }), 'credentials explains that SSH login and callback URL are separate').toBeVisible();
+  await expect(page.getByRole('link', { name: /Bereitstellungseinstellungen|deploy settings/i }), 'credentials explains that SSH login and callback URL are separate').toBeVisible();
 });
 
 // e2e-covers: settings.php:clear_api

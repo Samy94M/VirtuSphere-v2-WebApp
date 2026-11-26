@@ -176,7 +176,7 @@ test('an exact correlation filter shows one request and the jobs it enqueued', a
   await expect(jobs.locator(`a[href="deploy_log.php?id=${jobId}"]`), 'admin holds deploy.run').toHaveCount(1);
   // The retention windows differ, so the panel says so: an old trace with audit
   // rows and no jobs must not read as "this request enqueued nothing".
-  await expect(jobs).toContainText('job logs only for');
+  await expect(jobs).toContainText('The job log of a deploy job is kept only');
 });
 
 test('a partial correlation id is refused and nothing is queried', async ({ page }) => {
@@ -240,7 +240,7 @@ test('audit cursor windows survive inserts, reset with filters, and recover stal
   const filter = page.locator('form[action="logs.php"]');
   await expect(filter.locator('[name="before"], [name="after"]')).toHaveCount(0);
   await filter.locator('input[name="q"]').fill('e2e keyset fixture');
-  await filter.getByRole('button', { name: 'Apply' }).click();
+  await filter.getByRole('button', { name: 'Filter', exact: true }).click();
   await expect(page).toHaveURL(/q=e2e(?:\+|%20)keyset(?:\+|%20)fixture/);
   expect(page.url()).not.toMatch(/[?&](?:before|after)=/);
   expect(await visibleLogIds(page)).toEqual(inserted.slice().reverse().concat(newestIds.slice(0, 47)));

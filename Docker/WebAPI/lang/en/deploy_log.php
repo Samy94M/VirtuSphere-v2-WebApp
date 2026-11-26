@@ -10,7 +10,7 @@ return [
     'position_part_not_started' => ':count not started',
     'current_attempt' => 'Attempt :attempt of :max.',
     'finding_attempts' => ':name (position :position, attempt :attempt of :max): :reason',
-    'reason_vm_not_powered_off' => 'A powered-on VM of this name was already running on the host; Create changed nothing on it.',
+    'reason_vm_not_powered_off' => 'The VM of this name on the host was not powered off; creation changed nothing on it. Power it off and run the job again.',
     'stored_detail' => 'Stored text:',
     'host_no_message' => 'The host gave no closer message.',
     'ansible_cause' => 'Last Ansible failure line:',

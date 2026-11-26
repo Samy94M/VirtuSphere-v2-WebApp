@@ -45,6 +45,18 @@ function portal_timezone_is_valid(string $tz): bool
 }
 
 /**
+ * Display date format of the active portal language (i18n R15, E4, user
+ * decision 26.11.2026): ISO "Y-m-d H:i:s" in the English portal, "d.m.Y H:i:s"
+ * in the German one and wherever no catalog is loaded (CLI, worker, machine
+ * API keep the old form). Display only (i18n R6): stored values, wire fields
+ * and audit sentences never pass through here.
+ */
+function portal_datetime_format(): string
+{
+    return class_exists('Lang', false) && Lang::locale() === 'en' ? 'Y-m-d H:i:s' : 'd.m.Y H:i:s';
+}
+
+/**
  * Formats a UTC database timestamp string ("Y-m-d H:i:s") in the portal
  * timezone. Empty input yields an empty string; unparsable input is returned
  * verbatim rather than throwing.
@@ -60,7 +72,7 @@ function portal_format_datetime(?string $utc): string
         return (string) $utc;
     }
 
-    return $dt->setTimezone(new DateTimeZone(portal_timezone()))->format('d.m.Y H:i:s');
+    return $dt->setTimezone(new DateTimeZone(portal_timezone()))->format(portal_datetime_format());
 }
 
 /**
@@ -70,18 +82,19 @@ function portal_format_epoch(int $epoch): string
 {
     return (new DateTimeImmutable('@' . $epoch))
         ->setTimezone(new DateTimeZone(portal_timezone()))
-        ->format('d.m.Y H:i:s');
+        ->format(portal_datetime_format());
 }
 
 /**
  * Current server time rendered in the portal timezone, with the short offset,
- * for the settings "time" card (e.g. "09.07.2026 08:54:32 (Europe/Berlin, +02:00)").
+ * for the settings "time" card (e.g. "09.07.2026 08:54:32 (Europe/Berlin, +02:00)";
+ * English portal "2026-07-09 08:54:32 (Europe/Berlin, +02:00)").
  */
 function portal_now_label(): string
 {
     $now = new DateTimeImmutable('now', new DateTimeZone(portal_timezone()));
 
-    return $now->format('d.m.Y H:i:s') . ' (' . portal_timezone() . ', ' . $now->format('P') . ')';
+    return $now->format(portal_datetime_format()) . ' (' . portal_timezone() . ', ' . $now->format('P') . ')';
 }
 
 /**

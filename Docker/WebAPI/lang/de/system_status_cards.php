@@ -6,15 +6,15 @@ declare(strict_types=1);
 // progress, the autoimporter cause table. The catalog system_status is over the
 // line budget, so these keys live here (docs/ai/reference/i18n.md R4).
 return [
-    'verdict_none' => 'Kein Eingriff nötig.',
+    'verdict_none' => 'Keine Handlung nötig.',
     'verdict_act' => 'Handlung nötig.',
-    'verdict_evidence' => 'Kein aktueller Nachweis.',
+    'verdict_evidence' => 'Kein aktueller Beleg.',
     'verdict_see_entry' => 'Was zu tun ist, steht beim betroffenen Eintrag.',
     'deploy_worker_pointer' => 'Zustand und Handlung: Abschnitt Bereitstellungsdienst',
-    'service_action_manual' => 'Ein Auftrag braucht Ihre Entscheidung: Öffnen Sie sein Protokoll aus der Liste „Konkrete Klärungsfälle“ und halten Sie dort das Ergebnis fest.',
-    'service_action_cooldown' => 'Die Aufsicht startet den Arbeitsprozess selbst neu. Schlägt der Neustart wiederholt fehl, auf dem Portal-Server „docker compose ps“ prüfen.',
+    'service_action_manual' => 'Ein Auftrag braucht Ihre Entscheidung: Öffnen Sie sein Auftragsprotokoll aus der Liste „Konkrete Klärungsfälle“ und halten Sie dort das Ergebnis fest.',
+    'service_action_cooldown' => 'Der Bereitstellungsdienst startet sich selbst neu. Schlägt der Neustart wiederholt fehl, auf dem Portal-Server „docker compose ps“ prüfen.',
     'service_action_next_retry' => 'Nächster Versuch:',
-    'service_action_recovering' => 'Abwarten: Der Dienst stellt offene Aufträge selbst wieder her. Erst ein Fall mit „Manuelle Klärung nötig“ braucht Ihre Entscheidung.',
+    'service_action_recovering' => 'Abwarten: Der Dienst stellt offene Aufträge selbst wieder her. Erst ein Fall mit „Handlung nötig“ braucht Ihre Entscheidung.',
     'run_running' => 'Läuft seit :elapsed.',
     'run_running_last' => 'Läuft seit :elapsed (letzter Lauf :last).',
     'fact_scan_ok' => 'Letzter Scan ohne offene Punkte.',

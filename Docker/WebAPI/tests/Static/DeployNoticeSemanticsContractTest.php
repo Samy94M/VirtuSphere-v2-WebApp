@@ -31,7 +31,7 @@ final class DeployNoticeSemanticsContractTest extends TestCase
             self::assertStringContainsString($needles[0], $catalog['inventory_deviation_warn']);
             self::assertStringContainsString($needles[0], $catalog['host_missing_warn']);
             self::assertStringContainsString($needles[1], $catalog['capability_warn']);
-            self::assertStringContainsString($locale === 'de' ? 'blockiert den Deploy nicht' : 'never blocks the deploy', $catalog['storage_hint']);
+            self::assertStringContainsString($locale === 'de' ? 'blockiert die Bereitstellung nicht' : 'never blocks the deploy', $catalog['storage_hint']);
         }
     }
 }

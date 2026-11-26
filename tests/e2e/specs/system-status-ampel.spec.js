@@ -360,7 +360,7 @@ echo 'JSON' . json_encode(['esxi' => $esxi]) . 'JSON';
 
     const label = (await badge.textContent()).trim();
     // A zero over incomplete or old evidence is grey and says so (SY1).
-    expect(label).toMatch(/^(Keine Abweichungen|No deviations|Keine Treffer, Nachweis unvollständig|No findings, evidence incomplete|1 Abweichung|1 deviation|\d+ Abweichungen|\d+ deviations)$/);
+    expect(label).toMatch(/^(Keine Abweichungen|No deviations|Keine Treffer, Beleg unvollständig|No findings, evidence incomplete|1 Abweichung|1 deviation|\d+ Abweichungen|\d+ deviations)$/);
     expect(label).not.toMatch(/^1 Abweichungen|^1 deviations/);
     expect(label).not.toContain(':count');
   } finally {

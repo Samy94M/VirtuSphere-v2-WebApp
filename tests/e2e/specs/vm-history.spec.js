@@ -53,7 +53,7 @@ test.describe('as admin', () => {
     await expect(page.locator('[data-vm-history-entry^="audit-"]')).toContainText('Change log');
 
     await page.getByRole('checkbox', { name: 'Status' }).check();
-    await page.getByRole('button', { name: 'Apply' }).click();
+    await page.getByRole('button', { name: 'Filter', exact: true }).click();
     await expect(page).toHaveURL(/sources/);
     await expect(rows).toHaveCount(2);
     await expect(page.locator('[data-vm-history-entry^="audit-"]')).toHaveCount(0);

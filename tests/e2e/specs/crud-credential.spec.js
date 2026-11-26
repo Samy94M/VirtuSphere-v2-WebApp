@@ -211,7 +211,7 @@ test('Ansible test: a failing connection is categorized, persisted and linked to
   await expect(alert).not.toContainText(/Audit context|evidence_stored/);
   expect(credentialRow(id), 'the connection test does not rewrite the credential').toEqual(before);
   const refreshedRow = page.locator('tr', { hasText: name }).first();
-  await expect(refreshedRow.locator('form:has(input[name="action"][value="test"]) button')).toHaveText(/Verbindung und Umgebung prüfen|Check connection and environment/);
+  await expect(refreshedRow.locator('form:has(input[name="action"][value="test"]) button')).toHaveText(/Volltest|Full test/);
   await expect(refreshedRow.locator(`a[href="system_status.php#credential-${id}"]`)).toBeVisible();
   await expect(refreshedRow.locator('.status-time')).not.toHaveText(/Nie|Never|never/);
   const proof = phpJson(`
