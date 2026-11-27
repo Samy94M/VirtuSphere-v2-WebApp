@@ -223,6 +223,14 @@ declare(strict_types=1);
                     <?php } ?>
                 </tbody>
             </table></div>
+            <?php
+            // How to set the schedule belongs to the schedule row above, not
+            // to the certificate button at the end of the panel, where it read
+            // as what that button does (G13, PR-R2F).
+            ?>
+            <p><?php echo h(__t('settings.backup_ops_where')); ?></p>
+            <p><code>sudo sh scripts/install-backup-schedule.sh --schedule "0 6 * * *"</code></p>
+            <p class="muted"><a href="<?php echo h(help_url('stack', 'help-backup')); ?>"><?php echo h(__t('settings.backup_ops_more')); ?></a></p>
             <h3><?php echo h(__t('settings.backup_cert_heading')); ?></h3>
             <?php if ($backupEncryptionFinding !== null) { ?>
                 <div class="alert alert-warning" data-backup-encryption-finding><?php echo h(backup_encryption_finding_message($backupEncryptionFinding)); ?></div>
@@ -251,8 +259,5 @@ declare(strict_types=1);
                 </label>
                 <div class="actions form-grid-full"><button class="button" type="submit" data-confirm="<?php echo h(__t('settings.backup_cert_save_confirm')); ?>"><?php echo h(__t($backupCertificate === null ? 'settings.backup_cert_save' : 'settings.backup_cert_replace')); ?></button></div>
             </form>
-            <p><?php echo h(__t('settings.backup_ops_where')); ?></p>
-            <p><code>sudo sh scripts/install-backup-schedule.sh --schedule "0 6 * * *"</code></p>
-            <p class="muted"><a href="<?php echo h(help_url('stack', 'help-backup')); ?>"><?php echo h(__t('settings.backup_ops_more')); ?></a></p>
         </section>
     </div>

@@ -34,6 +34,12 @@ declare(strict_types=1);
             <h2><?php echo h(__t('settings.esxi_title')); ?></h2>
             <?php $esxiHintId = form_hint_id('esxi', 'inventory_group'); ?>
             <p class="muted" id="<?php echo h($esxiHintId); ?>"><?php echo h(__t('settings.esxi_hint')); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></p>
+            <?php
+            // The note is about the Ansible access the form below chooses, not
+            // about its save button; under the button it read as the button's
+            // consequence (G13, PR-R2F). Same for the test interval below.
+            ?>
+            <p class="muted"><?php echo h(__t('settings.esxi_ansible_note')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('settings.esxi_status_link')); ?></a></p>
             <form class="form-grid" method="post" action="settings.php"<?php echo form_control_attrs('esxi', 'inventory_group', null, [$esxiHintId], ''); ?> role="group" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_esxi_inventory">
@@ -61,11 +67,11 @@ declare(strict_types=1);
                 <?php } ?>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
             </form>
-            <p class="muted"><?php echo h(__t('settings.esxi_ansible_note')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('settings.esxi_status_link')); ?></a></p>
         </section>
         <section class="panel">
             <h2><?php echo h(__t('ansible_test.title')); ?></h2>
             <p class="muted" id="<?php echo h(form_hint_id('ansible_test', 'ansible_test_interval_hours')); ?>"><?php echo h(__t('ansible_test.hint', ['default' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX])); ?></p>
+            <p class="hint"><?php echo h(__t('ansible_test.behaviour')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('ansible_test.status_link')); ?></a></p>
             <form class="form-grid" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_ansible_test_interval">
@@ -75,6 +81,5 @@ declare(strict_types=1);
                 </label>
                 <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.save')); ?></button></div>
             </form>
-            <p class="hint"><?php echo h(__t('ansible_test.behaviour')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('ansible_test.status_link')); ?></a></p>
         </section>
     </div>
