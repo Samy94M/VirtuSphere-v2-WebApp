@@ -62,7 +62,7 @@ function system_status_render_ansible(array $snapshot, array $user): void
                         ['label' => __t('system_status.ansible_th_last_mission_job'), 'html' => system_status_ansible_job_fact($lastMissionJob, $canOpenJobLog)],
                     ]); ?>
                     <?php if ((string) $entry['state'] === 'stale') { ?>
-                        <p class="status-action"><?php echo h(__t('system_status.ansible_stale_detail', ['days' => ansible_preflight_evidence_valid_days((int) $snapshot['ansible']['interval_hours'])])); ?></p>
+                        <p class="status-action"><?php echo h(__t('system_status.ansible_stale_detail', ['duration' => portal_format_duration(ansible_preflight_evidence_valid_seconds((int) $snapshot['ansible']['interval_hours']))])); ?></p>
                     <?php } elseif ($stateRow !== null && empty($stateRow['evidence_current'])) { ?>
                         <p class="status-action"><?php echo h(__t('system_status.ansible_invalidated_detail')); ?></p>
                     <?php } ?>

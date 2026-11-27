@@ -98,9 +98,15 @@ final class AnsibleEvidenceWindowTest extends TestCase
         // The two former copies: the cadence passed the fixed constant, the
         // stale detail divided by 24 into a float.
         $root = dirname(__DIR__, 2);
-        foreach (['lib/credentials_status.php', 'lib/system_status_ansible_panels.php'] as $file) {
+        // The stale detail names the window as a duration (A6: from 48 hours
+        // on in days, with the part day); the cadence in whole days.
+        $owners = [
+            'lib/credentials_status.php' => 'ansible_preflight_evidence_valid_days(',
+            'lib/system_status_ansible_panels.php' => 'portal_format_duration(ansible_preflight_evidence_valid_seconds(',
+        ];
+        foreach ($owners as $file => $owner) {
             $source = (string) file_get_contents($root . '/' . $file);
-            self::assertStringContainsString('ansible_preflight_evidence_valid_days(', $source, $file);
+            self::assertStringContainsString($owner, $source, $file);
             self::assertStringNotContainsString("'days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS", $source, $file);
             self::assertDoesNotMatchRegularExpression('#interval_hours\'\]\s*/\s*24#', $source, $file);
         }

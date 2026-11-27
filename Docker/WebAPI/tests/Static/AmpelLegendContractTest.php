@@ -112,9 +112,11 @@ final class AmpelLegendContractTest extends TestCase
         ];
         // A pure heartbeat has one derived display state on top of the stored
         // ones (TS1-K4): `degraded`, a running maintenance service whose jobs
-        // fail. It is never stored, so the legend of stored states omits it, but
-        // the tone table must still map it exactly once. Its badge is the one
-        // value word among heartbeat states ("Beeinträchtigt", heartbeat_badge()).
+        // fail. It is never stored, but the tone table must still map it exactly
+        // once, and the heartbeat legend explains it in its own line (PR-R4B,
+        // testTheHeartbeatLegendExplainsTheDerivedLivenessStates()). Its badge is
+        // the one value word among heartbeat states ("Beeinträchtigt",
+        // heartbeat_badge()).
         $derived = ['liveness' => ['degraded']];
         foreach (self::AMPELN as $kind => [$storedStates, $unusedPrefix]) {
             foreach ($tokenSets[$kind] as $toneKind) {
@@ -132,6 +134,28 @@ final class AmpelLegendContractTest extends TestCase
                 }
             }
         }
+    }
+
+    public function testTheHeartbeatLegendExplainsTheDerivedLivenessStates(): void
+    {
+        // User decision 27.11.2026 (PR-R4B): "Beeinträchtigt" gets its own legend
+        // line. The derived states come from the constants, never a list here,
+        // and the stored set itself stays unchanged.
+        require_once str_replace('\\', '/', dirname(__DIR__, 2)) . '/lib/status_vocabulary.php';
+        $derived = array_values(array_diff(VIRTUSPHERE_LIVENESS_STATES, VIRTUSPHERE_HEARTBEAT_STATES));
+        self::assertSame([VIRTUSPHERE_LIVENESS_STATE_DEGRADED], $derived);
+        self::assertNotContains(VIRTUSPHERE_LIVENESS_STATE_DEGRADED, VIRTUSPHERE_HEARTBEAT_STATES, 'degraded is a display state, never stored');
+        foreach (['de', 'en'] as $locale) {
+            $catalog = $this->catalog($locale);
+            foreach ($derived as $state) {
+                self::assertArrayHasKey('legend_' . $state, $catalog, $locale . ' has no legend line for the derived state "' . $state . '"');
+            }
+        }
+        self::assertStringContainsString(
+            '[VIRTUSPHERE_LIVENESS_STATES, \'legend_\']',
+            $this->source('lib/system_status.php'),
+            'the heartbeat legend must walk the liveness states, so a derived state cannot lose its line'
+        );
     }
 
     public function testNeitherLegendReInlinesAStateList(): void

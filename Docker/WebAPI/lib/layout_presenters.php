@@ -365,19 +365,19 @@ function integration_action_hint(string $source, bool $openPoints = false, array
 
 /**
  * A duration in at most two units, the largest first (operator decision
- * 09.11.2026): 495 s is "8 Minuten 15 Sekunden", not "495 Sekunden"; 3725 s is
- * "1 Stunde 2 Minuten" (the seconds drop out). A zero second unit is left out.
+ * 09.11.2026; the day from 48 hours on, A6): 495 s is "8 Minuten 15 Sekunden",
+ * 3725 s "1 Stunde 2 Minuten", 200 h "8 Tage 8 Stunden". A zero second unit is left out.
  */
 function portal_format_duration(int $seconds): string
 {
     $seconds = max(0, $seconds);
-    $unit = static fn (int $count, string $one, string $many): string => __t($count === 1 ? 'common.duration_' . $one : 'common.duration_' . $many, ['count' => $count]);
+    $unit = static fn (int $count, string $one): string => __t('common.duration_' . $one . ($count === 1 ? '' : 's'), ['count' => $count]);
     if ($seconds < 60) {
-        return $unit($seconds, 'second', 'seconds');
+        return $unit($seconds, 'second');
     }
-    [$first, $second] = $seconds < 3600
-        ? [$unit(intdiv($seconds, 60), 'minute', 'minutes'), $seconds % 60 === 0 ? '' : $unit($seconds % 60, 'second', 'seconds')]
-        : [$unit(intdiv($seconds, 3600), 'hour', 'hours'), intdiv($seconds % 3600, 60) === 0 ? '' : $unit(intdiv($seconds % 3600, 60), 'minute', 'minutes')];
+    [$big, $small, $one, $two] = $seconds < 3600 ? [60, 1, 'minute', 'second'] : ($seconds < 172800 ? [3600, 60, 'hour', 'minute'] : [86400, 3600, 'day', 'hour']);
+    $rest = intdiv($seconds % $big, $small);
+    [$first, $second] = [$unit(intdiv($seconds, $big), $one), $rest === 0 ? '' : $unit($rest, $two)];
 
     return $second === '' ? $first : __t('common.duration_pair', ['first' => $first, 'second' => $second]);
 }

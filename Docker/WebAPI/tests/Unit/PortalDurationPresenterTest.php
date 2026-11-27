@@ -30,6 +30,16 @@ final class PortalDurationPresenterTest extends TestCase
         self::assertSame('0 Sekunden', portal_format_duration(-5));
     }
 
+    public function testFromFortyEightHoursTheDayIsTheLargestUnit(): void
+    {
+        // Glossary R15 block A (A6): an age from 48 hours on is given in days.
+        self::assertSame('47 Stunden 59 Minuten', portal_format_duration(172799));
+        self::assertSame('2 Tage', portal_format_duration(172800));
+        self::assertSame('7 Tage', portal_format_duration(7 * 86400 + 59), 'minutes drop out below the hour');
+        self::assertSame('8 Tage 8 Stunden', portal_format_duration(200 * 3600));
+        self::assertSame('2 Tage 1 Stunde', portal_format_duration(49 * 3600));
+    }
+
     public function testRelativeTimeNamesOneUnitAndTheDirection(): void
     {
         self::assertSame('gerade eben', portal_format_relative(59));

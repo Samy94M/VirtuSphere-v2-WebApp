@@ -7,7 +7,7 @@ declare(strict_types=1);
 // Konstanten in lib/backup_evidence.php und lib/constants.php.
 return [
     'heading' => 'Host und Backup',
-    'hint' => 'Der Docker-Host meldet diese Werte über den Backup-Statuskanal. Fehlt eine Meldung, steht dort „Keine Daten“. Die Karte im Überblick zeigt die schlechteste Zeile; „Keine Daten“ zählt dort nie als OK.',
+    'hint' => 'Der Docker-Host meldet diese Werte. Fehlt eine Meldung, steht dort „Keine Daten“. Die Karte im Überblick zeigt die schlechteste Zeile; „Keine Daten“ zählt dort nie als OK.',
     'row_backup' => 'Backup',
     'row_drill' => 'Restore-Test',
     'row_scrub' => 'Prüfsummen',
@@ -21,9 +21,9 @@ return [
     'age_today' => 'heute',
     'age_days_one' => 'vor :days Tag',
     'age_days' => 'vor :days Tagen',
-    'drill_unknown_hint' => 'Kein Restore-Test belegt. Ein Restore-Test auf einem anderen Rechner erscheint hier nicht. Restore-Test mit Beleg:',
-    'drill_due_hint' => 'Der letzte belegte Restore-Test liegt :days Tage oder länger zurück. Restore-Test mit Beleg:',
-    'scrub_unknown_hint' => 'Noch keine Prüfsummen-Prüfung gemeldet. Prüfung starten:',
+    'drill_unknown_hint' => 'Noch kein Restore-Test gemeldet; ein Restore-Test auf einem anderen Rechner erscheint hier nicht. Restore-Test mit Beleg:',
+    'drill_due_hint' => 'Der letzte gemeldete Restore-Test liegt :days Tage oder länger zurück. Restore-Test mit Beleg:',
+    'scrub_unknown_hint' => 'Noch keine Prüfung der Prüfsummen gemeldet. Prüfung starten:',
     'scrub_failed_hint' => 'Diese Backupstände weichen von ihrem Manifest ab: :sets. Nicht für einen Restore verwenden; neues Backup erzeugen, danach die Prüfung erneut starten.',
     'scrub_result' => 'Geprüfte Backupstände: :checked, abweichend: :failed',
     'https_expired_hint' => 'Das HTTPS-Zertifikat ist abgelaufen; Browser lehnen die Verbindung ab.',

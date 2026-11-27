@@ -240,10 +240,10 @@ function mission_import(mysqli $db, array $payload, string $newName, bool $dryRu
         }
         foreach (vm_network_issues_for_interfaces($vm['interfaces'], 0, 0, $vmName) as $networkIssue) {
             $message = (string) $networkIssue['code'] === VIRTUSPHERE_VM_NETWORK_EMPTY
-                ? validator_text('validate.interface_vlan_required', 'Every stored network interface requires a VLAN.')
+                ? validator_text('validate.interface_vlan_required', 'Every stored network adapter requires a port group.')
                 : validator_text(
                     'validate.interface_vlan_unique',
-                    'Each network interface of a VM requires a different VLAN.',
+                    'Port group :vlan is already assigned to another network adapter of this VM.',
                     ['vlan' => (string) $networkIssue['vlan']]
                 );
             $report['vm_field_errors'][] = $vmLabel . ': ' . $message;

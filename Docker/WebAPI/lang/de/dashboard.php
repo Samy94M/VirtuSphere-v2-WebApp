@@ -27,7 +27,7 @@ return [
     'backup_banner_title' => 'Backup-Hinweis:',
     'backup_banner_failed' => 'Das letzte Backup ist fehlgeschlagen. Prüfen Sie das Backup-Log und den Zeitplan (Cron oder systemd-Timer).',
     'backup_banner_stale' => 'Der erwartete Backup-Lauf ist ausgeblieben, auch die Kulanzzeit ist vorbei. Läuft der Zeitplan (Cron oder systemd-Timer) auf dem Host?',
-    'backup_banner_disk_low' => 'Wenig freier Speicher auf dem Backup-Volume. Prüfen Sie Retention oder Speicherplatz.',
+    'backup_banner_disk_low' => 'Wenig freier Speicher auf dem Backup-Volume. Prüfen Sie Aufbewahrung oder Speicherplatz.',
     'backup_banner_unknown' => 'Kein Backup-Status verfügbar. Das Skript lief noch nie oder der Status-Mount fehlt.',
     'backup_banner_link' => 'Backup-Einstellungen öffnen',
 ];
