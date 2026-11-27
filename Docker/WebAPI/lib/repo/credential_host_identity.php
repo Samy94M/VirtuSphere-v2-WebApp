@@ -56,7 +56,7 @@ function repo_verify_ansible_host_identity(mysqli $db, array $snapshot, array $o
 /**
  * Explicit administrator write; the posted old pin fences two browser tabs.
  *
- * $fingerprint is the SHA256 fingerprint or the whole `ssh-keygen -l` line. The
+ * $fingerprint is the SHA-256 fingerprint or the whole `ssh-keygen -l` line. The
  * key type comes from that line or from the observed or pinned key the value
  * matches; $keyType (the form's select) names it only for a key nobody has
  * observed. A value that deviates from the pin, or from the observation while
@@ -67,7 +67,7 @@ function repo_confirm_ansible_host_identity(mysqli $db, int $id, int $revision, 
 {
     $parsed = ssh_host_key_parse_input($fingerprint);
     if ($parsed === null || $userId <= 0) {
-        throw new ValidationException(['host_fingerprint' => validator_text('credentials.host_identity_invalid', 'Enter the SHA256 fingerprint or the ssh-keygen line from the host key check.')]);
+        throw new ValidationException(['host_fingerprint' => validator_text('credentials.host_identity_invalid', 'Enter the SHA-256 fingerprint or the whole ssh-keygen line from the host key check.')]);
     }
     $replaced = false;
     repo_transaction($db, static function () use ($db, $id, $revision, $oldFingerprint, $fingerprint, $keyType, $userId, $replaceDeviation, $parsed, &$replaced): void {
@@ -137,6 +137,6 @@ function repo_host_identity_plan_rejection(string $error): ValidationException
         'type_unknown' => new ValidationException(['host_key_type' => validator_text('credentials.host_identity_type_unknown', 'Choose one of the offered key types.')]),
         'type_needed' => new ValidationException(['host_key_type' => validator_text('credentials.host_identity_type_needed', 'Choose the key type the host shows for this fingerprint, or paste the whole ssh-keygen line.')]),
         'needs_line' => new ValidationException(['host_fingerprint' => validator_text('credentials.host_identity_needs_line', 'This value matches neither the observed nor the pinned key. Paste the whole ssh-keygen line; it names the key type.')]),
-        default => new ValidationException(['host_fingerprint' => validator_text('credentials.host_identity_invalid', 'Enter the SHA256 fingerprint or the ssh-keygen line from the host key check.')]),
+        default => new ValidationException(['host_fingerprint' => validator_text('credentials.host_identity_invalid', 'Enter the SHA-256 fingerprint or the whole ssh-keygen line from the host key check.')]),
     };
 }

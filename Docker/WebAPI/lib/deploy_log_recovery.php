@@ -47,6 +47,18 @@ function deploy_log_remote_execution(mysqli $db, int $jobId): ?array
 }
 
 /**
+ * The cleanup state of a remote execution as an operator reads it. One label
+ * per value of VIRTUSPHERE_REMOTE_CLEANUP_STATES; an unknown value gets a
+ * neutral sentence, never its token (GROK 1.2).
+ */
+function deploy_log_recovery_cleanup_label(string $state): string
+{
+    return in_array($state, VIRTUSPHERE_REMOTE_CLEANUP_STATES, true)
+        ? __t('deploy.recovery_cleanup_state_' . $state)
+        : __t('deploy.recovery_cleanup_state_unknown');
+}
+
+/**
  * @param array<string,mixed> $job
  * @param array<string,mixed>|null $execution
  * @param array<string,mixed> $user
@@ -63,11 +75,15 @@ function deploy_log_render_recovery(array $job, ?array $execution, array $user):
         <h2><?php echo h(__t('deploy.recovery_heading')); ?></h2>
         <p class="muted"><?php echo h(__t('deploy.recovery_hint')); ?></p>
         <?php
+        // P1a-3 (decided): the three remote states stay technical details and
+        // read as such, in code font (i18n R13); only the cleanup row gets a
+        // sentence, because it is the one that leads to an action here (the
+        // retry button below).
         echo system_status_fact_list([
-            ['label' => __t('deploy.recovery_fact_controller'), 'html' => h((string) $execution['controller_state'])],
-            ['label' => __t('deploy.recovery_fact_effect'), 'html' => h((string) $execution['effect_state'])],
-            ['label' => __t('deploy.recovery_fact_reconciliation'), 'html' => h((string) $execution['reconciliation_state'])],
-            ['label' => __t('deploy.recovery_fact_cleanup'), 'html' => h((string) $execution['cleanup_state'])],
+            ['label' => __t('deploy.recovery_fact_controller'), 'html' => '<code>' . h((string) $execution['controller_state']) . '</code>'],
+            ['label' => __t('deploy.recovery_fact_effect'), 'html' => '<code>' . h((string) $execution['effect_state']) . '</code>'],
+            ['label' => __t('deploy.recovery_fact_reconciliation'), 'html' => '<code>' . h((string) $execution['reconciliation_state']) . '</code>'],
+            ['label' => __t('deploy.recovery_fact_cleanup'), 'html' => h(deploy_log_recovery_cleanup_label((string) $execution['cleanup_state']))],
             ['label' => __t('deploy.recovery_fact_attempts'), 'html' => h((string) $execution['cleanup_attempts'])],
         ]);
         ?>

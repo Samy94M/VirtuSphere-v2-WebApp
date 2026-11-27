@@ -30,6 +30,8 @@ final class AnsibleCommandModuleContractTest extends TestCase
         'ansible_modes_using_powercycle',
         'ansible_modes_using_start',
         'ansible_mode_expects_mac_result',
+        // P2b-4 (TS1-K3): the modes of that predicate, for the full test's warning.
+        'ansible_modes_expecting_mac_result',
         'ansible_mode_creates_vms',
         // K16: modes that address existing VMs by their bound instance UUID.
         'ansible_mode_requires_bound_instance_uuid',

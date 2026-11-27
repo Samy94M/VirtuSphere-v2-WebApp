@@ -33,7 +33,8 @@ final class AuditLogDisplayTest extends TestCase
 
     public function testAStructuredRowShowsTheSentenceInTheViewersLanguage(): void
     {
-        self::assertSame('Einstellung portal timezone geändert: Europe/Berlin -> UTC', audit_log_display_message($this->structuredRow()));
+        // P3-6 (TS1-K3): the German reader gets the setting's German name.
+        self::assertSame('Einstellung „Anzeige-Zeitzone“ geändert: Europe/Berlin -> UTC', audit_log_display_message($this->structuredRow()));
     }
 
     public function testAnEnglishViewerSeesTheStoredSentence(): void

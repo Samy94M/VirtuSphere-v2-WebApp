@@ -50,6 +50,10 @@ final class DeployModeTextTest extends TestCase
             'mission_details.wds_vlan_hint' => ['modes' => $wds],
             'help_deploy.deploy_powercycle_wait_p1' => ['modes' => ansible_modes_using_powercycle()],
             'help_deploy.deploy_start_wait_p2' => ['modes' => ansible_modes_using_start()],
+            // P2b-4: the full test's allowlist warning names the modes the host
+            // preflight refuses, from the same predicate.
+            'credentials.test_warn_allowlist' => ['modes' => ansible_modes_expecting_mac_result()],
+            'credentials.test_warn_allowlist_noip' => ['modes' => ansible_modes_expecting_mac_result()],
             'help_deploy.network_contract_p2' => [
                 'mapping_modes' => $mapping,
                 'mapping_notice_modes' => array_values(array_diff($user, $mapping)),

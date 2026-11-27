@@ -64,13 +64,16 @@ function logs_filter_error(array $filter, string $field): string
 }
 
 /** One text/date control with its label, error and sticky value. */
-function logs_filter_field(string $name, string $label, string $value, string $error, string $type = 'text', string $placeholder = ''): string
+function logs_filter_field(string $name, string $label, string $value, string $error, string $type = 'text', string $placeholder = '', string $hint = ''): string
 {
-    $attrs = form_control_attrs(VIRTUSPHERE_LOG_FILTER_FORM, $name, null, false, $error);
+    $attrs = form_control_attrs(VIRTUSPHERE_LOG_FILTER_FORM, $name, null, $hint !== '', $error);
     $html = '<label>' . h($label)
         . '<input type="' . h($type) . '" name="' . h($name) . '" value="' . h($value) . '"'
         . ($placeholder !== '' ? ' placeholder="' . h($placeholder) . '"' : '')
         . $attrs . '>';
+    if ($hint !== '') {
+        $html .= '<small class="hint" id="' . h(form_hint_id(VIRTUSPHERE_LOG_FILTER_FORM, $name)) . '">' . h($hint) . '</small>';
+    }
 
     return $html . form_error_html(VIRTUSPHERE_LOG_FILTER_FORM, $name, null, $error) . '</label>';
 }
@@ -189,7 +192,12 @@ function logs_render_filter_form(array $filter, string $resetUrl, ?string $expor
             // From/To adjacent: they are one control in two boxes, and the grid
             // is four wide, so any field between them puts the pair on two rows
             // at the width the page is normally read at.
-            echo logs_filter_field('q', __t('logs.search'), (string) $filter['search'], '', 'text', __t('logs.search_placeholder'));
+            // P3-7: the search reads the stored English sentence (i18n R10), while
+            // the table shows the German one; the hint says so and names the
+            // filter that does find German words.
+            echo logs_filter_field('q', __t('logs.search'), (string) $filter['search'], '', 'text', __t('logs.search_placeholder'), __t('logs.search_hint', [
+                'filter' => __t('logs.event_code'), 'section' => __t('logs.advanced_heading'),
+            ]));
             echo logs_filter_field('ip', __t('logs.ip'), (string) $filter['ip'], '', 'text', __t('logs.ip_placeholder'));
             echo logs_filter_field('from', __t('logs.from'), (string) $filter['from'], logs_filter_error($filter, 'from'), 'date');
             echo logs_filter_field('to', __t('logs.to'), (string) $filter['to'], logs_filter_error($filter, 'to'), 'date');

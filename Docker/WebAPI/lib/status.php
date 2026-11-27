@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
+require_once __DIR__ . '/ansible_evidence_window.php';
 
 function virtusphere_status_meta(string $legacyStatus): array
 {
@@ -234,7 +235,7 @@ function ansible_preflight_ampel(?array $state, ?int $now = null, int $intervalH
         return 'unknown';
     }
 
-    return ($current - $checkedEpoch) > max(VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS * 86400, 2 * max(0, $intervalHours) * 3600)
+    return ($current - $checkedEpoch) > ansible_preflight_evidence_valid_seconds($intervalHours)
         ? 'stale'
         : $ampel;
 }

@@ -102,7 +102,13 @@ final class CredentialTestCompletionIntegrationTest extends TestCase
         self::assertStringContainsString('tested credential id ' . $this->credentialId . ':', (string) $audit['log_message']);
         $flash = $this->onlyFlash();
         self::assertSame($flashType, $flash['type']);
-        self::assertSame(__t($messageKey, $result['context']), $flash['message']);
+        // P2b-4: the allowlist warning names the refused modes, derived from
+        // the worker's predicate (DeployModeTextTest pins the derivation).
+        $replace = $messageKey === 'credentials.test_warn_allowlist'
+            ? [...$result['context'], 'modes' => deploy_mode_label_list(ansible_modes_expecting_mac_result())]
+            : $result['context'];
+        self::assertSame(__t($messageKey, $replace), $flash['message']);
+        self::assertDoesNotMatchRegularExpression('/:[a-z_]{3,}/', $flash['message'], 'no placeholder may stay unresolved');
         self::assertSame($result['ok'] ? '' : $result['detail'], $flash['detail']);
         self::assertStringNotContainsString('Audit context field is not allowed', $flash['message']);
     }

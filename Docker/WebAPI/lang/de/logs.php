@@ -6,6 +6,7 @@ return [
     'title' => 'Protokolle',
     'search' => 'Suche',
     'search_placeholder' => 'Nachricht oder Benutzername',
+    'search_hint' => 'Sucht im gespeicherten englischen Wortlaut. Für deutsche Begriffe nutzen Sie den Filter „:filter“ unter „:section“.',
     'ip' => 'IP',
     'ip_placeholder' => 'Exakte IP-Adresse',
     'tabs_label' => 'Protokoll-Bereiche',

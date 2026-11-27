@@ -18,6 +18,9 @@ declare(strict_types=1);
                 'default' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT,
                 'min' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MIN,
                 'max' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MAX,
+                // P2b-5: below this many active entries the brake does not apply
+                // (packages_retire_guard(), per catalog table).
+                'min_active' => VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE,
             ])); ?></p>
             <form class="form-grid" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>

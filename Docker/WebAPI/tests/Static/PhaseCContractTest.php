@@ -179,7 +179,9 @@ final class PhaseCContractTest extends TestCase
         self::assertStringContainsString('portal_error_message($exception)', $users);
 
         $login = $this->source('portal/login.php');
-        self::assertStringContainsString("__t('login.error_ip_locked')", $login);
+        // P2b-6: the lock names its duration from the window constant.
+        self::assertStringContainsString("__t('login.error_ip_locked', ['minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES])", $login);
+        self::assertStringContainsString("__t('login.error_rate_limited', ['minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES])", $login);
         self::assertStringContainsString('value="<?php echo h($username); ?>"', $login);
 
         $validate = $this->source('lib/validate.php');

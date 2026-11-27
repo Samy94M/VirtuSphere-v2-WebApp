@@ -6,6 +6,7 @@ return [
     'title' => 'Logs',
     'search' => 'Search',
     'search_placeholder' => 'Message or username',
+    'search_hint' => 'Searches the stored English wording. For German terms, use the ":filter" filter under ":section".',
     'ip' => 'IP',
     'ip_placeholder' => 'Exact IP address',
     'tabs_label' => 'Log sections',

@@ -99,16 +99,16 @@ function repo_validate_interfaces(mixed $interfaces): array
     $index = 0;
     foreach ($interfaces as $interface) {
         if (!is_array($interface) && !is_object($interface)) {
-            throw new ValidationException(['interfaces.' . $index => validator_text('validate.interface_entry_invalid', 'Interface entry is invalid.')]);
+            throw new ValidationException(['interfaces.' . $index => validator_text('validate.interface_entry_invalid', 'Network adapter entry is invalid.')]);
         }
 
         $validator = new Validator();
-        $mode = $validator->enum('interfaces.' . $index . '.mode', repo_object_get($interface, 'mode', VIRTUSPHERE_VM_DEFAULTS['interface_mode']), validator_label('interface_mode', 'Interface mode'), VIRTUSPHERE_INTERFACE_MODES, VIRTUSPHERE_VM_DEFAULTS['interface_mode']);
+        $mode = $validator->enum('interfaces.' . $index . '.mode', repo_object_get($interface, 'mode', VIRTUSPHERE_VM_DEFAULTS['interface_mode']), validator_label('interface_mode', 'Network adapter mode'), VIRTUSPHERE_INTERFACE_MODES, VIRTUSPHERE_VM_DEFAULTS['interface_mode']);
         $static = $mode === 'static';
         $row = [
             'id' => repo_id(repo_object_get($interface, 'id', repo_object_get($interface, 'Id'))),
-            'ip' => $validator->ipv4('interfaces.' . $index . '.ip', repo_object_get($interface, 'ip', ''), validator_label('interface_ip', 'Interface IP'), $static),
-            'subnet' => $validator->ipv4OrCidrMask('interfaces.' . $index . '.subnet', repo_object_get($interface, 'subnet', ''), validator_label('interface_subnet', 'Interface subnet'), $static),
+            'ip' => $validator->ipv4('interfaces.' . $index . '.ip', repo_object_get($interface, 'ip', ''), validator_label('interface_ip', 'Network adapter IP'), $static),
+            'subnet' => $validator->ipv4OrCidrMask('interfaces.' . $index . '.subnet', repo_object_get($interface, 'subnet', ''), validator_label('interface_subnet', 'Network adapter subnet'), $static),
             // Unlike the IP and the mask, the gateway stays OPTIONAL in static
             // mode. client_staticip.ps1 sets exactly one default route per VM
             // (the first static adapter carrying a gateway wins, every further
@@ -119,18 +119,18 @@ function repo_validate_interfaces(mixed $interfaces): array
             // where Windows would then point its default route at something
             // that never answers. The format is still validated; only empty is
             // allowed through.
-            'gateway' => $validator->ipv4('interfaces.' . $index . '.gateway', repo_object_get($interface, 'gateway', ''), validator_label('interface_gateway', 'Interface gateway')),
-            'dns1' => $validator->ipv4('interfaces.' . $index . '.dns1', repo_object_get($interface, 'dns1', ''), validator_label('interface_dns1', 'Interface DNS 1')),
-            'dns2' => $validator->ipv4('interfaces.' . $index . '.dns2', repo_object_get($interface, 'dns2', ''), validator_label('interface_dns2', 'Interface DNS 2')),
-            'vlan' => $validator->optionalString('interfaces.' . $index . '.vlan', repo_object_get($interface, 'vlan', ''), validator_label('interface_vlan', 'Interface VLAN'), 255),
+            'gateway' => $validator->ipv4('interfaces.' . $index . '.gateway', repo_object_get($interface, 'gateway', ''), validator_label('interface_gateway', 'Network adapter gateway')),
+            'dns1' => $validator->ipv4('interfaces.' . $index . '.dns1', repo_object_get($interface, 'dns1', ''), validator_label('interface_dns1', 'Network adapter DNS 1')),
+            'dns2' => $validator->ipv4('interfaces.' . $index . '.dns2', repo_object_get($interface, 'dns2', ''), validator_label('interface_dns2', 'Network adapter DNS 2')),
+            'vlan' => $validator->optionalString('interfaces.' . $index . '.vlan', repo_object_get($interface, 'vlan', ''), validator_label('interface_vlan', 'Network adapter port group'), 255),
             'mode' => $mode,
             // vNIC type is an enum, like disk_type and the interface mode: a value
             // outside VIRTUSPHERE_INTERFACE_TYPES fails the create playbook at ESXi,
             // so it is rejected here (import/legacy-API included) instead of silently
             // reaching the hypervisor. enum() applies the default for an empty value
             // and lower-cases, so a stored type is always a canonical known value.
-            'type' => $validator->enum('interfaces.' . $index . '.type', repo_object_get($interface, 'type', VIRTUSPHERE_VM_DEFAULTS['interface_type']), validator_label('interface_type', 'Interface type'), VIRTUSPHERE_INTERFACE_TYPES, VIRTUSPHERE_VM_DEFAULTS['interface_type']),
-            'mac' => $validator->mac('interfaces.' . $index . '.mac', repo_object_get($interface, 'mac', ''), validator_label('interface_mac', 'Interface MAC')),
+            'type' => $validator->enum('interfaces.' . $index . '.type', repo_object_get($interface, 'type', VIRTUSPHERE_VM_DEFAULTS['interface_type']), validator_label('interface_type', 'Network adapter type'), VIRTUSPHERE_INTERFACE_TYPES, VIRTUSPHERE_VM_DEFAULTS['interface_type']),
+            'mac' => $validator->mac('interfaces.' . $index . '.mac', repo_object_get($interface, 'mac', ''), validator_label('interface_mac', 'Network adapter MAC')),
         ];
         $validator->throwIfInvalid();
         $validated[] = $row;
@@ -197,8 +197,24 @@ function repo_validate_vm_payload(mysqli $db, int $missionId, array $vmData, int
         ? (string) (repo_scalar($db, 'SELECT vm_hostname FROM deploy_vms WHERE id = ? AND mission_id = ? LIMIT 1', 'ii', [$excludeVmId, $missionId]) ?? '')
         : '';
     $hostnameLabel = validator_label('hostname', 'Hostname');
+    $nameIsValid = $name !== ''
+        && mb_strlen($name) <= (int) VIRTUSPHERE_VM_LIMITS['vm_name_max_length']
+        && preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/', $name) === 1;
     if ($excludeVmId > 0 && $storedHostname !== '' && $hostnameInput === $storedHostname) {
         $values['vm_hostname'] = $validator->hostname('vm_hostname', $hostnameInput, $hostnameLabel, 64);
+    } elseif (trim((string) ($vmData['vm_hostname'] ?? '')) === '' && $nameIsValid) {
+        // Empty field: the VM name stands in. A VM name may be longer than a
+        // Windows hostname (H2b-4: the two limits stay apart), and a valid VM
+        // name shares the hostname's charset, so the only way it fails here is
+        // its length. The generic hostname message named a value the operator
+        // never typed; this one says which field to fill.
+        $probe = new Validator();
+        $values['vm_hostname'] = $probe->netbiosHostname('vm_hostname', $hostnameInput, $hostnameLabel);
+        try {
+            $probe->throwIfInvalid();
+        } catch (ValidationException) {
+            $validator->add('vm_hostname', validator_text('validate.vm_hostname_from_vm_name_too_long', 'The VM name is too long for a Windows hostname; enter a Windows hostname.'));
+        }
     } else {
         $values['vm_hostname'] = $validator->netbiosHostname('vm_hostname', $hostnameInput, $hostnameLabel);
     }

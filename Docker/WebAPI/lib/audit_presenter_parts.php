@@ -155,10 +155,27 @@ function audit_mission_transfer_description(string $id, array $context, string $
     return audit_t($locale, 'mission_action', ['action' => $action, 'id' => $id, 'named' => audit_description_named($context, $locale)]);
 }
 
+/**
+ * A fixed identifier a sentence names, which is no context word: the setting a
+ * row is about, the log tab of an export, a retention area (P3-6, P3-10). Its
+ * label from `ident_<kind>_<identifier>` when the catalog has one, else
+ * $stored, the form the sentence has always written. The English label IS that
+ * stored form, so the stored sentence keeps it byte for byte (i18n R10); only a
+ * German reader gets a German word. AuditIdentifierLabelTest derives the lists
+ * from their writers and owners.
+ */
+function audit_identifier_label(string $locale, string $kind, string $identifier, string $stored): string
+{
+    $key = 'audit_log.ident_' . $kind . '_' . $identifier;
+    $label = Lang::getIn($locale, $key);
+
+    return $label === $key ? $stored : $label;
+}
+
 /** @param array<string,mixed> $context */
 function audit_setting_description(string $id, array $context, string $locale = 'en'): string
 {
-    $setting = str_replace('_', ' ', $id);
+    $setting = audit_identifier_label($locale, 'setting', $id, str_replace('_', ' ', $id));
     if (array_key_exists('enabled', $context)) {
         return audit_t($locale, 'setting_enabled', [
             'state' => audit_bool_word((bool) $context['enabled'], $locale),
@@ -194,7 +211,7 @@ function audit_inventory_refresh_description(array $context, string $locale = 'e
 function audit_logs_export_description(string $tab, array $context, string $locale = 'en'): string
 {
     $message = audit_t($locale, 'logs_export', [
-        'tab' => $tab,
+        'tab' => audit_identifier_label($locale, 'log_tab', $tab, $tab),
         'rows' => (string) ($context['rows_exported'] ?? 0),
         'total' => (string) ($context['total_rows'] ?? 0),
     ]);
@@ -254,10 +271,25 @@ function audit_description_ids(array $ids): string
     return ' [' . implode(',', $ids) . ']';
 }
 
-/** @param array<string,mixed> $context */
-function audit_description_items(array $context, string $locale = 'en'): string
+/**
+ * The item list of a row. With $identKind each item of the form `<name>: <n>`
+ * shows its name through audit_identifier_label() (the retention areas, P3-10);
+ * any other item, and every item without a kind, stays as written.
+ *
+ * @param array<string,mixed> $context
+ */
+function audit_description_items(array $context, string $locale = 'en', string $identKind = ''): string
 {
     $items = is_array($context['items'] ?? null) ? $context['items'] : [];
+    if ($identKind !== '') {
+        $items = array_map(static function (mixed $item) use ($locale, $identKind): mixed {
+            if (!is_string($item) || preg_match('/^([a-z0-9_]+): (\d+)$/D', $item, $match) !== 1) {
+                return $item;
+            }
+
+            return audit_identifier_label($locale, $identKind, $match[1], $match[1]) . ': ' . $match[2];
+        }, $items);
+    }
 
     return $items !== []
         ? implode('; ', $items)

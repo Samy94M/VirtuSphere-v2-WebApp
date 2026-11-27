@@ -7,6 +7,8 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/connection_errors.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ssh_host_key_format.php';
+require_once __DIR__ . '/ansible_command_modes.php';
+require_once __DIR__ . '/deploy_mode_labels.php';
 
 /**
  * A test that passed but found the host's IP missing from the machine-API
@@ -71,10 +73,14 @@ function credentials_test_message(array $result): string
     // legacy 403 echoed one.
     if (credentials_test_is_allowlist_warning($result)) {
         $ip = trim((string) ($result['context']['ip'] ?? ''));
+        // P2b-4: the refused modes come from the predicate the worker's host
+        // preflight applies; "creating and starting" read like the steps of
+        // the full chain, which is refused too.
+        $modes = deploy_mode_label_list(ansible_modes_expecting_mac_result());
 
         return $ip !== ''
-            ? __t('credentials.test_warn_allowlist', ['ip' => $ip])
-            : __t('credentials.test_warn_allowlist_noip');
+            ? __t('credentials.test_warn_allowlist', ['ip' => $ip, 'modes' => $modes])
+            : __t('credentials.test_warn_allowlist_noip', ['modes' => $modes]);
     }
 
     if ($result['ok']) {

@@ -257,7 +257,7 @@ function repo_save_vm(mysqli $db, int $missionId, ?int $vmId, array $vmData, arr
                     repo_vm_rollout_edit_changes_identity($state, $desiredHostname, (string) $current['vm_hostname'])
                     && repo_deploy_active_job_exists($db, $missionId)
                 ) {
-                    $message = validator_text('validate.vm_hostname_active_job', 'The Windows hostname cannot be changed while a deploy job of this mission is running.');
+                    $message = validator_text('validate.vm_hostname_active_job', 'The Windows hostname cannot be changed while a job of this mission is running or waiting.');
                     throw new ValidationException(['vm_hostname' => $message], $message);
                 }
                 $values += repo_vm_rollout_values_for_edit($state, $desiredHostname);
