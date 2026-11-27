@@ -505,8 +505,11 @@ ContentLocation: `<PackagesShare>\<Paket>` (UNC aus der Registry).
   Manifest und Application-Identität gebunden (`ContentRequests`); vor dem
   Aufruf steht ein Intent, nach dem Aufruf `requested`. Ein stehender Intent
   wird nur wiederholt, wenn MECM ihn nachweislich nicht angenommen hat.
-- **Deployment unabhängig vom DP-Stand:** Collection sowie Required- und
-  Available-Deployments werden immer idempotent nachgezogen. Offline, ersetzte
+- **Deployment unabhängig vom DP-Stand:** Die eigene Collection mit dem
+  Required-Deployment (nur bei `generateOwnDeviceColletion: "true"`) und das
+  Available-Deployment an die Collection aus `DeployTo` (nur wenn gesetzt und
+  vorhanden, siehe unten) werden unabhängig vom DP-Stand idempotent
+  nachgezogen. Offline, ersetzte
   oder entfernte DPs, laufende Kopien und Verteilfehler sind Hinweise
   (`package_content_failed`, `package_content_in_progress`), kein offener
   Punkt: Der Lauf bleibt `ok` und merkt den Manifest-Stamp. Geräte können das

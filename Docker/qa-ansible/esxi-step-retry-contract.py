@@ -34,7 +34,16 @@ RETRY_PAUSES = [1, 1, 1]
 ATTEMPTS = len(RETRY_PAUSES) + 1
 
 TOUCH_STUB = '''
+import json
+import os
 import sys
+# TS1-K6: a scenario can make the marker fail for one VM with the line
+# report_vm_touch.py prints; the export passes its code on.
+args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
+failure = json.loads(open(os.environ['QA_SCENARIO']).read()).get('touch_failure', {}).get(args['--vm-id'])
+if failure is not None:
+    print(failure)
+    raise SystemExit(1)
 raise SystemExit(0)
 '''
 
@@ -162,6 +171,19 @@ CASES = [
     ('export-persistent', EXPORT, {'fail': {'info:vm2': ALWAYS}}, reads('vm1', *['vm2'] * ATTEMPTS, 'vm3'), False,
      ('[2/3] fail Export info vm2: query_failed after 4 attempt(s): synthetic 503', '[3/3] pass Export info vm3'),
      {'vm1': (False, ''), 'vm2': (True, 'synthetic 503'), 'vm3': (False, '')}),
+    # TS1-K6 (S1-7): a failed marker stops the export before vm2 is read and
+    # names the code the reporter printed: a refusal, an unreachable portal,
+    # or no code at all.
+    ('export-touch-refused', EXPORT,
+     {'touch_failure': {'1002': 'touch_refused: server rejected this VM access attempt. cause=attempt_stale'}},
+     reads('vm1'), True,
+     ('[2/3] fail Export info vm2: touch_refused', 'portal VM 1002 (touch_refused;', 'were NOT uploaded')),
+    ('export-touch-transport-failed', EXPORT,
+     {'touch_failure': {'1002': 'touch_transport_failed: portal did not confirm the access attempt.'}},
+     reads('vm1'), True,
+     ('[2/3] fail Export info vm2: touch_transport_failed', 'portal VM 1002 (touch_transport_failed;')),
+    ('export-touch-without-code', EXPORT, {'touch_failure': {'1001': ''}}, [], True,
+     ('[1/3] fail Export info vm1: touch_unconfirmed', 'portal VM 1001 (touch_unconfirmed;')),
     ('start-all', START, {}, reads('vm1', 'vm2', 'vm3') + powers('vm1', 'vm2', 'vm3'), False,
      ('[1/3] RUN Start info vm1', '[3/3] pass Start info vm3', '[1/3] RUN Start vm1', '[3/3] pass Start vm3')),
     ('start-read-transient', START, {'fail': {'info:vm2': 1}},

@@ -150,6 +150,28 @@ Describe 'Membership journal durability contract' {
         }
     }
 
+    # TS1-K6 (S2d-B-4): only a sharing violation names a second instance.
+    It 'names missing access, not a second instance, when the lock file cannot be opened for rights' {
+        # A directory in place of the lock file: Open answers with access denied.
+        New-Item -ItemType Directory -Path ($script:JournalPath + '.lock') -Force | Out-Null
+        $message = $null
+        try { $null = Enter-VsMembershipJournalInstance -Path $script:JournalPath } catch { $message = $_.Exception.Message }
+        $message | Should -BeLike 'Membership-Journal nicht sperrbar: kein Zugriff auf die Sperrdatei (*'
+        $message | Should -Not -BeLike '*andere Device-Sync-Instanz*'
+    }
+
+    It 'keeps any other open failure general and carries the original text' {
+        # A file in place of the journal directory: Open cannot find the path.
+        $notADirectory = Join-Path $TestDrive ('not-a-directory-{0}' -f [guid]::NewGuid().ToString('N'))
+        Set-Content -LiteralPath $notADirectory -Value 'x' -Encoding ASCII
+        $message = $null
+        try { $null = Enter-VsMembershipJournalInstance -Path (Join-Path $notADirectory 'membership-journal.json') } catch { $message = $_.Exception.Message }
+        $message | Should -BeLike 'Membership-Journal nicht sperrbar: Sperrdatei nicht zu oeffnen (*'
+        $message | Should -BeLike ('*{0}*' -f [IO.Path]::GetFileName($notADirectory))
+        $message | Should -Not -BeLike '*andere Device-Sync-Instanz*'
+        $message | Should -Not -BeLike '*kein Zugriff*'
+    }
+
     It 'refuses capacity overflow before replacing the current journal' {
         Set-VsMembershipJournalEntry -Path $script:JournalPath -Entry $script:Entry
         $before = [IO.File]::ReadAllText($script:JournalPath)

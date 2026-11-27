@@ -141,10 +141,28 @@ function Enter-VsMembershipJournalInstance {
         return [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     } catch {
         # Jede Ausnahme von Open landet hier, nicht nur die Sperre einer zweiten
-        # Instanz: die Meldung nennt deshalb beide Moeglichkeiten und den
-        # Originaltext, damit fehlende Rechte nicht als zweite Instanz erscheinen.
-        throw ('Membership-Journal nicht sperrbar: durch eine andere Device-Sync-Instanz gesperrt oder kein Zugriff auf die Sperrdatei ({0}).' -f $_.Exception.Message)
+        # Instanz (TS1-K6, S2d-B-4). Die Meldung nennt deshalb die erkannte
+        # Ursache und immer den Originaltext, damit fehlende Rechte nicht als
+        # zweite Instanz erscheinen.
+        throw ('Membership-Journal nicht sperrbar: {0} ({1}).' -f (Get-VsMembershipJournalLockFailureCause -Exception $_.Exception), $_.Exception.Message)
     }
+}
+
+# Ordnet eine Ausnahme von [IO.File]::Open der Sperrdatei einer Ursache zu.
+# Nur eine Freigabe- oder Sperrverletzung (Win32 32/33) ist eine zweite
+# Instanz; Zugriffsverweigerung ist ein Rechteproblem; alles andere (fehlender
+# Ordner, Datentraeger) bleibt allgemein und traegt den Originaltext.
+function Get-VsMembershipJournalLockFailureCause {
+    param([Parameter(Mandatory)][Exception]$Exception)
+    $inner = $Exception
+    if ($inner -is [Management.Automation.MethodInvocationException] -and $null -ne $inner.InnerException) {
+        $inner = $inner.InnerException
+    }
+    if ($inner -is [UnauthorizedAccessException]) { return 'kein Zugriff auf die Sperrdatei' }
+    if ($inner.GetType() -eq [IO.IOException] -and @(32, 33) -contains ($inner.HResult -band 0xFFFF)) {
+        return 'durch eine andere Device-Sync-Instanz gesperrt'
+    }
+    return 'Sperrdatei nicht zu oeffnen'
 }
 
 function New-VsMembershipJournalEntry {
