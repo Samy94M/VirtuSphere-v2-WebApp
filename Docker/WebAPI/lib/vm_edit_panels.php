@@ -125,10 +125,8 @@ declare(strict_types=1);
                     // Fields and hint form one group spanning two grid tracks, so the prose
                     // stays under the controls it explains. Its column cannot be pinned in
                     // CSS: a hidden MECM id or datacenter shifts the pair by a track.
-                    $locationHintSubject = [__t('vm_edit.label_datastore')];
-                    if (!$hideVmDatacenter) {
-                        $locationHintSubject[] = __t('vm_edit.label_datacenter');
-                    }
+                    // The hints name their field in the sentence itself; the bold
+                    // repeated label in front of them is gone (G9, PR-R4A).
                     $locationHintId = form_hint_id('vm_edit', 'location');
                 ?>
                 <div class="field-group" role="group"<?php echo form_control_attrs('vm_edit', 'location', null, [$locationHintId], ''); ?>>
@@ -155,11 +153,11 @@ declare(strict_types=1);
                         ]); ?></label>
                     <?php } ?>
                     <div class="form-grid-full" id="<?php echo h($locationHintId); ?>">
-                        <p class="hint"><span class="hint-subject"><?php echo h(implode(' / ', $locationHintSubject)); ?>:</span> <?php echo h(__t('vm_edit.location_hint')); ?></p>
+                        <p class="hint"><?php echo h(__t('vm_edit.location_hint')); ?></p>
                         <?php // Only case where the empty option names no value: the datacenter
                               // then comes from the target host, not from the mission. ?>
                         <?php if (!$hideVmDatacenter && $missionDatacenter === '') { ?>
-                            <p class="hint"><span class="hint-subject"><?php echo h(__t('vm_edit.label_datacenter')); ?>:</span> <?php echo h(__t('vm_edit.location_datacenter_host_hint')); ?></p>
+                            <p class="hint"><?php echo h(__t('vm_edit.location_datacenter_host_hint')); ?></p>
                         <?php } ?>
                         <?php if ($vmLocationNotes !== []) { ?>
                             <?php // Exhaustive match, no default: a new note token has to be
@@ -198,7 +196,7 @@ declare(strict_types=1);
                             <?php echo h(__t('vm_edit.ram_hotplug')); ?>
                         </label>
                     </div>
-                    <p class="hint" id="<?php echo h($hotplugHintId); ?>"><?php echo h(__t('vm_edit.hotplug_hint')); ?></p>
+                    <p class="hint" id="<?php echo h($hotplugHintId); ?>"><?php echo h(__t('vm_edit.hotplug_hint')); ?> <a href="<?php echo h(help_url('missions', 'help-hotplug')); ?>"><?php echo h(__t('common.help')); ?></a></p>
                 </div>
 
                 <?php
@@ -245,7 +243,7 @@ declare(strict_types=1);
                             <a href="<?php echo h($missionDetailsUrl); ?>"><?php echo h(__t('vm_edit.autostart_mission_link')); ?></a>
                         </p>
                     <?php } else { ?>
-                        <p class="hint" id="<?php echo h($autostartHintId); ?>"><?php echo h(__t('vm_edit.autostart_hint')); ?></p>
+                        <p class="hint" id="<?php echo h($autostartHintId); ?>"><?php echo h(__t('vm_edit.autostart_hint')); ?> <a href="<?php echo h(help_url('deploy', 'help-autostart')); ?>"><?php echo h(__t('common.help')); ?></a></p>
                     <?php } ?>
                 </div>
                 <?php // readonly, not disabled: a readonly number input still posts, so a

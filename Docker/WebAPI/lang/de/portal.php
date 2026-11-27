@@ -40,7 +40,7 @@ return [
     'vm_mecm_reset_already_pending' => 'Es war nichts zu tun: „:hostname“ wartet bereits als nächster Rolloutname und die VM ist für MECM eingereiht.',
     'vm_mecm_reset_already_pending_reason' => 'bereits eingereiht',
     'vm_mecm_reset_active_job' => 'MECM-ID zurücksetzen nicht möglich: Für diese Mission läuft gerade ein Bereitstellungsauftrag. Warten Sie, bis er beendet ist.',
-    'vm_mecm_reset_invalid_hostname' => 'MECM-ID zurücksetzen nicht möglich: Der Windows-Hostname taugt nicht als Rolloutname in MECM. Zulässig sind höchstens :max Zeichen, nur Buchstaben, Ziffern und innenliegende Bindestriche, kein Punkt. Bitte zuerst im VM-Editor korrigieren.',
+    'vm_mecm_reset_invalid_hostname' => 'MECM-ID zurücksetzen nicht möglich: Der Windows-Hostname taugt nicht als Rolloutname in MECM. Zulässig sind höchstens :max Zeichen, nur Buchstaben, Ziffern und innenliegende Bindestriche, kein Punkt. Korrigieren Sie ihn zuerst im VM-Editor.',
     // Zustand, keine Ablehnung (Entscheidung 2026-09-03): VirtuSphere loescht in
     // MECM nichts, also bleibt nach einem Reset genau ein Schritt offen, und der
     // gehoert einem Menschen. Der Satz steht deshalb an der VM und nicht in einer

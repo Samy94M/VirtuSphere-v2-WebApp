@@ -15,5 +15,5 @@ return [
     'reload' => 'Reload page',
     'list_changed' => 'The list has changed.',
     'vm_gone' => 'This VM no longer exists in this mission.',
-    'open_missions' => 'To the missions',
+    'open_missions' => 'Open missions',
 ];

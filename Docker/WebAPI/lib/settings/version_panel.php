@@ -57,7 +57,8 @@ $versionRuntime = $versionOverview['runtime'];
                                     : __t('settings.version_database_none')); ?>
                                 <?php if ($versionDatabase['pending'] > 0) { ?>
                                     <div class="muted"><?php echo h(__t('settings.version_database_pending', ['count' => $versionDatabase['pending']])); ?></div>
-                                    <div class="muted"><?php echo h(__t('settings.version_database_action')); ?></div>
+                                    <?php // PR-R4A: the runbook reference lives in the help (A7). ?>
+                                    <div class="muted"><?php echo h(__t('settings.version_database_action')); ?> <a href="<?php echo h(help_url('settings', 'help-settings-version')); ?>"><?php echo h(__t('common.help')); ?></a></div>
                                 <?php } ?>
                             </td>
                             <td><?php echo $versionBadge($versionDatabase['state']); ?></td>

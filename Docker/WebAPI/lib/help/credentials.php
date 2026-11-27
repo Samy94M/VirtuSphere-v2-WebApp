@@ -16,10 +16,11 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_credentials.credentials_ports_ansible')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_usage')); ?></p>
         </section>
-        <section class="panel">
+        <section class="panel" id="help-credentials-trust">
             <h2><?php echo h(__t('help_credentials.credentials_trust_heading')); ?></h2>
-            <h3><?php echo h(__t('help_credentials.ansible_host_identity_heading')); ?></h3>
+            <h3 id="help-host-identity" tabindex="-1"><?php echo h(__t('help_credentials.ansible_host_identity_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.ansible_host_identity')); ?></p>
+            <p><?php echo h(__t('help_credentials.ansible_host_identity_fingerprint_only')); ?></p>
             <p><?php echo h(__t('help_credentials.ansible_host_identity_tool')); ?></p>
             <h3><?php echo h(__t('help_credentials.credentials_trust_why_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.credentials_trust_why')); ?></p>
@@ -28,9 +29,10 @@ declare(strict_types=1);
             <h3><?php echo h(__t('help_credentials.credentials_trust_how_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.credentials_trust_how')); ?></p>
         </section>
-        <section class="panel">
+        <section class="panel" id="help-credentials-tests">
             <h2><?php echo h(__t('help_credentials.credentials_tests_heading')); ?></h2>
             <p><?php echo h(__t('help_credentials.credentials_tests_p1', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
+            <p><?php echo h(__t('help_credentials.credentials_tests_checks')); ?></p>
             <p><?php echo h(__t('ansible_test.help')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_tests_p2')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_tests_p3')); ?></p>

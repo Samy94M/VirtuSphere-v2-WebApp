@@ -636,7 +636,7 @@ echo 'JSON' . json_encode(['role' => $row === null ? 'missing' : $row['role']]) 
       page.waitForResponse((r) => r.url().includes('settings.php') && r.request().method() === 'POST'),
       dialog.locator('[data-confirm-accept]').click(),
     ]);
-    await expect(page.locator('.alert-error').first(), 'the server names the missing role').toContainText('Please choose a role.');
+    await expect(page.locator('.alert-error').first(), 'the server names the missing role').toContainText('Choose a role.');
     expect(roleOf(), 'the entry keeps no role').toBeNull();
   } finally {
     sql(`$stmt = $db->prepare('DELETE FROM deploy_accessToWebAPI WHERE ipAddress = ?'); $stmt->bind_param('s', $ip); $stmt->execute();`);

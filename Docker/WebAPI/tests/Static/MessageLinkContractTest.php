@@ -81,7 +81,9 @@ final class MessageLinkContractTest extends TestCase
     public function testAMessageWhoseLinkWasRemovedIsReported(): void
     {
         $sources = $this->sources();
-        $key = 'deploy.verbose_hint';
+        // PR-R4A: deploy.verbose_hint no longer names the help page (its link
+        // moved to the hint itself); this sentence still names System status.
+        $key = 'credentials.test_hint';
         $file = $this->fileContaining($sources, "'" . $key . "'");
         // Negative case: drop every link helper from the file that renders the
         // key. The same derivation must then name exactly this key.

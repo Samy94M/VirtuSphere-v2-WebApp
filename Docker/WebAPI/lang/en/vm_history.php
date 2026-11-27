@@ -12,7 +12,6 @@ return [
     'filter_sources_hint' => 'Without a selection, every source is shown.',
     'filter_from' => 'From',
     'filter_to' => 'To',
-    'filter_date_hint' => 'Times shown in :tz.',
     'filter_apply' => 'Filter',
     'filter_reset' => 'Reset filters',
     'error_date' => 'Enter a date as YYYY-MM-DD.',

@@ -58,7 +58,7 @@ function vm_history_render_filter(array $filter, array $permitted, int $missionI
         <div class="form-grid">
             <?php echo $date('from', __t('vm_history.filter_from')) . $date('to', __t('vm_history.filter_to')); ?>
         </div>
-        <p class="hint"><?php echo h(__t('vm_history.filter_date_hint', ['tz' => portal_timezone()])); ?></p>
+        <p class="hint"><?php echo h(__t('common.timezone_note', ['tz' => portal_timezone()])); ?></p>
         <?php if (in_array('range', $filter['errors'], true)) { ?>
             <p class="alert alert-warning" role="status"><?php echo h(__t('vm_history.error_range')); ?></p>
         <?php } ?>

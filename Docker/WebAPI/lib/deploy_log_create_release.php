@@ -17,6 +17,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/deploy_create_release.php';
 require_once __DIR__ . '/deploy_recovery_actions.php';
 require_once __DIR__ . '/system_status_urls.php';
+require_once __DIR__ . '/help_page.php';
 
 /**
  * Renders the release box for the first unresolved create unit of this job.
@@ -49,7 +50,8 @@ function deploy_log_render_create_release(mysqli $db, array $job, array $user): 
     ?>
     <section class="panel">
         <h2><?php echo h(__t('deploy.create_release_heading')); ?></h2>
-        <p class="muted"><?php echo h(__t('deploy.create_release_hint')); ?></p>
+        <?php // PR-R4A: the conditions stay here, what the release does and does not do is the help's create section. ?>
+        <p class="muted"><?php echo h(__t('deploy.create_release_hint')); ?> <a href="<?php echo h(help_url('deploy', 'help-create-progress')); ?>"><?php echo h(__t('common.help')); ?></a></p>
         <?php if (!$decision['eligible']) { ?>
             <div class="alert alert-warning">
                 <p><strong><?php echo h(__t('deploy.create_release_blocked_heading')); ?></strong></p>

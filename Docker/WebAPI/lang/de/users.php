@@ -47,5 +47,5 @@ return [
     'flash_email_unchanged' => 'E-Mail-Adresse unverändert.',
     'flash_password_reset' => 'Passwort zurückgesetzt.',
     'flash_lock_cleared' => 'Sperre aufgehoben.',
-    'flash_check_input' => 'Bitte Eingaben prüfen.',
+    'flash_check_input' => 'Prüfen Sie Ihre Eingaben.',
 ];

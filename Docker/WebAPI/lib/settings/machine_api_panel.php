@@ -16,10 +16,10 @@ require_once __DIR__ . '/../machine_api_roles.php';
         // there is no MECM host or port here. Provider, site code and the report
         // interval are configured in the Windows installer's registry.
         ?>
-        <div class="alert alert-info"><?php echo h(__t('settings.machine_api_directions')); ?></div>
+        <div class="alert alert-info"><?php echo h(__t('settings.machine_api_directions')); ?> <a href="<?php echo h(help_url('settings', 'help-settings-machine-api')); ?>"><?php echo h(__t('common.help')); ?></a></div>
         <section class="panel">
             <h2><?php echo h(__t('settings.allowlist_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.allowlist_hint')); ?></p>
+            <p class="muted"><?php echo h(__t('settings.allowlist_hint')); ?> <a href="<?php echo h(help_url('settings', 'help-settings-allowlist')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             <?php
             // An empty allowlist is a total outage, not an unset option: every
             // machine endpoint answers 403, so no sync and no MAC upload work.
@@ -105,7 +105,7 @@ require_once __DIR__ . '/../machine_api_roles.php';
 
         <section class="panel">
             <h2><?php echo h(__t('settings.report_token_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.report_token_hint')); ?></p>
+            <p class="muted"><?php echo h(__t('settings.report_token_hint')); ?> <a href="<?php echo h(help_url('settings', 'help-settings-token')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             <?php if ($reportTokenOnce !== '') { ?>
                 <div class="alert alert-info">
                     <strong><?php echo h(__t('settings.report_token_once')); ?></strong>

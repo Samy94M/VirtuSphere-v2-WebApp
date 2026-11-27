@@ -46,7 +46,7 @@ return [
     'bulk_confirm_reset' => 'Reset the MECM ID of the selected VMs? Delete the old MECM device of each VM in MECM first; the portal does not delete it. The next rollout registers each successfully processed VM again.',
     'bulk_select_hint' => 'Select at least one VM.',
     'bulk_hint' => 'At most :cap VMs per action. Bulk actions only affect the portal records, never the hypervisor.',
-    'bulk_none_selected' => 'Please select VMs first.',
+    'bulk_none_selected' => 'Select VMs first.',
     'bulk_too_many' => 'Too many VMs selected (limit :cap).',
     'bulk_delete_done' => ':done of :selected selected portal records deleted. No VM was deleted on the hypervisor.',
     'bulk_reset_done' => ':done of :selected MECM resets prepared. If not done yet: delete the old device in MECM; until then the device sync waits.',
