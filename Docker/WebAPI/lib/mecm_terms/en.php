@@ -28,4 +28,16 @@ return [
     'collections' => ['de' => 'Collections', 'en' => 'collections'],
     'deployment' => ['de' => 'Deployment', 'en' => 'deployment'],
     'deployments' => ['de' => 'Deployments', 'en' => 'deployments'],
+    // PR-R3MP: object words and console paths. A path is the console text, the
+    // same in both portal languages.
+    'application' => ['de' => 'Application', 'en' => 'application'],
+    'applications' => ['de' => 'Applications', 'en' => 'applications'],
+    'deployment_type' => ['de' => 'Deployment Type', 'en' => 'deployment type'],
+    'deployment_types' => ['de' => 'Deployment Types', 'en' => 'deployment types'],
+    'path_system_status' => ['de' => 'Monitoring → System Status', 'en' => 'Monitoring → System Status'],
+    'path_component_status' => ['de' => 'Monitoring → System Status → Component Status', 'en' => 'Monitoring → System Status → Component Status'],
+    'path_content_status' => ['de' => 'Monitoring → Distribution Status → Content Status', 'en' => 'Monitoring → Distribution Status → Content Status'],
+    'path_devices' => ['de' => 'Assets and Compliance → Devices', 'en' => 'Assets and Compliance → Devices'],
+    'path_device_collections' => ['de' => 'Assets and Compliance → Device Collections', 'en' => 'Assets and Compliance → Device Collections'],
+    'path_applications' => ['de' => 'Software Library → Application Management → Applications', 'en' => 'Software Library → Application Management → Applications'],
 ];

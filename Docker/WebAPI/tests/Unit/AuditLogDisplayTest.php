@@ -107,7 +107,7 @@ final class AuditLogDisplayTest extends TestCase
     {
         $display = audit_log_display($this->outcomeRow('outcome_unknown', 'stale_heartbeat'));
 
-        self::assertSame('Bereitstellungsauftrag mit ID 812 (Mission 12, Modus Vollständige Kette): Ausgang unbekannt: von der Überwachung nach veraltetem Heartbeat beendet', $display['message']);
+        self::assertSame('Bereitstellungsauftrag mit ID 812 (Mission 12, Modus Vollständige Kette): Ausgang unbekannt: von der Bereinigung verwaister Aufträge nach veraltetem Lebenszeichen beendet', $display['message']);
         self::assertSame('', $display['detail']);
     }
 

@@ -21,14 +21,15 @@ declare(strict_types=1);
 return [
     'phrases' => [
         'Site Health' => 'Name of the VirtuSphere component on the MECM server (scheduled task "VirtuSphere MECM Site Health", mecm_site-health.ps1) and of its reporter, log and data; not the MECM site',
-        'Device Collections' => 'Folder path of the English MECM console ("Assets and Compliance → Device Collections"); console paths stay verbatim until the user decides whether they follow the console language',
-        'Deployment Type' => 'Own MECM object (German console: Bereitstellungstyp), not one of the six term words; whether it joins the term sets is a question for the user',
+        'VirtuSphere_Applications' => 'Name of the VirtuSphere console folder for packages (collections and applications), the same in every console language; not the MECM object word',
         'collection=' => 'Field name of the cause line the MECM scripts report ("collection=<name>"), quoted verbatim',
         'collection_missing target=WEB01 collection=Firefox-115.0' => 'Verbatim example of a cause line of the device sync',
     ],
     'keys' => [
         'de:vms.th_location' => 'Column of the VM list: where the VM runs on ESXi, not the MECM site; its name is a question for VB3',
         'de:help_missions.location_datacenter_optional' => 'Standort here is where the VM lives in ESXi (datacenter, datastore), not the MECM site',
+        'de:help_stack.stack_a1_li1' => 'Describes the portal itself as a PHP application, not the MECM object',
+        'en:help_stack.stack_a1_li1' => 'Describes the portal itself as a PHP application, not the MECM object',
         // Ansible collections (community.vmware and friends), not the MECM object.
         'de:common.conn_ansible_config' => 'Ansible collection, not the MECM object',
         'en:common.conn_ansible_config' => 'Ansible collection, not the MECM object',

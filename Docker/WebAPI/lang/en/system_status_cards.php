@@ -47,7 +47,7 @@ return [
     'cause_package_content_unknown' => 'Distribution state unreadable',
     'cause_package_content_request_failed' => 'Content request not accepted',
     'cause_package_content_group_empty' => 'DP group without members',
-    'cause_package_definition_drift' => 'Application differs from its definition',
+    'cause_package_definition_drift' => '{mecm:Application} differs from its definition',
     'cause_package_source_missing' => 'Folder files missing',
     'cause_package_deploy_failed' => '{mecm:Deployment} not created',
     'cause_package_deployto_missing' => 'DeployTo {mecm:collection} missing',

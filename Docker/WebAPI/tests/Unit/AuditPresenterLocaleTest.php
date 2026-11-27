@@ -83,7 +83,7 @@ final class AuditPresenterLocaleTest extends TestCase
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME, 'deploy_job', '812', VIRTUSPHERE_AUDIT_RESULT_FAILURE, ['mission_id' => 12, 'mode' => 'full', 'status' => 'failed', 'reason' => 'ESXi host unreachable: timeout after 300 s'], 'de')
         );
         self::assertSame(
-            'Bereitstellungsauftrag mit ID 813 (Mission 12, Modus VMs starten): Ausgang unbekannt: von der Überwachung nach veraltetem Heartbeat beendet',
+            'Bereitstellungsauftrag mit ID 813 (Mission 12, Modus VMs starten): Ausgang unbekannt: von der Bereinigung verwaister Aufträge nach veraltetem Lebenszeichen beendet',
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_DEPLOY_OUTCOME, 'deploy_job', '813', VIRTUSPHERE_AUDIT_RESULT_WARNING, ['mission_id' => 12, 'mode' => 'start', 'status' => 'outcome_unknown', 'reason' => 'stale_heartbeat'], 'de')
         );
         self::assertSame(

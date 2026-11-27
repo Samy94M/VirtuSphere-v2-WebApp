@@ -47,7 +47,7 @@ return [
     'cause_package_content_unknown' => 'Verteilstand nicht lesbar',
     'cause_package_content_request_failed' => 'Contentauftrag nicht angenommen',
     'cause_package_content_group_empty' => 'DP-Gruppe ohne Mitglieder',
-    'cause_package_definition_drift' => 'Anwendung weicht von der Definition ab',
+    'cause_package_definition_drift' => '{mecm:Application} weicht von der Definition ab',
     'cause_package_source_missing' => 'Ordner files fehlt',
     'cause_package_deploy_failed' => '{mecm:Deployment} nicht angelegt',
     'cause_package_deployto_missing' => '{mecm:Collection} aus DeployTo fehlt',
