@@ -9,12 +9,13 @@ require_once __DIR__ . '/../ansible_test_config.php';
 require_once __DIR__ . '/../backup_evidence.php';
 ?>
     <div class="stack" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" data-tab-panel>
-        <section class="panel">
+        <section class="panel" id="help-settings-intro">
             <h2><?php echo h(__t('help_settings.settings_heading')); ?></h2>
             <p><?php echo h(__t('help_settings.settings_p1')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_p1_b')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-settings-deploy">
             <h2><?php echo h(__t('settings.tab_deploy')); ?></h2>
             <h3><?php echo h(__t('help_settings.settings_api_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_api_p1')); ?></p>
@@ -33,6 +34,7 @@ require_once __DIR__ . '/../backup_evidence.php';
             <p><?php echo h(__t('help_settings.settings_allowlist_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_allowlist_p2')); ?></p>
             <p><?php echo h(__t('help_settings.settings_allowlist_p3')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_allowlist_p3_b')); ?></p>
             <h3><?php echo h(__t('help_settings.settings_reporting_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_reporting_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_reporting_p2')); ?></p>
@@ -43,10 +45,11 @@ require_once __DIR__ . '/../backup_evidence.php';
             <p><?php echo h(__t('help_settings.settings_token_p3')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-settings-catalog">
             <h2><?php echo h(__t('settings.tab_catalog')); ?></h2>
             <h3 id="help-settings-retire" tabindex="-1"><?php echo h(__t('help_settings.settings_retire_heading')); ?></h3>
-            <p><?php echo h(__t('help_settings.settings_retire_p1', [
+            <p><?php echo h(__t('help_settings.settings_retire_p1')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_retire_p1_b', [
                 'default' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT,
                 'min' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MIN,
                 'max' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MAX,
@@ -80,7 +83,7 @@ require_once __DIR__ . '/../backup_evidence.php';
             <p><?php echo h(__t('help_settings.settings_https_scripts')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-settings-system">
             <h2><?php echo h(__t('settings.tab_system')); ?></h2>
             <h3><?php echo h(__t('help_settings.settings_time_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_time_p1')); ?></p>

@@ -41,9 +41,13 @@ layout_header(__t('help.title'), $user, 'help');
     </div>
 
     <?php
+    // Each panel renders into a buffer first: its table of contents is read
+    // from the sections it actually rendered (help_panel_with_toc()).
     foreach (VIRTUSPHERE_HELP_PANELS as $panel => $definition) {
         if (help_panel_visible($panel, $user)) {
+            ob_start();
             require __DIR__ . '/../lib/help/' . $definition['partial'];
+            echo help_panel_with_toc((string) ob_get_clean(), $panel);
         }
     }
     ?>

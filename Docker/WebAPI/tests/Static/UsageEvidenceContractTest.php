@@ -109,8 +109,8 @@ final class UsageEvidenceContractTest extends TestCase
     public function testTheHelpTeachesTheSection(): void
     {
         $helpKeys = [
-            'help_packages' => ['packages_usage', 'packages_os_usage'],
-            'help_system_status' => ['vlans_usage'],
+            // vlans_usage moved with its section into the catalog help tab (PR-R6).
+            'help_packages' => ['packages_usage', 'packages_os_usage', 'vlans_usage'],
             'help_credentials' => ['credentials_usage'],
         ];
         foreach ($helpKeys as $catalog => $keys) {

@@ -59,12 +59,16 @@ final class DeployRecoveryHelpContractTest extends TestCase
     {
         $catalog = require dirname(__DIR__, 2) . '/lang/' . $locale . '/help_deploy.php';
         self::assertIsArray($catalog);
-        self::assertArrayHasKey('deploy_identity_p2', $catalog);
-        self::assertIsString($catalog['deploy_identity_p2']);
+        // PR-R6 split both paragraphs at a sentence boundary; the help renders
+        // each paragraph as its key followed by the `_b` part, so the guidance
+        // is read from the whole paragraph.
+        $parts = [];
+        foreach (['deploy_identity_p2', 'deploy_identity_p2_b', 'create_progress_p3', 'create_progress_p3_b'] as $key) {
+            self::assertArrayHasKey($key, $catalog);
+            self::assertIsString($catalog[$key]);
+            $parts[] = $catalog[$key];
+        }
 
-        self::assertArrayHasKey('create_progress_p3', $catalog);
-        self::assertIsString($catalog['create_progress_p3']);
-
-        return $catalog['deploy_identity_p2'] . ' ' . $catalog['create_progress_p3'];
+        return implode(' ', $parts);
     }
 }
