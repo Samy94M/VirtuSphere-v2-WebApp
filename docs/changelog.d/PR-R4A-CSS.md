@@ -1,0 +1,2 @@
+- **Links in Hinweisen unterstrichen (PR-R4A-CSS, 27.11.2026).** Links in grauem Hinweistext, etwa „Hilfe“ an einem Feld oder „Systemstatus öffnen“ unter einem Panel, sind jetzt unterstrichen und damit nicht mehr nur an der Farbe zu erkennen.
+- **Zwei Wortwahlen (PR-R4A-CSS, 27.11.2026).** Der Link nach einem ESXi-Inventarabruf heißt „Kataloge und Inventar öffnen“ wie der Reiter, und der Dashboard-Hinweis bei wenig Backup-Speicher sagt „Aufbewahrung der Backups“ statt „Retention“.
