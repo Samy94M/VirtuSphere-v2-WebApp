@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 return [
     'page_title' => 'Anmeldung - VirtuSphere',
-    'error_ip_locked' => 'Diese IP wurde nach zu vielen Fehlversuchen vorübergehend gesperrt.',
-    'error_rate_limited' => 'Zu viele Anmeldeversuche. Bitte warten Sie und versuchen Sie es später erneut.',
+    'error_ip_locked' => 'Diese IP-Adresse ist nach zu vielen Fehlversuchen für etwa :minutes Minuten gesperrt.',
+    'error_rate_limited' => 'Zu viele Anmeldeversuche. Warten Sie etwa :minutes Minuten und versuchen Sie es dann erneut.',
     'error_directory_unavailable' => 'Active Directory ist vorübergehend nicht erreichbar. Verwenden Sie bei Bedarf ein lokales Notfallkonto.',
     'error_invalid' => 'Benutzername oder Passwort ungültig.',
     'session_expired' => 'Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.',

@@ -252,8 +252,24 @@ if ($deployPreview !== null) {
                   // while that button is disabled (controls.css): at the top of the
                   // panel "starts at once" stood directly above the open prerequisites.
                   // The live blocker check only toggles the button, so the sentence
-                  // follows it without a second state. ?>
-            <span class="queue-expectation"><?php echo h(deploy_service_queue_expectation($serviceSnapshot)); ?></span>
+                  // follows it without a second state.
+                  // P1a-4: only the ready sentence promises an immediate start, and
+                  // a job with a start time or a stagger does not start at once. For
+                  // that case a second sentence stands ready; every other answer
+                  // ("is saved and waits") holds for a planned job as well.
+                  // deploy_form.js switches the two with the start option and the
+                  // stagger field; without JavaScript the render picks from the
+                  // remembered form values. ?>
+            <?php
+            $expectNow = deploy_service_queue_expectation($serviceSnapshot);
+            $expectPlanned = $expectNow === __t('deploy.service_expect_ready') ? __t('deploy.service_expect_ready_planned') : $expectNow;
+            $plannedNow = $isScheduled || (int) deploy_form_value('stagger_minutes') > 0;
+            if ($expectPlanned === $expectNow) { ?>
+                <span class="queue-expectation"><?php echo h($expectNow); ?></span>
+            <?php } else { ?>
+                <span class="queue-expectation" data-queue-expectation="now"<?php echo $plannedNow ? ' hidden' : ''; ?>><?php echo h($expectNow); ?></span>
+                <span class="queue-expectation" data-queue-expectation="planned"<?php echo $plannedNow ? '' : ' hidden'; ?>><?php echo h($expectPlanned); ?></span>
+            <?php } ?>
         </div>
     </form>
 </section>

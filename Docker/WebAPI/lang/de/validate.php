@@ -94,6 +94,7 @@ return [
     'vm_name_taken_global' => 'VM-Name wird bereits in Mission „:mission“ verwendet. Der VM-Name in ESXi muss portalweit eindeutig sein.',
     'vm_hostname_taken_global' => 'Windows-Hostname wird bereits von VM „:vm“ in Mission „:mission“ verwendet. Ein Windows-Hostname muss eindeutig sein, weil MECM ihn als Gerätenamen importiert.',
     'vm_hostname_active_job' => 'Der Windows-Hostname kann nicht geändert werden, solange für diese Mission ein Auftrag läuft oder wartet.',
+    'vm_hostname_from_vm_name_too_long' => 'Der VM-Name ist als Windows-Hostname zu lang; tragen Sie einen Windows-Hostnamen ein.',
     'mission_rename_mecm_locked' => 'Mission kann nicht umbenannt werden: Der Name ist der Name ihrer {mecm:collection} in MECM, und VMs dieser Mission sind bereits in MECM registriert.',
     'mission_activation_vm_name_conflict' => 'Vorlage kann nicht zur Mission werden: Der VM-Name „:vm“ wird bereits in Mission „:mission“ verwendet.',
     'template_clone_name_conflicts' => 'Vorlage kann nicht geklont werden: Diese VM-Namen existieren bereits in anderen Missionen: :names',

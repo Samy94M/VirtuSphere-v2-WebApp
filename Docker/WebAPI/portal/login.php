@@ -61,9 +61,11 @@ if ($isPost) {
     // login() answers a locked account and a name over its attempt budget with
     // the same reason: a separate "account locked" sentence told an anonymous
     // caller that the name exists (SEC1, C-04). The audit row keeps the cause.
+    // P2b-6: both refusals last as long as the failure window; the duration is
+    // no secret (the help names it) and answers the operator's "how long".
     $error = match ($result['reason'] ?? '') {
-        'rate_limited' => __t('login.error_rate_limited'),
-        'ip_locked' => __t('login.error_ip_locked'),
+        'rate_limited' => __t('login.error_rate_limited', ['minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES]),
+        'ip_locked' => __t('login.error_ip_locked', ['minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES]),
         'directory_unavailable' => __t('login.error_directory_unavailable'),
         default => __t('login.error_invalid'),
     };

@@ -107,7 +107,7 @@ final class AuditPresenterLocaleTest extends TestCase
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_INTEGRATION_STATE, 'integration_source', 'mecm_sync', VIRTUSPHERE_AUDIT_RESULT_WARNING, ['old_state' => 'ok', 'new_state' => 'warning'], 'de')
         );
         self::assertSame(
-            'Einstellung portal timezone geändert: Europe/Berlin -> UTC',
+            'Einstellung „Anzeige-Zeitzone“ geändert: Europe/Berlin -> UTC',
             audit_event_description(VIRTUSPHERE_AUDIT_EVENT_SETTINGS_CHANGED, 'setting', 'portal_timezone', VIRTUSPHERE_AUDIT_RESULT_SUCCESS, ['action' => 'updated', 'old_value' => 'Europe/Berlin', 'new_value' => 'UTC'], 'de')
         );
     }

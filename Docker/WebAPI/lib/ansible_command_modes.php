@@ -193,6 +193,19 @@ function ansible_mode_expects_mac_result(string $mode): bool
 }
 
 /**
+ * The user modes whose sequence ends with the MAC export, for a sentence that
+ * names them (P2b-4: the allowlist warning of the full test). Filtered by
+ * ansible_mode_expects_mac_result(), the predicate the worker's host preflight
+ * applies, never listed (i18n R9).
+ *
+ * @return string[]
+ */
+function ansible_modes_expecting_mac_result(): array
+{
+    return array_values(array_filter(virtusphere_user_deploy_modes(), 'ansible_mode_expects_mac_result'));
+}
+
+/**
  * Whether a mode's sequence runs the create playbook, i.e. whether the queue
  * has to materialize one durable create result row per selected VM (Etappe
  * 14B). Derived the same way as the three helpers above, so a mode that gains

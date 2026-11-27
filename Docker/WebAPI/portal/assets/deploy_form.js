@@ -149,6 +149,31 @@
             staggerInput.addEventListener('input', syncStagger);
             syncStagger();
         }
+        // P1a-4: the sentence beside the queue button. Only the ready answer has a
+        // planned twin; the server renders both and this keeps the one in view that
+        // matches the start option and the stagger. A mode change can clear the
+        // stagger without an input event, so the mode select triggers it too.
+        var expectNow = document.querySelector('[data-queue-expectation="now"]');
+        var expectPlanned = document.querySelector('[data-queue-expectation="planned"]');
+        if (expectNow && expectPlanned) {
+            var syncExpectation = function () {
+                var scheduled = document.querySelector('[data-schedule-mode][value="scheduled"]');
+                var stagger = document.querySelector('[data-stagger-input]');
+                var planned = Boolean(scheduled && scheduled.checked)
+                    || Boolean(stagger && !stagger.disabled && stagger.value !== '' && Number(stagger.value) > 0);
+                expectNow.hidden = planned;
+                expectPlanned.hidden = !planned;
+            };
+            modeRadios.forEach(function (radio) { radio.addEventListener('change', syncExpectation); });
+            ['[data-stagger-input]', '[data-stagger-modes]'].forEach(function (selector) {
+                var control = document.querySelector(selector);
+                if (control) {
+                    control.addEventListener('input', syncExpectation);
+                    control.addEventListener('change', syncExpectation);
+                }
+            });
+            syncExpectation();
+        }
         // Mode -> wait time, one direction only. Unlike staggering a wait time
         // carries no intent that could lock a mode, so there is no reverse lock and
         // the value is left untouched: the server ignores it in a mode that does not

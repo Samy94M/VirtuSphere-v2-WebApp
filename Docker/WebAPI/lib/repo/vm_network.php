@@ -174,7 +174,7 @@ function repo_vm_network_assert_scope_within_bounds(array $vms): void
     if (count($vms) > VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS) {
         $text = validator_text(
             'validate.deploy_scope_vm_limit',
-            'A deploy job may cover at most :max VMs; :count were selected.',
+            'A deploy job may cover at most :max VMs; :count are selected. Split the selection into several jobs.',
             ['max' => VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_VMS, 'count' => count($vms)]
         );
         throw new ValidationException(['vm_ids' => $text], $text);
@@ -184,7 +184,7 @@ function repo_vm_network_assert_scope_within_bounds(array $vms): void
         if ($interfaces > VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM) {
             $text = validator_text(
                 'validate.deploy_scope_interface_limit',
-                'VM :name has :count network interfaces; at most :max are supported.',
+                'VM :name has :count network adapters; at most :max are supported.',
                 ['name' => (string) ($vm['vm_name'] ?? ''), 'count' => $interfaces, 'max' => VIRTUSPHERE_DEPLOY_JOB_SCOPE_MAX_INTERFACES_PER_VM]
             );
             throw new ValidationException(['vm_ids' => $text], $text);
@@ -333,8 +333,8 @@ function repo_vm_network_assert_bundle_write_allowed(mysqli $db, int $missionId,
             $errors[$field] = validator_text(
                 (string) $issue['code'] === VIRTUSPHERE_VM_NETWORK_EMPTY ? 'validate.interface_vlan_required' : 'validate.interface_vlan_unique',
                 (string) $issue['code'] === VIRTUSPHERE_VM_NETWORK_EMPTY
-                    ? 'Every stored network interface requires a VLAN.'
-                    : 'Each network interface of a VM requires a different VLAN.',
+                    ? 'Every stored network adapter requires a port group.'
+                    : 'Port group :vlan is already assigned to another network adapter of this VM.',
                 ['vlan' => (string) $issue['vlan']]
             );
         }

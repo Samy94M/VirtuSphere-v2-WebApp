@@ -45,20 +45,34 @@ function logs_export_send_csv(mysqli $connection, array $filter, int $userId): n
     $export = logs_export_prepare($connection, $filter, $userId);
     $bounds = $export['bounds'];
     $rows = $export['rows'];
-    // The correlation id is a column of the file, not only of the screen: the
-    // export is what leaves the portal, and an incident report built from it
-    // has to be able to point back at the trace it came from.
-    $header = [
-        __t('logs.th_id'), __t('logs.th_time'), __t('logs.th_category'),
-        __t('logs.th_user'), __t('logs.th_ip'), __t('logs.th_message'),
-        __t('logs.th_correlation'),
-    ];
 
-    portal_send_csv('logs-' . $filter['tab'], $header, $rows, [
+    portal_send_csv('logs-' . $filter['tab'], logs_export_header(), $rows, [
         'Total-Rows' => $export['total'],
         'Export-Limit' => $bounds['limit'],
         'Truncated' => $bounds['truncated'] ? 1 : 0,
     ]);
+}
+
+/**
+ * The header row, column for column the cells of logs_export_rows().
+ *
+ * The correlation id is a column of the file, not only of the screen: the
+ * export is what leaves the portal, and an incident report built from it has to
+ * be able to point back at the trace it came from. Event code and object type
+ * (P3-1) are appended, so every earlier column keeps its position for a reader
+ * that addresses columns by number; they are the raw registry identifiers,
+ * because that is what logs.advanced_hint promises and what a runbook, an ADR
+ * and ?event= name. A row from before the audit registry leaves both empty.
+ *
+ * @return list<string>
+ */
+function logs_export_header(): array
+{
+    return [
+        __t('logs.th_id'), __t('logs.th_time'), __t('logs.th_category'),
+        __t('logs.th_user'), __t('logs.th_ip'), __t('logs.th_message'),
+        __t('logs.th_correlation'), __t('logs.event_code'), __t('logs.object_type'),
+    ];
 }
 
 /**
@@ -133,6 +147,8 @@ function logs_export_rows(mysqli $connection, array $filter, int $max): array
                 (string) ($row['ip'] ?? ''),
                 (string) ($row['log_message'] ?? ''), // Stored English text on purpose: search and the filters match it, so the export does too.
                 (string) ($row['correlation_id'] ?? ''),
+                (string) ($row['event_code'] ?? ''),
+                (string) ($row['object_type'] ?? ''),
             ];
         }
         if (count($chunk) < VIRTUSPHERE_LOG_EXPORT_CHUNK_ROWS) {

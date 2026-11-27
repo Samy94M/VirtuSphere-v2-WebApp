@@ -242,6 +242,44 @@ final class LogCsvExportTest extends TestCase
     }
 
     /**
+     * P3-1: the file carries event code and object type as its last two
+     * columns, the header names them, and every earlier column keeps its
+     * position. A row from before the audit registry leaves both empty.
+     */
+    public function testEventCodeAndObjectTypeAreTheLastTwoColumns(): void
+    {
+        $this->seed(1);
+        $stmt = $this->db->prepare(
+            'INSERT INTO deploy_logs (ip, category, log_message, event_code, object_type, object_id, result, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())'
+        );
+        $ip = self::IP;
+        $category = self::CATEGORY;
+        $message = 'phpunit export structured fixture';
+        $event = VIRTUSPHERE_AUDIT_EVENT_AUTH_LOGIN;
+        $objectType = 'user';
+        $objectId = '1';
+        // deploy_logs_structured_audit_check: a structured row names its result.
+        $result = VIRTUSPHERE_AUDIT_RESULT_DENIED;
+        $stmt->bind_param('sssssss', $ip, $category, $message, $event, $objectType, $objectId, $result);
+        $stmt->execute();
+
+        $header = logs_export_header();
+        $rows = logs_export_rows($this->db, $this->filter(), 10);
+
+        self::assertCount(9, $header);
+        self::assertSame([__t('logs.th_correlation'), __t('logs.event_code'), __t('logs.object_type')], array_slice($header, 6));
+        self::assertCount(2, $rows);
+        foreach ($rows as $row) {
+            self::assertCount(count($header), $row, 'header and row must have the same width');
+        }
+        // Newest first: the structured row, then the historical-shaped one.
+        self::assertSame($message, $rows[0][5], 'the message column keeps its position');
+        self::assertSame([$event, $objectType], array_slice($rows[0], 7));
+        self::assertSame(['', ''], array_slice($rows[1], 7), 'a row without registry columns exports empty cells');
+    }
+
+    /**
      * The same filter fingerprints identically across two exports, so an
      * operator can group them, and a different filter does not collide.
      */

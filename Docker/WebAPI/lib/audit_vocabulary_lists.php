@@ -13,6 +13,7 @@ require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/deploy_create_release.php';
 require_once __DIR__ . '/repo/deploy_supervisor_contract.php';
 require_once __DIR__ . '/repo/deploy_job_vm_states.php';
+require_once __DIR__ . '/permissions.php';
 
 /**
  * Every closed list a presenter field shows, by field (words without an owner of
@@ -58,6 +59,9 @@ function audit_code_vocabularies(): array
         'integration_state' => VIRTUSPHERE_AUDIT_INTEGRATION_STATES,
         'callback_reason' => virtusphere_mac_import_callback_reasons(),
         'touch_cause' => VIRTUSPHERE_DEPLOY_TOUCH_REFUSAL_CAUSES,
+        // P3-6: the role a user was given; the German word is the role name of
+        // the navigation (layout.role_*, AuditIdentifierLabelTest).
+        'user_role' => VIRTUSPHERE_ROLES,
     ];
 
     return array_map(static fn (array $words): array => array_values(array_unique(array_map('strval', $words))), $lists);

@@ -62,7 +62,10 @@ echo 'JSON' . json_encode(['job' => $jobId, 'execution' => $executionId]) . 'JSO
   await page.goto(`deploy_log.php?id=${seed.job}`);
   const block = page.locator('section.panel', { hasText: 'Recovery' }).first();
   await expect(block, 'the block renders because a remote execution exists').toBeVisible();
-  await expect(block, 'the stored cleanup state is shown, not guessed').toContainText('failed');
+  // P1a-3: the cleanup row reads as a sentence (it leads to the retry button);
+  // the other remote states stay technical details in code font.
+  await expect(block, 'the stored cleanup state is shown, not guessed').toContainText('Failed');
+  await expect(block.locator('code', { hasText: 'exited_nonzero' }), 'the controller state stays a technical detail').toHaveCount(1);
 
   // The evidence moves under the operator between rendering and clicking. The
   // retry must be refused, not silently applied to a case they never saw.

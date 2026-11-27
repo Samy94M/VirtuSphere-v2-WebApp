@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 return [
     'page_title' => 'Sign in - VirtuSphere',
-    'error_ip_locked' => 'This IP address is temporarily locked after too many failed attempts.',
-    'error_rate_limited' => 'Too many sign-in attempts. Wait and try again later.',
+    'error_ip_locked' => 'This IP address is locked for about :minutes minutes after too many failed attempts.',
+    'error_rate_limited' => 'Too many sign-in attempts. Wait about :minutes minutes and try again.',
     'error_directory_unavailable' => 'Active Directory is temporarily unavailable. Use a local emergency account if necessary.',
     'error_invalid' => 'Invalid username or password.',
     'session_expired' => 'Your session expired. Please sign in again.',

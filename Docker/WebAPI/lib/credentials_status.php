@@ -6,6 +6,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/ansible_test_config.php';
 require_once __DIR__ . '/credentials.php';
 require_once __DIR__ . '/esxi_automation.php';
+require_once __DIR__ . '/ansible_evidence_window.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_urls.php';
 
@@ -66,12 +67,14 @@ function credential_cadence_esxi(int $intervalHours, ?array $esxiState, bool $an
 
 /**
  * Ansible scheduling and evidence expiry remain independent. A stopped service
- * or disabled schedule does not prolong the validity of old evidence.
+ * or disabled schedule does not prolong the validity of old evidence. The days
+ * are the window the Ampel applies (ansible_preflight_evidence_valid_days()),
+ * which is up to twice the interval, not the fixed minimum.
  */
 function credential_cadence_ansible(int $intervalHours = VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT): string
 {
     return __t($intervalHours === 0 ? 'ansible_test.cadence_off' : 'ansible_test.cadence', [
-        'hours' => $intervalHours, 'days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS,
+        'hours' => $intervalHours, 'days' => ansible_preflight_evidence_valid_days($intervalHours),
     ]);
 }
 

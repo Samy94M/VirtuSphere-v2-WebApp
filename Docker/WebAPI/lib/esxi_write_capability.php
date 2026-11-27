@@ -23,7 +23,7 @@ function deploy_assert_esxi_write_capability(mysqli $db, int $credentialId, stri
     if ($verdict['verdict'] === 'block') {
         throw new ValidationException([], validator_text(
             'layout.err_esxi_write_license',
-            'ESXi write operations are blocked: this host reports a current free licence whose API is read-only.'
+            'The selected ESXi host reports a free license: its API is read-only, so this mode cannot run. Only the MAC export and the inventory pull are possible. After a license change, refresh the ESXi inventory.'
         ), [
             'url' => system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI),
             'label_key' => 'deploy.identity_refresh_link',
