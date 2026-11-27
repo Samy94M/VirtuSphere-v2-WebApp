@@ -291,6 +291,17 @@ small,
     color: var(--muted);
 }
 
+/* A link inside muted prose (a field hint, a panel note) differs from the text
+   around it only by hue, about 1.2:1 against --muted, so colour alone would mark
+   it (WCAG 1.4.1, axe link-in-text-block). The underline is the non-colour
+   affordance, as for .alert a in feedback.css. A link styled as a button keeps
+   its own shape. */
+
+:is(small, .muted, .hint) a:not(.button) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 /* Inline command and path examples run longer than a narrow phone viewport
    (WCAG 1.4.10 reflow): wrap them at any point instead of widening the page.
    Wide tables already scroll inside .table-wrap; bare <code> has no wrapper. */

@@ -135,13 +135,7 @@ function credential_render_host_identity_form(array $credential, bool $deviation
         <input type="hidden" name="credential_id" value="<?php echo h((string) $id); ?>">
         <input type="hidden" name="config_revision" value="<?php echo h((string) $credential['config_revision']); ?>">
         <input type="hidden" name="old_host_fingerprint" value="<?php echo h($pinnedFingerprint); ?>">
-        <p class="hint"><?php echo h(__t('credentials.host_identity_hint')); ?></p>
-        <?php
-        // PR-R4A: the help link stands on its own line. Inside the muted hint
-        // its only cue would be the colour, 1.2:1 against the hint text
-        // (axe link-in-text-block on the opened row).
-        ?>
-        <p class="hint"><a href="<?php echo h(help_url('credentials', 'help-host-identity')); ?>"><?php echo h(__t('common.help')); ?></a></p>
+        <p class="hint"><?php echo h(__t('credentials.host_identity_hint')); ?> <a href="<?php echo h(help_url('credentials', 'help-host-identity')); ?>"><?php echo h(__t('common.help')); ?></a></p>
         <p class="hint"><?php echo h(__t('credentials.host_identity_commands')); ?></p>
         <ul class="host-identity-commands">
             <?php foreach (ssh_host_key_commands() as $command) { $label = __t('credentials.host_identity_command_' . $command['family']); ?>

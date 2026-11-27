@@ -111,7 +111,7 @@ return [
     'test_esxi_strict_queued' => 'Strikter Zertifikatstest eingereiht. Nach einem erfolgreichen Lauf kann der strikte Modus aktiviert werden.',
     'test_esxi_failed' => 'Der Inventarabruf konnte nicht eingereiht werden.',
     'test_esxi_action' => 'Ergebnis oder Konfiguration öffnen',
-    'test_esxi_action_settings' => 'Einstellungen, Kataloge und Inventar öffnen',
+    'test_esxi_action_settings' => 'Kataloge und Inventar öffnen',
     'test_action_allowlist' => 'IP-Freigaben öffnen',
     'test_action_api_base_url' => 'Bereitstellungseinstellungen öffnen',
     'test_action_system_status' => 'Systemstatus öffnen',
