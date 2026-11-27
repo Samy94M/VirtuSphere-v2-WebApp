@@ -284,9 +284,10 @@ foreach ($catalog['de'] ?? [] as $module => $entries) {
 }
 
 /**
- * MECM terms (i18n R15, PR-R3M): the six MECM object names (Task Sequence,
- * Distribution Point, Site, SMS Provider, Collection, Deployment) come only from
- * the term set of the environment's console language, as `{mecm:<name>}`.
+ * MECM terms (i18n R15, PR-R3M, PR-R3MP): the MECM object names (Task Sequence,
+ * Distribution Point, Site, SMS Provider, Collection, Deployment, Application,
+ * Deployment Type) and console paths come only from the term set of the
+ * environment's console language, as `{mecm:<name>}`.
  *
  * The word list is derived from the term sets themselves (Docker/WebAPI/lib/
  * mecm_terms/<language>.php): every form of every set, matched as a whole word,

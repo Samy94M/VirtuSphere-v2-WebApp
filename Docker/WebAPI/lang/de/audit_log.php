@@ -338,7 +338,7 @@ return [
     'code_deploy_status_partial' => 'teilweise erfolgreich',
     'code_deploy_status_outcome_unknown' => 'Ausgang unbekannt',
 
-    'code_deploy_reason_stale_heartbeat' => 'von der Überwachung nach veraltetem Heartbeat beendet',
+    'code_deploy_reason_stale_heartbeat' => 'von der Bereinigung verwaister Aufträge nach veraltetem Lebenszeichen beendet',
     'code_deploy_reason_ansible_connection_lost' => 'nach Abbruch der Verbindung zum Ansible-Host beendet',
 
     'code_claim_state_accepting' => 'nimmt Aufträge an',

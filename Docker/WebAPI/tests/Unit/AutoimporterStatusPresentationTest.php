@@ -167,7 +167,7 @@ final class AutoimporterStatusPresentationTest extends TestCase
             $cleanupHelp = (string) $help['system_status_status_cleanup_p4'];
             self::assertStringContainsString($locale === 'de' ? 'null erfolgreiche DPs' : 'zero successful DPs', $cleanupHelp);
             self::assertStringContainsString('removeOldVersion=true', $cleanupHelp);
-            self::assertStringContainsString($locale === 'de' ? '{mecm:deployments}, Applications und {mecm:collections}' : '{mecm:deployments}, applications, and {mecm:collections}', $cleanupHelp);
+            self::assertStringContainsString($locale === 'de' ? '{mecm:deployments}, {mecm:applications} und {mecm:collections}' : '{mecm:deployments}, {mecm:applications}, and {mecm:collections}', $cleanupHelp);
             $packageHelp = (string) $help['system_status_status_package_p5'];
             self::assertStringContainsString('Get-VsPackageRetainedNames', $packageHelp);
             self::assertStringContainsString('install-VirtuSphere-MECM.ps1 -Upgrade', $packageHelp);

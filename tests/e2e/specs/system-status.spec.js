@@ -193,7 +193,9 @@ test('MECM site: a confirmed critical is red, a provider fault is grey not criti
     seedSite('fail', 'site_critical');
     await page.goto('system_status.php');
     await expect(page.locator('#mecm')).toContainText(/MECM meldet kritisch|MECM reports critical/);
-    await expect(page.locator('#mecm')).toContainText(/Monitoring, System Status/);
+    // The console path comes from the term set (PR-R3MP); the QA stack runs the
+    // default German console (pinned in the MECM section test above).
+    await expect(page.locator('#mecm')).toContainText(/Überwachung → Systemstatus/);
 
     // A provider fault is an unknown outcome: grey, and must NOT read as the
     // MECM-critical console pointer. reload() (not a same-hash goto) forces a
@@ -201,7 +203,7 @@ test('MECM site: a confirmed critical is red, a provider fault is grey not criti
     seedSite('unknown', 'provider_access_denied');
     await page.reload();
     await expect(page.locator('#mecm')).toContainText(/Providerzugriff verweigert|Provider access denied/);
-    await expect(page.locator('#mecm')).not.toContainText(/Monitoring, System Status/);
+    await expect(page.locator('#mecm')).not.toContainText(/Überwachung → Systemstatus/);
     await expect(page.locator('#mecm')).not.toContainText(/MECM meldet kritisch|MECM reports critical/);
   } finally {
     restoreSite(snapshot);

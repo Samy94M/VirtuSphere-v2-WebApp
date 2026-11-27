@@ -60,6 +60,32 @@ final class LangMecmTermsTest extends TestCase
         self::assertNotSame($collection['en'], mb_ucfirst($collection['en']), 'the English set writes running text in lower case');
     }
 
+    /**
+     * Console paths (`path_*`, PR-R3MP) are the console's own text: the same in
+     * both portal languages, with the nodes of the English console path, and a
+     * path is either wholly the English one or translated in every node (user
+     * rule of 27.11.2026: German only with two independent sources per node,
+     * never a mixed path).
+     */
+    public function testAConsolePathIsConsoleTextAndNeverMixed(): void
+    {
+        $english = Lang::mecmTerms('en');
+        $paths = array_filter(array_keys($english), static fn (string $name): bool => str_starts_with($name, 'path_'));
+        self::assertNotSame([], $paths, 'the term sets name console paths');
+        foreach (Lang::mecmConsoleLanguages() as $console) {
+            $terms = Lang::mecmTerms($console);
+            foreach ($paths as $name) {
+                $label = $console . ': ' . $name;
+                self::assertSame($terms[$name]['de'], $terms[$name]['en'], $label . ' differs between portal languages');
+                $nodes = explode(' → ', $terms[$name]['de']);
+                $englishNodes = explode(' → ', $english[$name]['de']);
+                self::assertCount(count($englishNodes), $nodes, $label . ' has other nodes than the English console path');
+                $same = count(array_intersect_assoc($nodes, $englishNodes));
+                self::assertTrue($same === 0 || $same === count($nodes), $label . ' mixes English and translated nodes');
+            }
+        }
+    }
+
     public function testSwitchingTheConsoleLanguageSwitchesTheCatalogText(): void
     {
         $seen = [];
