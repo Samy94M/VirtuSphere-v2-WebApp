@@ -4,6 +4,8 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../deploy_create_constants.php';
 require_once __DIR__ . '/../deploy_late_start.php';
+// The draft lifetime in the blockers text comes from its owner (PR-R3C, TS1 H2a-6).
+require_once __DIR__ . '/../deploy_form_state.php';
 // The hardware versions shown in the create text come from their owner, not from a typed number (R9).
 require_once __DIR__ . '/../esxi_create_compatibility.php';
 require_once __DIR__ . '/../settings_page.php';
@@ -18,7 +20,7 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
             <p><?php echo h(__t('help_deploy.deploy_requirements_p2')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_blockers_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_blockers_p1')); ?></p>
-            <p><?php echo h(__t('help_deploy.deploy_blockers_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.deploy_blockers_p2', ['minutes' => intdiv(VIRTUSPHERE_DEPLOY_DRAFT_MAX_AGE_SECONDS, 60)])); ?></p>
             <h3 id="help-network-contract" tabindex="-1"><?php echo h(__t('help_deploy.network_contract_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.network_contract_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.network_contract_p2', deploy_network_contract_mode_lists())); ?></p>
@@ -170,12 +172,31 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
                 'pause_4' => (string) VIRTUSPHERE_CREATE_RETRY_PAUSES_SECONDS[2],
             ])); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p6')); ?></p>
+            <?php
+            // PR-R3C (TS1 H2a-7): releases and guest minimums come from their tables, not typed into the text.
+            $helpCreateHwList = implode(', ', array_map(
+                static fn (array $row): string => __t('help_deploy.create_progress_p7_hw', [
+                    'release' => esxi_release_label((string) $row['esxi']),
+                    'vmx' => (string) $row['vmx'],
+                ]),
+                VIRTUSPHERE_ESXI_CREATE_HARDWARE_VERSIONS
+            ));
+            $helpCreateGuestFloors = array_values(array_filter(
+                VIRTUSPHERE_GUEST_OS_OPTIONS,
+                static fn (array $option): bool => version_compare((string) $option['min_esxi'], esxi_create_release_floor(), '>')
+            ));
+            usort($helpCreateGuestFloors, static fn (array $a, array $b): int => version_compare((string) $a['min_esxi'], (string) $b['min_esxi']));
+            $helpCreateGuestList = implode(', ', array_map(
+                static fn (array $option): string => __t('help_deploy.create_progress_p7_guest', [
+                    'guest' => __t((string) $option['label_key']),
+                    'release' => esxi_release_label((string) $option['min_esxi']),
+                ]),
+                $helpCreateGuestFloors
+            ));
+            ?>
             <p><?php echo h(__t('help_deploy.create_progress_p7', [
-                'hw_70_ga' => (string) esxi_create_hardware_version_for('7.0.0'),
-                'hw_70_u1' => (string) esxi_create_hardware_version_for('7.0.1'),
-                'hw_70_u2' => (string) esxi_create_hardware_version_for('7.0.2'),
-                'hw_80_ga' => (string) esxi_create_hardware_version_for('8.0.0'),
-                'hw_80_u2' => (string) esxi_create_hardware_version_for('8.0.2'),
+                'hw_list' => $helpCreateHwList,
+                'guest_list' => $helpCreateGuestList,
             ])); ?></p>
         </section>
 

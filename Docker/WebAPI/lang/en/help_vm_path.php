@@ -14,5 +14,5 @@ return [
     'caption_handed_to_mecm' => 'The device sync reports the ResourceID',
     'caption_windows_reports' => 'The client confirms it is ready',
     'caption_client_done' => 'Every client phase reports "finished"',
-    'note' => 'The highest phase whose evidence has arrived applies; a VM can skip phases. A failed job does not move it back; it appears as a finding.',
+    'note' => 'The highest phase whose evidence has arrived applies; a VM can skip phases. A failed job does not move it back; it appears as a finding. Only "Reset MECM ID" deliberately sets a VM back to "MAC known".',
 ];

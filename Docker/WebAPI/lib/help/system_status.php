@@ -5,6 +5,8 @@ declare(strict_types=1);
 
 // The page size of the audit table is the one constant the logs text states.
 require_once __DIR__ . '/../device_sync_cause_constants.php';
+// The restore-test threshold of the host card comes from its owner (PR-R3C, TS1 H3-5).
+require_once __DIR__ . '/../backup_evidence.php';
 require_once __DIR__ . '/../log_filter.php';
 require_once __DIR__ . '/../system_status.php';
 
@@ -112,6 +114,27 @@ require_once __DIR__ . '/../system_status.php';
                     ])); ?></li>
                 <?php } ?>
             </ul>
+            <?php
+            // PR-R3C (TS1 H3-8): every other code of the portal list, with the
+            // short text the VM shows. Codes explained above are taken from
+            // their own help texts ("<code>: ..."), so no second hand list.
+            $explainedDeviceCauses = ['membership_operation_uncertain'];
+            for ($identityCause = 1; $identityCause <= $identityCauseCount; $identityCause++) {
+                $explainedDeviceCauses[] = (string) strstr(__t('help_system_status.system_status_identity_' . $identityCause, [
+                    'max' => VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH,
+                ]), ':', true);
+            }
+            $otherDeviceCauses = array_values(array_diff(VIRTUSPHERE_DEVICE_SYNC_CAUSES, $explainedDeviceCauses));
+            ?>
+            <?php if ($otherDeviceCauses !== []) { ?>
+            <p><?php echo h(__t('help_system_status.system_status_cause_group_p1')); ?></p>
+            <ul>
+                <?php foreach ($otherDeviceCauses as $deviceCause) { ?>
+                    <li><code><?php echo h($deviceCause); ?></code>: <?php echo h(__t('status.sync_cause_' . $deviceCause)); ?></li>
+                <?php } ?>
+            </ul>
+            <p><?php echo h(__t('help_system_status.system_status_cause_group_action')); ?></p>
+            <?php } ?>
             <p><?php echo h(__t('help_system_status.system_status_identity_p2', ['days' => VIRTUSPHERE_DEVICE_SYNC_CAUSE_RETENTION_DAYS])); ?></p>
             <h3><?php echo h(__t('help_system_status.system_status_work_heading')); ?></h3>
             <p><?php echo h(__t('help_system_status.system_status_work_0')); ?></p>
@@ -148,6 +171,10 @@ require_once __DIR__ . '/../system_status.php';
             <h2 id="help-status-host" tabindex="-1"><?php echo h(__t('help_system_status.host_heading')); ?></h2>
             <p><?php echo h(__t('help_system_status.host_p1')); ?></p>
             <p><?php echo h(__t('help_system_status.host_p2')); ?></p>
+            <p><?php echo h(__t('help_system_status.host_p3', [
+                'drill_days' => VIRTUSPHERE_RESTORE_DRILL_DUE_DAYS,
+                'cert_days' => VIRTUSPHERE_HTTPS_CERT_EXPIRY_WARN_DAYS,
+            ])); ?></p>
         </section>
 
         <section class="panel">
@@ -167,7 +194,7 @@ require_once __DIR__ . '/../system_status.php';
             <p><?php echo h(__t('help_system_status.clientphases_p1')); ?></p><p><?php echo h(__t('help_system_status.k13_client_failure')); ?></p>
             <ul>
                 <li><?php echo h(__t('help_system_status.clientphases_step1')); ?></li>
-                <li><?php echo h(__t('help_system_status.clientphases_step2')); ?></li>
+                <li><?php echo h(__t('help_system_status.clientphases_step2', ['max' => VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH])); ?></li>
                 <li><?php echo h(__t('help_system_status.clientphases_step3')); ?></li>
                 <li><?php echo h(__t('help_system_status.clientphases_step4')); ?></li>
             </ul>

@@ -9,7 +9,7 @@ final class DeployRecoveryHelpContractTest extends TestCase
 {
     private const REQUIRED = [
         'de' => [
-            'vorhandene VM weder als nicht erstellt freigeben noch als allgemeine Reparatur löschen',
+            'vorhandene VM weder als nicht angelegt freigeben noch als allgemeine Reparatur löschen',
             'erfolgreicher VM-Inventarabruf',
             'neuer als Auftrag und Einheit',
             'Recent Tasks',
