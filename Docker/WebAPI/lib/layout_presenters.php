@@ -68,9 +68,14 @@ function mecm_sync_badge(string $mecmSyncState): string
 // (MECM sync tasks) reads domain words; a pure heartbeat (internal services,
 // $kind 'liveness') reads reporter words, so a silent worker is "unreachable"
 // and never "critical", and its green is "current" next to the deploy-service
-// card's "ready" instead of a second "OK" for the same service.
+// card's "ready" instead of a second "OK" for the same service. The derived
+// `degraded` (TS1-K4) is a value like the deploy card's: "Beeinträchtigt", tone limited.
 function heartbeat_badge(string $state, string $kind = 'result'): string
 {
+    if ($kind === 'liveness' && $state === VIRTUSPHERE_LIVENESS_STATE_DEGRADED) {
+        return status_value_badge(status_tone_for($kind, $state), __t('system_status.service_degraded'));
+    }
+
     return status_tone_badge(status_tone_for($kind, $state));
 }
 
@@ -344,13 +349,15 @@ function integration_source_label(string $source): string
 }
 
 // $openPoints: reported on time, the run itself had open points; Task Scheduler is not the cause.
-function integration_action_hint(string $source, bool $openPoints = false): string
+/** @param list<string> $failedJobs a degraded maintenance service (TS1-K4): name them, no restart */
+function integration_action_hint(string $source, bool $openPoints = false, array $failedJobs = []): string
 {
     return match ($source) {
         VIRTUSPHERE_INTEGRATION_SOURCE_DEVICE_SYNC => $openPoints ? __t('system_status.action_device_sync_open_points') : __t('system_status.action_device_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_PACKAGES_SYNC => $openPoints ? __t('system_status.action_packages_sync_open_points') : __t('system_status.action_packages_sync'),
         VIRTUSPHERE_INTEGRATION_SOURCE_AUTOIMPORTER => __t('system_status.action_autoimporter'),
-        VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => __t('system_status.action_maintenance_worker'),
+        VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE => $failedJobs === [] ? __t('system_status.action_maintenance_worker')
+            : __t(count($failedJobs) === 1 ? 'system_status.action_maintenance_jobs_failed_one' : 'system_status.action_maintenance_jobs_failed_many', ['jobs' => implode(', ', $failedJobs)]),
         VIRTUSPHERE_INTEGRATION_SOURCE_DEPLOY_WORKER => __t('system_status.action_deploy_worker'),
         default => '',
     };

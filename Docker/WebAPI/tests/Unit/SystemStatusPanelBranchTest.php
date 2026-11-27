@@ -522,6 +522,39 @@ final class SystemStatusPanelBranchTest extends TestCase
         }
     }
 
+    /**
+     * TS1-K4 (G2-6): a maintenance service that reports on time while its jobs
+     * fail reads "Beeinträchtigt" and names the jobs; it must never read
+     * "Nicht erreichbar" or ask for the restart that would only drop the memory.
+     */
+    public function testADegradedMaintenanceRowNamesTheJobsAndAsksForNoRestart(): void
+    {
+        $rows = [[
+            'source' => VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
+            'row' => ['last_seen_at' => '2026-07-23 10:00:00', 'last_checked_at' => '2026-07-23 10:05:00', 'interval_seconds' => 60, 'last_detail' => 'failed jobs: retention:client_events, esxi-inventory'],
+            'state' => VIRTUSPHERE_LIVENESS_STATE_DEGRADED,
+            'failed_jobs' => ['retention:client_events', 'esxi-inventory'],
+        ]];
+
+        ob_start();
+        system_status_render_source_rows($rows);
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString(status_value_badge('limited', __t('system_status.service_degraded')), $html);
+        self::assertStringNotContainsString(status_tone_badge('unreachable'), $html);
+        self::assertStringContainsString(h(__t('system_status.action_maintenance_jobs_failed_many', ['jobs' => 'retention:client_events, esxi-inventory'])), $html);
+        self::assertStringNotContainsString(h(__t('system_status.action_maintenance_worker')), $html, 'no restart instruction for a running service');
+
+        $rows[0]['failed_jobs'] = ['retention'];
+        ob_start();
+        system_status_render_source_rows($rows);
+        self::assertStringContainsString(
+            h(__t('system_status.action_maintenance_jobs_failed_one', ['jobs' => 'retention'])),
+            (string) ob_get_clean(),
+            'a single job takes the singular sentence'
+        );
+    }
+
     public function testASuppressedGroupDropsHintsButKeepsItsRows(): void
     {
         // A source that was never set up cannot be restarted. The caller says so

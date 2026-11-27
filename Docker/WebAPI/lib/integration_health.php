@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/status.php';
+require_once __DIR__ . '/status_vocabulary.php';
 require_once __DIR__ . '/esxi_inventory.php';
 require_once __DIR__ . '/repo/ansible_activity.php';
 require_once __DIR__ . '/repo/ansible_preflight.php';
@@ -25,7 +26,10 @@ require_once __DIR__ . '/repo/log.php';
 function integration_health_snapshot(mysqli $db, ?int $now = null): array
 {
     $now ??= time();
-    $rows = integration_health_site_evidence_rows(repo_integration_status_rows($db, $now), $now);
+    $rows = array_map(
+        static fn (array $entry): array => integration_health_maintenance_entry($entry, $now),
+        integration_health_site_evidence_rows(repo_integration_status_rows($db, $now), $now)
+    );
     $bySource = [];
     foreach ($rows as $row) {
         $bySource[(string) $row['source']] = $row;
@@ -118,7 +122,7 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
         'mecm_sync' => ['rows' => $syncRows, 'state' => repo_integration_worst_state($syncRows), 'report_count' => $syncReportCount, 'has_reports' => $syncReportCount > 0],
         'mecm_site' => ['rows' => $siteRows, 'state' => repo_integration_worst_state($siteRows), 'site_state' => integration_health_site_group_state($siteRows), 'report_count' => $siteReportCount, 'has_reports' => $siteReportCount > 0],
         'mecm' => ['rows' => $mecmRows, 'state' => repo_integration_worst_state($mecmRows)],
-        'internal' => ['rows' => $internalRows, 'state' => repo_integration_worst_state($internalRows)],
+        'internal' => ['rows' => $internalRows, 'state' => integration_health_internal_state($internalRows)],
         'mecm_fresh_ips' => $freshIps,
         'mecm_ip_mismatch' => count($freshIps) > 1,
         // Refused machine accesses within the last day. Without this, "configured
@@ -142,11 +146,131 @@ function integration_health_snapshot(mysqli $db, ?int $now = null): array
             // as a switched-off interval, and the cadence line must say so instead
             // of promising a cycle nobody drives.
             'deploy_worker_alive' => integration_deploy_worker_alive($bySource),
-            'maintenance_alive' => $maintenanceEntry !== null
-                && ($maintenanceEntry['row'] ?? null) !== null
-                && (string) $maintenanceEntry['state'] === 'ok',
+            'maintenance_alive' => integration_maintenance_alive($maintenanceEntry),
         ],
     ];
+}
+
+/**
+ * The self-report of the maintenance worker, written by maintenance_worker_run_
+ * once() and read back by integration_health_maintenance_entry(). One owner for
+ * both directions, so the format the portal parses is the format the worker
+ * writes.
+ *
+ * @param list<string> $failedJobs
+ */
+function integration_maintenance_heartbeat_detail(array $failedJobs): string
+{
+    return $failedJobs === [] ? 'loop ok' : 'failed jobs: ' . implode(', ', $failedJobs);
+}
+
+/**
+ * The failed job names of a maintenance report, or an empty list when the detail
+ * is not a failure report of that format. Only job-name characters are accepted:
+ * the names end up in a visible hint, and a detail somebody else wrote must not
+ * smuggle text into it.
+ *
+ * @return list<string>
+ */
+function integration_maintenance_failed_jobs(?string $detail): array
+{
+    $prefix = 'failed jobs: ';
+    $detail = (string) $detail;
+    if (!str_starts_with($detail, $prefix)) {
+        return [];
+    }
+    $jobs = [];
+    foreach (explode(', ', substr($detail, strlen($prefix))) as $job) {
+        if (preg_match('/^[a-z][a-z0-9_:-]*$/', $job) === 1) {
+            $jobs[] = $job;
+        }
+    }
+
+    return array_values(array_unique($jobs));
+}
+
+/**
+ * TS1-K4 (G2-6): the maintenance service that runs but whose jobs fail is
+ * `degraded` ("Beeinträchtigt"), not `danger` ("Nicht erreichbar"). The stored
+ * row cannot tell the two apart by its status alone, because both are `fail`;
+ * what separates them is whether the service still reports on time, which is
+ * `last_checked_at` (every report, failing or not) against the same thresholds
+ * a healthy row is judged by. Only a current check with named jobs is degraded;
+ * a late or unparseable failure keeps the old state, and with it the restart
+ * hint, because then nothing establishes that the service is still running.
+ *
+ * Every other source, and every non-failing maintenance row, passes unchanged.
+ *
+ * @param array{source:string,row:array|null,state:string} $entry
+ * @return array{source:string,row:array|null,state:string,failed_jobs?:list<string>}
+ */
+function integration_health_maintenance_entry(array $entry, int $now): array
+{
+    $row = $entry['row'] ?? null;
+    if ((string) $entry['source'] !== VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE
+        || $row === null
+        || (string) ($row['last_status'] ?? '') !== VIRTUSPHERE_HEARTBEAT_STATUS_FAIL
+    ) {
+        return $entry;
+    }
+    $jobs = integration_maintenance_failed_jobs(isset($row['last_detail']) ? (string) $row['last_detail'] : null);
+    $checked = virtusphere_heartbeat_staleness(
+        isset($row['last_checked_at']) ? (string) $row['last_checked_at'] : null,
+        (int) ($row['interval_seconds'] ?? 0),
+        null,
+        $now
+    );
+    if ($jobs === [] || $checked !== 'ok') {
+        return $entry;
+    }
+    $entry['state'] = VIRTUSPHERE_LIVENESS_STATE_DEGRADED;
+    $entry['failed_jobs'] = $jobs;
+
+    return $entry;
+}
+
+/**
+ * The worst state of the internal services. `degraded` is a display state the
+ * token rank of lib/status.php does not know, so it is compared by its tone
+ * (status_tone_rank(), the scale the System status headline uses); the other
+ * rows keep the token roll-up. Ties go to the stored state.
+ *
+ * @param list<array{source:string,row:array|null,state:string}> $rows
+ */
+function integration_health_internal_state(array $rows): string
+{
+    $stored = array_values(array_filter(
+        $rows,
+        static fn (array $entry): bool => (string) $entry['state'] !== VIRTUSPHERE_LIVENESS_STATE_DEGRADED
+    ));
+    $worst = repo_integration_worst_state($stored);
+    if (count($stored) === count($rows)) {
+        return $worst;
+    }
+
+    return status_tone_rank(status_tone_for('liveness', VIRTUSPHERE_LIVENESS_STATE_DEGRADED)) > status_tone_rank(status_tone_for('liveness', $worst))
+        ? VIRTUSPHERE_LIVENESS_STATE_DEGRADED
+        : $worst;
+}
+
+/**
+ * Whether the maintenance service is driving its interval jobs, for the ESXi
+ * cadence line. A degraded service still runs; it stops driving the inventory
+ * cycle only when `esxi-inventory` is one of the jobs that fail.
+ *
+ * @param array{source:string,row:array|null,state:string,failed_jobs?:list<string>}|null $entry
+ */
+function integration_maintenance_alive(?array $entry): bool
+{
+    if ($entry === null || ($entry['row'] ?? null) === null) {
+        return false;
+    }
+    $state = (string) $entry['state'];
+    if ($state === VIRTUSPHERE_LIVENESS_STATE_DEGRADED) {
+        return !in_array('esxi-inventory', $entry['failed_jobs'] ?? [], true);
+    }
+
+    return $state === 'ok';
 }
 
 /**

@@ -43,6 +43,9 @@ final class DeployWorkerModuleContractTest extends TestCase
         'deploy_reap_observer_since',
         'deploy_reap_observer_is_blind',
         'deploy_worker_reap_stale_jobs',
+        // TS1-K4 (G1-4): the inventory pull a reaped create/full job owes, queued
+        // after the cleanup's commit.
+        'deploy_worker_request_inventory_after_reap',
         'deploy_worker_conclude_sequence',
         'deploy_worker_handle_cancelled',
         'deploy_worker_log_if_job_exists',
@@ -61,6 +64,8 @@ final class DeployWorkerModuleContractTest extends TestCase
         // a database and a new status cannot silently become "success".
         'deploy_worker_outcome_audit_result',
         'deploy_worker_refresh_inventory_after_deploy',
+        // TS1-K4: its condition, shared with the stale-job cleanup.
+        'deploy_worker_inventory_refresh_due',
         // VB1 (ADR-0038 amendment 2): the worker's two triggers of the automatic
         // observation start, both after their job's own result is committed.
         'deploy_worker_job_start_step',

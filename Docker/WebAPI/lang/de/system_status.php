@@ -169,6 +169,9 @@ return [
     'device_sync_causes_help' => 'Hilfe zu den Ursachen je VM',
     'action_autoimporter' => 'Letzten Abschluss und Autoimporter-Tageslog prüfen. Eine offene DP-Verteilung kann trotz laufender Aufgabe bestehen; ein Neustart behebt sie nicht. Fehlen neue Logeinträge, die Aufgabe „VirtuSphere MECM Package Import“ auf dem MECM-Server prüfen.',
     'action_maintenance_worker' => 'Interner Wartungsdienst läuft nicht: auf dem Portal-Server „docker compose ps“ prüfen und den Dienst maintenance-worker neu starten.',
+    // Der Dienst läuft, einzelne Jobs scheitern (TS1-K4): kein Neustart, der verwürfe nur den Merker.
+    'action_maintenance_jobs_failed_one' => 'Der Wartungsdienst läuft und meldet pünktlich, aber dieser Teil seines Durchlaufs scheitert: :jobs. Ein Neustart behebt das nicht. Die Ursache steht im Containerlog: Prüfen Sie auf dem Portal-Server „docker compose logs maintenance-worker“. Der Hinweis verschwindet, sobald der Teil wieder gelingt.',
+    'action_maintenance_jobs_failed_many' => 'Der Wartungsdienst läuft und meldet pünktlich, aber diese Teile seines Durchlaufs scheitern: :jobs. Ein Neustart behebt das nicht. Die Ursache steht im Containerlog: Prüfen Sie auf dem Portal-Server „docker compose logs maintenance-worker“. Der Hinweis verschwindet, sobald sie wieder gelingen.',
     // Ohne diesen Dienst bleibt jeder Auftrag auf „Wartend" stehen, auch der
     // ESXi-Inventarabruf, der als Auftrag läuft.
     'action_deploy_worker' => 'Bereitstellungsdienst läuft nicht: solange er stillsteht, bleibt jeder Auftrag wartend und auch das ESXi-Inventar wird nicht abgerufen. Auf dem Portal-Server „docker compose ps“ prüfen und den Dienst deploy-worker neu starten.',

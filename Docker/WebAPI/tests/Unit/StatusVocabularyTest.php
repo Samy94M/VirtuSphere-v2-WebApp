@@ -82,7 +82,8 @@ final class StatusVocabularyTest extends TestCase
         require_once dirname(__DIR__, 2) . '/lib/directory_constants.php';
         require_once dirname(__DIR__, 2) . '/lib/mecm_site_assessment.php';
         yield 'result' => ['result', VIRTUSPHERE_HEARTBEAT_STATES];
-        yield 'liveness' => ['liveness', VIRTUSPHERE_HEARTBEAT_STATES];
+        // The stored heartbeat states plus the derived `degraded` (TS1-K4).
+        yield 'liveness' => ['liveness', [...VIRTUSPHERE_HEARTBEAT_STATES, 'degraded']];
         yield 'esxi' => ['esxi', VIRTUSPHERE_ESXI_AMPEL_STATES];
         yield 'ansible' => ['ansible', VIRTUSPHERE_ANSIBLE_AMPEL_STATES];
         yield 'directory' => ['directory', VIRTUSPHERE_DIRECTORY_AMPEL_STATES];

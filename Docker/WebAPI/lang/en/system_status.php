@@ -169,6 +169,9 @@ return [
     'device_sync_causes_help' => 'Help with the causes per VM',
     'action_autoimporter' => 'Check the last completion and the daily autoimporter log. DP distribution can remain open while the task is running; restarting does not resolve it. If no new log entries appear, check the "VirtuSphere MECM Package Import" task on the MECM server.',
     'action_maintenance_worker' => 'Internal maintenance service is not running: check "docker compose ps" on the portal host and restart the maintenance-worker service.',
+    // The service runs, single jobs fail (TS1-K4): no restart, it would only drop the memory.
+    'action_maintenance_jobs_failed_one' => 'The maintenance service is running and reporting on time, but this part of its pass fails: :jobs. Restarting it does not fix this. The cause is in the container log: check "docker compose logs maintenance-worker" on the portal host. The hint disappears once that part succeeds again.',
+    'action_maintenance_jobs_failed_many' => 'The maintenance service is running and reporting on time, but these parts of its pass fail: :jobs. Restarting it does not fix this. The cause is in the container log: check "docker compose logs maintenance-worker" on the portal host. The hint disappears once they succeed again.',
     // Without this service every job stays "waiting", including the ESXi
     // inventory pull, which runs as a job.
     'action_deploy_worker' => 'Deploy service is not running: while it stands still every job stays waiting and the ESXi inventory is not pulled either. Check "docker compose ps" on the portal host and restart the deploy-worker service.',

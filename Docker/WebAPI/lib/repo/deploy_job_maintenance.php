@@ -237,6 +237,18 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 ? 'deploy job ' . $jobId . ' cancelled; converged by the reaper after a stale heartbeat'
                 : 'deploy job ' . $jobId . ' reaped after stale heartbeat';
             deploy_worker_fail_locked_job_vms($db, $job, $note, $payload['vm_ids'] ?? []);
+            // TS1-K4 (G1-4): a create/full job the live worker would have
+            // refreshed for (same condition) owes its credential an inventory
+            // pull here too; otherwise its unresolved units cannot be released
+            // and, with the interval at 0, no pull ever comes. Decided inside
+            // this transaction, ENQUEUED only after it commits
+            // (deploy_worker_request_inventory_after_reap()): the enqueue locks
+            // another job row, which must not come after the VM locks above. A
+            // credential paused after a sign-in failure is not pulled
+            // automatically (ADR-0023), as in deploy_worker_after_start_step().
+            $job['inventory_refresh'] = deploy_worker_inventory_refresh_due($db, $job);
+            $job['inventory_paused'] = $job['inventory_refresh']
+                && (int) (repo_esxi_inventory_state($db, (int) $job['credential_esxi_id'])['paused_until_credential_change'] ?? 0) === 1;
             if ($wasCancelling) {
                 // The accepted request already is the single immutable cancel
                 // SYSTEM line. The reaper supplies only the terminal metadata.
@@ -245,6 +257,15 @@ function repo_reap_stale_deploy_jobs(mysqli $db, int $staleAfterSeconds = VIRTUS
                 $stmt = $db->prepare('UPDATE deploy_jobs SET status = ?, cancelled_at = NOW(), terminal_reason_code = ?, terminal_reason_detail = ?, last_error = NULL, locked_at = NULL, locked_by = NULL, lock_token = NULL, worker_epoch = NULL, heartbeat_at = NULL, updated_at = NOW() WHERE id = ? AND status = ?');
                 $stmt->bind_param('sssis', $cancelled, $reasonCode, $reasonDetail, $jobId, $cancelling);
             } else {
+                // The log owner refuses every line after the terminal state, so
+                // the request is announced now, ahead of the reaper's own final
+                // account. A cancel-converged job keeps its one immutable cancel
+                // line; there the audit row of the request is the record.
+                if ($job['inventory_refresh']) {
+                    repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $job['inventory_paused']
+                        ? 'No inventory pull after the stale-job cleanup: the ESXi credential is paused after a sign-in failure. Fix the credential, then refresh the inventory on System status before releasing an unresolved create unit.'
+                        : 'Inventory pull requested after the stale-job cleanup. It is enqueued once this cleanup commits; whether it was queued is recorded as deploy.inventory_requested in the audit log, a failure in the container log.');
+                }
                 repo_insert_deploy_job_log_unlocked($db, $jobId, VIRTUSPHERE_DEPLOY_LOG_SYSTEM, $message);
                 $reasonCode = VIRTUSPHERE_DEPLOY_TERMINAL_REASON_STALE_HEARTBEAT;
                 $reasonDetail = deploy_terminal_reason_detail($message);

@@ -185,6 +185,44 @@ final class WorkerTrafficLightTest extends TestCase
     }
 
     /**
+     * TS1-K4 (G2-7): a failure remembered from an earlier pass reaches the row
+     * in a pass whose heartbeat is not due, and so does the recovery. Only
+     * audit-transitions runs here (every scheduled job ran a moment ago), so the
+     * pass changes nothing but the row.
+     */
+    public function testARememberedFailureAndItsRecoveryAreWrittenAtOnce(): void
+    {
+        $now = time();
+        $scheduled = ['self-heartbeat', 'retention', 'log-rotation', 'deploy-job-reap', 'deploy-vm-sweep', 'esxi-inventory'];
+        $state = [
+            'last_run' => array_fill_keys($scheduled, $now),
+            'states' => [],
+            'failed_jobs' => ['retention:client_events'],
+            'reported_failures' => [],
+        ];
+
+        maintenance_worker_run_once($this->db, $state);
+
+        self::assertSame(['retention:client_events'], $state['failed_jobs'], 'retention did not run, so its failure is kept');
+        self::assertSame(['retention:client_events'], $state['reported_failures']);
+        $row = $this->row(VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE);
+        self::assertSame(VIRTUSPHERE_HEARTBEAT_STATUS_FAIL, (string) $row['last_status']);
+        self::assertSame('failed jobs: retention:client_events', (string) $row['last_detail']);
+
+        // Now the job that failed is audit-transitions itself, as the row says;
+        // it runs in every pass, succeeds here, and the recovery is written.
+        $state['failed_jobs'] = ['audit-transitions'];
+        $state['reported_failures'] = ['audit-transitions'];
+
+        maintenance_worker_run_once($this->db, $state);
+
+        self::assertSame([], $state['failed_jobs']);
+        $row = $this->row(VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE);
+        self::assertSame(VIRTUSPHERE_HEARTBEAT_STATUS_OK, (string) $row['last_status']);
+        self::assertSame('loop ok', (string) $row['last_detail']);
+    }
+
+    /**
      * One failing job does not stop the others: they are independent, and a broken
      * retention purge must not keep the deploy-job reaper from running. But the
      * pass's verdict is a failure.

@@ -6,8 +6,10 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/deploy_worker_outcome.php';
 require_once __DIR__ . '/esxi_inventory.php';
+require_once __DIR__ . '/integration_health.php';
 require_once __DIR__ . '/log_rotation.php';
 require_once __DIR__ . '/log_redaction.php';
+require_once __DIR__ . '/maintenance_failure_memory.php';
 require_once __DIR__ . '/repo/heartbeats.php';
 require_once __DIR__ . '/repo/client_events.php';
 require_once __DIR__ . '/repo/settings.php';
@@ -34,6 +36,9 @@ function maintenance_worker_due(array &$state, string $job, int $intervalSeconds
         return false;
     }
     $state['last_run'][$job] = $now;
+    // Which scheduled jobs ran in THIS pass: the failure memory below re-judges
+    // exactly those. maintenance_worker_run_once() resets it per pass.
+    $state['ran'][$job] = true;
 
     return true;
 }
@@ -51,23 +56,43 @@ function maintenance_worker_due(array &$state, string $job, int $intervalSeconds
  *
  * A failing individual job does not abort the pass - the others are independent
  * and must still run - but it does make the pass's verdict a failure.
+ *
+ * TS1-K4 (G2-7): the verdict is the REMEMBERED failure list, not this pass's. A
+ * job that failed stays failed until the same job runs again and succeeds, and a
+ * change of that list is reported at once instead of at the next due heartbeat.
+ * Before, the hourly retention could fail in a pass whose heartbeat was not due,
+ * and the next heartbeat said 'loop ok': the false green the paragraph above was
+ * meant to end. The memory is process-local on purpose; a restart loses it, and
+ * the first pass of the new process runs every job (last_run is empty) and so
+ * establishes the list again.
  */
 function maintenance_worker_run_once(mysqli $db, array &$state, bool $force = false): void
 {
     $failures = [];
+    $state['ran'] = [];
     $heartbeatDue = maintenance_worker_due($state, 'self-heartbeat', VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS, $force);
 
     try {
         maintenance_worker_run_jobs($db, $state, $force, $failures);
     } finally {
-        if ($heartbeatDue) {
+        $remembered = maintenance_worker_remembered_failures(
+            $state['failed_jobs'] ?? [],
+            $failures,
+            $state['ran'],
+            array_keys($state['last_run'] ?? [])
+        );
+        $state['failed_jobs'] = $remembered;
+        // `reported` is what the row says now. It is taken over only after the
+        // write succeeded, so a write that throws is retried by the next pass.
+        if (maintenance_worker_report_due($heartbeatDue, $state['reported_failures'] ?? null, $remembered)) {
             repo_record_worker_result(
                 $db,
                 VIRTUSPHERE_INTEGRATION_SOURCE_MAINTENANCE,
                 VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS,
-                $failures === [],
-                $failures === [] ? 'loop ok' : 'failed jobs: ' . implode(', ', $failures)
+                $remembered === [],
+                integration_maintenance_heartbeat_detail($remembered)
             );
+            $state['reported_failures'] = $remembered;
         }
     }
 }

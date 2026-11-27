@@ -61,8 +61,11 @@ function deploy_service_availability(array $facts): string
     // The same rule one level down: the contract is a claim about which process
     // shape is running, and a claim that the observation contradicts is not a
     // basis for any other answer. A supervisor reporting while the row says
-    // `worker_v1` is exactly that case, and it is the state a half-finished
-    // maintenance window leaves behind.
+    // `worker_v1`, or only the worker reporting while the row says
+    // `supervisor_v1`, is exactly that case, and it is the state a half-finished
+    // maintenance window leaves behind (deploy_service_shape_matches_contract()).
+    // The check stays BEFORE process_alive: under `supervisor_v1` the old-shape
+    // worker would otherwise read as a dead supervisor, i.e. `offline`.
     if (!$facts['shape_matches_contract']) {
         return VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED;
     }
@@ -225,9 +228,7 @@ function deploy_service_health_snapshot(mysqli $db, ?int $now = null): array
             ? $supervisorFresh
             : $childAlive,
         'child_alive' => $childAlive,
-        // A supervisor reporting under `worker_v1` means the container was
-        // started into the new shape without the window that decides it.
-        'shape_matches_contract' => $contract === VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR || !$supervisorFresh,
+        'shape_matches_contract' => deploy_service_shape_matches_contract($contract, $supervisorFresh, $childAlive),
         'active_job' => $active['job_id'] !== null,
         'active_job_consistent' => $active['consistent'],
         'overdue_seconds' => $queue['overdue_seconds'],
@@ -252,6 +253,34 @@ function deploy_service_health_snapshot(mysqli $db, ?int $now = null): array
         'recovery' => $recovery,
         'supervisor' => $supervisor + ['fresh' => $supervisorFresh, 'child_alive' => $childAlive],
     ];
+}
+
+/**
+ * Whether the observed process shape agrees with the stored contract
+ * (docs/ai/contracts/deploy.md A45: the snapshot fails closed to `degraded`
+ * while shape and stored contract disagree). Pure, so both directions are
+ * pinned by unit tests.
+ *
+ * - `worker_v1` stored, a supervisor reporting: the container was started into
+ *   the new shape without the window that decides it.
+ * - `supervisor_v1` stored, no supervisor reporting but the worker reporting
+ *   (TS1-K4, H4-3): the container still runs the single worker of the old
+ *   shape. Before, this read as `offline` ("Nicht erreichbar"), because the
+ *   process that has to be alive under this contract is the supervisor; but a
+ *   worker that reports is not an outage, it is the shape the contract denies.
+ * - `supervisor_v1` stored and both silent is no contradiction: nothing runs,
+ *   and availability says `offline` through process_alive.
+ *
+ * An unknown contract is decided before this (it fails closed on its own), so
+ * it counts as matching here.
+ */
+function deploy_service_shape_matches_contract(string $contract, bool $supervisorFresh, bool $childAlive): bool
+{
+    return match ($contract) {
+        VIRTUSPHERE_SUPERVISOR_CONTRACT_WORKER => !$supervisorFresh,
+        VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR => $supervisorFresh || !$childAlive,
+        default => true,
+    };
 }
 
 /**

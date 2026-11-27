@@ -19,6 +19,8 @@ declare(strict_types=1);
 // lib/status_badges.php, portal only. Visible words live in
 // lang/{de,en}/status_vocabulary.php.
 
+require_once __DIR__ . '/constants.php';
+
 const VIRTUSPHERE_STATUS_LEVEL_TONES = ['ok', 'warning', 'limited', 'critical', 'unknown'];
 const VIRTUSPHERE_STATUS_REPORTER_TONES = ['current', 'stale', 'no_data', 'unreachable', 'disabled'];
 const VIRTUSPHERE_STATUS_ACTIVITY_TONES = ['running'];
@@ -30,12 +32,24 @@ const VIRTUSPHERE_STATUS_PHRASES = [
     'evidence_incomplete' => 'unknown',
 ];
 
+// TS1-K4 (G2-6): a pure heartbeat has one state no stored row carries. The System
+// status snapshot derives `degraded` for the maintenance service when it is still
+// reporting on time but its last report names failed jobs (integration_health_
+// maintenance_entry()). It is a display state like the deploy service's
+// availability: never stored, never audited, and the token rank of lib/status.php
+// does not know it, so roll-ups compare it by its tone. It is the one heartbeat
+// state whose badge is a VALUE, not its tone's word: heartbeat_badge() renders it
+// with status_value_badge() as "Beeinträchtigt" (user decision 27.11.2026, the
+// deploy service card's word), in the colour and icon of `limited`.
+const VIRTUSPHERE_LIVENESS_STATE_DEGRADED = 'degraded';
+const VIRTUSPHERE_LIVENESS_STATES = [...VIRTUSPHERE_HEARTBEAT_STATES, VIRTUSPHERE_LIVENESS_STATE_DEGRADED];
+
 // The sources whose Ampel tokens this module maps. Every kind lists its complete
 // token set, so a test can walk them and a new token fails the build instead of
 // rendering as unknown.
 const VIRTUSPHERE_STATUS_TONE_KINDS = [
     'result' => ['ok', 'legacy', 'warning', 'missing', 'danger', 'stale', 'unknown'],
-    'liveness' => ['ok', 'legacy', 'warning', 'missing', 'danger', 'stale', 'unknown'],
+    'liveness' => VIRTUSPHERE_LIVENESS_STATES,
     'esxi' => ['ok', 'warning', 'danger', 'stale', 'unknown'],
     'ansible' => ['ok', 'warning', 'danger', 'stale', 'unknown'],
     'directory' => ['ok', 'warning', 'danger', 'unknown'],
@@ -108,6 +122,8 @@ function status_tone_for(string $kind, string $state): string
             'warning', 'legacy', 'missing' => 'warning',
             'danger' => 'unreachable',
             'stale' => 'stale',
+            // Running, but not completely: some of its jobs fail (legend_limited).
+            VIRTUSPHERE_LIVENESS_STATE_DEGRADED => 'limited',
             default => 'no_data',
         },
         // A paused sign-in and a failure streak are both critical: neither pulls
