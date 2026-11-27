@@ -316,9 +316,11 @@ function system_status_render_deploy_service(?array $snapshot, array $user): voi
                 ['label' => __t('system_status.service_fact_recovering_count'), 'html' => h((string) $snapshot['recovery']['recovering'])],
             ]);
             ?>
-            <?php if ((string) $snapshot['availability'] === VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED) {
-                echo system_status_fact_list($processFacts);
-            } else { ?><details class="technical-details"><summary><?php echo h(__t('system_status.service_process_details')); ?></summary><?php echo system_status_fact_list($processFacts); ?></details><?php } ?>
+            <?php // The process shape speaks the architecture's words (supervisor,
+                  // worker process), so it lives in the technical block only
+                  // (glossary R15, PR-R4B). A degraded service opens the block,
+                  // because the shape is then part of the diagnosis. ?>
+            <details class="technical-details"<?php echo (string) $snapshot['availability'] === VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED ? ' open' : ''; ?>><summary><?php echo h(__t('system_status.service_process_details')); ?></summary><?php echo system_status_fact_list($processFacts); ?></details>
             <?php if (($active['count'] ?? 0) > 1) { ?>
                 <ul><?php foreach ($active['jobs'] as $job) { ?><li><a href="<?php echo h(deploy_job_log_url((int) $job['job_id'])); ?>"><?php echo h(__t('system_status.service_fact_active_job', ['id' => (int) $job['job_id']])); ?></a> · <?php echo h((string) $job['ownership'] === 'recovery_waiting' ? __t('system_status.service_job_recovery_waiting') : ((bool) $job['consistent'] ? __t('system_status.service_job_owned') : __t('system_status.service_job_inconsistent'))); ?></li><?php } ?></ul>
             <?php } ?>

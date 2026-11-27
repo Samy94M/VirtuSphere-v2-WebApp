@@ -45,6 +45,8 @@ return [
     'duration_minutes' => ':count minutes',
     'duration_hour' => ':count hour',
     'duration_hours' => ':count hours',
+    'duration_day' => ':count day',
+    'duration_days' => ':count days',
     'duration_pair' => ':first :second',
     'time_relative_now' => 'just now',
     'time_relative_soon' => 'in less than a minute',

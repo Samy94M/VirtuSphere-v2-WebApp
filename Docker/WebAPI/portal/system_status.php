@@ -133,7 +133,7 @@ layout_header(__t('system_status.title'), $user, 'system-status', 'system-status
               // display timezone while the database holds UTC (ADR-0022), so
               // the zone is named once here rather than left to be guessed from
               // a row that may be hours off the reader's own clock. ?>
-        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time datetime="<?php echo h(portal_time_iso($snapshot['generated_at'])); ?>"><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('system_status.timezone_note', ['tz' => portal_timezone()])); ?> &middot; <?php echo h(__t('system_status.hint')); ?></p>
+        <p class="status-generated"><?php echo h(__t('system_status.generated_at')); ?>: <time datetime="<?php echo h(portal_time_iso($snapshot['generated_at'])); ?>"><?php echo h(portal_format_timestamp($snapshot['generated_at'])); ?></time> &middot; <?php echo h(__t('common.timezone_note', ['tz' => portal_timezone()])); ?> &middot; <?php echo h(__t('system_status.hint')); ?></p>
         <div class="actions">
             <a class="button" href="<?php echo h($refreshUrl); ?>"><?php echo h(__t('system_status.refresh_status')); ?></a>
         </div>

@@ -153,7 +153,10 @@ test('start (scheduled): the preview must be confirmed, then a scheduled job is 
   expect(jobs[0].status, 'the job waits as queued').toBe('queued');
   expect(jobs[0].scheduled_at, 'the job carries its start time').not.toBeNull();
   await expect(outcome, 'queue persistence is not presented as execution').toContainText(String(jobs[0].id));
-  await expect(outcome, 'queue persistence is not presented as execution').toContainText(/not yet.*executed/i);
+  // PR-R4B (9.4): the flash names the stored transition; the "not yet executed"
+  // caveat lives once in help_deploy.action_outcomes_p1 (portal contract).
+  await expect(outcome, 'the flash names the stored transition').toContainText(/\bis scheduled\b/i);
+  await expect(outcome, 'queue persistence is not presented as execution').not.toContainText(/\b(executed|started|running|completed|succeeded)\b/i);
   await expect(outcome.locator('.alert-actions a'), 'the next step opens this exact job').toHaveAttribute('href', `deploy_log.php?id=${jobs[0].id}`);
 
   // ADR-0032, matrix point 9: the browser-enqueued job carries the request's
@@ -422,7 +425,8 @@ test('retry: Cancel creates nothing, Confirm queues a new job for the failed one
   const newId = Number(jobs[1].id);
   const outcome = page.locator('.alert-success').first();
   await expect(outcome, 'retry names the new queued job').toContainText(String(newId));
-  await expect(outcome, 'retry is not presented as execution').toContainText(/not yet.*executed/i);
+  await expect(outcome, 'retry names the stored transition').toContainText(/\bis queued\b/i);
+  await expect(outcome, 'retry is not presented as execution').not.toContainText(/\b(executed|started|running|completed|succeeded)\b/i);
   await expect(outcome.locator('.alert-actions a')).toHaveAttribute('href', `deploy_log.php?id=${newId}`);
 });
 

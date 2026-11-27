@@ -306,33 +306,74 @@ function deploy_supervisor_state_is_fresh(array $supervisor, int $now): bool
     return ($now - $seen) <= (3 * VIRTUSPHERE_SUPERVISOR_PUBLISH_INTERVAL_SECONDS);
 }
 
+// The closed answers of deploy_service_queue_expectation(). Only `ready`
+// promises an immediate start; every other answer means "is saved and waits"
+// and holds for a planned job as well (P1a-4).
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_READY = 'ready';
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_BUSY = 'busy';
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_PAUSED = 'paused';
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_DEGRADED = 'degraded';
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_COOLDOWN = 'cooldown';
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_OFFLINE = 'offline';
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_RECOVERING = 'recovering';
+const VIRTUSPHERE_DEPLOY_QUEUE_EXPECTATIONS = [
+    VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_READY,
+    VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_BUSY,
+    VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_PAUSED,
+    VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_DEGRADED,
+    VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_COOLDOWN,
+    VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_OFFLINE,
+    VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_RECOVERING,
+];
+
 /**
  * What an operator may expect of a job they queue right now.
  *
- * Five closed answers over the three axes, with a fixed precedence, so the
- * sentence above the button and the state on the System status card cannot
- * disagree. A pause is named before a fault, because a paused service is the
- * one case where the wait is somebody's decision and the operator can go and
- * undo it.
+ * Closed answers (VIRTUSPHERE_DEPLOY_QUEUE_EXPECTATIONS) over the three axes,
+ * with a fixed precedence, so the sentence above the button and the state on
+ * the System status card cannot disagree. A pause is named before a fault,
+ * because a paused service is the one case where the wait is somebody's
+ * decision and the operator can go and undo it. The answer is a code, never
+ * the sentence: a caller that compared sentences broke as soon as a wording
+ * changed (P1a-4). deploy_service_queue_expectation_label() says it.
  *
  * @param array<string,mixed> $snapshot
  */
 function deploy_service_queue_expectation(array $snapshot): string
 {
     if ($snapshot['claim_state'] !== VIRTUSPHERE_DEPLOY_CLAIM_ACCEPTING) {
-        return __t('deploy.service_expect_paused');
+        return VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_PAUSED;
     }
 
     return match ($snapshot['availability']) {
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE => __t('deploy.service_expect_offline'),
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE => VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_OFFLINE,
         // Cooldown gets its own sentence rather than sharing the degraded one.
         // It is a planned, ending state, and "something is wrong" would suggest
         // an action that would be the wrong one here: waiting is the action.
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN => __t('deploy.service_expect_cooldown'),
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED => __t('deploy.service_expect_degraded'),
-        VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY => __t('deploy.service_expect_busy'),
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_COOLDOWN => VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_COOLDOWN,
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED => VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_DEGRADED,
+        VIRTUSPHERE_DEPLOY_AVAILABILITY_BUSY => VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_BUSY,
         default => $snapshot['recovery_attention'] === VIRTUSPHERE_DEPLOY_ATTENTION_NONE
-            ? __t('deploy.service_expect_ready')
-            : __t('deploy.service_expect_recovering'),
+            ? VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_READY
+            : VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_RECOVERING,
+    };
+}
+
+/**
+ * The sentence for a queue expectation. `$planned` matters only for `ready`:
+ * a job with a start time or a stagger does not start at once.
+ */
+function deploy_service_queue_expectation_label(string $expectation, bool $planned = false): string
+{
+    return match ($expectation) {
+        VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_READY => $planned
+            ? __t('deploy.service_expect_ready_planned')
+            : __t('deploy.service_expect_ready'),
+        VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_BUSY => __t('deploy.service_expect_busy'),
+        VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_PAUSED => __t('deploy.service_expect_paused'),
+        VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_DEGRADED => __t('deploy.service_expect_degraded'),
+        VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_COOLDOWN => __t('deploy.service_expect_cooldown'),
+        VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_OFFLINE => __t('deploy.service_expect_offline'),
+        default => __t('deploy.service_expect_recovering'),
     };
 }

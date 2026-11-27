@@ -66,7 +66,7 @@ final class RegisteredVmExportPresenterTest extends TestCase
         self::assertNull(mac_import_bound_first_mac_log_vm_id('x ' . $line));
         self::assertNull(mac_import_bound_first_mac_log_vm_id(VIRTUSPHERE_MAC_IMPORT_BOUND_FIRST_MAC_LOG_PREFIX . '0; x'));
 
-        foreach (['de' => ['MAC erstmals übernommen', 'Erfolgreich'], 'en' => ['MAC imported for the first time', 'Successful']] as $locale => [$notice, $label]) {
+        foreach (['de' => ['MAC-Adresse erstmals übernommen', 'Erfolgreich'], 'en' => ['MAC address imported for the first time', 'Successful']] as $locale => [$notice, $label]) {
             Lang::load($locale);
             $marked = deploy_terminal_vm_results_html(mac_import_present_vm_rows($decoded, ['id' => 1, 'mission_id' => 2, 'mac_bound_first_vm_ids' => [1]]));
             self::assertStringContainsString($notice, $marked);

@@ -147,7 +147,8 @@ test('the page legend explains every Ampel state the page can render, and says t
   const sizes = phpJson(`
 require_once '/var/www/html/lib/status_vocabulary.php';
 echo 'JSON' . json_encode([
-    'heartbeat' => count(VIRTUSPHERE_HEARTBEAT_STATES),
+    // Stored heartbeat states plus the derived "Beeinträchtigt" line (PR-R4B).
+    'heartbeat' => count(VIRTUSPHERE_LIVENESS_STATES),
     'esxi' => count(VIRTUSPHERE_ESXI_AMPEL_STATES),
     'ansible' => count(VIRTUSPHERE_ANSIBLE_AMPEL_STATES),
     'vocabulary' => count(status_tones()) + count(VIRTUSPHERE_STATUS_PHRASES),
@@ -390,7 +391,7 @@ echo 'JSON' . json_encode(['ids' => $rows]) . 'JSON';
     await expect(badge).toHaveClass(/badge-neutral/);
     await expect(badge).not.toHaveClass(/badge-success/);
     await expect(page.locator('#deviations')).toContainText(
-      /(Es ist keine ESXi-Quelle konfiguriert|No ESXi source is configured)\./,
+      /(Es ist kein ESXi-Zugang angelegt|No ESXi credential exists)\./,
     );
     await expect(page.locator('#deviations a[href="credentials.php"]')).toHaveCount(1);
     // No deviation list and no repair form without a comparison behind them.

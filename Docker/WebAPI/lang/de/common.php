@@ -45,6 +45,8 @@ return [
     'duration_minutes' => ':count Minuten',
     'duration_hour' => ':count Stunde',
     'duration_hours' => ':count Stunden',
+    'duration_day' => ':count Tag',
+    'duration_days' => ':count Tage',
     'duration_pair' => ':first :second',
     'time_relative_now' => 'gerade eben',
     'time_relative_soon' => 'in weniger als einer Minute',

@@ -6,6 +6,7 @@ require_once __DIR__ . '/constants.php';
 require_once __DIR__ . '/deploy_constants.php';
 require_once __DIR__ . '/directory_constants.php';
 require_once __DIR__ . '/status_evidence.php';
+require_once __DIR__ . '/status_vocabulary.php';
 require_once __DIR__ . '/system_status_urls.php';
 
 // The package codes the autoimporter writes into its cause line, in the order of
@@ -124,7 +125,10 @@ function system_status_legend_items(string $kind): void
         // trying to explain one row's colour, and the overall badge is only
         // ever a roll-up of these same words minus 'stale' (directory_health_snapshot()).
         'directory' => [VIRTUSPHERE_DIRECTORY_CONTROLLER_AMPEL_STATES, 'directory_legend_'],
-        default => [VIRTUSPHERE_HEARTBEAT_STATES, 'legend_'],
+        // The stored heartbeat states plus the derived display state `degraded`
+        // ("Beeinträchtigt", TS1-K4; legend line by user decision 27.11.2026,
+        // PR-R4B). VIRTUSPHERE_HEARTBEAT_STATES itself stays the stored set.
+        default => [VIRTUSPHERE_LIVENESS_STATES, 'legend_'],
     };
 
     // Thresholds an explanation quotes are interpolated from the constant that
@@ -145,7 +149,9 @@ function system_status_legend_items(string $kind): void
             'esxi' => esxi_state_badge($state),
             'ansible' => ansible_state_badge($state),
             'directory' => directory_controller_state_badge($state),
-            default => heartbeat_badge($state),
+            // A derived liveness state has only the liveness badge (a value
+            // word); the stored states keep their result badge.
+            default => in_array($state, VIRTUSPHERE_HEARTBEAT_STATES, true) ? heartbeat_badge($state) : heartbeat_badge($state, 'liveness'),
         };
         $key = $prefix . $state;
         echo '<li>' . $badge . ' ' . h(__t('system_status.' . $key, $params[$key] ?? [])) . '</li>';

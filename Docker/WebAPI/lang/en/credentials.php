@@ -111,7 +111,7 @@ return [
     'test_esxi_strict_queued' => 'Strict certificate test queued. After a successful run, strict mode can be activated.',
     'test_esxi_failed' => 'The inventory pull could not be queued.',
     'test_esxi_action' => 'Open result or configuration',
-    'test_esxi_action_settings' => 'Open Settings, catalog and inventory',
+    'test_esxi_action_settings' => 'Open catalog and inventory',
     'test_action_allowlist' => 'Open IP allowlist',
     'test_action_api_base_url' => 'Open deploy settings',
     'test_action_system_status' => 'Open System status',

@@ -92,6 +92,9 @@ require_once __DIR__ . '/../system_status.php';
                     <li><code><?php echo h($statusCode); ?></code>: <?php echo h(__t('help_system_status.system_status_status_code_' . $statusCode)); ?></li>
                 <?php } ?>
             </ul>
+            <?php // PR-R4B: the allowed config.json values, moved here from the
+                  // finding text on the System status card. ?>
+            <p><?php echo h(__t('help_system_status.system_status_status_config_values')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_counters', ['minutes' => (string) intdiv(VIRTUSPHERE_AUTOIMPORTER_HINT_REFRESH_SECONDS, 60)])); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_cleanup_p4')); ?></p>
             <p><?php echo h(__t('help_system_status.system_status_status_package_p5')); ?></p>

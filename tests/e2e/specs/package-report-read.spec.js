@@ -56,7 +56,7 @@ test('VM report links keep exact ownership and do not invent a completion', asyn
   const runLink = page.getByRole('link', { name: 'Link to this attempt' });
   await expect(runLink).toHaveAttribute('href', `package_run.php?mission_id=${ids.mission}&vm_id=${ids.first}&run_id=${RUN_ID}`);
   await expect(page.locator('[data-copy-link]')).toHaveAttribute('data-copy-link', await runLink.getAttribute('href'));
-  await page.getByText('Support copy of this data snapshot').click();
+  await page.getByText('Text copy for support').click();
   await expect(page.locator('#package-report-support-text')).toHaveValue(new RegExp(RUN_ID));
   await expect(page.locator('#package-report-support-text')).toHaveValue(/Processed count unknown because no completion was reported/);
   await page.getByRole('link', { name: 'View package reports on other devices (without error comparison)' }).click();

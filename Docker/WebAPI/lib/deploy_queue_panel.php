@@ -261,10 +261,11 @@ if ($deployPreview !== null) {
                   // stagger field; without JavaScript the render picks from the
                   // remembered form values. ?>
             <?php
-            $expectNow = deploy_service_queue_expectation($serviceSnapshot);
-            $expectPlanned = $expectNow === __t('deploy.service_expect_ready') ? __t('deploy.service_expect_ready_planned') : $expectNow;
+            $expectation = deploy_service_queue_expectation($serviceSnapshot);
+            $expectNow = deploy_service_queue_expectation_label($expectation);
+            $expectPlanned = deploy_service_queue_expectation_label($expectation, true);
             $plannedNow = $isScheduled || (int) deploy_form_value('stagger_minutes') > 0;
-            if ($expectPlanned === $expectNow) { ?>
+            if ($expectation !== VIRTUSPHERE_DEPLOY_QUEUE_EXPECT_READY) { ?>
                 <span class="queue-expectation"><?php echo h($expectNow); ?></span>
             <?php } else { ?>
                 <span class="queue-expectation" data-queue-expectation="now"<?php echo $plannedNow ? ' hidden' : ''; ?>><?php echo h($expectNow); ?></span>

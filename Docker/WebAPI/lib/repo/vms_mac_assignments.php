@@ -114,8 +114,8 @@ function repo_vm_network_assert_new_macs_unique(mysqli $db, int $vmId, array $in
             $field = 'interfaces.' . (int) $index . '.mac';
             $message = validator_text(
                 'validate.mac_duplicate',
-                ':field is already assigned to another interface.',
-                ['field' => validator_label('interface_mac', 'Interface MAC')]
+                ':field is already assigned to another network adapter.',
+                ['field' => validator_label('interface_mac', 'Network adapter MAC')]
             );
             throw new ValidationException([$field => $message], $message);
         }
@@ -142,8 +142,8 @@ function repo_vm_network_assert_new_macs_unique(mysqli $db, int $vmId, array $in
                 $field = 'interfaces.' . $candidate['index'] . '.mac';
                 $message = validator_text(
                     'validate.mac_duplicate',
-                    ':field is already assigned to another interface.',
-                    ['field' => validator_label('interface_mac', 'Interface MAC')]
+                    ':field is already assigned to another network adapter.',
+                    ['field' => validator_label('interface_mac', 'Network adapter MAC')]
                 );
                 throw new ValidationException([$field => $message], $message);
             }

@@ -417,7 +417,7 @@ final class SystemStatusPanelBranchTest extends TestCase
         self::assertStringContainsString(__t('system_status.ansible_allowlist_detail'), $html);
         self::assertStringNotContainsString(__t('system_status.ansible_failed_component', ['component' => 'allowlist']), $html);
         self::assertStringContainsString(status_tone_word('stale'), $html);
-        self::assertStringContainsString(__t('system_status.ansible_stale_detail', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS]), $html);
+        self::assertStringContainsString(__t('system_status.ansible_stale_detail', ['duration' => portal_format_duration(ansible_preflight_evidence_valid_seconds(VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT))]), $html);
         self::assertStringContainsString('action="credentials.php"', $html);
         self::assertStringContainsString('name="return_to" value="ansible_status"', $html);
         self::assertStringContainsString('href="logs.php?tab=security&amp;category=credentials"', $html);

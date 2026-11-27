@@ -20,6 +20,8 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_packages.packages_diagnostics_current')); ?></p>
             <p><?php echo h(__t('help_packages.packages_usage')); ?></p>
             <p><?php echo h(__t('help_packages.packages_portal_reports')); ?> <a href="package_reports.php"><?php echo h(__t('help_packages.link_reports')); ?></a></p>
+            <?php // PR-R4B: the safeguards the report page used to repeat per row. ?>
+            <p><?php echo h(__t('help_packages.packages_portal_reports_reading')); ?></p>
         </section>
         <section class="panel">
             <h2><?php echo h(__t('help_packages.packages_os_heading')); ?></h2>

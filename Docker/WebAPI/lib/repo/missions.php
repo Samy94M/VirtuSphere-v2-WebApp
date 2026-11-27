@@ -135,7 +135,7 @@ function repo_validate_mission_values(mysqli $db, array $missionData, int $exclu
         $values['mission_notes'] = $validator->optionalString('mission_notes', $missionData['mission_notes'] ?? '', validator_label('mission_notes', 'Mission notes'), 65535);
     }
     if (array_key_exists('wds_vlan', $missionData)) {
-        $values['wds_vlan'] = $validator->optionalString('wds_vlan', $missionData['wds_vlan'] ?? '', validator_label('wds_vlan', 'WDS VLAN'), 255);
+        $values['wds_vlan'] = $validator->optionalString('wds_vlan', $missionData['wds_vlan'] ?? '', validator_label('wds_vlan', 'WDS port group'), 255);
     }
     if (array_key_exists('hypervisor_datastorage', $missionData)) {
         $datastoreLabel = validator_label('datastore', 'Datastore');
@@ -185,7 +185,7 @@ function repo_validate_mission_values(mysqli $db, array $missionData, int $exclu
             $stopAction = VIRTUSPHERE_MISSION_AUTOSTART_DEFAULTS['autostart_stop_action'];
         }
         if (!in_array($stopAction, VIRTUSPHERE_AUTOSTART_STOP_ACTIONS, true)) {
-            $validator->add('autostart_stop_action', validator_text('validate.enum', ':field has an invalid value.', ['field' => validator_label('autostart_stop_action', 'Stop action')]));
+            $validator->add('autostart_stop_action', validator_text('validate.enum', ':field has an invalid value.', ['field' => validator_label('autostart_stop_action', 'Action on shutdown')]));
         }
         $values['autostart_stop_action'] = $stopAction;
     }
