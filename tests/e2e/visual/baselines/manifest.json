@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "updatedAt": "2026-11-26T10:50:34.788Z",
-  "reason": "PR-R2: form typography, spacing and narrow widths after the portal review; PR-R3B: glossary words in the page catalogs and system status fixture (Handlung noetig)",
+  "updatedAt": "2026-11-27T05:00:17.849Z",
+  "reason": "PR-R2F: an alert directly in a stack takes the stack gap (G15); the system status overview starts 14 px higher, the mobile and wrap captures change by anti-aliasing",
   "runner": {
     "runnerId": "virtusphere-visual-linux-x64-chromium-1228-noble",
     "platform": "linux",
@@ -188,8 +188,8 @@
     "dark/missions-mobile.png": "f65dc2ce218ee9d34a62b31bef732ff6c20546e1471e589e8d74089350618388",
     "dark/missions-wrap.png": "ce290c46a793bff78534de0ad4579c7f8f1b99b68792f55df73b2852677fbb5f",
     "dark/system-status-desktop.png": "652d0b3275c0fd2c9ed13db0f0064274d102ebf0287bc0ace1816b1a215c73c2",
-    "dark/system-status-mobile.png": "e1e95c07f1ff481c94d164d8b18b1cbf78839617c197565411f69c3be7a165df",
-    "dark/system-status-wrap.png": "5e51fe78c0b856020add79fe3140405e9f9ba670f0a38f6ca3414effb89f1520",
+    "dark/system-status-mobile.png": "f97ce43d03173f1b26eae8fab0526b83f8d5ad30b6580ebbdd97cecaac8d9529",
+    "dark/system-status-wrap.png": "60267d965cd643cf8f70b0fd5243bf107714046715916a40532b94ab78daa2d8",
     "light/deploy-desktop.png": "d501ddc3f305498cbcf1bc4b8dfde684751b244c91da3e7b175150582b914a91",
     "light/deploy-mobile.png": "bbfac70aef57c32a836daaa25d73c421d51348638aa88b775d799c81999c18a1",
     "light/deploy-wrap.png": "c3826210fe1501815d4cd705711e0138dbbb90595d8ec50bf31610cb5ea600f0",
@@ -197,7 +197,7 @@
     "light/missions-mobile.png": "e2f0d00b631322c55794e4759ac963ddc65043edbf4e19a7b109bd8ca6d45e2b",
     "light/missions-wrap.png": "7a3d4527f9f3a543efd54d8520f0ea18c2faeabd5d4b17497d376b59611ac59e",
     "light/system-status-desktop.png": "334ee2f4462d265b4f4b55df32dc4ae732abd3943e60b167b2f220fea6b007d3",
-    "light/system-status-mobile.png": "7c3ccfb8780349a15564769326710b82255b3d1ccbbbcc3c106803b71cb04973",
-    "light/system-status-wrap.png": "edd611545b5a2c105c601401c3047dc9850609033a0a4633f383e9163008b9ae"
+    "light/system-status-mobile.png": "6ecfea58d26c90576ebe627c1acd078bbe1e8d54ac9785fc3381ff7990aa8063",
+    "light/system-status-wrap.png": "90d2a7089ecb89b3491ef154556a41edea3342b692cf55861782040fc2c1b491"
   }
 }
