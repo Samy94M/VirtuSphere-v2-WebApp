@@ -25,7 +25,7 @@ require_once __DIR__ . '/../vm_status_live.php';
             <p><?php echo h(__t('help_missions.vm_steps_1')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_2')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_3', ['max' => (int) VIRTUSPHERE_VM_LIMITS['vm_name_max_length']])); ?></p>
-            <p><?php echo h(__t('help_missions.vm_steps_4')); ?></p>
+            <p><?php echo h(__t('help_missions.vm_steps_4', ['hostname_max' => VIRTUSPHERE_MECM_ROLLOUT_HOSTNAME_MAX_LENGTH])); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_5')); ?></p>
             <?php // PR-R4A: the field keeps the rule, the reason it is the normal case lives here. ?>
             <p><?php echo h(__t('help_missions.vm_steps_gateway')); ?></p>
