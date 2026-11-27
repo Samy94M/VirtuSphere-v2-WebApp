@@ -21,6 +21,7 @@ Portal pages are server-rendered PHP. Use the shared bootstrap, sessions, CSRF a
 ## R5 Control, hint and field-error IDs are generated only by lib/forms.php. Use form_control_attrs()
 
 - Control, hint and field-error IDs are generated only by `lib/forms.php`. Use `form_control_attrs()` for the control or a real `fieldset`/`role="group"`, `form_hint_id()` for the rendered explanation and `form_error_html()` for its error. Do not hand-write `aria-invalid`, `aria-describedby` or a `.field-error`; the helper has to combine hint and error without dropping either. A repeated row passes its row scope, and an HTML template keeps the same `__INDEX__` in names and IDs until one monotonic replacement fills both. A dynamic hint is added to `aria-describedby` exactly while it is visible.
+- A field in `.form-grid` is a subgrid of a fixed band (`controls.css`, G9): a caption, a control and at most three trailing items (hint, error, a second hint), two beside a tall control such as a textarea; a fourth shares the last slot with the third and overlaps it, so a field that needs more says it in the field group's prose or in the panel text instead.
 
 ## R6 form_remember() covers one of the paths a form re-renders on, not all of them. The deploy queue
 

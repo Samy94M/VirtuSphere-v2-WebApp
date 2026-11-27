@@ -95,9 +95,27 @@
     font-size: 16px;
 }
 
+/* A table, a form and a figure have no bottom margin of their own, so a
+   subheading after them touched them (G12, PR-R2F: "Installiertes Zertifikat"
+   under the upload form, "Verschlüsselung" under the backup table, and the help
+   pages). The form grid's negative bottom margin collapses with this one and
+   leaves the same 18px under its last control. */
+
 .panel p + h3,
-.panel ul + h3 {
+.panel ul + h3,
+.panel > .table-wrap + h3,
+.panel > form + h3,
+.panel > figure + h3 {
     margin-top: 18px;
+}
+
+/* A sentence after a table touched its last row (PR-R2F: the NTP note under
+   the server time, the schedule command under the backup table). The hidden
+   drift alert may stand between them. */
+
+.panel > .table-wrap + p,
+.panel > .table-wrap + [hidden] + p {
+    margin-top: 14px;
 }
 
 .panel ul,
@@ -139,6 +157,14 @@
 /* The live status line of the dashboard stands between the tiles it dates and
    the next panel. In the stack it had the paragraph margins on top of the gap
    on both sides, about 33px each way; it now sits under the tiles (G14). */
+
+/* A stack spaces its children with its gap; an alert's own bottom margin came
+   on top of it, 32px instead of 18px (G15, PR-R2F: the direction note above
+   the machine API panels, the plain-HTTP warning of the system status). */
+
+.stack > .alert {
+    margin-bottom: 0;
+}
 
 .stack > p[data-vm-live] {
     margin: calc(var(--space-2) - 18px) 0 0;
@@ -189,6 +215,17 @@
 
 /* Deploy settings keep the task first: one compact URL row, secondary reset,
    and examples behind progressive disclosure. Runtime facts stay read-only. */
+
+/* HTTPS switches: each sentence sits on the button it explains, the next pair
+   starts clearly apart (G13, PR-R2F). */
+
+.settings-switch > p {
+    margin: 0 0 var(--space-2);
+}
+
+.settings-switch + .settings-switch {
+    margin-top: 18px;
+}
 
 .settings-url-intro {
     max-width: 92ch;

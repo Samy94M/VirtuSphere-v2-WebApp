@@ -88,43 +88,54 @@ declare(strict_types=1);
 
         <section class="panel">
             <h2><?php echo h(__t('settings.https_toggles_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.https_enabled_hint', ['port' => $httpsPort])); ?></p>
-            <div class="actions">
-                <form method="post" action="settings.php">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="action" value="save_https_enabled">
-                    <input type="hidden" name="https_enabled" value="<?php echo $httpsEnabled ? '0' : '1'; ?>">
-                    <?php
-                    // Enabling just adds a listener; disabling drops every
-                    // HTTPS session (and the redirect with it), so only that
-                    // branch asks. Omitted, never rendered empty.
-                    ?>
-                    <button class="button" type="submit"<?php echo $httpsEnabled ? ' data-confirm="' . h(__t('settings.https_confirm_disable')) . '"' : ''; ?>><?php echo h($httpsEnabled ? __t('settings.https_disable_button') : __t('settings.https_enable_button')); ?></button>
-                </form>
+            <?php
+            // Each sentence explains the switch under it. One group per pair
+            // keeps it there: in one run of paragraphs and button rows every
+            // sentence sat nearer the button above it (G13, PR-R2F).
+            ?>
+            <div class="settings-switch">
+                <p class="muted"><?php echo h(__t('settings.https_enabled_hint', ['port' => $httpsPort])); ?></p>
+                <div class="actions">
+                    <form method="post" action="settings.php">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="save_https_enabled">
+                        <input type="hidden" name="https_enabled" value="<?php echo $httpsEnabled ? '0' : '1'; ?>">
+                        <?php
+                        // Enabling just adds a listener; disabling drops every
+                        // HTTPS session (and the redirect with it), so only that
+                        // branch asks. Omitted, never rendered empty.
+                        ?>
+                        <button class="button" type="submit"<?php echo $httpsEnabled ? ' data-confirm="' . h(__t('settings.https_confirm_disable')) . '"' : ''; ?>><?php echo h($httpsEnabled ? __t('settings.https_disable_button') : __t('settings.https_enable_button')); ?></button>
+                    </form>
+                </div>
             </div>
-            <p class="muted"><?php echo h(__t('settings.https_redirect_hint')); ?></p>
-            <div class="actions">
-                <form method="post" action="settings.php">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="action" value="save_https_redirect">
-                    <input type="hidden" name="https_redirect_enabled" value="<?php echo $httpsRedirectEnabled ? '0' : '1'; ?>">
-                    <?php
-                    // Enabling moves every HTTP browser to the new listener
-                    // (lockout risk with an untrusted cert), so that branch
-                    // asks; switching it off is the recovery path and stays
-                    // one click.
-                    ?>
-                    <button class="button" type="submit"<?php echo !$httpsRedirectEnabled ? ' data-confirm="' . h(__t('settings.https_confirm_redirect')) . '"' : ''; ?>><?php echo h($httpsRedirectEnabled ? __t('settings.https_redirect_disable_button') : __t('settings.https_redirect_enable_button')); ?></button>
-                </form>
+            <div class="settings-switch">
+                <p class="muted"><?php echo h(__t('settings.https_redirect_hint')); ?></p>
+                <div class="actions">
+                    <form method="post" action="settings.php">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="save_https_redirect">
+                        <input type="hidden" name="https_redirect_enabled" value="<?php echo $httpsRedirectEnabled ? '0' : '1'; ?>">
+                        <?php
+                        // Enabling moves every HTTP browser to the new listener
+                        // (lockout risk with an untrusted cert), so that branch
+                        // asks; switching it off is the recovery path and stays
+                        // one click.
+                        ?>
+                        <button class="button" type="submit"<?php echo !$httpsRedirectEnabled ? ' data-confirm="' . h(__t('settings.https_confirm_redirect')) . '"' : ''; ?>><?php echo h($httpsRedirectEnabled ? __t('settings.https_redirect_disable_button') : __t('settings.https_redirect_enable_button')); ?></button>
+                    </form>
+                </div>
             </div>
-            <p class="muted"><?php echo h(__t('settings.https_hsts_hint', ['days' => intdiv(VIRTUSPHERE_HTTPS_HSTS_MAX_AGE_SECONDS, 86400)])); ?></p>
-            <div class="actions">
-                <form method="post" action="settings.php">
-                    <?php echo csrf_field(); ?>
-                    <input type="hidden" name="action" value="save_https_hsts">
-                    <input type="hidden" name="https_hsts_enabled" value="<?php echo $httpsHstsEnabled ? '0' : '1'; ?>">
-                    <button class="button" type="submit"><?php echo h($httpsHstsEnabled ? __t('settings.https_hsts_disable_button') : __t('settings.https_hsts_enable_button')); ?></button>
-                </form>
+            <div class="settings-switch">
+                <p class="muted"><?php echo h(__t('settings.https_hsts_hint', ['days' => intdiv(VIRTUSPHERE_HTTPS_HSTS_MAX_AGE_SECONDS, 86400)])); ?></p>
+                <div class="actions">
+                    <form method="post" action="settings.php">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="save_https_hsts">
+                        <input type="hidden" name="https_hsts_enabled" value="<?php echo $httpsHstsEnabled ? '0' : '1'; ?>">
+                        <button class="button" type="submit"><?php echo h($httpsHstsEnabled ? __t('settings.https_hsts_disable_button') : __t('settings.https_hsts_enable_button')); ?></button>
+                    </form>
+                </div>
             </div>
         </section>
     </div>
