@@ -110,8 +110,15 @@ final class AmpelLegendContractTest extends TestCase
             'esxi' => ['esxi'],
             'ansible' => ['ansible'],
         ];
-        foreach (self::AMPELN as $kind => [$states, $unusedPrefix]) {
+        // A pure heartbeat has one derived display state on top of the stored
+        // ones (TS1-K4): `degraded`, a running maintenance service whose jobs
+        // fail. It is never stored, so the legend of stored states omits it, but
+        // the tone table must still map it exactly once. Its badge is the one
+        // value word among heartbeat states ("Beeinträchtigt", heartbeat_badge()).
+        $derived = ['liveness' => ['degraded']];
+        foreach (self::AMPELN as $kind => [$storedStates, $unusedPrefix]) {
             foreach ($tokenSets[$kind] as $toneKind) {
+                $states = [...$storedStates, ...($derived[$toneKind] ?? [])];
                 self::assertEqualsCanonicalizing($states, VIRTUSPHERE_STATUS_TONE_KINDS[$toneKind], $toneKind . ' must map exactly the ' . $kind . ' states');
                 foreach (['de', 'en'] as $locale) {
                     $catalog = require str_replace('\\', '/', dirname(__DIR__, 2)) . '/lang/' . $locale . '/status_vocabulary.php';

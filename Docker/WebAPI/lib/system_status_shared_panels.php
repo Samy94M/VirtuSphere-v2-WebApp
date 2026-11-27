@@ -76,7 +76,7 @@ function system_status_fact_time(?string $timestamp, ?int $now = null): string
     return $value === '' ? '&mdash;' : portal_time_html($value, $now);
 }
 
-/** @param list<array{source:string,row:array|null,state:string}> $rows */
+/** @param list<array{source:string,row:array|null,state:string,failed_jobs?:list<string>}> $rows */
 function system_status_render_source_rows(array $rows, bool $suppressHints = false): void
 {
     ?>
@@ -121,7 +121,10 @@ function system_status_render_source_rows(array $rows, bool $suppressHints = fal
                 // verdict: nothing was ever set up, so "restart the task" names a
                 // task that does not exist. The caller says so once for the whole
                 // group instead of five rows repeating a premature instruction.
-                $actionHint = !$suppressHints && $entry['state'] !== 'ok' && !$isDeployWorker ? integration_action_hint($entry['source']) : '';
+                //
+                // A degraded maintenance service (TS1-K4) carries the jobs that
+                // fail; its hint names them instead of asking for a restart.
+                $actionHint = !$suppressHints && $entry['state'] !== 'ok' && !$isDeployWorker ? integration_action_hint($entry['source'], false, $entry['failed_jobs'] ?? []) : '';
                 if ($actionHint !== '') { ?><p class="status-action"><?php echo h($actionHint); ?></p><?php } ?>
                 <?php if ($isDeployWorker) { ?><p class="muted" data-deploy-worker-pointer><a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_DEPLOY_SERVICE)); ?>"><?php echo h(__t('system_status_cards.deploy_worker_pointer')); ?></a></p><?php } ?>
                 <?php if ($detail !== '') { ?>

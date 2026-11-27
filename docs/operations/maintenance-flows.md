@@ -10,7 +10,7 @@ Ein Durchlauf startet alle `VIRTUSPHERE_MAINTENANCE_WORKER_SLEEP_SECONDS` Sekund
 
 | Job | Takt | Konstante | Arbeit |
 |---|---|---|---|
-| `self-heartbeat` | 60 s | `VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS` | Ergebnis des Durchlaufs in die eigene Statuszeile schreiben (`repo_record_worker_result()`), immer am Ende des Durchlaufs |
+| `self-heartbeat` | 60 s | `VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS` | Gemerkte gescheiterte Jobs in die eigene Statuszeile schreiben (`repo_record_worker_result()`), immer am Ende des Durchlaufs; ändert sich der Merker, sofort statt erst im Takt |
 | `retention` | 3600 s | `VIRTUSPHERE_MAINTENANCE_RETENTION_INTERVAL_SECONDS` | Löschläufe der Aufbewahrungsfenster (`maintenance_worker_retention()`, Tabelle unten) |
 | `log-rotation` | 3600 s | `VIRTUSPHERE_MAINTENANCE_LOG_ROTATION_INTERVAL_SECONDS` | Dateilogs rotieren, die die Datenbankaufbewahrung nicht erfasst (`virtusphere_rotate_logs()`) |
 | `deploy-job-reap` | 120 s | `VIRTUSPHERE_DEPLOY_REAP_INTERVAL_SECONDS` | Aufträge mit veraltetem Herzschlag beenden (`deploy_worker_reap_stale_jobs()`, Ablauf in [„Aufsicht: verwaiste Aufträge“](deploy-flows.md#aufsicht-verwaiste-aufträge)) |
@@ -30,9 +30,9 @@ flowchart TD
     reap --> sweep["deploy-vm-sweep: hängengebliebene VMs konvergieren, wenn fällig"]
     sweep --> inventory["esxi-inventory: fällige Inventarabrufe einreihen, wenn fällig"]
     inventory --> transitions["audit-transitions: Zustandswechsel protokollieren"]
-    transitions --> verdict{"Ist in diesem Durchlauf ein Job gescheitert?"}
-    verdict -->|nein| ok["self-heartbeat, wenn fällig: loop ok"]
-    verdict -->|ja| failed["self-heartbeat, wenn fällig: failed jobs mit Namen; der Systemstatus zeigt den Dienst als gestört"]
+    transitions --> verdict{"Steht nach diesem Durchlauf ein gescheiterter Job im Merker?"}
+    verdict -->|nein| ok["self-heartbeat, wenn fällig oder der Merker sich geändert hat: loop ok"]
+    verdict -->|ja| failed["self-heartbeat, wenn fällig oder der Merker sich geändert hat: failed jobs mit Namen; der Systemstatus zeigt den Dienst als Beeinträchtigt"]
     ok -.->|nächster Durchlauf| loop
     failed -.->|nächster Durchlauf| loop
     loop -.->|Datenbankfehler| reconnect["Neu verbinden, warten, dann nächster Durchlauf; nach dem Verbinden urteilt der Reaper erst nach der Beobachtungsfrist"]
@@ -45,7 +45,7 @@ flowchart TD
     class failed,reconnect blocked;
 ```
 
-Das Lebenszeichen steht bewusst am Ende: Ein Durchlauf, der bei jedem Takt wirft, meldet sich so nicht mehr grün. Bis zur Korrektur im Code gilt das nur eingeschränkt: Das Lebenszeichen trägt nur die Fehler des Durchlaufs, in dem es fällig ist. Wirft ein Job in einem anderen Durchlauf, etwa der stündliche `retention`, steht der Fehler nur im Containerlog des `maintenance-worker`, und die nächste Meldung sagt wieder `loop ok`. Erreicht ein Fehler das Lebenszeichen, zeigt der Systemstatus den Dienst heute als „Nicht erreichbar“ mit dem Hinweis, ihn neu zu starten; der Neustart behebt den gescheiterten Job nicht. Die Namen der gescheiterten Jobs stehen unter „Technische Details“, die Ursache im Containerlog. Ein Datenbankfehler (`mysqli_sql_exception`) bricht den Durchlauf ab; die Schleife verbindet neu (`maintenance_worker_connect_db()`), wartet `--sleep` und versucht es erneut, statt in einer schnellen Schleife zu kreisen. Jede neue Verbindung setzt den Beobachtungsbeginn des Reapers (`deploy_reap_observer_since()`), damit er die Zeit ohne Datenbank nicht als toten Worker deutet. Ein Stoppsignal beendet den Dienst nur zwischen zwei Durchläufen oder während des Wartens (`worker_stop_requested()`).
+Das Lebenszeichen steht bewusst am Ende: Ein Durchlauf, der bei jedem Takt wirft, meldet sich so nicht mehr grün. Der Dienst merkt sich gescheiterte Jobs, bis derselbe Job wieder gelingt (`maintenance_worker_remembered_failures()`): Ein Fehler gehört zu seinem geplanten Job (`retention:<Name>` zu `retention`), und erst dessen nächster Lauf ersetzt ihn; `audit-transitions` ohne eigenen Takt wird in jedem Durchlauf neu beurteilt. Ändert sich der Merker, schreibt der Durchlauf das Lebenszeichen sofort, sonst im Takt `self-heartbeat`; so kommt auch der stündliche `retention` verlässlich an, und `audit-transitions` protokolliert den Übergang ok → gescheitert und zurück im nächsten Durchlauf. Ein Neustart verliert den Merker; der erste Durchlauf des neuen Prozesses fährt alle Jobs und meldet ihr Ergebnis sofort. Meldet der Dienst pünktlich und nennt gescheiterte Jobs, zeigt der Systemstatus ihn als „Beeinträchtigt“ mit den Jobnamen und dem Verweis auf das Containerlog des `maintenance-worker`; ein Neustart behebt den gescheiterten Job nicht. „Nicht erreichbar“ mit dem Hinweis auf den Neustart bleibt für einen Dienst, der nicht mehr pünktlich meldet. Ein Datenbankfehler (`mysqli_sql_exception`) bricht den Durchlauf ab; die Schleife verbindet neu (`maintenance_worker_connect_db()`), wartet `--sleep` und versucht es erneut, statt in einer schnellen Schleife zu kreisen. Jede neue Verbindung setzt den Beobachtungsbeginn des Reapers (`deploy_reap_observer_since()`), damit er die Zeit ohne Datenbank nicht als toten Worker deutet. Ein Stoppsignal beendet den Dienst nur zwischen zwei Durchläufen oder während des Wartens (`worker_stop_requested()`).
 
 ## Aufbewahrung
 

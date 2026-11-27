@@ -156,6 +156,10 @@ final class DeployServiceHealthTest extends TestCase
 
     public function testAMissingSupervisorIsOfflineEvenWithALiveChild(): void
     {
+        // The precedence of the pure function with a MATCHING shape. Since
+        // TS1-K4 the snapshot no longer produces this fact set: a live child
+        // without a supervisor under supervisor_v1 is a shape contradiction
+        // (testTheOldShapeUnderTheSupervisorContractIsDegradedNotOffline).
         $facts = $this->facts([
             'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR,
             'process_alive' => false,
@@ -194,6 +198,55 @@ final class DeployServiceHealthTest extends TestCase
             deploy_service_availability($facts),
             'a supervisor reporting under worker_v1 must never read as ready'
         );
+    }
+
+    /**
+     * TS1-K4 (H4-3, deploy.md A45): the shape fact fails closed in BOTH
+     * directions. Under `supervisor_v1` a reporting worker without a reporting
+     * supervisor is the old shape still running, and it read as `offline`
+     * because process_alive is the supervisor there.
+     */
+    public function testTheShapeContradictsTheContractInBothDirections(): void
+    {
+        $worker = VIRTUSPHERE_SUPERVISOR_CONTRACT_WORKER;
+        $supervisor = VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR;
+
+        self::assertTrue(deploy_service_shape_matches_contract($worker, false, true));
+        self::assertTrue(deploy_service_shape_matches_contract($worker, false, false));
+        self::assertFalse(deploy_service_shape_matches_contract($worker, true, true), 'a supervisor under worker_v1');
+        self::assertFalse(deploy_service_shape_matches_contract($worker, true, false));
+
+        self::assertTrue(deploy_service_shape_matches_contract($supervisor, true, true));
+        self::assertTrue(deploy_service_shape_matches_contract($supervisor, true, false), 'a missing child is the child axis, not the shape');
+        self::assertFalse(deploy_service_shape_matches_contract($supervisor, false, true), 'the old single worker under supervisor_v1');
+        self::assertTrue(deploy_service_shape_matches_contract($supervisor, false, false), 'nothing runs: offline, not a contradiction');
+    }
+
+    public function testTheOldShapeUnderTheSupervisorContractIsDegradedNotOffline(): void
+    {
+        // The facts deploy_service_health_snapshot() builds for that case. The
+        // shape check sits before process_alive, which is what makes it win.
+        $facts = $this->facts([
+            'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR,
+            'process_alive' => false,
+            'child_alive' => true,
+            'shape_matches_contract' => deploy_service_shape_matches_contract(VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR, false, true),
+        ]);
+        self::assertSame(VIRTUSPHERE_DEPLOY_AVAILABILITY_DEGRADED, deploy_service_availability($facts));
+
+        $bothSilent = $this->facts([
+            'supervisor_contract' => VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR,
+            'process_alive' => false,
+            'child_alive' => false,
+            'shape_matches_contract' => deploy_service_shape_matches_contract(VIRTUSPHERE_SUPERVISOR_CONTRACT_SUPERVISOR, false, false),
+        ]);
+        self::assertSame(VIRTUSPHERE_DEPLOY_AVAILABILITY_OFFLINE, deploy_service_availability($bothSilent));
+    }
+
+    public function testTheSnapshotDerivesTheShapeFromThePureRule(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 2) . '/lib/deploy_service_health.php');
+        self::assertStringContainsString("'shape_matches_contract' => deploy_service_shape_matches_contract(\$contract, \$supervisorFresh, \$childAlive)", $source);
     }
 
     public function testTheSupervisorFreshnessBoundIsTheSlowerPublishCadence(): void

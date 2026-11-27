@@ -102,5 +102,76 @@ function deploy_worker_reap_stale_jobs(mysqli $db): int
         ? 'Separate observation at this moment: a deploy service is reporting its status row. That is a statement about now, not about the process that held this job, which may have been restarted since.'
         : 'Separate observation at this moment: no deploy service is reporting its status row.';
 
-    return count(repo_reap_stale_deploy_jobs($db, VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, $cause));
+    $reaped = repo_reap_stale_deploy_jobs($db, VIRTUSPHERE_DEPLOY_STALE_AFTER_SECONDS, $cause);
+    // The cleanup has committed. Only now its inventory requests are enqueued,
+    // each in a transaction of its own (TS1-K4, G1-4).
+    foreach ($reaped as $job) {
+        deploy_worker_request_inventory_after_reap($db, $job);
+    }
+
+    return count($reaped);
+}
+
+/**
+ * The inventory pull a concluded create/full job owes its ESXi credential, for a
+ * job the stale-job cleanup ended (TS1-K4, G1-4). The cleanup decided it inside
+ * its transaction (`inventory_refresh`, `inventory_paused`, from
+ * deploy_worker_inventory_refresh_due()); this runs after the commit.
+ *
+ * Fail-soft like the live worker's refresh: an enqueue or audit failure goes to
+ * the container log and never undoes the cleanup, which has already committed;
+ * the queued job and its `deploy.inventory_requested` row commit together or
+ * not at all (R19). The request goes through the
+ * one enqueue owner, esxi_inventory_enqueue_for_credential(), so an already
+ * waiting pull is not duplicated (`already_pending`) and the automatic interval,
+ * even at 0, plays no part. A paused credential is not pulled; the job log
+ * already says so.
+ *
+ * @param array<string,mixed> $job one row returned by repo_reap_stale_deploy_jobs()
+ */
+function deploy_worker_request_inventory_after_reap(mysqli $db, array $job): void
+{
+    if (!($job['inventory_refresh'] ?? false)) {
+        return;
+    }
+    $jobId = (int) ($job['id'] ?? 0);
+    $credentialId = (int) ($job['credential_esxi_id'] ?? 0);
+    if ($job['inventory_paused'] ?? false) {
+        fwrite(STDOUT, '[deploy-reap] job ' . $jobId . ': no inventory pull for ESXi credential ' . $credentialId . ", it is paused after a sign-in failure\n");
+
+        return;
+    }
+    try {
+        // The queued job and its audit row commit together (R19). An enqueue
+        // that failed half-way reports `error` from inside its own catch; the
+        // throw below rolls that rest back instead of committing it.
+        $context = repo_transaction($db, static function () use ($db, $credentialId): array {
+            $enqueue = esxi_inventory_enqueue_for_credential($db, $credentialId);
+            $reason = (string) ($enqueue['reason'] ?? VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_QUEUED);
+            if ($reason === VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_ERROR) {
+                throw new RuntimeException((string) ($enqueue['message'] ?? 'the inventory job could not be queued'));
+            }
+            $context = ['reason' => $reason];
+            if (isset($enqueue['job_id'])) {
+                $context['job_id'] = (int) $enqueue['job_id'];
+            }
+            $requested = $enqueue['enqueued'] || $reason === VIRTUSPHERE_AUDIT_INVENTORY_REQUEST_ALREADY_PENDING;
+            audit_event_required(
+                $db,
+                VIRTUSPHERE_AUDIT_EVENT_DEPLOY_INVENTORY_REQUESTED,
+                'credential',
+                $credentialId,
+                $requested ? VIRTUSPHERE_AUDIT_RESULT_SUCCESS : VIRTUSPHERE_AUDIT_RESULT_WARNING,
+                $context,
+                null,
+                'cli'
+            );
+
+            return $context + ['requested' => $requested];
+        });
+        fwrite($context['requested'] ? STDOUT : STDERR, '[deploy-reap] job ' . $jobId . ': inventory pull for ESXi credential ' . $credentialId
+            . ' after the stale-job cleanup: ' . $context['reason'] . (isset($context['job_id']) ? ' (job ' . $context['job_id'] . ')' : '') . "\n");
+    } catch (Throwable $exception) {
+        fwrite(STDERR, '[deploy-reap] job ' . $jobId . ': inventory pull after the stale-job cleanup failed: ' . virtusphere_redact_log_text($exception->getMessage()) . "\n");
+    }
 }

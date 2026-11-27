@@ -344,25 +344,37 @@ function deploy_terminal_status_for_failure_reason(string $reasonCode): string
 /** Every terminal create/full path refreshes after a durable Create launch. */
 function deploy_worker_refresh_inventory_after_deploy(mysqli $db, array $job): void
 {
-    $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
-    $credentialId = (int) ($job['credential_esxi_id'] ?? 0);
-    if ($credentialId <= 0 || !in_array($mode, VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES, true)) {
-        return;
-    }
     try {
-        $launched = false;
-        foreach (repo_deploy_create_results($db, (int) $job['id']) as $unit) {
-            if (trim((string) ($unit['async_jid'] ?? '')) !== '') {
-                $launched = true;
-                break;
-            }
-        }
-        if ($launched) {
-            esxi_inventory_enqueue_for_credential($db, $credentialId);
+        if (deploy_worker_inventory_refresh_due($db, $job)) {
+            esxi_inventory_enqueue_for_credential($db, (int) $job['credential_esxi_id']);
         }
     } catch (Throwable $exception) {
         error_log('[deploy-worker] post-deploy inventory refresh enqueue failed: ' . virtusphere_redact_log_text($exception->getMessage()));
     }
+}
+
+/**
+ * Whether a concluded job owes its ESXi credential an inventory refresh: a mode
+ * of VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES, an ESXi credential, and at least
+ * one Create unit with a durably stored Ansible job id, whatever the terminal
+ * status. The one condition for the live worker's paths
+ * (deploy_worker_refresh_inventory_after_deploy()) and the stale-job cleanup
+ * (repo_reap_stale_deploy_jobs(), TS1-K4), so the two cannot disagree about
+ * which job changed ESXi. Reads only; the caller decides where it enqueues.
+ */
+function deploy_worker_inventory_refresh_due(mysqli $db, array $job): bool
+{
+    $mode = deploy_worker_payload($job)['mode'] ?? VIRTUSPHERE_DEPLOY_MODE_FULL;
+    if ((int) ($job['credential_esxi_id'] ?? 0) <= 0 || !in_array($mode, VIRTUSPHERE_DEPLOY_INVENTORY_REFRESH_MODES, true)) {
+        return false;
+    }
+    foreach (repo_deploy_create_results($db, (int) $job['id']) as $unit) {
+        if (trim((string) ($unit['async_jid'] ?? '')) !== '') {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**

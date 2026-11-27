@@ -77,7 +77,7 @@ Zeiten stehen in den Faktenlisten relativ und absolut in einem `<time datetime>`
 
 ```mermaid
 flowchart TD
-  A{"Supervisor-Vertrag bekannt und Prozessform passend?"} -->|nein| DG["Beeinträchtigt"]
+  A{"Supervisor-Vertrag bekannt und Prozessform passend (keine Aufsicht unter worker_v1, kein Einzelprozess ohne Aufsicht unter supervisor_v1)?"} -->|nein| DG["Beeinträchtigt"]
   A -->|ja| B{"Dienstprozess lebt? (Supervisor-Heartbeat frisch, sonst Worker-Status ok)"}
   B -->|nein| OF["Nicht erreichbar"]
   B -->|ja| SV{"Läuft der Dienst unter Supervisor?"}
@@ -366,13 +366,17 @@ flowchart TD
 
 Wartungsdienst und Deploy-Worker schreiben ihren Status direkt in dieselbe Tabelle wie die MECM-Aufgaben, im Takt `VIRTUSPHERE_MAINTENANCE_HEARTBEAT_INTERVAL_SECONDS` beziehungsweise `VIRTUSPHERE_DEPLOY_WORKER_HEARTBEAT_INTERVAL_SECONDS`. Ihre Zeilen sind reine Lebenszeichen und sprechen deshalb Melderwörter (`heartbeat_badge($state, 'liveness')`): Die Zeile des Bereitstellungsdienstes sagt „Aktuell“ neben der Karte „Bereit“, statt ein zweites Wort für den Zustand des Dienstes zu behaupten. Seit SY3 trägt sie keinen eigenen Reparaturhinweis mehr, sondern verweist auf die Karte Bereitstellungsdienst, deren Fazitzeile den Schritt nennt; sie bleibt, weil die Kachel „Interne Dienste“ sie mitzählt.
 
+Meldet der Wartungsdienst pünktlich, aber mit gescheiterten Jobs, leitet `integration_health_maintenance_entry()` den Anzeigezustand `degraded` ab: „Beeinträchtigt“ wie auf der Karte Bereitstellungsdienst, im Ton „Eingeschränkt“, mit einem Hinweis, der die Jobs nennt und auf das Containerlog verweist statt auf einen Neustart. Pünktlich heißt: `last_checked_at` liegt unter derselben Schwelle wie ein frisches Lebenszeichen. Der Zustand wird nicht gespeichert und nicht auditiert; die Legende der Quellen-Ampel listet die gespeicherten Zustände. In der Kachel zählt `degraded` mit dem Rang seines Tons (`integration_health_internal_state()`).
+
 ```mermaid
 flowchart TD
   A{"Hat der Dienst je gemeldet?"} -->|nein| A1{"Meldet der andere interne Dienst?"}
   A1 -->|ja| MI["Warnung (missing, gelb)"]
   A1 -->|nein| UK["Keine Daten (grau)"]
   A -->|ja| B{"Letzte Meldung fail?"}
-  B -->|ja| RD["Nicht erreichbar (rot)"]
+  B -->|ja| WD{"Wartungsdienst, letzte Prüfung frisch und gescheiterte Jobs genannt?"}
+  WD -->|ja| DG["Beeinträchtigt (degraded, Ton Eingeschränkt), Hinweis mit Jobnamen und Containerlog"]
+  WD -->|nein| RD["Nicht erreichbar (rot)"]
   B -->|nein| C{"Alter der letzten Meldung?"}
   C -->|über Intervall mal Gefahrfaktor| RD
   C -->|über Intervall mal Warnfaktor| YL["Warnung (gelb)"]
