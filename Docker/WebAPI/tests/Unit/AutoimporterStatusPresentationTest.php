@@ -302,7 +302,10 @@ final class AutoimporterStatusPresentationTest extends TestCase
             $catalog = require __DIR__ . '/../../lang/' . $locale . '/system_status.php';
             $help = require __DIR__ . '/../../lang/' . $locale . '/help_system_status.php';
             self::assertStringContainsString(':minutes', (string) $catalog['run_distribution_scope'], $locale);
-            self::assertStringContainsString(':minutes', (string) $help['system_status_status_counters'], $locale);
+            // PR-R6 split the counters paragraph into three keys rendered in a row.
+            self::assertStringContainsString(':minutes', (string) $help['system_status_status_counters']
+                . ' ' . (string) $help['system_status_status_counters_b']
+                . ' ' . (string) $help['system_status_status_counters_c'], $locale);
         }
         $html = $this->renderAutoimporter(null, 'unknown');
         self::assertStringContainsString(

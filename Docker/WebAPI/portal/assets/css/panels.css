@@ -1330,3 +1330,31 @@ a.tab {
 .help-fig-arrowhead {
     fill: var(--muted);
 }
+
+/* The table of contents of a help tab (PR-R6), generated from the tab's
+   sections by help_panel_with_toc(). Two columns where the width allows them,
+   one column on a narrow screen; an entry never breaks across the columns. */
+
+.help-toc ol {
+    margin: 0;
+    padding-left: 22px;
+    columns: 2 18rem;
+    column-gap: 32px;
+}
+
+.help-toc li {
+    margin: 0 0 6px;
+    break-inside: avoid;
+}
+
+/* A long list item of the help split into paragraphs (PR-R6): the parts sit
+   tight under each other instead of taking the browser's paragraph margins,
+   so the item still reads as one bullet. */
+
+.panel li > p {
+    margin: 0;
+}
+
+.panel li > p + p {
+    margin-top: 6px;
+}

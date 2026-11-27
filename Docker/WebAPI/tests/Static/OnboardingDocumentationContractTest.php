@@ -61,7 +61,8 @@ final class OnboardingDocumentationContractTest extends TestCase
             /** @var array<string, string> $shell */
             $shell = require $this->root . '/Docker/WebAPI/lang/' . $locale . '/help.php';
             foreach (array_keys($shell) as $key) {
-                self::assertMatchesRegularExpression('/^(title|tabs_label|tab_)/', $key, 'help.php is only the help-page shell catalog: ' . $key);
+                // toc_: the label of the generated table of contents, page shell like the tab names (PR-R6).
+                self::assertMatchesRegularExpression('/^(title|tabs_label|tab_|toc_)/', $key, 'help.php is only the help-page shell catalog: ' . $key);
             }
         }
 

@@ -66,8 +66,10 @@ final class StatusWriterContractTest extends TestCase
         // The technical sentence names the stage 1/5, which no writer stores; it is shown only as an axis value.
         'help_missions.status_technical_p1' => [1],
         // status_stuck_1..3 name phases and findings since ST-2, not x/5 stages, so they are no longer pinned.
-        'help_stack.stack_a6_p3' => [4],
-        'help_stack.stack_a7_p3' => [5],
+        // PR-R6 split the long FAQ paragraphs; the stage sentences kept their
+        // wording and moved with their part (a6 old p3 -> p5, a7 old p3 -> p4).
+        'help_stack.stack_a6_p5' => [4],
+        'help_stack.stack_a7_p4' => [5],
         'help_stack.stack_a11_li1' => [3],
         'help_settings.settings_api_p1' => [2],
         'help_system_status.firstaid_step3' => [4, 5],

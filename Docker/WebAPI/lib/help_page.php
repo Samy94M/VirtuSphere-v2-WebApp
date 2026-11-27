@@ -83,9 +83,57 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // How to read the audit log text column: the stored sentences are English
     // with technical codes, and nothing rewrites them.
     'help-log-texts' => 'system-status',
-    // The VLAN catalog and why it is read-only. Its section sits in the System
-    // status panel because the catalog reads what the inventory reads.
-    'help-vlans' => 'system-status',
+    // The port group catalog and why it is read-only. PR-R6 moved it from the
+    // System status panel to the catalog panel, next to packages and operating
+    // systems: it is the third catalog an operator picks from.
+    'help-vlans' => 'packages',
+    // PR-R6: every H2 section carries an anchor, because the generated table
+    // of contents (help_panel_with_toc()) links each one. These sections had
+    // no anchor before; their content did not change.
+    'help-intro' => 'overview',
+    'help-workflow' => 'overview',
+    'help-glossary' => 'overview',
+    'help-missions' => 'missions',
+    'help-mission-transfer' => 'missions',
+    'help-creator' => 'missions',
+    'help-naming' => 'missions',
+    'help-rollout' => 'missions',
+    'help-location' => 'missions',
+    'help-bulk' => 'missions',
+    'help-vm-status' => 'missions',
+    'help-badges' => 'missions',
+    'help-vm-retire' => 'missions',
+    'help-packages' => 'packages',
+    'help-os' => 'packages',
+    'help-deploy-requirements' => 'deploy',
+    'help-deploy-warnings' => 'deploy',
+    'help-deploy-mode-list' => 'deploy',
+    'help-deploy-schedule' => 'deploy',
+    'help-deploy-result' => 'deploy',
+    'help-deploy-log' => 'deploy',
+    'help-deploy-cancel' => 'deploy',
+    'help-deploy-retry' => 'deploy',
+    'help-status-first-aid' => 'system-status',
+    'help-status-reading' => 'system-status',
+    'help-status-client-phases' => 'system-status',
+    'help-status-credential-tests' => 'system-status',
+    'help-logs' => 'system-status',
+    'help-roles' => 'users',
+    'help-users' => 'users',
+    'help-user-create' => 'users',
+    'help-user-actions' => 'users',
+    'help-user-safety' => 'users',
+    'help-directory' => 'users',
+    'help-directory-troubleshooting' => 'users',
+    'help-credentials-kinds' => 'credentials',
+    'help-settings-intro' => 'settings',
+    'help-settings-deploy' => 'settings',
+    'help-settings-catalog' => 'settings',
+    'help-settings-system' => 'settings',
+    'help-stack-faq' => 'stack',
+    'help-operations' => 'stack',
+    // A new section: the internal terms that stood in the overview glossary.
+    'help-internal-terms' => 'stack',
 ];
 
 function help_panel_visible(string $panel, array $user): bool
@@ -124,6 +172,74 @@ function help_url(string $panel, ?string $section = null): string
     }
 
     return 'help.php#' . $section;
+}
+
+/**
+ * One top-level help section: a <section class="panel…"> whose first element is
+ * its <h2>, with the section's anchor on either of the two. The table of
+ * contents reads the rendered panel with this pattern and HelpTableOfContentsTest
+ * reads the partial sources with it, so a section the contents would miss fails
+ * the test instead of silently dropping out of the list (PR-R6).
+ */
+const VIRTUSPHERE_HELP_TOC_SECTION_PATTERN = '~<section\b([^>]*\bclass="panel\b[^"]*"[^>]*)>\s*<h2\b([^>]*)>(.*?)</h2>~s';
+
+/**
+ * The top-level sections of one rendered help panel, in page order, read from
+ * the markup the partial actually produced (never from a written list, which
+ * would go stale the first time a section moves).
+ *
+ * @return list<array{id: string, label: string}>
+ */
+function help_panel_sections(string $html): array
+{
+    preg_match_all(VIRTUSPHERE_HELP_TOC_SECTION_PATTERN, $html, $matches, PREG_SET_ORDER);
+    $sections = [];
+    foreach ($matches as $match) {
+        $id = null;
+        foreach ([$match[1], $match[2]] as $attributes) {
+            if (preg_match('~\sid="(help-[a-z-]+)"~', $attributes, $idMatch) === 1) {
+                $id = $idMatch[1];
+                break;
+            }
+        }
+        if ($id === null) {
+            continue;
+        }
+        // The heading was escaped when the partial rendered it; only markup
+        // inside it (none today) is dropped, the escaped text stays escaped.
+        $sections[] = ['id' => $id, 'label' => trim(strip_tags($match[3]))];
+    }
+
+    return $sections;
+}
+
+/**
+ * A rendered help panel with its table of contents placed directly after the
+ * panel's opening tag: one link per top-level section, in page order. A panel
+ * with fewer than two sections gets none (a list of one entry says nothing).
+ */
+function help_panel_with_toc(string $html, string $panel): string
+{
+    $sections = help_panel_sections($html);
+    if (count($sections) < 2) {
+        return $html;
+    }
+    $titleId = 'toc-' . $panel;
+    $items = '';
+    foreach ($sections as $section) {
+        $items .= '<li><a href="' . h(help_url($panel, $section['id'])) . '">' . $section['label'] . '</a></li>';
+    }
+    $nav = '<nav class="panel help-toc" aria-labelledby="' . h($titleId) . '">'
+        . '<h2 id="' . h($titleId) . '">' . h(__t('help.toc_label')) . '</h2>'
+        . '<ol>' . $items . '</ol></nav>';
+
+    $opening = '~<div\b[^>]*\bid="panel-' . preg_quote($panel, '~') . '"[^>]*>~';
+    if (preg_match($opening, $html, $match, PREG_OFFSET_CAPTURE) !== 1) {
+        return $html;
+    }
+    $at = $match[0][1] + strlen($match[0][0]);
+
+    return substr($html, 0, $at) . "\n        " . $nav . substr($html, $at);
 }
 
 /**

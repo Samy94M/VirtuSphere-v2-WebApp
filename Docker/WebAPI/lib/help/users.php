@@ -9,7 +9,7 @@ declare(strict_types=1);
 $passwordMinLength = password_policy_min_length(db());
 ?>
     <div class="stack" id="panel-users" role="tabpanel" aria-labelledby="tab-users" tabindex="0" data-tab-panel>
-        <section class="panel">
+        <section class="panel" id="help-roles">
             <h2><?php echo h(__t('help_users.roles_heading')); ?></h2>
             <p><?php echo h(__t('help_users.roles_p1')); ?></p>
             <div class="table-wrap"><table>
@@ -45,18 +45,18 @@ $passwordMinLength = password_policy_min_length(db());
         </section>
 
         <?php if ($canUsers): ?>
-        <section class="panel">
+        <section class="panel" id="help-users">
             <h2><?php echo h(__t('help_users.usersmgmt_heading')); ?></h2>
             <p><?php echo h(__t('help_users.usersmgmt_p1')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-user-create">
             <h2><?php echo h(__t('help_users.usersmgmt_create_heading')); ?></h2>
             <p><?php echo h(__t('help_users.usersmgmt_create_p1', ['min' => $passwordMinLength])); ?></p>
             <p><?php echo h(__t('help_users.usersmgmt_create_p2')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-user-actions">
             <h2><?php echo h(__t('help_users.usersmgmt_actions_heading')); ?></h2>
             <ul>
                 <li><?php echo h(__t('help_users.usersmgmt_action_role')); ?></li>
@@ -66,12 +66,16 @@ $passwordMinLength = password_policy_min_length(db());
             </ul>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-user-safety">
             <h2><?php echo h(__t('help_users.usersmgmt_safety_heading')); ?></h2>
             <ul>
                 <li><?php echo h(__t('help_users.usersmgmt_safety_1')); ?></li>
                 <li><?php echo h(__t('help_users.usersmgmt_safety_2')); ?></li>
-                <li><?php echo h(__t('help_users.usersmgmt_safety_3', ['minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES])); ?></li>
+                <li>
+                    <p><?php echo h(__t('help_users.usersmgmt_safety_3', ['minutes' => VIRTUSPHERE_LOGIN_FAILURE_WINDOW_MINUTES])); ?></p>
+                    <p><?php echo h(__t('help_users.usersmgmt_safety_3_b')); ?></p>
+                    <p><?php echo h(__t('help_users.usersmgmt_safety_3_c')); ?></p>
+                </li>
                 <li><?php echo h(__t('help_users.usersmgmt_safety_4')); ?></li>
             </ul>
             <p><?php echo h(__t('help_users.usersmgmt_audit_p1')); ?></p>
@@ -79,14 +83,15 @@ $passwordMinLength = password_policy_min_length(db());
                   // asymmetry is named here as well as on the page itself,
                   // because this is where somebody reads BEFORE they look. ?>
             <p><?php echo h(__t('help_users.usersmgmt_audit_filter')); ?></p>
-            <p><?php echo h(__t('help_users.usersmgmt_audit_correlation', [
+            <p><?php echo h(__t('help_users.usersmgmt_audit_correlation')); ?></p>
+            <p><?php echo h(__t('help_users.usersmgmt_audit_correlation_b', [
                 'audit_days' => VIRTUSPHERE_LOG_RETENTION_DAYS,
                 'security_days' => VIRTUSPHERE_LOG_RETENTION_SECURITY_DAYS,
                 'job_days' => VIRTUSPHERE_DEPLOY_JOB_LOG_RETENTION_DAYS,
             ])); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-directory">
             <h2><?php echo h(__t('help_users.directory_heading')); ?></h2>
             <p><?php echo h(__t('help_users.directory_p1')); ?></p>
             <ol>
@@ -99,7 +104,7 @@ $passwordMinLength = password_policy_min_length(db());
             <p><?php echo h(__t('help_users.directory_breakglass')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-directory-troubleshooting">
             <h2><?php echo h(__t('help_users.directory_troubleshooting_heading')); ?></h2>
             <ul>
                 <li><?php echo h(__t('help_users.directory_troubleshooting_tls')); ?></li>

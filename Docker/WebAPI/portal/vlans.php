@@ -66,7 +66,7 @@ $usageId = usage_evidence_requested_id($_GET['usage'] ?? null);
 $usageRow = usage_evidence_find_row($rows, $usageId);
 $usageEvidence = $usageRow !== null ? usage_evidence_vlan($connection, (string) ($usageRow['vlan_name'] ?? '')) : null;
 
-layout_header(__t('vlans.title'), $user, 'vlans', 'system-status', 'help-vlans');
+layout_header(__t('vlans.title'), $user, 'vlans', 'packages', 'help-vlans');
 ?>
 <div class="stack">
     <section class="panel">

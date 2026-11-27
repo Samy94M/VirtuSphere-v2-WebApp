@@ -4,7 +4,7 @@
 declare(strict_types=1);
 ?>
     <div class="stack" id="panel-stack" role="tabpanel" aria-labelledby="tab-stack" tabindex="0" data-tab-panel>
-        <section class="panel faq">
+        <section class="panel faq" id="help-stack-faq">
             <h2><?php echo h(__t('help_stack.stack_heading')); ?></h2>
             <p><?php echo h(__t('help_stack.stack_p1')); ?></p>
             <?php
@@ -38,7 +38,7 @@ declare(strict_types=1);
             <?php endforeach; ?>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-operations">
             <h2><?php echo h(__t('help_stack.ops_heading')); ?></h2>
             <p><?php echo h(__t('help_stack.ops_p1')); ?></p>
             <ul>
@@ -68,6 +68,7 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_stack.ops_restore_p2')); ?></p>
             <p><?php echo h(__t('help_stack.ops_restore_p3')); ?></p>
             <p><?php echo h(__t('help_stack.ops_restore_p4')); ?></p>
+            <p><?php echo h(__t('help_stack.ops_restore_p4_b')); ?></p>
 
             <h3><?php echo h(__t('help_stack.ops_backup_heading')); ?></h3>
             <ul>
@@ -86,6 +87,22 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_stack.app_key_p1')); ?></p>
             <p><?php echo h(__t('help_stack.app_key_p2')); ?></p>
             <p><?php echo h(__t('help_stack.app_key_p3')); ?></p>
+            <p><?php echo h(__t('help_stack.app_key_p3_b')); ?></p>
             <p><?php echo h(__t('help_stack.app_key_p4')); ?></p>
+        </section>
+
+        <?php // PR-R6: the internal terms that used to stand in the overview
+              // glossary. The overview explains the operator words (R15). ?>
+        <section class="panel" id="help-internal-terms">
+            <h2><?php echo h(__t('help_stack.glossary_heading')); ?></h2>
+            <p><?php echo h(__t('help_stack.glossary_intro')); ?></p>
+            <ul>
+                <li><?php echo h(__t('help_stack.glossary_moid')); ?></li>
+                <li><?php echo h(__t('help_stack.glossary_async_job')); ?></li>
+                <li><?php echo h(__t('help_stack.glossary_start_intent')); ?></li>
+                <li><?php echo h(__t('help_stack.glossary_client_ready_ack')); ?></li>
+                <li><?php echo h(__t('help_stack.glossary_best_effort')); ?></li>
+                <li><?php echo h(__t('help_stack.glossary_name_semantics')); ?></li>
+            </ul>
         </section>
     </div>

@@ -3,7 +3,7 @@
 declare(strict_types=1);
 ?>
     <div class="stack" id="panel-credentials" role="tabpanel" aria-labelledby="tab-credentials" tabindex="0" data-tab-panel>
-        <section class="panel">
+        <section class="panel" id="help-credentials-kinds">
             <h2><?php echo h(__t('help_credentials.credentials_heading')); ?></h2>
             <p><?php echo h(__t('help_credentials.credentials_p1')); ?></p>
             <ul>
@@ -16,12 +16,19 @@ declare(strict_types=1);
             <p><?php echo h(__t('help_credentials.credentials_ports_ansible')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_usage')); ?></p>
         </section>
-        <section class="panel" id="help-credentials-trust">
-            <h2><?php echo h(__t('help_credentials.credentials_trust_heading')); ?></h2>
-            <h3 id="help-host-identity" tabindex="-1"><?php echo h(__t('help_credentials.ansible_host_identity_heading')); ?></h3>
+        <?php // PR-R6: the Ansible host key stood as the first subsection under the
+              // ESXi certificate check; it is a section of its own, its anchor
+              // stays on its heading. ?>
+        <section class="panel">
+            <h2 id="help-host-identity" tabindex="-1"><?php echo h(__t('help_credentials.ansible_host_identity_heading')); ?></h2>
             <p><?php echo h(__t('help_credentials.ansible_host_identity')); ?></p>
+            <p><?php echo h(__t('help_credentials.ansible_host_identity_b')); ?></p>
+            <p><?php echo h(__t('help_credentials.ansible_host_identity_c')); ?></p>
             <p><?php echo h(__t('help_credentials.ansible_host_identity_fingerprint_only')); ?></p>
             <p><?php echo h(__t('help_credentials.ansible_host_identity_tool')); ?></p>
+        </section>
+        <section class="panel" id="help-credentials-trust">
+            <h2><?php echo h(__t('help_credentials.credentials_trust_heading')); ?></h2>
             <h3><?php echo h(__t('help_credentials.credentials_trust_why_heading')); ?></h3>
             <p><?php echo h(__t('help_credentials.credentials_trust_why')); ?></p>
             <h3><?php echo h(__t('help_credentials.credentials_trust_what_heading')); ?></h3>
@@ -32,6 +39,7 @@ declare(strict_types=1);
         <section class="panel" id="help-credentials-tests">
             <h2><?php echo h(__t('help_credentials.credentials_tests_heading')); ?></h2>
             <p><?php echo h(__t('help_credentials.credentials_tests_p1', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
+            <p><?php echo h(__t('help_credentials.credentials_tests_p1_b', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_tests_checks')); ?></p>
             <p><?php echo h(__t('ansible_test.help')); ?></p>
             <p><?php echo h(__t('help_credentials.credentials_tests_p2')); ?></p>
