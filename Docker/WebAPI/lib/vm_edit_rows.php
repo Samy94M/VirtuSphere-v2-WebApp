@@ -5,6 +5,7 @@ declare(strict_types=1);
 /** VM-editor dynamic interface/disk rows, group hints and field-error wrapper. */
 
 require_once __DIR__ . '/vm_disk_layout.php';
+require_once __DIR__ . '/help_page.php';
 
 function render_interface_row(array $interface, int|string $index, array $vlans, bool $canWrite, bool $template = false, array $fieldErrors = []): void
 {
@@ -128,12 +129,13 @@ function render_disk_type_hint(): void
     <div id="<?php echo h(form_hint_id('vm_edit', 'disks')); ?>">
         <p class="hint"><?php echo h(__t('vm_edit.disk_type_hint', [
             'default' => disk_type_label(VIRTUSPHERE_VM_DEFAULTS['disk_type']),
-        ])); ?></p>
+        ])); ?> <a href="<?php echo h(help_url('missions', 'help-disk-types')); ?>"><?php echo h(__t('common.help')); ?></a></p>
+        <?php // PR-R4A: how the system disk and already set-up disks behave is the
+              // help's VM section; the field keeps the limits a person types against. ?>
         <p class="hint"><?php echo h(__t('vm_edit.disk_name_hint', [
             'max' => (string) VIRTUSPHERE_DISK_VOLUME_LABEL_MAX,
             'example' => vm_disk_default_name(2),
-            'legacy' => VIRTUSPHERE_VM_DEFAULTS['disk_name_legacy_default'],
-        ])); ?></p>
+        ])); ?> <a href="<?php echo h(help_url('missions', 'help-vm-edit')); ?>"><?php echo h(__t('common.help')); ?></a></p>
     </div>
     <?php render_disk_label_island(); ?>
     <?php
@@ -150,7 +152,7 @@ function render_interface_gateway_hint(): void
     ?>
     <div id="<?php echo h(form_hint_id('vm_edit', 'interfaces')); ?>">
         <p class="hint"><?php echo h(__t('vm_edit.network_contract_hint')); ?></p>
-        <p class="hint"><?php echo h(__t('vm_edit.gateway_hint')); ?></p>
+        <p class="hint"><?php echo h(__t('vm_edit.gateway_hint')); ?> <a href="<?php echo h(help_url('missions', 'help-vm-edit')); ?>"><?php echo h(__t('common.help')); ?></a></p>
     </div>
     <?php
 }

@@ -47,5 +47,5 @@ return [
     'flash_email_unchanged' => 'Email address unchanged.',
     'flash_password_reset' => 'Password reset.',
     'flash_lock_cleared' => 'Lock cleared.',
-    'flash_check_input' => 'Please check your input.',
+    'flash_check_input' => 'Check your input.',
 ];

@@ -19,6 +19,7 @@ require_once __DIR__ . '/credentials_status.php';
 require_once __DIR__ . '/credentials_test_message.php';
 require_once __DIR__ . '/credentials_host_identity.php';
 require_once __DIR__ . '/log_redaction.php';
+require_once __DIR__ . '/help_page.php';
 require_once __DIR__ . '/settings_page.php';
 require_once __DIR__ . '/ssh.php';
 require_once __DIR__ . '/system_status.php';
@@ -64,9 +65,11 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
         <p class="muted"><?php echo h(__t('credentials.scope_hint')); ?></p>
         <p class="muted"><?php echo h(__t('credentials.mecm_scope_hint')); ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_MACHINE_API)); ?>"><?php echo h(__t('credentials.mecm_scope_link')); ?></a></p>
         <p class="muted"><?php echo h(__t('credentials.ansible_scope_hint')); ?> <a href="<?php echo h(settings_url(VIRTUSPHERE_SETTINGS_TAB_DEPLOY)); ?>"><?php echo h(__t('credentials.ansible_scope_link')); ?></a></p>
-        <p class="muted"><?php echo h(__t('credentials.trust_why')); ?></p>
-        <p class="muted"><?php echo h(__t('credentials.trust_what')); ?></p>
-        <p class="muted"><?php echo h(__t('credentials.trust_how')); ?></p>
+        <?php
+        // PR-R4A: the why/what/how of certificate verification stood here and
+        // again in the help (help_credentials.credentials_trust_*). It lives
+        // there now; the hint at the certificate field links to it.
+        ?>
         <form class="form-grid" method="post" action="credentials.php" autocomplete="off">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="action" value="create">
@@ -94,7 +97,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
                 <?php echo form_error_html('create', 'esxi_cert_kind'); ?>
             </label>
             <label><?php echo h(__t('credentials.label_certificate')); ?><textarea name="esxi_certificate_pem" rows="6"<?php echo form_control_attrs('create', 'esxi_certificate_pem'); ?> placeholder="-----BEGIN CERTIFICATE-----"><?php echo h(form_old('create', 'esxi_certificate_pem')); ?></textarea><?php echo form_error_html('create', 'esxi_certificate_pem'); ?></label>
-            <p class="muted"><?php echo h(__t('credentials.new_cert_hint')); ?></p>
+            <p class="muted"><?php echo h(__t('credentials.new_cert_hint')); ?> <a href="<?php echo h(help_url('credentials', 'help-credentials-trust')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             <div class="actions"><button class="button" type="submit"><?php echo h(__t('common.create')); ?></button></div>
         </form>
     </section>
@@ -102,7 +105,7 @@ layout_header(__t('credentials.title'), $user, 'credentials', 'credentials');
     <section class="panel">
         <h2><?php echo h(__t('credentials.stored_heading')); ?></h2>
         <p class="muted"><?php echo h(__t('credentials.test_hint')); ?> <a href="system_status.php"><?php echo h(__t('credentials.test_hint_link')); ?></a></p>
-        <p class="muted"><?php echo h(__t('credentials.test_checks')); ?></p>
+        <p class="muted"><?php echo h(__t('credentials.test_checks')); ?> <a href="<?php echo h(help_url('credentials', 'help-credentials-tests')); ?>"><?php echo h(__t('common.help')); ?></a></p>
         <div class="table-wrap" tabindex="0"><table>
             <thead><tr><th><?php echo h(__t('credentials.label_type')); ?></th><th><?php echo h(__t('common.name')); ?></th><th><?php echo h(__t('credentials.label_host')); ?></th><th><?php echo h(__t('credentials.label_port')); ?></th><th><?php echo h(__t('credentials.label_username')); ?></th><th><?php echo h(__t('credentials.th_status')); ?></th><th><?php echo h(__t('common.updated')); ?></th><th><?php echo h(__t('common.actions')); ?></th></tr></thead>
             <tbody>

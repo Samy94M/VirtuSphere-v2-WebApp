@@ -26,6 +26,26 @@ const VIRTUSPHERE_HELP_SECTIONS = [
     // The path of a VM as a drawing: the derived phases in rank order. The
     // status section below it explains each phase and finding in words.
     'help-vm-path' => 'missions',
+    // PR-R4A: the long field hints of the VM editor and the mission details
+    // were cut to one or two sentences; their detail lives in these sections,
+    // and each field links to the one that explains it.
+    'help-vm-edit' => 'missions',
+    'help-disk-types' => 'missions',
+    'help-hotplug' => 'missions',
+    'help-autostart' => 'deploy',
+    'help-deploy-verbose' => 'deploy',
+    'help-deploy-storage' => 'deploy',
+    // The same for the settings and credentials pages (PR-R4A).
+    'help-settings-machine-api' => 'settings',
+    'help-settings-allowlist' => 'settings',
+    'help-settings-token' => 'settings',
+    'help-settings-retire' => 'settings',
+    'help-settings-ansible-test' => 'settings',
+    'help-settings-https' => 'settings',
+    'help-settings-version' => 'settings',
+    'help-credentials-trust' => 'credentials',
+    'help-host-identity' => 'credentials',
+    'help-credentials-tests' => 'credentials',
     'help-status-overview' => 'system-status',
     // The status vocabulary (SY2): every tone with its word, colour and icon.
     'help-status-vocabulary' => 'system-status',

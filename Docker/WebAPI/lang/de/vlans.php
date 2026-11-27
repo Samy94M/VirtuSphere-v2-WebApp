@@ -6,7 +6,7 @@ return [
     'title' => 'Portgruppen',
     'confirm_delete' => 'Zurückgezogenen Katalog-Eintrag :name löschen? Existiert die Portgruppe auf ESXi noch, legt der nächste Abruf sie neu an.',
     'flash_deleted' => 'Katalog-Eintrag entfernt.',
-    'catalog_hint' => 'Der Portgruppenkatalog wird aus ESXi gelesen (nur Anzeige): Portgruppen werden aus den ESXi-Zugängen übernommen, die auf der Seite „Zugangsdaten“ registriert sind. Anlegen und Bearbeiten gibt es hier nicht; verschwindet eine Portgruppe, wird der Eintrag zurückgezogen (nicht gelöscht). Zuweisungen in Missionen und VMs bleiben als Name erhalten. Die Spalte „Auf ESXi“ zeigt, auf wie vielen erfolgreich abgerufenen Hosts die Portgruppe existiert; die Spalte „VLAN-ID“ warnt, wenn derselbe Name auf verschiedenen Hosts unterschiedliche IDs trägt.',
+    'catalog_hint' => 'Die Portgruppen kommen aus dem Inventar der ESXi-Zugänge und werden hier nur angezeigt. Verschwindet eine Portgruppe, wird der Eintrag zurückgezogen, nicht gelöscht; Zuweisungen in Missionen und VMs bleiben als Name erhalten.',
     'link_credentials' => 'Zugangsdaten öffnen',
     'status_active' => 'Aktiv',
     'filter_label' => 'Statusfilter',

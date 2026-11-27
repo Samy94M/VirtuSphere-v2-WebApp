@@ -21,7 +21,7 @@ declare(strict_types=1);
                 // P2b-5: below this many active entries the brake does not apply
                 // (packages_retire_guard(), per catalog table).
                 'min_active' => VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE,
-            ])); ?></p>
+            ])); ?> <a href="<?php echo h(help_url('settings', 'help-settings-retire')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             <form class="form-grid" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_retire_threshold">
@@ -36,13 +36,18 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('settings.esxi_title')); ?></h2>
             <?php $esxiHintId = form_hint_id('esxi', 'inventory_group'); ?>
-            <p class="muted" id="<?php echo h($esxiHintId); ?>"><?php echo h(__t('settings.esxi_hint')); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('layout.nav_system_status')); ?></a><?php } ?></p>
+            <?php
+            // One link to System status for the panel (PR-R4A, R2F hand-over): it
+            // sits with the sentence that says the results are shown there. The
+            // note about the Ansible access no longer repeats it.
+            ?>
+            <p class="muted" id="<?php echo h($esxiHintId); ?>"><?php echo h(__t('settings.esxi_hint')); ?><?php if (can('system.config', $user)) { ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('settings.esxi_status_link')); ?></a><?php } ?></p>
             <?php
             // The note is about the Ansible access the form below chooses, not
             // about its save button; under the button it read as the button's
             // consequence (G13, PR-R2F). Same for the test interval below.
             ?>
-            <p class="muted"><?php echo h(__t('settings.esxi_ansible_note')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('settings.esxi_status_link')); ?></a></p>
+            <p class="muted"><?php echo h(__t('settings.esxi_ansible_note')); ?></p>
             <form class="form-grid" method="post" action="settings.php"<?php echo form_control_attrs('esxi', 'inventory_group', null, [$esxiHintId], ''); ?> role="group" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_esxi_inventory">
@@ -74,7 +79,7 @@ declare(strict_types=1);
         <section class="panel">
             <h2><?php echo h(__t('ansible_test.title')); ?></h2>
             <p class="muted" id="<?php echo h(form_hint_id('ansible_test', 'ansible_test_interval_hours')); ?>"><?php echo h(__t('ansible_test.hint', ['default' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX])); ?></p>
-            <p class="hint"><?php echo h(__t('ansible_test.behaviour')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('ansible_test.status_link')); ?></a></p>
+            <p class="hint"><?php echo h(__t('ansible_test.behaviour')); ?> <a href="<?php echo h(help_url('settings', 'help-settings-ansible-test')); ?>"><?php echo h(__t('common.help')); ?></a> &middot; <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ANSIBLE)); ?>"><?php echo h(__t('ansible_test.status_link')); ?></a></p>
             <form class="form-grid" method="post" action="settings.php" autocomplete="off">
                 <?php echo csrf_field(); ?>
                 <input type="hidden" name="action" value="save_ansible_test_interval">

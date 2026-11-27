@@ -3,10 +3,10 @@ declare(strict_types=1);
 return [
     'title' => 'Automatischer Ansible-Volltest',
     'interval' => 'Prüfintervall (Stunden, 0 = aus)',
-    'hint' => 'Prüft alle registrierten Ansible-Zugänge über denselben Volltest wie „Volltest jetzt starten“: SSH, Werkzeuge, SFTP und bei konfigurierter API-Basis-URL auch die Verbindung zum Portal. Standard: :default Stunden. Ganze Stunden bis :max sind erlaubt; 0 deaktiviert die Automatik.',
-    'behaviour' => 'Der Bereitstellungsdienst startet fällige Prüfungen im Hintergrund, sobald er frei und die Auftragsannahme aktiv ist. Das Intervall zählt ab dem letzten Prüfstart, auch bei Fehler oder Unterbrechung. Manuelle Prüfungen verschieben den nächsten Termin ebenfalls. Änderungen gelten für kommende Prüfungen; eine laufende Prüfung wird dadurch nicht abgebrochen.',
+    'hint' => 'Prüft alle registrierten Ansible-Zugänge in diesem Abstand mit dem Volltest. Standard sind :default Stunden, erlaubt ganze Stunden bis :max; 0 schaltet die Automatik ab.',
+    'behaviour' => 'Fällige Prüfungen startet der Bereitstellungsdienst im Hintergrund, sobald er frei ist; das Intervall zählt ab dem letzten Prüfstart.',
     'invalid' => 'Geben Sie eine ganze Stundenzahl zwischen :min und :max ein.',
-    'status_link' => 'Ansible-Systemstatus öffnen',
+    'status_link' => 'Systemstatus öffnen',
     'configure' => 'Prüfintervall ändern',
     'cadence' => 'Automatisch im Abstand von :hours h, sobald der Dienst frei und die Auftragsannahme aktiv ist; Beleg :days Tage gültig. Manueller Volltest weiterhin möglich.',
     'cadence_off' => 'Automatischer Volltest ausgeschaltet; manuell auf Klick. Beleg :days Tage gültig.',

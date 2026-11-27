@@ -46,7 +46,7 @@ if ($deployPreview !== null) {
             </div>
         <?php } ?>
         <?php if ($previewHasSchedule) { ?>
-        <p class="muted"><?php echo h(__t('deploy.preview_hint', ['tz' => portal_timezone()])); ?></p>
+        <p class="muted"><?php echo h(__t('deploy.preview_hint')); ?> <?php echo h(__t('common.timezone_note', ['tz' => portal_timezone()])); ?></p>
         <div class="table-wrap" tabindex="0"><table>
             <thead><tr><th><?php echo h(__t('common.name')); ?></th><th><?php echo h(__t('deploy.preview_when')); ?></th></tr></thead>
             <tbody>
@@ -68,7 +68,7 @@ if ($deployPreview !== null) {
         <?php if ($deployPreview['storage'] !== []) { ?>
             <h3><?php echo h(__t('deploy.storage_heading')); ?></h3>
             <?php deploy_render_storage_table($deployPreview['storage'], $deployPreview['capacity']); ?>
-            <p class="hint"><?php echo h(__t('deploy.storage_hint')); ?></p>
+            <p class="hint"><?php echo h(__t('deploy.storage_hint')); ?> <a href="<?php echo h(help_url('deploy', 'help-deploy-storage')); ?>"><?php echo h(__t('common.help')); ?></a></p>
         <?php } ?>
         <form method="post" action="<?php echo h($redirectBase); ?>">
             <?php echo csrf_field(); ?>
@@ -161,19 +161,19 @@ if ($deployPreview !== null) {
             ?>
             <label><?php echo h(__t('deploy.label_powercycle_wait')); ?>
                 <input type="number" name="powercycle_wait"<?php echo form_control_attrs('schedule', 'powercycle_wait', null, $powercycleModeActive ? false : [$powercycleLockHintId], ''); ?> value="<?php echo h(deploy_form_value('powercycle_wait', (string) VIRTUSPHERE_POWERCYCLE_WAIT_DEFAULT)); ?>" min="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_POWERCYCLE_WAIT_MAX); ?>" data-powercycle-input>
-                <small class="hint" id="<?php echo h($powercycleLockHintId); ?>" data-powercycle-lock<?php echo $powercycleModeActive ? ' hidden' : ''; ?>><span class="hint-subject"><?php echo h(__t('deploy.label_powercycle_wait')); ?>:</span> <?php echo h(__t('deploy.powercycle_lock_hint')); ?></small>
+                <small class="hint" id="<?php echo h($powercycleLockHintId); ?>" data-powercycle-lock<?php echo $powercycleModeActive ? ' hidden' : ''; ?>><?php echo h(__t('deploy.powercycle_lock_hint')); ?></small>
             </label>
             <label><?php echo h(__t('deploy.label_start_wait')); ?>
                 <input type="number" name="start_wait"<?php echo form_control_attrs('schedule', 'start_wait', null, $startModeActive ? [$startWaitHintId] : [$startWaitHintId, $startWaitLockHintId], ''); ?> value="<?php echo h(deploy_form_value('start_wait', (string) VIRTUSPHERE_START_WAIT_SECONDS_DEFAULT)); ?>" min="<?php echo h((string) VIRTUSPHERE_START_WAIT_SECONDS_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_START_WAIT_SECONDS_MAX); ?>" data-start-wait-input>
-                <small class="hint" id="<?php echo h($startWaitHintId); ?>"><span class="hint-subject"><?php echo h(__t('deploy.label_start_wait')); ?>:</span> <?php echo h(__t('deploy.start_wait_hint', ['max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX])); ?></small>
-                <small class="hint" id="<?php echo h($startWaitLockHintId); ?>" data-start-wait-lock<?php echo $startModeActive ? ' hidden' : ''; ?>><span class="hint-subject"><?php echo h(__t('deploy.label_start_wait')); ?>:</span> <?php echo h(__t('deploy.start_wait_lock_hint')); ?></small>
+                <small class="hint" id="<?php echo h($startWaitHintId); ?>"><?php echo h(__t('deploy.start_wait_hint', ['max' => VIRTUSPHERE_START_WAIT_SECONDS_MAX])); ?></small>
+                <small class="hint" id="<?php echo h($startWaitLockHintId); ?>" data-start-wait-lock<?php echo $startModeActive ? ' hidden' : ''; ?>><?php echo h(__t('deploy.start_wait_lock_hint')); ?></small>
             </label>
         </div>
         <?php $verboseHintId = form_hint_id('schedule', 'verbose_group'); ?>
         <div class="field-stack" role="group"<?php echo form_control_attrs('schedule', 'verbose_group', null, [$verboseHintId], ''); ?>>
                 <span class="field-label"><?php echo h(__t('deploy.verbose_heading')); ?></span>
                 <label class="checkbox-item"><input type="checkbox" name="verbose" value="1" <?php echo deploy_form_value('verbose') === '1' ? 'checked' : ''; ?>> <?php echo h(__t('deploy.label_verbose')); ?></label>
-            <p class="hint" id="<?php echo h($verboseHintId); ?>"><span class="hint-subject"><?php echo h(__t('deploy.label_verbose')); ?>:</span> <?php echo h(__t('deploy.verbose_hint')); ?> <a href="<?php echo h(help_url('deploy')); ?>"><?php echo h(__t('common.help')); ?></a></p>
+            <p class="hint" id="<?php echo h($verboseHintId); ?>"><?php echo h(__t('deploy.verbose_hint')); ?> <a href="<?php echo h(help_url('deploy', 'help-deploy-verbose')); ?>"><?php echo h(__t('common.help')); ?></a></p>
         </div>
         <?php if ($hostWarnings !== []) { ?>
             <script type="application/json" data-deploy-host-warnings nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($hostWarnings, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
@@ -219,7 +219,7 @@ if ($deployPreview !== null) {
                 <?php if ($storageIsland !== null) { ?>
                     <script type="application/json" data-deploy-storage nonce="<?php echo h(virtusphere_csp_nonce()); ?>"><?php echo json_encode($storageIsland, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR); ?></script>
                 <?php } ?>
-                <p class="hint" id="<?php echo h($storageHintId); ?>"><?php echo h(__t('deploy.storage_hint')); ?></p>
+                <p class="hint" id="<?php echo h($storageHintId); ?>"><?php echo h(__t('deploy.storage_hint')); ?> <a href="<?php echo h(help_url('deploy', 'help-deploy-storage')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             </div>
         <?php } ?>
         <?php $scheduleHintId = form_hint_id('schedule', 'schedule_group'); ?>
@@ -239,7 +239,7 @@ if ($deployPreview !== null) {
                 <small class="hint" id="<?php echo h(form_hint_id('schedule', 'stagger_minutes')); ?>"><?php echo h(__t('deploy.stagger_hint', ['modes' => deploy_mode_label_list(VIRTUSPHERE_DEPLOY_STAGGER_MODES)])); ?></small>
                 <?php echo form_error_html('schedule', 'stagger_minutes'); ?>
             </label>
-            <p class="hint" id="<?php echo h($scheduleHintId); ?>"><?php echo h(__t('deploy.schedule_tz_hint', ['tz' => portal_timezone()])); ?></p>
+            <p class="hint" id="<?php echo h($scheduleHintId); ?>"><?php echo h(__t('common.timezone_note', ['tz' => portal_timezone()])); ?></p>
         </div>
         <div class="actions actions-row">
             <noscript><button class="button button-secondary" type="submit" name="action" value="check"><?php echo h(__t('deploy.preparation_check')); ?></button></noscript>

@@ -25,18 +25,19 @@ require_once __DIR__ . '/../backup_evidence.php';
             <p><?php echo h(__t('help_settings.settings_deploy_test_stale', ['days' => VIRTUSPHERE_ANSIBLE_PREFLIGHT_STALE_AFTER_DAYS])); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-settings-machine-api">
             <h2><?php echo h(__t('settings.tab_machine_api')); ?></h2>
             <?php // The one sentence that makes the whole tab readable: it is inbound only. ?>
             <p><?php echo h(__t('help_settings.settings_machine_api_directions')); ?></p>
-            <h3><?php echo h(__t('help_settings.settings_allowlist_heading')); ?></h3>
+            <h3 id="help-settings-allowlist" tabindex="-1"><?php echo h(__t('help_settings.settings_allowlist_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_allowlist_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_allowlist_p2')); ?></p>
             <p><?php echo h(__t('help_settings.settings_allowlist_p3')); ?></p>
             <h3><?php echo h(__t('help_settings.settings_reporting_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_reporting_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_reporting_p2')); ?></p>
-            <h3><?php echo h(__t('help_settings.settings_token_heading')); ?></h3>
+            <p><?php echo h(__t('help_settings.settings_reporting_p3')); ?></p>
+            <h3 id="help-settings-token" tabindex="-1"><?php echo h(__t('help_settings.settings_token_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_token_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_token_p2')); ?></p>
             <p><?php echo h(__t('help_settings.settings_token_p3')); ?></p>
@@ -44,26 +45,29 @@ require_once __DIR__ . '/../backup_evidence.php';
 
         <section class="panel">
             <h2><?php echo h(__t('settings.tab_catalog')); ?></h2>
-            <h3><?php echo h(__t('help_settings.settings_retire_heading')); ?></h3>
+            <h3 id="help-settings-retire" tabindex="-1"><?php echo h(__t('help_settings.settings_retire_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_retire_p1', [
                 'default' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_DEFAULT,
                 'min' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MIN,
                 'max' => VIRTUSPHERE_PACKAGE_RETIRE_THRESHOLD_MAX,
             ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_retire_p2')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_retire_p3', ['min_active' => VIRTUSPHERE_PACKAGE_RETIRE_MIN_ACTIVE])); ?></p>
             <h3><?php echo h(__t('help_settings.settings_esxi_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_esxi_p1', [
                 'max' => VIRTUSPHERE_ESXI_INVENTORY_INTERVAL_HOURS_MAX,
                 'evidence_hours' => intdiv(VIRTUSPHERE_ESXI_DATACENTER_DERIVATION_MAX_AGE_SECONDS, 3600),
             ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_esxi_p2_interval_zero', ['days' => VIRTUSPHERE_ESXI_INVENTORY_STALE_AFTER_DAYS])); ?></p>
-            <h3><?php echo h(__t('ansible_test.title')); ?></h3>
-            <p><?php echo h(__t('ansible_test.hint', ['default' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX])); ?></p>
-            <p><?php echo h(__t('ansible_test.behaviour')); ?></p>
+            <?php // PR-R4A: the settings card carries the short forms; the full
+                  // explanation of the automatic test is help text of its own. ?>
+            <h3 id="help-settings-ansible-test" tabindex="-1"><?php echo h(__t('ansible_test.title')); ?></h3>
+            <p><?php echo h(__t('help_settings.ansible_test_hint', ['default' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_DEFAULT, 'max' => VIRTUSPHERE_ANSIBLE_TEST_INTERVAL_HOURS_MAX])); ?></p>
+            <p><?php echo h(__t('help_settings.ansible_test_behaviour')); ?></p>
             <p><?php echo h(__t('ansible_test.help')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-settings-https">
             <h2><?php echo h(__t('settings.tab_https')); ?></h2>
             <h3><?php echo h(__t('help_settings.settings_https_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_https_p1')); ?></p>
@@ -73,6 +77,7 @@ require_once __DIR__ . '/../backup_evidence.php';
                 'days' => intdiv(VIRTUSPHERE_HTTPS_HSTS_MAX_AGE_SECONDS, 86400),
             ])); ?></p>
             <p><?php echo h(__t('help_settings.settings_https_p4')); ?></p><p><?php echo h(__t('settings.https_pin_consumers')); ?></p><p><?php echo h(__t('help_settings.settings_https_plaintext')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_https_scripts')); ?></p>
         </section>
 
         <section class="panel">
@@ -113,11 +118,12 @@ require_once __DIR__ . '/../backup_evidence.php';
             ])); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-settings-version">
             <h2><?php echo h(__t('settings.tab_version')); ?></h2>
             <h3><?php echo h(__t('help_settings.settings_version_heading')); ?></h3>
             <p><?php echo h(__t('help_settings.settings_version_p1')); ?></p>
             <p><?php echo h(__t('help_settings.settings_version_p2')); ?></p>
             <p><?php echo h(__t('help_settings.settings_version_p3')); ?></p>
+            <p><?php echo h(__t('help_settings.settings_version_p4')); ?></p>
         </section>
     </div>

@@ -13,8 +13,12 @@ declare(strict_types=1);
     <div class="stack" id="panel-https" role="tabpanel" aria-labelledby="tab-https" tabindex="0" data-tab-panel hidden>
         <section class="panel">
             <h2><?php echo h(__t('settings.https_title')); ?></h2>
-            <p class="muted"><?php echo h(__t('settings.https_hint')); ?></p>
-            <p class="hint"><?php echo h(__t('settings.https_pin_consumers')); ?> <a href="<?php echo h(help_url('settings')); ?>"><?php echo h(__t('common.help')); ?></a></p>
+            <?php
+            // PR-R4A: the pin note stood here and again under the installed
+            // certificate, the only place a certificate change can concern. It
+            // stays there; the help link moves to the panel's own hint.
+            ?>
+            <p class="muted"><?php echo h(__t('settings.https_hint')); ?> <a href="<?php echo h(help_url('settings', 'help-settings-https')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             <?php if ($httpsEnabled && !$httpsListenerLive) { ?>
                 <?php // The setting says "on" but the web server threw the generated config
                       // out (init.sh quarantine). Without this the card claims HTTPS is live

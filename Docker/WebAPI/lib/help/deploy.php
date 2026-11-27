@@ -48,7 +48,7 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
             <p><?php echo h(__t('help_deploy.deploy_state_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_state_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_state_p3')); ?></p>
-            <h3><?php echo h(__t('help_deploy.deploy_verbose_heading')); ?></h3>
+            <h3 id="help-deploy-verbose" tabindex="-1"><?php echo h(__t('help_deploy.deploy_verbose_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.deploy_verbose_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.deploy_verbose_p2')); ?></p>
             <h3><?php echo h(__t('help_deploy.deploy_output_limits_heading')); ?></h3>
@@ -118,7 +118,7 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
             <p><?php echo h(__t('help_deploy.deploy_cancel_p3')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-deploy-storage">
             <h2><?php echo h(__t('help_deploy.deploy_storage_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.deploy_storage_p1', [
                 // The default disk size with its unit and the default
@@ -160,6 +160,7 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
             <p><?php echo h(__t('help_deploy.create_progress_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p2')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p3')); ?></p>
+            <p><?php echo h(__t('help_deploy.create_progress_release')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p4')); ?></p>
             <p><?php echo h(__t('help_deploy.create_progress_p5', [
                 'retries' => (string) (VIRTUSPHERE_CREATE_MAX_ATTEMPTS - 1),
@@ -199,12 +200,13 @@ require_once __DIR__ . '/../help_deploy_job_states.php';
             <p><?php echo h(__t('help_deploy.deploy_retry_p3')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-autostart">
             <h2><?php echo h(__t('help_deploy.autostart_heading')); ?></h2>
             <p><?php echo h(__t('help_deploy.autostart_p1')); ?></p>
             <h3><?php echo h(__t('help_deploy.autostart_inherit_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.autostart_inherit_p1', ['seconds' => VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT])); ?></p>
             <p><?php echo h(__t('help_deploy.autostart_inherit_p2')); ?></p>
+            <p><?php echo h(__t('help_deploy.autostart_delays_p1')); ?></p>
             <h3><?php echo h(__t('help_deploy.autostart_heartbeat_heading')); ?></h3>
             <p><?php echo h(__t('help_deploy.autostart_heartbeat_p1')); ?></p>
             <p><?php echo h(__t('help_deploy.autostart_heartbeat_p2')); ?></p>

@@ -38,8 +38,8 @@ return [
     'vm_mecm_reset_success' => 'MECM ID was reset. The next rollout registers this VM with MECM as ":hostname". If not done yet: delete the old device in MECM; until then the device sync waits.',
     'vm_mecm_reset_already_pending' => 'Nothing to do: ":hostname" is already waiting as the next rollout name and the VM is queued for MECM.',
     'vm_mecm_reset_already_pending_reason' => 'already queued',
-    'vm_mecm_reset_active_job' => 'Reset is not possible: a deploy job of this mission is currently running. Please wait until it has finished.',
-    'vm_mecm_reset_invalid_hostname' => 'Reset is not possible: the Windows hostname cannot be used as a rollout name in MECM. At most :max characters, only letters, digits and internal hyphens, no dot. Please correct it in the VM editor first.',
+    'vm_mecm_reset_active_job' => 'Reset is not possible: a deploy job of this mission is currently running. Wait until it has finished.',
+    'vm_mecm_reset_invalid_hostname' => 'Reset is not possible: the Windows hostname cannot be used as a rollout name in MECM. At most :max characters, only letters, digits and internal hyphens, no dot. Correct it in the VM editor first.',
     // A state, not a refusal (decision of 2026-09-03): VirtuSphere deletes nothing
     // in MECM, so after a reset exactly one step is left and it belongs to a
     // person. The sentence therefore sits on the VM, not inside an error only

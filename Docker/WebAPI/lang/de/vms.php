@@ -46,7 +46,7 @@ return [
     'bulk_confirm_reset' => 'MECM-ID der ausgewählten VMs zurücksetzen? Löschen Sie vorher das alte MECM-Gerät jeder VM in MECM; das Portal löscht es nicht. Der nächste Rollout meldet jede erfolgreich bearbeitete VM erneut an.',
     'bulk_select_hint' => 'Wählen Sie mindestens eine VM aus.',
     'bulk_hint' => 'Höchstens :cap VMs je Aktion. Bulk-Aktionen betreffen nur die Portal-Datensätze, nie den Hypervisor.',
-    'bulk_none_selected' => 'Bitte zuerst VMs auswählen.',
+    'bulk_none_selected' => 'Wählen Sie zuerst VMs aus.',
     'bulk_too_many' => 'Zu viele VMs ausgewählt (Grenze :cap).',
     'bulk_delete_done' => ':done von :selected ausgewählten Portal-Datensätzen gelöscht. Auf dem Hypervisor wurde keine VM gelöscht.',
     'bulk_reset_done' => ':done von :selected MECM-Rücksetzungen vorbereitet. Falls noch nicht geschehen: altes Gerät in MECM löschen; bis dahin wartet der Device-Sync.',

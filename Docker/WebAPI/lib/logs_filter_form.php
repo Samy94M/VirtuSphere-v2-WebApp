@@ -207,7 +207,7 @@ function logs_render_filter_form(array $filter, string $resetUrl, ?string $expor
         <?php // The dates are read in the display timezone while the rows are
               // stored in UTC, so the sentence says which day boundary applies;
               // an operator comparing against a UTC log elsewhere needs it. ?>
-        <p class="hint"><?php echo h(__t('logs.date_range_hint', ['tz' => portal_timezone()])); ?></p>
+        <p class="hint"><?php echo h(__t('logs.date_range_hint')); ?> <?php echo h(__t('common.timezone_note', ['tz' => portal_timezone()])); ?></p>
         <details class="filter-advanced"<?php echo logs_filter_advanced_is_open($filter) ? ' open' : ''; ?>>
             <summary><?php echo h(__t('logs.advanced_heading')); ?></summary>
             <div class="form-grid">

@@ -96,7 +96,7 @@ layout_header(__t('logs.title'), $user, 'logs', 'system-status');
               // rows are stored in UTC (ADR-0022). An audit row is read against
               // an incident whose time somebody else noted, so the zone has to
               // be on the page rather than inferred. ?>
-        <p class="muted"><?php echo h(__t('logs.retention_note', ['days' => $retentionDays])); ?> <?php echo h(__t('logs.timezone_note', ['tz' => portal_timezone()])); ?></p>
+        <p class="muted"><?php echo h(__t('logs.retention_note', ['days' => $retentionDays])); ?> <?php echo h(__t('common.timezone_note', ['tz' => portal_timezone()])); ?></p>
         <div class="table-wrap" tabindex="0"><table>
             <thead><tr><th><?php echo h(__t('logs.th_id')); ?></th><th><?php echo h(__t('logs.th_time')); ?></th><th><?php echo h(__t('logs.th_category')); ?></th><th><?php echo h(__t('logs.th_user')); ?></th><th><?php echo h(__t('logs.th_ip')); ?></th><th><?php echo h(__t('logs.th_message')); ?></th><th><?php echo h(__t('logs.th_correlation')); ?></th></tr></thead>
             <tbody>

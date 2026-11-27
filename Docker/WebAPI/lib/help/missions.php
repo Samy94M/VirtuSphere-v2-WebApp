@@ -19,7 +19,7 @@ require_once __DIR__ . '/../vm_status_live.php';
             <p><?php echo h(__t('help_missions.edit_conflict_p1')); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-vm-edit">
             <h2><?php echo h(__t('help_missions.vm_steps_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.vm_steps_intro')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_1')); ?></p>
@@ -27,6 +27,8 @@ require_once __DIR__ . '/../vm_status_live.php';
             <p><?php echo h(__t('help_missions.vm_steps_3', ['max' => (int) VIRTUSPHERE_VM_LIMITS['vm_name_max_length']])); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_4')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_5')); ?></p>
+            <?php // PR-R4A: the field keeps the rule, the reason it is the normal case lives here. ?>
+            <p><?php echo h(__t('help_missions.vm_steps_gateway')); ?></p>
             <p><?php echo h(__t('help_missions.vm_steps_6', [
                 'legacy' => VIRTUSPHERE_VM_DEFAULTS['disk_name_legacy_default'],
                 'example' => vm_disk_default_name(2),
@@ -168,7 +170,7 @@ require_once __DIR__ . '/../vm_status_live.php';
             <p><?php echo h(__t('help_missions.location_p3')); ?> <a href="<?php echo h(system_status_url(VIRTUSPHERE_SYSTEM_STATUS_ANCHOR_ESXI)); ?>"><?php echo h(__t('help_missions.link_system_status')); ?></a></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-disk-types">
             <h2><?php echo h(__t('help_missions.disktype_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.disktype_p1')); ?></p>
             <ul>
@@ -214,7 +216,7 @@ require_once __DIR__ . '/../vm_status_live.php';
             <p><?php echo h(__t('help_missions.bulk_p2', ['cap' => VIRTUSPHERE_VM_BULK_CAP])); ?></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="help-hotplug">
             <h2><?php echo h(__t('help_missions.hotplug_heading')); ?></h2>
             <p><?php echo h(__t('help_missions.hotplug_p1')); ?></p>
         </section>

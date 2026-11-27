@@ -246,28 +246,20 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                     // fields and their prose form one group spanning two grid tracks. A hint
                     // inside the datacenter cell would set the height of the whole first row;
                     // one as a full-width row would start at the far left, under "Name".
+                    // Each hint names its field in its own sentence; the bold repeated
+                    // label in front of it is gone (G9, PR-R4A).
                     $locationHints = [];
                     if (!$hideMissionDatacenter) {
-                        $locationHints[] = [
-                            __t('mission_details.label_datacenter'),
-                            __t('mission_details.datacenter_optional_hint'),
-                        ];
+                        $locationHints[] = __t('mission_details.datacenter_optional_hint');
                     }
                     if ($locationNotes !== []) {
-                        $multiCredentialSubject = [__t('mission_details.label_datastore')];
-                        if (!$hideMissionDatacenter) {
-                            $multiCredentialSubject[] = __t('mission_details.label_datacenter');
-                        }
                         // Exhaustive match, no default: a new note token has to
                         // be given a sentence rather than disappearing silently.
-                        $locationHints[] = [
-                            implode(' / ', $multiCredentialSubject),
-                            implode(' ', array_map(static fn (string $note): string => match ($note) {
-                                'host_choice' => __t('mission_details.location_host_choice_hint'),
-                                'buckets' => __t('mission_details.location_bucket_hint'),
-                                'never_pulled' => __t('mission_details.location_never_pulled_hint'),
-                            }, $locationNotes)),
-                        ];
+                        $locationHints[] = implode(' ', array_map(static fn (string $note): string => match ($note) {
+                            'host_choice' => __t('mission_details.location_host_choice_hint'),
+                            'buckets' => __t('mission_details.location_bucket_hint'),
+                            'never_pulled' => __t('mission_details.location_never_pulled_hint'),
+                        }, $locationNotes));
                     }
                     // A lone datastore without prose is an ordinary field, not a group.
                     $groupLocationFields = !$hideMissionDatacenter || $locationHints !== [];
@@ -302,8 +294,8 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                       // alone goes under that field; once a note concerns both controls,
                       // all of it spans the group, as in the VM editor. ?>
                 <?php if ($hasLocationHint) { ?><div class="<?php echo $locationNotes === [] ? 'field-group-second' : 'form-grid-full'; ?>" id="<?php echo h($locationHintId); ?>"><?php } ?>
-                <?php foreach ($locationHints as [$hintSubject, $hintText]) { ?>
-                    <p class="hint"><span class="hint-subject"><?php echo h($hintSubject); ?>:</span> <?php echo h($hintText); ?></p>
+                <?php foreach ($locationHints as $hintText) { ?>
+                    <p class="hint"><?php echo h($hintText); ?></p>
                 <?php } ?>
                 <?php if (in_array('never_pulled', $locationNotes, true)) { ?>
                     <?php // The note above names the cause; this is the one place that
@@ -342,8 +334,8 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                             <?php echo h(__t('mission_details.autostart_wait_heartbeat')); ?>
                         </label>
                     </div>
-                    <p class="hint" id="<?php echo h($autostartHintId); ?>"><?php echo h(__t('mission_details.autostart_hint')); ?></p>
-                    <p class="hint" id="<?php echo h($heartbeatHintId); ?>"><span class="hint-subject"><?php echo h(__t('mission_details.autostart_wait_heartbeat')); ?>:</span> <?php echo h(__t('mission_details.autostart_heartbeat_hint')); ?></p>
+                    <p class="hint" id="<?php echo h($autostartHintId); ?>"><?php echo h(__t('mission_details.autostart_hint')); ?> <a href="<?php echo h(help_url('deploy', 'help-autostart')); ?>"><?php echo h(__t('common.help')); ?></a></p>
+                    <p class="hint" id="<?php echo h($heartbeatHintId); ?>"><?php echo h(__t('mission_details.autostart_heartbeat_hint')); ?></p>
                 </div>
                 <?php $delayHintId = form_hint_id('update', 'autostart_delays'); ?>
                 <label><?php echo h(__t('mission_details.autostart_start_delay')); ?><input type="number" name="autostart_start_delay"<?php echo form_control_attrs('update', 'autostart_start_delay', null, [$delayHintId]); ?> min="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MIN); ?>" max="<?php echo h((string) VIRTUSPHERE_AUTOSTART_DELAY_MAX); ?>" value="<?php echo h(form_old('update', 'autostart_start_delay', (string) ((int) ($mission['autostart_start_delay'] ?? VIRTUSPHERE_AUTOSTART_DELAY_DEFAULT)))); ?>" <?php echo $missionWrite ? '' : 'readonly'; ?>><?php echo form_error_html('update', 'autostart_start_delay'); ?></label>
@@ -356,7 +348,7 @@ layout_header($pageTitle, $user, $isTemplate ? 'templates' : 'missions', 'missio
                     </select>
                     <?php echo form_error_html('update', 'autostart_stop_action'); ?>
                 </label>
-                <p class="hint form-grid-span-2" id="<?php echo h($delayHintId); ?>"><?php echo h(__t('mission_details.autostart_delay_hint')); ?></p>
+                <p class="hint form-grid-span-2" id="<?php echo h($delayHintId); ?>"><?php echo h(__t('mission_details.autostart_delay_hint')); ?> <a href="<?php echo h(help_url('deploy', 'help-autostart')); ?>"><?php echo h(__t('common.help')); ?></a></p>
             </div>
             <?php if (can('missions.write', $user)) { ?><?php echo form_unsaved_status_html(); ?><div class="actions"><button class="button" type="submit" data-busy-label="<?php echo h(__t('mission_details.save_busy')); ?>"><?php echo h(__t('common.save')); ?></button></div><?php } ?>
         </form>

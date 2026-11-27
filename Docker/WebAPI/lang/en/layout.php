@@ -64,6 +64,6 @@ return [
     'err_esxi_create_guest' => 'VM :name: the guest OS :os needs at least ESXi :floor, but the selected host reports ESXi :release. Choose another guest OS in the VM or use a newer host.',
     // An unexpected fault of a portal action (R18). :ref is the request's
     // correlation ID, the same one the server log line carries (C18).
-    'err_unexpected' => 'The action could not be completed. Please give the administrator the correlation ID :ref so the error can be found in the server log.',
+    'err_unexpected' => 'The action could not be completed. Give the administrator the correlation ID :ref so the error can be found in the server log.',
     'err_action_failed' => 'The action could not be completed.',
 ];

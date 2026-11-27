@@ -6,7 +6,7 @@ return [
     'title' => 'Port groups',
     'confirm_delete' => 'Delete retired catalog entry :name? If the port group still exists on ESXi, the next fetch re-creates it.',
     'flash_deleted' => 'Catalog entry removed.',
-    'catalog_hint' => 'The port group catalog is ESXi-owned (display only): port groups are taken from the ESXi credentials registered on the "Credentials" page. There is no create or edit here; when a port group disappears the entry is retired (not deleted). Assignments in missions and VMs are kept as names. The "On ESXi" column shows on how many successfully fetched hosts the port group exists; the "VLAN ID" column warns when the same name carries different IDs on different hosts.',
+    'catalog_hint' => 'The port groups come from the inventory of the ESXi credentials and are only shown here. When a port group disappears, the entry is retired, not deleted; assignments in missions and VMs are kept as names.',
     'link_credentials' => 'Open credentials',
     'status_active' => 'Active',
     'filter_label' => 'Status filter',

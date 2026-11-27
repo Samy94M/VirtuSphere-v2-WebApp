@@ -6,7 +6,7 @@ return [
     'block_bind_rejected' => 'Das AD-Suchkonto wurde abgewiesen. Suchkonto korrigieren und einen Domänencontroller erneut testen.',
     'schema_pending' => 'Die Active-Directory-Datenbankmigration ist noch nicht abgeschlossen. Lokale Konten bleiben verfügbar.',
     'err_schema_pending' => 'Die Active-Directory-Datenbankmigration ist noch nicht abgeschlossen.',
-    'err_config_stale' => 'Die Verzeichnis-Konfiguration wurde zwischenzeitlich geändert. Bitte Seite neu laden und erneut prüfen.',
+    'err_config_stale' => 'Die Verzeichnis-Konfiguration wurde zwischenzeitlich geändert. Laden Sie die Seite neu und prüfen Sie erneut.',
     'tab_accounts' => 'Benutzerkonten',
     'tab_directory' => 'Active Directory',
     'heading' => 'Active Directory über LDAPS',
