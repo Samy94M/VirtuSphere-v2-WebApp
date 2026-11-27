@@ -21,16 +21,27 @@
       register: powercycle_touch
       changed_when: false
   rescue:
+    # TS1-K6 (S1-7): the line passes on the code report_vm_touch.py printed,
+    # touch_refused or touch_transport_failed; none is touch_unconfirmed.
+    # Same rule as export_vm_info.yml; the wire answer is unchanged.
+    - name: Code des nicht bestaetigten Powercycle-Markers festhalten
+      ansible.builtin.set_fact:
+        powercycle_touch_code: >-
+          {{ ansible_failed_result.stdout | default('')
+             | regex_search('^touch_(refused|transport_failed)(?=:)', multiline=True)
+             | default('touch_unconfirmed', true) }}
+
     - name: Nicht bestaetigten Powercycle-Marker als geschlossene Ursache melden
       ansible.builtin.debug:
-        msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] fail Powercycle info {{ powercycle_target['vm_name'] }}: touch_refused"
+        msg: "[{{ powercycle_info_index + 1 }}/{{ powercycle_targets | length }}] fail Powercycle info {{ powercycle_target['vm_name'] }}:
+          {{ powercycle_touch_code }}"
 
     - name: Keine ESXi-Abfrage ohne Markerbestaetigung starten
       ansible.builtin.fail:
         msg: >-
           Powercycle access marker was not confirmed for portal VM
-          {{ powercycle_target['portal_vm_id'] }} (refused by the portal or
-          portal not reachable; the output of the previous task names which);
+          {{ powercycle_target['portal_vm_id'] }} ({{ powercycle_touch_code }}; the
+          output of the marker task above names the reason);
           no ESXi query was started.
 
 # AN-01: addressed by the bound instance UUID, never by the name. The identity

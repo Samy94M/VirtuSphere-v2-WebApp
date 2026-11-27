@@ -27,11 +27,14 @@ import time
 
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 vm_id = int(args['--vm-id'])
+scenario = json.loads(open(os.environ['PC_SCENARIO']).read())
 with open(os.environ['PC_EVENTS'], 'a') as stream:
-    denied = vm_id == int(json.loads(open(os.environ['PC_SCENARIO']).read()).get('touch_failure_vm_id', 0))
+    denied = vm_id == int(scenario.get('touch_failure_vm_id', 0))
     event = ['touch_refused' if denied else 'touch', vm_id, args['--phase'], time.monotonic()]
     stream.write(json.dumps(event) + '\\n')
 if denied:
+    # TS1-K6: the line report_vm_touch.py prints; the playbook passes its code on.
+    print(scenario.get('touch_failure_output', 'touch_refused: server rejected this VM access attempt. cause=attempt_stale'))
     raise SystemExit(1)
 '''
 
@@ -274,8 +277,17 @@ CASES = [
     ('missing-instance-uuid', {'broken': 'instance_uuid'}, [], True),
     ('wrong-instance-identity', {'broken': 'hw_name'}, [], True),
     ('mismatched-instance-identity', {'live_name': {'vm2': 'foreign-vm'}}, [], True),
-    ('touch-refused-before-first-info', {'touch_failure_vm_id': 1001}, [], True),
-    ('touch-refused-does-not-query-or-mark-neighbor', {'touch_failure_vm_id': 1002}, [], True),
+    ('touch-refused-before-first-info', {'touch_failure_vm_id': 1001}, [], True,
+     ('[1/3] fail Powercycle info vm1: touch_refused', 'portal VM 1001 (touch_refused;')),
+    ('touch-refused-does-not-query-or-mark-neighbor', {'touch_failure_vm_id': 1002}, [], True,
+     ('[2/3] fail Powercycle info vm2: touch_refused',)),
+    # TS1-K6 (S1-7): an unreachable portal is not reported as a refusal, and a
+    # reporter that printed no code is not given one.
+    ('touch-transport-failure-keeps-its-code',
+     {'touch_failure_vm_id': 1002, 'touch_failure_output': 'touch_transport_failed: portal did not confirm the access attempt.'},
+     [], True, ('[2/3] fail Powercycle info vm2: touch_transport_failed', 'portal VM 1002 (touch_transport_failed;')),
+    ('touch-without-code-is-unconfirmed', {'touch_failure_vm_id': 1001, 'touch_failure_output': ''}, [], True,
+     ('[1/3] fail Powercycle info vm1: touch_unconfirmed', 'portal VM 1001 (touch_unconfirmed;')),
     ('info-transient', {'info_fail_times': {'vm2': 2}}, cycle(1) + cycle(2) + cycle(3), False,
      ('RETRY Powercycle info vm2', 'attempt 3 of 4')),
     ('info-failure-stops-before-next-touch', {'info_failure': 'vm1'}, [], True,

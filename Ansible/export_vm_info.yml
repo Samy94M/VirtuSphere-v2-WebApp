@@ -20,16 +20,28 @@
       register: export_touch
       changed_when: false
   rescue:
+    # TS1-K6 (S1-7): report_vm_touch.py prints one closed code first:
+    # touch_refused (refused by the portal or not a valid request) or
+    # touch_transport_failed (portal not reached or no answer). The line passes
+    # that code on, so the operator looks at the right place; a reporter that
+    # printed neither is touch_unconfirmed. The wire answer is unchanged.
+    - name: Code des nicht bestaetigten Export-Markers festhalten
+      ansible.builtin.set_fact:
+        export_touch_code: >-
+          {{ ansible_failed_result.stdout | default('')
+             | regex_search('^touch_(refused|transport_failed)(?=:)', multiline=True)
+             | default('touch_unconfirmed', true) }}
+
     - name: Nicht bestaetigten Export-Marker als geschlossene Ursache melden
       ansible.builtin.debug:
-        msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}] fail Export info {{ export_vm_config['vm_name'] }}: touch_refused"
+        msg: "[{{ export_info_index + 1 }}/{{ vm_configurations | length }}] fail Export info {{ export_vm_config['vm_name'] }}: {{ export_touch_code }}"
 
     - name: Keine Exportabfrage ohne Markerbestaetigung starten
       ansible.builtin.fail:
         msg: >-
           Export access marker was not confirmed for portal VM
-          {{ export_vm_config['portal_vm_id'] }} (refused by the portal or
-          portal not reachable; the output of the previous task names which);
+          {{ export_vm_config['portal_vm_id'] }} ({{ export_touch_code }}; the
+          output of the marker task above names the reason);
           no ESXi query was started.
           Results already read in this run were NOT uploaded: start the export again.
 
