@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return [
     'title' => 'History',
-    'open_full' => 'Full history',
+    'open_full' => 'Open history',
     'back' => 'Back to the VM',
     'intro' => 'The stored events of this VM from the selected sources, newest first. What a source removed after its retention period is missing here.',
     'filter_heading' => 'Filter',

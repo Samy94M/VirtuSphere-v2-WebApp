@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return [
     'title' => 'Chronik',
-    'open_full' => 'Ganze Chronik',
+    'open_full' => 'Chronik öffnen',
     'back' => 'Zurück zur VM',
     'intro' => 'Die gespeicherten Ereignisse dieser VM aus den gewählten Quellen, neueste zuerst. Was eine Quelle nach ihrer Aufbewahrungsfrist entfernt hat, fehlt hier.',
     'filter_heading' => 'Filter',

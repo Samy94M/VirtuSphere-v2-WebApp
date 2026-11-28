@@ -102,7 +102,7 @@ return [
     'finding_os_install_watching' => 'Observation running since :since',
     'finding_client_phase_failed' => 'Client phase failed: :phase',
     'finding_client_phase_unconfirmed' => 'Client phase :phase unconfirmed for :minutes min',
-    'finding_package_run_failed' => 'Package report failed: :package',
+    'finding_package_run_failed' => 'Package installation failed: :package',
     'finding_unknown' => 'Unknown finding',
     'finding_more' => '+:count',
     'finding_more_title' => ':count more findings, all in the VM editor',
@@ -123,7 +123,7 @@ return [
     'finding_short_os_install_watching' => 'Observation running',
     'finding_short_client_phase_failed' => 'Client phase failed',
     'finding_short_client_phase_unconfirmed' => 'Client phase unconfirmed',
-    'finding_short_package_run_failed' => 'Package report failed',
+    'finding_short_package_run_failed' => 'Package installation failed',
     'finding_short_mecm_sync_deploy_failed' => 'MECM sync open',
     // The device sync's cause at the finding "Waiting for MECM" (MX1). It is part of
     // the full sentence (VM editor and table cell tooltip), never of the short
