@@ -96,6 +96,8 @@ function virtusphere_legacy_status_from_states(string $lifecycleState, string $m
 // both states and passes the legacy string as a literal (mecm_client_ack.php,
 // mecm_updateid.php, db_importMAC.php). Accepting a legacy string would need an
 // inverse plus an ADR-0008 note: five strings onto two axes is not lossless.
+// The stored string has one internal reader: behind a worker mark the phase
+// takes it as the last evidence (lib/vm_phase_evidence.php, ADR-0008 amendment 1).
 
 // getDeviceList emits the stored MECM token; the deploy failure mark keeps its
 // wire name `failed` (migration 0070, ADR-0019 amendment 5).

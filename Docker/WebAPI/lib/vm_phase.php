@@ -15,7 +15,7 @@ declare(strict_types=1);
  * No conclusion from silence (ADR-0038): a phase is granted only for a report
  * that arrived, and a missing report produces at most a "without evidence"
  * finding, never a failure. A failed job does not move the phase backwards; it
- * produces the finding and the phase keeps its last evidence.
+ * produces the finding and the phase keeps its last evidence (lib/vm_phase_evidence.php).
  */
 
 require_once __DIR__ . '/constants.php';
@@ -25,6 +25,7 @@ require_once __DIR__ . '/status.php';
 require_once __DIR__ . '/vm_progress.php';
 require_once __DIR__ . '/vm_inventory_observation.php';
 require_once __DIR__ . '/vm_sync_cause.php';
+require_once __DIR__ . '/vm_phase_evidence.php';
 
 // --- Phases (rank = index in VIRTUSPHERE_VM_PHASES plus one) -----------------
 const VIRTUSPHERE_VM_PHASE_CREATED = 'created';
@@ -97,8 +98,8 @@ const VIRTUSPHERE_VM_FINDING_LINK_PACKAGE_RUN = 'package_run';
  * $evidence carries `is_template` and `client_phases` (phase => latest event
  * row or null, as repo_client_phase_summary() shapes it); everything else is
  * read from the VM row. Rules 4 to 6 are the predicates of
- * virtusphere_legacy_status_from_states(), so the stored x/5 value stays
- * explainable from the phase.
+ * virtusphere_legacy_status_from_states(). Behind a worker mark (`deploying`,
+ * `failed`) the axes carry no evidence and the rules read the stored x/5 value.
  *
  * @param array<string,mixed> $vm
  * @param array<string,mixed> $evidence
@@ -110,16 +111,17 @@ function virtusphere_vm_phase(array $vm, array $evidence = []): string
     }
     $lifecycle = (string) ($vm['lifecycle_state'] ?? '');
     $mecm = (string) ($vm['mecm_sync_state'] ?? '');
+    $stage = virtusphere_vm_marked_stage($vm);
 
-    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED) {
+    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLED || $stage === VIRTUSPHERE_STATUS_OS_INSTALLED) {
         return virtusphere_vm_client_phases_done((array) ($evidence['client_phases'] ?? []))
             ? VIRTUSPHERE_VM_PHASE_CLIENT_DONE
             : VIRTUSPHERE_VM_PHASE_WINDOWS_REPORTS;
     }
-    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecm === VIRTUSPHERE_MECM_SYNC_REGISTERED) {
+    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_OS_INSTALLING || $mecm === VIRTUSPHERE_MECM_SYNC_REGISTERED || $stage === VIRTUSPHERE_STATUS_OS_INSTALLING) {
         return VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM;
     }
-    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecm === VIRTUSPHERE_MECM_SYNC_PENDING) {
+    if ($lifecycle === VIRTUSPHERE_LIFECYCLE_DEPLOYED || $mecm === VIRTUSPHERE_MECM_SYNC_PENDING || $stage === VIRTUSPHERE_STATUS_DEPLOYED) {
         return VIRTUSPHERE_VM_PHASE_MAC_KNOWN;
     }
     if (virtusphere_vm_is_bound($vm)) {
@@ -202,9 +204,9 @@ function virtusphere_vm_finding_meta(array $finding): array
  * client events through a correlated subquery over the (vm_id, phase, id)
  * index, so the twin is exact and not "phase 6 or 7". Templates are a mission
  * property and are not ranked here; the overview marks them with their badge.
- *
- * The literals are PHP constants of this module, never request text, and each
- * is checked against a closed character class before it enters the string.
+ * The literals are PHP constants (state tokens here, stored x/5 values behind a
+ * worker mark in virtusphere_vm_marked_stage_sql()), never request text, and
+ * each is checked against a closed class before it enters the string.
  */
 function virtusphere_vm_phase_sql(string $vm = 'v'): string
 {
@@ -220,15 +222,16 @@ function virtusphere_vm_phase_sql(string $vm = 'v'): string
         . ' WHERE e.vm_id = ' . $vm . '.id AND e.event = ' . $lit(VIRTUSPHERE_CLIENT_EVENT_FINISHED)
         . ' AND e.phase IN (' . $phases . ')'
         . ' AND NOT EXISTS (SELECT 1 FROM deploy_client_events n WHERE n.vm_id = e.vm_id AND n.phase = e.phase AND n.id > e.id))';
+    $behindMark = static fn (string $stage): string => virtusphere_vm_marked_stage_sql($vm, $stage);
+    $installed = '(' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED) . ' OR ' . $behindMark(VIRTUSPHERE_STATUS_OS_INSTALLED) . ')';
 
     return 'CASE'
-        . ' WHEN ' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED)
-            . ' AND ' . $finishedPhases . ' = ' . count(VIRTUSPHERE_CLIENT_PHASES) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_CLIENT_DONE)
-        . ' WHEN ' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_OS_INSTALLED) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_WINDOWS_REPORTS)
-        . ' WHEN ' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_OS_INSTALLING)
-            . ' OR ' . $vm . '.mecm_sync_state = ' . $lit(VIRTUSPHERE_MECM_SYNC_REGISTERED) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM)
-        . ' WHEN ' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_DEPLOYED)
-            . ' OR ' . $vm . '.mecm_sync_state = ' . $lit(VIRTUSPHERE_MECM_SYNC_PENDING) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_MAC_KNOWN)
+        . ' WHEN ' . $installed . ' AND ' . $finishedPhases . ' = ' . count(VIRTUSPHERE_CLIENT_PHASES) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_CLIENT_DONE)
+        . ' WHEN ' . $installed . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_WINDOWS_REPORTS)
+        . ' WHEN ' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_OS_INSTALLING) . ' OR ' . $vm . '.mecm_sync_state = ' . $lit(VIRTUSPHERE_MECM_SYNC_REGISTERED)
+            . ' OR ' . $behindMark(VIRTUSPHERE_STATUS_OS_INSTALLING) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_HANDED_TO_MECM)
+        . ' WHEN ' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_DEPLOYED) . ' OR ' . $vm . '.mecm_sync_state = ' . $lit(VIRTUSPHERE_MECM_SYNC_PENDING)
+            . ' OR ' . $behindMark(VIRTUSPHERE_STATUS_DEPLOYED) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_MAC_KNOWN)
         . ' WHEN ' . $vm . ".vm_instance_uuid IS NOT NULL AND " . $vm . ".vm_instance_uuid <> '' THEN " . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_ON_ESXI)
         . ' WHEN ' . $vm . '.lifecycle_state = ' . $lit(VIRTUSPHERE_LIFECYCLE_DEPLOYING) . ' THEN ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_IN_PROGRESS)
         . ' ELSE ' . virtusphere_vm_phase_rank(VIRTUSPHERE_VM_PHASE_CREATED)
