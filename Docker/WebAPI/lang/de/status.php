@@ -106,7 +106,7 @@ return [
     'finding_os_install_watching' => 'Beobachtung läuft seit :since',
     'finding_client_phase_failed' => 'Client-Phase fehlgeschlagen: :phase',
     'finding_client_phase_unconfirmed' => 'Client-Phase :phase seit :minutes min unbestätigt',
-    'finding_package_run_failed' => 'Paketbericht fehlgeschlagen: :package',
+    'finding_package_run_failed' => 'Paketinstallation fehlgeschlagen: :package',
     'finding_unknown' => 'Unbekannter Befund',
     'finding_more' => '+:count',
     'finding_more_title' => ':count weitere Befunde, alle im VM-Editor',
@@ -127,7 +127,7 @@ return [
     'finding_short_os_install_watching' => 'Beobachtung läuft',
     'finding_short_client_phase_failed' => 'Client-Phase fehlgeschlagen',
     'finding_short_client_phase_unconfirmed' => 'Client-Phase unbestätigt',
-    'finding_short_package_run_failed' => 'Paketbericht fehlgeschlagen',
+    'finding_short_package_run_failed' => 'Paketinstallation fehlgeschlagen',
     'finding_short_mecm_sync_deploy_failed' => 'MECM-Sync offen',
     // Grund des Devices Sync am Befund „Wartet auf MECM“ (MX1). Er steht im vollen
     // Satz (VM-Editor und Tooltip der Tabellenzelle), nie in der Kurzform; ab

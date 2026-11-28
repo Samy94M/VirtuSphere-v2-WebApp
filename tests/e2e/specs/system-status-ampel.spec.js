@@ -460,7 +460,7 @@ echo 'SEEDED';
     // to it is what names the legacy script.
     await expect(row.locator('.badge').first()).toHaveText(/^(Warnung|Warning)$/);
     await expect(row.locator('.badge').first()).toHaveClass(/badge-warning/);
-    await expect(row).toContainText(/Legacy: Ergebnis nicht bestätigt|Legacy: result not confirmed/);
+    await expect(row).toContainText(/Alte Skriptversion: Ergebnis nicht bestätigt|Old script version: result not confirmed/);
   } finally {
     restoreHeartbeats(snapshot);
   }

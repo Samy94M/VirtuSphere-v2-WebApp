@@ -121,7 +121,7 @@ return [
     'job_part' => '; Auftrags-ID :job',
     'inventory_refresh' => 'ESXi-Inventarabruf angefordert für Ziele:targets und Aufträge:jobs (:queued eingereiht, :open offen, :paused pausiert, :failed fehlgeschlagen)',
     'vlan_reassigned' => 'VLAN :id auf :target_vlan umgehängt (:missions Missionen, :interfaces Schnittstellen)',
-    'convergence_sweep' => '[maintenance-worker] Zustandsabgleich markierte VMs (:count) der Mission mit ID :id als fehlgeschlagen:reason_part',
+    'convergence_sweep' => '[maintenance-worker] Abschluss verwaister VMs: VMs (:count) der Mission mit ID :id als fehlgeschlagen markiert:reason_part',
     'claim_paused' => 'Annahme neuer Bereitstellungsaufträge: :state:claim_job_part',
     'claim_job_part' => ' (Auftrag :job war aktiv)',
     'claim_resumed' => 'Annahme neuer Bereitstellungsaufträge wieder aufgenommen',
@@ -136,8 +136,8 @@ return [
     'recovery_documented' => 'Externe Prüfung für Bereitstellungsauftrag mit ID :id dokumentiert: :resolution_code (Auflösung :resolution_id)',
     'create_released' => 'Anlageschritt :position des Bereitstellungsauftrags mit ID :id als nicht angelegt freigegeben (Auflösung :resolution_id)',
     'create_refused' => 'Freigabe des Anlageschritts :position des Bereitstellungsauftrags mit ID :id abgelehnt: :blocker',
-    'supervisor_switched' => 'Prozessvertrag der Bereitstellung von :previous auf :target umgestellt',
-    'supervisor_refused' => 'Umstellung des Prozessvertrags der Bereitstellung auf :target abgelehnt: :blocker',
+    'supervisor_switched' => 'Prozessform der Bereitstellung von :previous auf :target umgestellt',
+    'supervisor_refused' => 'Umstellung der Prozessform der Bereitstellung auf :target abgelehnt: :blocker',
     'recovery_reviewed' => 'Prüfung der Wiederherstellung über veraltete Aufträge (:reviewed): :requested angefordert, :manual zur manuellen Prüfung offen',
 
     // Integrationen, System, Protokolle und Machine-API
